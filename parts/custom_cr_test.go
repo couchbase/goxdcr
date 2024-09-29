@@ -145,13 +145,27 @@ func waitForReplication(key string, cas gocb.Cas, target *gocb.Bucket) (err erro
 }
 
 // Verify that document cas has changed from the cas passed in.
-func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket) {
+// returns new cas.
+func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket, accessDeleted bool) gocb.Cas {
 	var err error
-	var doc *gocb.GetResult
+	var doc *gocb.LookupInResult
 	newCas := cas
 	start := time.Now()
+	var opts *gocb.LookupInOptions
+	if accessDeleted {
+		opts = &gocb.LookupInOptions{
+			Internal: struct {
+				DocFlags gocb.SubdocDocFlag
+				User     []byte
+			}{
+				DocFlags: gocb.SubdocDocFlagAccessDeleted,
+			},
+		}
+	}
+
 	for i := 0; i < 120 && (err != nil || cas == newCas); i++ {
-		doc, err = bucket.DefaultCollection().Get(key, nil)
+		doc, err = bucket.DefaultCollection().LookupIn(key,
+			[]gocb.LookupInSpec{gocb.GetSpec("$document.CAS", &gocb.GetSpecOptions{IsXattr: true})}, opts)
 		newCas = doc.Cas()
 		time.Sleep(1 * time.Second)
 	}
@@ -159,11 +173,13 @@ func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucke
 		if t != nil {
 			t.Errorf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err)
 			t.FailNow()
-			return
+			return newCas
 		}
 
 		panic(fmt.Sprintf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err))
 	}
+
+	return newCas
 }
 
 func waitForMV(key string, expectedMV map[string]string, bucket *gocb.Bucket) (cas gocb.Cas, err error) {
@@ -687,7 +703,7 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 	fmt.Printf("Created %v source documents\n", numDoc)
 	fmt.Println("Wait for merge to finish")
 	for i := 0; i < numDoc; i++ {
-		waitForCasChange(t, key[i], cas[i], sourceBucket)
+		waitForCasChange(t, key[i], cas[i], sourceBucket, false)
 	}
 	fmt.Printf("Verifying merge and replication of merged doc for %v documents\n", numDoc)
 	for i := 0; i < numDoc; i++ {

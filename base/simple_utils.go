@@ -1295,6 +1295,16 @@ func Uint64ToHexLittleEndian(u64 uint64) []byte {
 	return encoded
 }
 
+func Uint64ToHexBigEndian(u64 uint64) []byte {
+	be := make([]byte, 8)
+	binary.BigEndian.PutUint64(be, u64)
+	encoded := make([]byte, hex.EncodedLen(8)+2)
+	hex.Encode(encoded[2:], be)
+	encoded[0] = '0'
+	encoded[1] = 'x'
+	return encoded
+}
+
 // strips 0s from the end of the resultant hex little endian string
 func Uint64ToHexLittleEndianAndStrip0s(u64 uint64) []byte {
 	hexLE := Uint64ToHexLittleEndian(u64)

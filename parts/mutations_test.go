@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/crMeta"
 	utilsReal "github.com/couchbase/goxdcr/v8/utils"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -39,29 +40,37 @@ import (
 //
 // STEP 4) Run the Mutations tests using the following command: (use -v for verbose output on stdout)
 /*
-	go clean -cache && go test -timeout 1200s -run ^Test_LegacyMutations$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 1200s -run ^Test_ECCVOnlyMutations$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 1200s -run ^Test_MobileOnlyMutations$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 1200s -run ^Test_ECCVAndMobileMutations$ github.com/couchbase/goxdcr/parts
+	(if necessary) go clean -cache
+	go test -timeout 12000s -run ^Test_LegacyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_MobileOnlyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
 */
 //
 // STEP 5) Run the Mutations CR tests using the following command: (use -v for verbose output on stdout)
 /*
-	go clean -cache && go test -timeout 120s -run ^Test_LegacyMutationsCRTest$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 120s -run ^Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 120s -run ^Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 120s -run ^Test_MobileOnlyMutationsCRTest$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 120s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/parts
-	go clean -cache && go test -timeout 120s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/parts
+	(if necessary) go clean -cache
+	go test -timeout 12000s -run ^Test_LegacyMutationsCRTest$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_MobileOnlyMutationsCRTest$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
 */
 //
 // STEP 6) Manually delete the injected TestMcRequest and TestMcResponse function calls from xmem.
+// NOTE: all these tests can be run concurrently.
 
-var targetSync string = `{"cas":"0x1234"}`
-var sourceSync string = `{"cas":"0x5678"}`
-var userXattrKey string = "foo"
-var userXattr string = `{"foo":"bar"}`
-var targetDoc string = `{}`
+var targetSync string = `{"cas":"0x1234"}` // _sync for target doc
+var sourceSync string = `{"cas":"0x5678"}` // _sync for source doc
+var userXattrKey string = "foo"            // used as source doc xattr
+var userXattr string = `{"foo":"bar"}`     // value for userXattrKey
+var targetDoc string = `{"target":"doc"}`  // target doc value
+var xattrK1 string = userXattrKey          // used as target doc xattr, same as source doc xattr
+var xattrV1 string = `{}`                  // value for xattrK1
+var xattrK2 string = `bar`                 // used as target doc xattr. Assumed to always exist only on target doc.
+var xattrV2 string = `"blah"`              // value for xattrK2
+var NumVbs int = 128
 
 var crc32tab = []uint32{
 	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba,
@@ -142,7 +151,7 @@ func getVBucketNo(key string, vbCount int) uint16 {
 }
 
 func setMeta(kvAddr, bucketName string, key, value []byte, datatype uint8, cas, revID uint64, lww bool) error {
-	tgtAgentgentConfig := &gocbcore.AgentConfig{
+	tgtAgentConfig := &gocbcore.AgentConfig{
 		BucketName:        bucketName,
 		UserAgent:         "XmemTestSetMeta",
 		UseTLS:            false,
@@ -154,7 +163,7 @@ func setMeta(kvAddr, bucketName string, key, value []byte, datatype uint8, cas, 
 	}
 
 	ch := make(chan error)
-	tgtAgent, closeFunc := createSDKAgent(tgtAgentgentConfig)
+	tgtAgent, closeFunc := createSDKAgent(tgtAgentConfig)
 	defer closeFunc()
 	if tgtAgent == nil {
 		return fmt.Errorf("tgtAgent is nil")
@@ -166,8 +175,8 @@ func setMeta(kvAddr, bucketName string, key, value []byte, datatype uint8, cas, 
 	}
 
 	_, err := tgtAgent.SetMeta(gocbcore.SetMetaOptions{
-		Key:            []byte(key),
-		Value:          []byte(value),
+		Key:            key,
+		Value:          value,
 		CollectionName: "_default",
 		ScopeName:      "_default",
 		Cas:            gocbcore.Cas(cas),
@@ -188,6 +197,93 @@ func setMeta(kvAddr, bucketName string, key, value []byte, datatype uint8, cas, 
 	return nil
 }
 
+func createTombstone(value []byte, datatype uint8) ([]byte, uint8, error) {
+	if datatype&base.SnappyDataType > 0 {
+		len, err := snappy.DecodedLen(value)
+		if err != nil {
+			return nil, 0, err
+		}
+		val := make([]byte, int(len))
+		value, err = snappy.Decode(val, value)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		datatype &= ^base.SnappyDataType
+	}
+
+	if datatype&base.JSONDataType > 0 {
+		datatype &= ^base.JSONDataType
+	}
+
+	// tombstones have xattrs,
+	// but not doc body.
+	var tombstone []byte
+	if datatype&base.XattrDataType > 0 {
+		xattrSize, err := base.GetXattrSize(value)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		tombstone = value[:4+xattrSize]
+	}
+
+	return tombstone, datatype, nil
+}
+
+// given any value, this routine will strip off the body and preserve the xattrs passed in
+func delMeta(kvAddr, bucketName string, key, value []byte, datatype uint8, cas, revID uint64, lww bool) error {
+	tgtAgentConfig := &gocbcore.AgentConfig{
+		BucketName:        bucketName,
+		UserAgent:         "XmemTestDelMeta",
+		UseTLS:            false,
+		TLSRootCAProvider: func() *x509.CertPool { return nil },
+		UseCollections:    true,
+		AuthMechanisms:    []gocbcore.AuthMechanism{gocbcore.ScramSha256AuthMechanism},
+		Auth:              gocbcore.PasswordAuthProvider{Username: username, Password: password},
+		MemdAddrs:         []string{kvAddr},
+	}
+
+	ch := make(chan error)
+	tgtAgent, closeFunc := createSDKAgent(tgtAgentConfig)
+	defer closeFunc()
+	if tgtAgent == nil {
+		return fmt.Errorf("DelTgtAgent is nil")
+	}
+
+	var options uint32
+	if lww {
+		options |= base.FORCE_ACCEPT_WITH_META_OPS
+	}
+
+	value, datatype, err = createTombstone(value, datatype)
+	if err != nil {
+		return err
+	}
+
+	_, err := tgtAgent.DeleteMeta(gocbcore.DeleteMetaOptions{
+		Key:            key,
+		Value:          value,
+		CollectionName: "_default",
+		ScopeName:      "_default",
+		Cas:            gocbcore.Cas(cas),
+		RevNo:          revID,
+		Options:        options,
+		Datatype:       datatype,
+	}, func(smr *gocbcore.DeleteMetaResult, err error) {
+		ch <- err
+	})
+	if err != nil {
+		return fmt.Errorf("tgtAgent.DelMeta, err=%v", err)
+	}
+	err = <-ch
+	if err != nil {
+		return fmt.Errorf("tgtAgent.DelMeta return, err=%v", err)
+	}
+
+	return nil
+}
+
 func generateHlv(cas uint64, src string) []byte {
 	return []byte(fmt.Sprintf(`{"%s":"%s","%s":"%s","%s":"%s"}`,
 		crMeta.HLV_CVCAS_FIELD, base.Uint64ToHexLittleEndian(cas),
@@ -196,7 +292,7 @@ func generateHlv(cas uint64, src string) []byte {
 }
 
 func generateHlvWithPv(cas uint64, src string) []byte {
-	return []byte(fmt.Sprintf(`{"%s":"%s","%s":"%s","%s":"%s","%s":{"oldSrc":"0x1234567890123456"}}`,
+	return []byte(fmt.Sprintf(`{"%s":"%s","%s":"%s","%s":"%s","%s":["1234567890123456@oldSrc"]}`,
 		crMeta.HLV_CVCAS_FIELD, base.Uint64ToHexLittleEndian(cas),
 		crMeta.HLV_SRC_FIELD, src,
 		crMeta.HLV_VER_FIELD, base.Uint64ToHexLittleEndian(cas),
@@ -213,10 +309,13 @@ func generateMou(cas, rev uint64) []byte {
 		base.PREVIOUSREV, rev))
 }
 
-func generateBody(hlv, mou, sync, doc []byte) ([]byte, uint8, error) {
+func generateBody(hlv, mou, sync, xattrKey1, xattrVal1, xattrKey2, xattrVal2, doc []byte) ([]byte, uint8, error) {
 	bodyLen := 4 + 4 + len(base.XATTR_HLV) + 1 + len(hlv) + 1 +
 		4 + len(base.XATTR_MOBILE) + 1 + len(sync) + 1 +
-		4 + len(base.XATTR_MOU) + 1 + len(mou) + 1 + len(doc)
+		4 + len(base.XATTR_MOU) + 1 + len(mou) + 1 +
+		4 + len(xattrKey1) + 1 + len(xattrVal1) + 1 +
+		4 + len(xattrKey2) + 1 + len(xattrVal2) + 1 +
+		len(doc)
 	body := make([]byte, bodyLen)
 	comp := base.NewXattrComposer(body)
 
@@ -236,6 +335,20 @@ func generateBody(hlv, mou, sync, doc []byte) ([]byte, uint8, error) {
 
 	if len(mou) > 0 {
 		err := comp.WriteKV([]byte(base.XATTR_MOU), mou)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	if len(xattrKey1) > 0 && len(xattrVal1) > 0 {
+		err := comp.WriteKV(xattrKey1, xattrVal1)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	if len(xattrKey2) > 0 && len(xattrVal2) > 0 {
+		err := comp.WriteKV(xattrKey2, xattrVal2)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -265,7 +378,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 	hlv := generateHlv(cas-1, src)
 	mou := generateMou(cas, rev-1)
 
-	body, datatype, err := generateBody(hlv, mou, sync, doc)
+	body, datatype, err := generateBody(hlv, mou, sync, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -282,7 +395,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 	hlv = generateHlv(cas-2, src)
 	mou = generateMou(cas-1, rev-2)
 
-	body, datatype, err = generateBody(hlv, mou, sync, doc)
+	body, datatype, err = generateBody(hlv, mou, sync, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -298,7 +411,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 
 	hlv = generateHlv(cas, src)
 
-	body, datatype, err = generateBody(hlv, nil, nil, doc)
+	body, datatype, err = generateBody(hlv, nil, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -314,7 +427,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 
 	hlv = generateHlv(cas-1, src)
 
-	body, datatype, err = generateBody(hlv, nil, nil, doc)
+	body, datatype, err = generateBody(hlv, nil, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -330,7 +443,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 
 	hlv = generateHlv(cas, src)
 
-	body, datatype, err = generateBody(hlv, nil, sync, doc)
+	body, datatype, err = generateBody(hlv, nil, sync, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -346,7 +459,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 
 	hlv = generateHlv(cas-1, src)
 
-	body, datatype, err = generateBody(hlv, nil, sync, doc)
+	body, datatype, err = generateBody(hlv, nil, sync, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -360,7 +473,7 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 	// only sync
 	desc = append(desc, "only sync")
 
-	body, datatype, err = generateBody(nil, nil, sync, doc)
+	body, datatype, err = generateBody(nil, nil, sync, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -371,10 +484,24 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 	syncs = append(syncs, sync)
 	mous = append(mous, nil)
 
+	// only user xattrs
+	desc = append(desc, "only user xattrs")
+
+	body, datatype, err = generateBody(nil, nil, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	datatypes = append(datatypes, datatype)
+	targets = append(targets, body)
+
+	hlvs = append(hlvs, nil)
+	syncs = append(syncs, nil)
+	mous = append(mous, nil)
+
 	// no xattrs
 	desc = append(desc, "no xattrs")
 
-	body, datatype, err = generateBody(nil, nil, nil, doc)
+	body, datatype, err = generateBody(nil, nil, nil, nil, nil, nil, nil, doc)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -386,6 +513,50 @@ func getAllTargetBodys(cas, rev uint64, src string) ([][]byte, []uint8, []string
 	mous = append(mous, nil)
 
 	return targets, datatypes, desc, hlvs, syncs, mous, nil
+}
+
+// given document body, extracts and returns hlv, mou and sync from xattr section
+func getHlvMouSyncFromDocBody(body []byte, datatype uint8) ([]byte, []byte, []byte, error) {
+	var hlv, sync, mou []byte
+	if datatype&base.XattrDataType == 0 {
+		return hlv, mou, sync, nil
+	}
+
+	if datatype&base.SnappyDataType > 0 {
+		len, err := snappy.DecodedLen(body)
+		if err != nil {
+			return hlv, mou, sync, err
+		}
+		val := make([]byte, int(len))
+		body, err = snappy.Decode(val, body)
+		if err != nil {
+			return hlv, mou, sync, err
+		}
+
+		datatype &= ^base.SnappyDataType
+	}
+
+	it, err := base.NewXattrIterator(body)
+	if err != nil {
+		return hlv, mou, sync, err
+	}
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return hlv, mou, sync, err
+		}
+
+		if base.Equals(k, base.XATTR_HLV) {
+			hlv = v
+		} else if base.Equals(k, base.XATTR_MOBILE) {
+			sync = v
+		} else if base.Equals(k, base.XATTR_MOU) {
+			mou = v
+		}
+	}
+
+	return hlv, mou, sync, nil
 }
 
 type mutationTC struct {
@@ -409,6 +580,10 @@ type mutationTC struct {
 	sync         string
 	userXattrKey string
 	userXattrVal string
+	// if hlv in source document was outdated.
+	// if it is true, hlv above is expected to have updated hlv and
+	// mou to be the updated mou.
+	hlvOutdated bool
 	// a target document with the same key as source document is created before executing the test
 	targetDocExists bool
 	// if targetDocExists above, the body to be written before executing the test,
@@ -435,138 +610,371 @@ func (test mutationTC) executeTest(assert assert.Assertions, bucketName string, 
 
 	uprEvent, err := test.getUprEvent()
 	assert.Nil(err)
-
-	key := fmt.Sprintf("key-%v", time.Now().UnixNano())
-	uprEvent.Key = []byte(key)
-	uprEvent.VBucket = getVBucketNo(key, 1024)
 	uprEvent.Cas = uprEvent.Cas + uint64(test.casDelta)
 
-	fmt.Printf("Key generated=%s\n", key)
+	valueCopy := uprEvent.Value
+	datatypeCopy := uprEvent.DataType
+	testOpcodeCopy := test.reqT.setOpcode
+	statusCopy := test.respT.Status
+	retryCntCopy := test.reqT.retryCnt
+	setCasCopy := test.reqT.setCas
+	setHasXattrsCopy := test.reqT.setHasXattrs
+	targetSyncValCopy := test.sync
+	uprEventOpcodeCopy := uprEvent.Opcode
+	casLockingCopy := test.reqT.casLocking
+	casLockingFailureCopy := test.casLockingFailure
 
-	if test.targetDocExists {
-		err = setMeta(kvStringTgt, bucketName, []byte(key), test.targetBody, test.targetDatatype,
-			test.targetCas, test.targetRevId, xmemBucket == base.CRMode_LWW)
-		assert.Nil(err)
-	}
+	bucket := cluster.Bucket(bucketName)
 
-	setHasXattrs := test.reqT.setHasXattrs
-	targetSyncVal := test.sync
+	defer func() {
+		// reset it back before returning
+		uprEvent.Value = valueCopy
+		uprEvent.DataType = datatypeCopy
+		test.reqT.setOpcode = testOpcodeCopy
+		test.respT.Status = statusCopy
+		test.reqT.retryCnt = retryCntCopy
+		test.reqT.setCas = setCasCopy
+		test.reqT.setHasXattrs = setHasXattrsCopy
+		test.sync = targetSyncValCopy
+		uprEvent.Opcode = uprEventOpcodeCopy
+		test.reqT.targetCasChanger = targetWriter{}
+		test.casLockingFailure = casLockingFailureCopy
+		test.reqT.casLocking = casLockingCopy
+	}()
 
-	if test.targetCasChanged {
-		test.reqT.targetCasChanger = &targetWriter{
-			writer:     setMeta,
-			kvAddr:     kvStringTgt,
-			bucketName: bucketName,
-			key:        []byte(key),
-			val:        test.targetBody,
-			datatype:   test.targetDatatype,
-			cas:        test.targetCas + 1,
-			revId:      test.targetRevId + 1,
-			lww:        xmemBucket == base.CRMode_LWW,
-		}
+	// execute the test for all combinations.
+	sourceOpcodes := []mc.CommandCode{mc.UPR_MUTATION, mc.UPR_DELETION, mc.UPR_EXPIRATION}
+	targetsAreTombstone := []bool{false} // KV crashes with true - MB-63769
 
-		if test.mobile && !test.targetDocExists {
-			// the first request composed will not have sync because target doesn't exist first.
-			// Then when target cas changed, retry request will have sync
-			test.reqT.setHasXattrs = len(test.hlv) > 0 || len(test.mou) > 0 || len(test.userXattrKey) > 0
-			test.sync = ``
-		}
-	}
+	for _, sourceOpcode := range sourceOpcodes {
+		for _, targetIsTombstone := range targetsAreTombstone {
+			key := fmt.Sprintf("key-%v", time.Now().UnixNano())
+			uprEvent.Key = []byte(key)
+			uprEvent.VBucket = getVBucketNo(key, NumVbs)
 
-	if !test.targetWins {
-		reqTestCh <- test.reqT
-		respTestCh <- test.respT
-	}
+			fmt.Printf("$$$$ Key generated=%s, source mutation=%s, target is tombstone=%v\n", key, sourceOpcode, targetIsTombstone)
 
-	if test.casLockingFailure {
-		// the retry request
-		test.respT.Status = mc.SUCCESS
-		test.reqT.retryCnt++
-		test.reqT.setOpcode = base.SET_WITH_META
-		test.reqT.targetCasChanger = nil
-		test.reqT.setCas = test.targetCas + 1
-		test.reqT.setHasXattrs = setHasXattrs
-		test.sync = targetSyncVal
+			uprEvent.Opcode = sourceOpcode
+			sourceDocIsTombstone := sourceOpcode == mc.UPR_DELETION || sourceOpcode == mc.UPR_EXPIRATION
 
-		go func() {
-			reqTestCh <- test.reqT
-			respTestCh <- test.respT
-		}()
-	}
-
-	// Create xmem and router for testing
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName, xmemBucket)
-	realUtils := utilsReal.NewUtilities()
-	xmem.utils = realUtils
-	xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
-	xmem.source_cr_mode = xmemBucket
-	router.sourceCRMode = xmemBucket
-
-	settings[base.EnableCrossClusterVersioningKey] = test.eccv
-	settings[base.VersionPruningWindowHrsKey] = 720
-	mobileSetting := base.MobileCompatibilityOff
-	if test.mobile {
-		mobileSetting = base.MobileCompatibilityActive
-	}
-	router.SetMobileCompatibility(uint32(mobileSetting))
-	router.crossClusterVersioning = 0
-	if test.eccv {
-		router.crossClusterVersioning = 1
-	}
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
-	settings[MOBILE_COMPATBILE] = mobileSetting
-	startTargetXmem(xmem, settings, bucketName, &assert)
-
-	req, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: uprEvent})
-	assert.Nil(err)
-
-	if test.eccv {
-		max_cas := int(uprEvent.Cas) + test.max_cas_delta
-		if max_cas < 0 {
-			panic("max_cas is < 0, but should be >= 0")
-		}
-		xmem.config.vbHlvMaxCas[req.Req.VBucket] = uint64(max_cas)
-	}
-
-	xmem.Receive(req)
-
-	if !test.targetWins {
-		bucket := cluster.Bucket(bucketName)
-
-		if test.reqT.setOpcode != base.SUBDOC_MULTI_MUTATION {
-			err = waitForReplication(string(uprEvent.Key), gocb.Cas(uprEvent.Cas), bucket)
+			sourceHlv, sourceMou, sourceSyncVal, err := getHlvMouSyncFromDocBody(uprEvent.Value, uprEvent.DataType)
+			assert.Nil(err)
+			targetHlv, targetMou, targetSyncVal, err := getHlvMouSyncFromDocBody(test.targetBody, test.targetDatatype)
 			assert.Nil(err)
 
-			err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, []byte(test.hlv), true)
-			assert.Nil(err)
+			if sourceDocIsTombstone {
+				if !test.targetDocExists {
+					// this setup will compose a deleteWithMeta with command.cas = 0
+					// because target doc did not exist.
+					// so cas locking will never happen
+					test.casLockingFailure = false
+					test.reqT.casLocking = false
+					test.respT.Status = mc.SUCCESS
+				} else {
+					test.reqT.casLocking = casLockingCopy
+					test.respT.Status = statusCopy
+					test.casLockingFailure = casLockingFailureCopy
+				}
+				if !test.reqT.setHasXattrs && (len(targetHlv) > 0 || len(targetMou) > 0 || len(targetSyncVal) > 0) {
+					// KV bug - MB-63765
+					continue
+				}
+				uprEvent.Value, uprEvent.DataType, err = createTombstone(uprEvent.Value, uprEvent.DataType)
+				assert.Nil(err)
+				if test.reqT.setOpcode != base.SUBDOC_MULTI_MUTATION {
+					test.reqT.setOpcode = mc.DELETE_WITH_META
+				} else {
+					test.reqT.setOpcode = testOpcodeCopy
+				}
+			} else {
+				uprEvent.Value = valueCopy
+				uprEvent.DataType = datatypeCopy
+				test.reqT.setOpcode = testOpcodeCopy
+				test.reqT.casLocking = casLockingCopy
+				test.respT.Status = statusCopy
+				test.casLockingFailure = casLockingFailureCopy
+			}
 
-			err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, []byte(test.mou), true)
-			assert.Nil(err)
+			test.reqT.retryCnt = retryCntCopy
+			test.reqT.setCas = setCasCopy
+			test.reqT.setHasXattrs = setHasXattrsCopy
+			test.sync = targetSyncValCopy
+			test.reqT.targetCasChanger = targetWriter{}
 
-			err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, []byte(test.sync), true)
-			assert.Nil(err)
-
-			if len(test.userXattrKey) > 0 {
-				err = checkTarget(bucket, string(uprEvent.Key), test.userXattrKey, []byte(test.userXattrVal), true)
+			if test.targetDocExists {
+				if targetIsTombstone {
+					err = delMeta(kvStringTgt, bucketName, []byte(key), test.targetBody, test.targetDatatype,
+						test.targetCas, test.targetRevId, xmemBucket == base.CRMode_LWW)
+				} else {
+					err = setMeta(kvStringTgt, bucketName, []byte(key), test.targetBody, test.targetDatatype,
+						test.targetCas, test.targetRevId, xmemBucket == base.CRMode_LWW)
+				}
 				assert.Nil(err)
 			}
-		} else {
-			// cas will regenerate, hlv will be macro-expanded, so we cannot verify hlv
-			waitForCasChange(nil, string(uprEvent.Key), gocb.Cas(test.targetCas), bucket)
 
-			err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, []byte(test.mou), true)
+			expectedRev := []byte(fmt.Sprintf(`"%v"`, test.targetRevId+1))
+			if test.targetCasChanged {
+				test.reqT.targetCasChanger = targetWriter{
+					enabled:       true,
+					waiter:        checkTarget,
+					kvAddr:        kvStringTgt,
+					bucketName:    bucketName,
+					key:           []byte(key),
+					val:           test.targetBody,
+					datatype:      test.targetDatatype,
+					cas:           test.targetCas + 1,
+					revId:         test.targetRevId + 1,
+					lww:           xmemBucket == base.CRMode_LWW,
+					bucket:        bucket,
+					expectedCas:   []byte(`"` + string(base.Uint64ToHexBigEndian(test.targetCas+1)) + `"`),
+					expectedRev:   expectedRev,
+					accessDeleted: true,
+				}
+
+				if targetIsTombstone {
+					test.reqT.targetCasChanger.writer = delMeta
+				} else {
+					test.reqT.targetCasChanger.writer = setMeta
+				}
+
+				if test.mobile && !test.targetDocExists {
+					// the first request composed will not have sync because target doesn't exist first.
+					// Then when target cas changed, retry request will have sync
+					test.reqT.setHasXattrs = len(test.hlv) > 0 || len(test.mou) > 0 || len(test.userXattrKey) > 0
+					test.sync = ``
+				}
+			}
+
+			if !test.targetWins {
+				reqTestCh <- test.reqT
+				respTestCh <- test.respT
+			}
+
+			if test.casLockingFailure {
+				// the retry request
+				test.respT.Status = mc.SUCCESS
+				test.reqT.retryCnt++
+				test.reqT.targetCasChanger = targetWriter{}
+				test.reqT.setCas = test.targetCas + 1
+				test.reqT.setHasXattrs = setHasXattrsCopy
+				test.sync = targetSyncValCopy
+
+				if sourceDocIsTombstone {
+					test.reqT.setOpcode = mc.DELETE_WITH_META
+				} else {
+					test.reqT.setOpcode = base.SET_WITH_META
+				}
+
+				go func() {
+					reqTestCh <- test.reqT
+					respTestCh <- test.respT
+				}()
+			}
+
+			// Create xmem and router for testing
+			utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName, xmemBucket)
+			realUtils := utilsReal.NewUtilities()
+			xmem.utils = realUtils
+			xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
+			xmem.source_cr_mode = xmemBucket
+			router.sourceCRMode = xmemBucket
+
+			settings[base.EnableCrossClusterVersioningKey] = test.eccv
+			settings[base.VersionPruningWindowHrsKey] = 720
+			mobileSetting := base.MobileCompatibilityOff
+			if test.mobile {
+				mobileSetting = base.MobileCompatibilityActive
+			}
+			router.SetMobileCompatibility(uint32(mobileSetting))
+			router.crossClusterVersioning = 0
+			if test.eccv {
+				router.crossClusterVersioning = 1
+			}
+			setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
+			settings[MOBILE_COMPATBILE] = mobileSetting
+			startTargetXmem(xmem, settings, bucketName, &assert)
+
+			req, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: uprEvent})
 			assert.Nil(err)
 
-			err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, []byte(test.sync), true)
-			assert.Nil(err)
+			if test.eccv {
+				max_cas := int(uprEvent.Cas) + test.max_cas_delta
+				if max_cas < 0 {
+					panic("max_cas is < 0, but should be >= 0")
+				}
+				xmem.config.vbHlvMaxCas[req.Req.VBucket] = uint64(max_cas)
+			}
+
+			xmem.Receive(req)
+
+			if !test.targetWins {
+				if test.reqT.setOpcode != base.SUBDOC_MULTI_MUTATION {
+					err = waitForReplication(string(uprEvent.Key), gocb.Cas(uprEvent.Cas), bucket)
+					assert.Nil(err)
+
+					if sourceDocIsTombstone && (test.targetCasChanged || test.targetDocExists) {
+						// for delete_with_meta, system xattrs will remain even after delete
+						if test.eccv && uprEvent.Cas >= xmem.config.vbHlvMaxCas[uprEvent.VBucket] {
+							// these are with eccv on + cas >= max_cas,
+							// hlv will always be stamped/updated.
+							assert.NotEqual(len(test.hlv), 0)
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, []byte(test.hlv), true, true)
+							assert.Nil(err)
+						} else if len(sourceHlv) > 0 {
+							// hlv will only be updated if it already exists.
+							if test.hlvOutdated {
+								// if hlv in source document was outdated.
+								// if it is true, updated hlv would be test.hlv
+								err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, []byte(test.hlv), true, true)
+								assert.Nil(err)
+							} else {
+								err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, sourceHlv, true, true)
+								assert.Nil(err)
+							}
+						} else if len(targetHlv) > 0 && !test.reqT.setHasXattrs {
+							// delete_with_meta with no xattrs in the command value,
+							// system xattrs will be preserved in the tombstone.
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, targetHlv, true, true)
+							assert.Nil(err)
+						} else {
+							err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_HLV, true, true)
+							assert.Nil(err)
+						}
+					} else {
+						if len(test.hlv) > 0 {
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_HLV, []byte(test.hlv), true, true)
+							assert.Nil(err)
+						} else {
+							err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_HLV, true, true)
+							assert.Nil(err)
+						}
+					}
+				} else {
+					// cas will regenerate
+					newCas := waitForCasChange(nil, string(uprEvent.Key), gocb.Cas(test.targetCas), bucket, true)
+
+					// cvCas should be macro expanded
+					cvCas := []byte(`"` + string(base.Uint64ToHexLittleEndian(uint64(newCas))) + `"`)
+					err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_CVCAS_PATH, cvCas, true, true)
+					assert.Nil(err)
+
+					// src := []byte(`"Source"`)
+					// err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_SRC_PATH, src, true)
+					// assert.Nil(err)
+
+					// ver := []byte(`"` + string(base.Uint64ToHexLittleEndian(uprEvent.Cas)) + `"`)
+					// err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_VER_PATH, ver, true)
+					// assert.Nil(err)
+				}
+
+				if sourceDocIsTombstone && (test.targetCasChanged || test.targetDocExists) {
+					// for delete_with_meta, system xattrs will remain even after delete
+
+					if len(sourceMou) > 0 {
+						if test.hlvOutdated {
+							// if hlv in source document was outdated.
+							// if it is true, updated mou would be test.mou
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, []byte(test.mou), true, true)
+							assert.Nil(err)
+						} else {
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, sourceMou, true, true)
+							assert.Nil(err)
+						}
+					} else if len(targetMou) > 0 && !test.reqT.setHasXattrs {
+						// delete_with_meta with no xattrs in command value,
+						// system xattrs will be preserved in the tombstone.
+						err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, targetMou, true, true)
+						assert.Nil(err)
+					} else {
+						err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_MOU, true, true)
+						assert.Nil(err)
+					}
+
+					if test.mobile {
+						// target sync will be preserved
+						if len(targetSyncVal) > 0 && !(sourceDocIsTombstone && !test.targetDocExists && test.reqT.setHasXattrs) {
+							// say the target doc did not exist when deleteWithMeta command was composed by XDCR
+							// that means it would have command.Cas = 0
+							// but by the time the mutation reaches the target KV, if any update happened which has _sync now,
+							// it will not be preserved since command.Cas = 0 and deleteWithMeta already has xattrs in it's command.Value.
+							// if len(command.Value) is 0, then KV performs delWithMeta and preserves system xattrs.
+							// if len(command.Value) is not 0, then KV performs a setWithMeta with the command.Value (i.e tombstone with command.Value's xattrs) and
+							// system xattrs are not preserved (unless they are part of command.Value)
+							err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, targetSyncVal, true, true)
+							assert.Nil(err)
+						} else {
+							err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_MOBILE, true, true)
+							assert.Nil(err)
+						}
+					} else if len(sourceSyncVal) > 0 {
+						err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, sourceSyncVal, true, true)
+						assert.Nil(err)
+					} else if len(targetSyncVal) > 0 && !test.reqT.setHasXattrs {
+						// delete_with_meta with no xattrs in command value,
+						// system xattrs will be preserved in the tombstone.
+						err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, targetSyncVal, true, true)
+						assert.Nil(err)
+					} else {
+						err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_MOBILE, true, true)
+						assert.Nil(err)
+					}
+				} else {
+					if len(test.mou) > 0 {
+						err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOU, []byte(test.mou), true, true)
+						assert.Nil(err)
+					} else {
+						err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_MOU, true, true)
+						assert.Nil(err)
+					}
+
+					if len(test.sync) > 0 {
+						// expected sync needs to be specified by the test
+						err = checkTarget(bucket, string(uprEvent.Key), base.XATTR_MOBILE, []byte(test.sync), true, true)
+						assert.Nil(err)
+					} else {
+						err = checkTargetDNE(bucket, string(uprEvent.Key), base.XATTR_MOBILE, true, true)
+						assert.Nil(err)
+					}
+				}
+
+				if !(sourceDocIsTombstone && test.reqT.setOpcode == base.SUBDOC_MULTI_MUTATION) && len(test.userXattrKey) > 0 {
+					// if we issue a subdoc mc.DELETE, all user xattrs will be pruned and
+					// only system xattrs are preserved
+					// source doc had this xattr
+					err = checkTarget(bucket, string(uprEvent.Key), test.userXattrKey, []byte(test.userXattrVal), true, true)
+					assert.Nil(err)
+				} else {
+					// source doc didn't have the xattr and won CR,
+					// so final target doc should not have it.
+					err = checkTargetDNE(bucket, string(uprEvent.Key), xattrK1, true, true)
+					assert.Nil(err)
+				}
+
+				err = checkTargetDNE(bucket, string(uprEvent.Key), xattrK2, true, true)
+				assert.Nil(err)
+			} else {
+				// this xattr is assumed to always only exist on target.
+				if test.targetDatatype&base.XattrDataType > 0 {
+					err = checkTarget(bucket, string(uprEvent.Key), xattrK2, []byte(xattrV2), true, true)
+					assert.Nil(err)
+				}
+
+				if !targetIsTombstone {
+					err = checkTarget(bucket, string(uprEvent.Key), "", []byte(targetDoc), false, true)
+					assert.Nil(err)
+				} else {
+					err = checkTargetDNE(bucket, string(uprEvent.Key), "", false, true)
+					assert.Nil(err)
+				}
+			}
+
+			if len(reqTestCh) > 0 {
+				panic(fmt.Sprintf("%v failed because of xmem inresponsiveness for req, len=%v", test.name, len(reqTestCh)))
+			}
+			if len(respTestCh) > 0 {
+				panic(fmt.Sprintf("%v failed because of xmem inresponsiveness for resp %v", test.name, len(respTestCh)))
+			}
 		}
-	}
-
-	if len(reqTestCh) > 0 {
-		panic(fmt.Sprintf("%v failed because of xmem inresponsiveness for req", test.name))
-	}
-	if len(respTestCh) > 0 {
-		panic(fmt.Sprintf("%v failed because of xmem inresponsiveness for resp", test.name))
 	}
 }
 
@@ -736,13 +1144,14 @@ var legacyMutationTCs = []mutationTC{
 		eccv:          false,
 		max_cas_delta: 0,
 		casDelta:      1000000,
-		hlv:           `{"cvCas":"0x4042f769ae7de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x4042f769ae7de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x0000669ea77de817"}}`,
+		hlv:           `{"cvCas":"0x4042f769ae7de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x4042f769ae7de817","pv":["0000669ea77de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   hlvXattrs,
 		respT: respTestParams{
 			Status: mc.SUCCESS,
 		},
+		hlvOutdated: true,
 	},
 	{
 		name: "legacy mutation, already has outdated hlv and user xattrs",
@@ -759,7 +1168,7 @@ var legacyMutationTCs = []mutationTC{
 		eccv:          false,
 		max_cas_delta: 0,
 		casDelta:      1000000,
-		hlv:           `{"cvCas":"0x4042bb32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x4042bb32e17de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x0000ac32e17de817"}}`,
+		hlv:           `{"cvCas":"0x4042bb32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x4042bb32e17de817","pv":["0000ac32e17de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   hlvAndUserXattrs,
@@ -768,6 +1177,7 @@ var legacyMutationTCs = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 }
 
@@ -853,6 +1263,8 @@ func Test_LegacyMutations(t *testing.T) {
 
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
+				test.targetCasChanged = false
+				test.casLockingFailure = false
 
 				fmt.Println(">>>> source doc exists, target doc exists, source wins CR.")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
@@ -1018,7 +1430,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: -100,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa0868e393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0868e393a7ce817","pv":{"27hMZgvcvI5YMQJBIGkxxw":"0x0000f6942f7ce817"}}`,
+		hlv:           `{"cvCas":"0xa0868e393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0868e393a7ce817","pv":["0000f6942f7ce817@27hMZgvcvI5YMQJBIGkxxw"]}`,
 		mou:           ``,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
@@ -1027,6 +1439,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 	{
 		name: "eccv=on (cas >= max_cas), mobile=off, outdated hlv, import mutation, no user xattrs",
@@ -1044,13 +1457,14 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: -100,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa0867049c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0867049c87de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x18fcf8cbc47de817"}}`,
+		hlv:           `{"cvCas":"0xa0867049c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0867049c87de817","pv":["18fcf8cbc47de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
 			Status: mc.SUCCESS,
 		},
+		hlvOutdated: true,
 	},
 	{
 		name: "eccv=on (cas >= max_cas), mobile=off, only outdated hlv and user xattrs",
@@ -1068,7 +1482,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: -100,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa086ad32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa086ad32e17de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x0000ac32e17de817"}}`,
+		hlv:           `{"cvCas":"0xa086ad32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa086ad32e17de817","pv":["0000ac32e17de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   hlvAndUserXattrs,
@@ -1077,6 +1491,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 }
 
@@ -1222,7 +1637,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: 100,
 		casDelta:      10,
-		hlv:           `{"cvCas":"0x0a008d393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a008d393a7ce817","pv":{"27hMZgvcvI5YMQJBIGkxxw":"0x0000f6942f7ce817"}}`,
+		hlv:           `{"cvCas":"0x0a008d393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a008d393a7ce817","pv":["0000f6942f7ce817@27hMZgvcvI5YMQJBIGkxxw"]}`,
 		mou:           ``,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
@@ -1231,6 +1646,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 	{
 		name: "eccv=on (cas < max_cas), mobile=off, outdated hlv, import mutation, no user xattrs",
@@ -1247,13 +1663,14 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: 100,
 		casDelta:      10,
-		hlv:           `{"cvCas":"0x0a006f49c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a006f49c87de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x18fcf8cbc47de817"}}`,
+		hlv:           `{"cvCas":"0x0a006f49c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a006f49c87de817","pv":["18fcf8cbc47de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
 			Status: mc.SUCCESS,
 		},
+		hlvOutdated: true,
 	},
 	{
 		name: "eccv=on (cas < max_cas), mobile=off, only outdated hlv and user xattrs",
@@ -1270,7 +1687,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		eccv:          true,
 		max_cas_delta: 100,
 		casDelta:      10,
-		hlv:           `{"cvCas":"0x0a00ac32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a00ac32e17de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x0000ac32e17de817"}}`,
+		hlv:           `{"cvCas":"0x0a00ac32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x0a00ac32e17de817","pv":["0000ac32e17de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   hlvAndUserXattrs,
@@ -1279,6 +1696,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 }
 
@@ -1348,7 +1766,7 @@ func Test_ECCVOnlyMutations(t *testing.T) {
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
 
-				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists")
+				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists and wins CR")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 				fmt.Printf("--------------- (%v/%v) Done Target: %s ---------------\n", j+1, len(targets), desc[j])
@@ -1368,17 +1786,18 @@ func Test_ECCVOnlyMutations(t *testing.T) {
 
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
+				test.targetCasChanged = false
+				test.casLockingFailure = false
+				test.respT.Status = mc.SUCCESS
 
-				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists, target wins CR")
+				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists, source wins CR")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 				test.targetCasChanged = true
 				test.casLockingFailure = true
 				test.respT.Status = mc.KEY_EEXISTS
-				test.targetBody = target
-				test.targetDatatype = datatypes[j]
 
-				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists, source wins CR")
+				fmt.Println(">>>> source doc exists with cas >= max_cas, target doc exists, source wins CR and cas locking fails")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 				fmt.Printf("--------------- (%v/%v) Done Target: %s ---------------\n", j+1, len(targets), desc[j])
@@ -1446,6 +1865,8 @@ func Test_ECCVOnlyMutations(t *testing.T) {
 
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
+				test.targetCasChanged = false
+				test.casLockingFailure = false
 
 				fmt.Println(">>>> source doc exists with cas < max_cas, target doc exists and source wins CR")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
@@ -1475,7 +1896,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  false,
@@ -1498,7 +1919,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1523,7 +1944,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1548,7 +1969,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1571,7 +1992,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1596,7 +2017,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1605,7 +2026,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		eccv:          false,
 		max_cas_delta: 0,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa0868e393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0868e393a7ce817","pv":{"27hMZgvcvI5YMQJBIGkxxw":"0x0000f6942f7ce817"}}`,
+		hlv:           `{"cvCas":"0xa0868e393a7ce817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0868e393a7ce817","pv":["0000f6942f7ce817@27hMZgvcvI5YMQJBIGkxxw"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
@@ -1614,6 +2035,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 	{
 		name: "eccv=off, mobile=on, outdated hlv, import mutation, no user xattrs",
@@ -1621,7 +2043,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1630,13 +2052,14 @@ var mobileOnlyMutationTCs = []mutationTC{
 		eccv:          false,
 		max_cas_delta: 0,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa0867049c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0867049c87de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x18fcf8cbc47de817"}}`,
+		hlv:           `{"cvCas":"0xa0867049c87de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa0867049c87de817","pv":["18fcf8cbc47de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
 			Status: mc.SUCCESS,
 		},
+		hlvOutdated: true,
 	},
 	{
 		name: "eccv=off, mobile=on, only outdated hlv and user xattrs",
@@ -1644,7 +2067,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 			setOpcode:     mc.ADD_WITH_META,
 			getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 			subdocLookup:  true,
-			specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+			specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 			casLocking:    true,
 			setNoTargetCR: true,
 			setHasXattrs:  true,
@@ -1653,7 +2076,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		eccv:          false,
 		max_cas_delta: 0,
 		casDelta:      100000,
-		hlv:           `{"cvCas":"0xa086ad32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa086ad32e17de817","pv":{"qa5lP/5Ae1V6ZQt4VojG6g":"0x0000ac32e17de817"}}`,
+		hlv:           `{"cvCas":"0xa086ad32e17de817","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0xa086ad32e17de817","pv":["0000ac32e17de817@qa5lP/5Ae1V6ZQt4VojG6g"]}`,
 		mou:           ``,
 		sync:          ``,
 		getUprEvent:   hlvAndUserXattrs,
@@ -1662,6 +2085,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		},
 		userXattrKey: userXattrKey,
 		userXattrVal: userXattr,
+		hlvOutdated:  true,
 	},
 }
 
@@ -1768,6 +2192,9 @@ func Test_MobileOnlyMutations(t *testing.T) {
 
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
+				test.targetCasChanged = false
+				test.casLockingFailure = false
+				test.respT.Status = mc.SUCCESS
 				if len(syncs[j]) > 0 {
 					test.reqT.setHasXattrs = true // target sync is preserved
 					test.sync = string(syncs[j])
@@ -1838,7 +2265,7 @@ func Test_ECCVAndMobileMutations(t *testing.T) {
 			for _, spec := range test.reqT.specs {
 				uniqspecs[spec] = true
 			}
-			mobilespecs := []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE}
+			mobilespecs := []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE}
 			for _, spec := range mobilespecs {
 				uniqspecs[spec] = true
 			}
@@ -1928,6 +2355,10 @@ func Test_ECCVAndMobileMutations(t *testing.T) {
 			for j, target := range targets {
 				fmt.Printf("--------------- (%v/%v) Target: %s ---------------\n", j+1, len(targets), desc[j])
 
+				test.targetCasChanged = false
+				test.casLockingFailure = false
+				test.respT.Status = mc.SUCCESS
+
 				if len(syncs[j]) > 0 {
 					test.reqT.setHasXattrs = true // target sync is preserved
 					test.sync = string(syncs[j])
@@ -1972,7 +2403,7 @@ func Test_ECCVAndMobileMutations(t *testing.T) {
 			for _, spec := range test.reqT.specs {
 				uniqspecs[spec] = true
 			}
-			mobilespecs := []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE}
+			mobilespecs := []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE}
 			for _, spec := range mobilespecs {
 				uniqspecs[spec] = true
 			}
@@ -2071,6 +2502,9 @@ func Test_ECCVAndMobileMutations(t *testing.T) {
 				}
 				test.targetBody = target
 				test.targetDatatype = datatypes[j]
+				test.targetCasChanged = false
+				test.casLockingFailure = false
+				test.respT.Status = mc.SUCCESS
 
 				fmt.Println(">>>> source doc exists, target doc exists and source wins CR")
 				test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
@@ -2140,6 +2574,8 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -2160,7 +2596,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2178,7 +2614,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2194,7 +2630,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2212,7 +2648,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2228,7 +2664,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2246,7 +2682,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2262,7 +2698,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2280,7 +2716,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2304,7 +2740,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2322,7 +2758,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2338,7 +2774,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2356,7 +2792,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2372,7 +2808,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2390,7 +2826,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2406,7 +2842,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2424,7 +2860,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2448,7 +2884,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2466,7 +2902,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2482,7 +2918,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2500,7 +2936,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2516,7 +2952,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2534,13 +2970,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -2550,7 +2988,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2568,13 +3006,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -2592,7 +3032,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2610,7 +3050,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2626,7 +3066,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2644,7 +3084,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2660,7 +3100,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2678,13 +3118,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -2694,7 +3136,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2712,13 +3154,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -2736,7 +3180,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2754,7 +3198,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2770,7 +3214,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2788,7 +3232,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2804,7 +3248,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2822,13 +3266,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -2838,7 +3284,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2856,13 +3302,15 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -2880,7 +3328,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2898,7 +3346,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2914,7 +3362,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2932,7 +3380,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2948,7 +3396,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -2966,7 +3414,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -2982,7 +3430,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3000,7 +3448,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3059,6 +3507,8 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -3079,7 +3529,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3098,7 +3548,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3114,7 +3564,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3133,7 +3583,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3149,7 +3599,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3166,18 +3616,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6000000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6000000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source PV completely pruned
 		test.name = "3a"
@@ -3187,7 +3636,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3204,18 +3653,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x000060e8e99a520d","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x000060e8e99a520d"}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source PV completely pruned, but pv doesn't exist on target.
 		test.name = "3b"
@@ -3225,7 +3673,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3242,18 +3690,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x000060e8e99a520d","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x000060e8e99a520d"}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 < cas2 - target wins
 		test.name = "4"
@@ -3263,7 +3710,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3282,7 +3729,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3306,7 +3753,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3325,7 +3772,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3341,7 +3788,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3357,19 +3804,16 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetWins = false
 		test.targetCas = cas2
 		test.targetRevId = rev2
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified
-		test.hlv = ``
+		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
 		test.mou = string(generateMou(cas1, pRev1))
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
 
 		// same as above, but source PV is completely pruned
 		test.name = "6a"
@@ -3379,7 +3823,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3395,19 +3839,16 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetWins = false
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified
-		test.hlv = ``
+		test.hlv = `{"cvCas":"0x0000de08058d0b0d","src":"Source","ver":"0x0000de08058d0b0d"}`
 		test.mou = string(generateMou(cas1*10000000000000000, pRev1))
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
 
 		// same as above, but source PV is completely pruned and pv doesn't exist on target
 		test.name = "6b"
@@ -3417,7 +3858,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3433,19 +3874,16 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetWins = false
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified
-		test.hlv = ``
+		test.hlv = `{"cvCas":"0x0000de08058d0b0d","src":"Source","ver":"0x0000de08058d0b0d"}`
 		test.mou = string(generateMou(cas1*10000000000000000, pRev1))
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
 
 		// non-import, import - cas1 > cvCas2 - source wins
 		test.name = "7"
@@ -3455,7 +3893,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3472,18 +3910,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified.
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6000000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6000000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source PV is completely pruned
 		test.name = "7a"
@@ -3493,7 +3930,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3510,18 +3947,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified.
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x000060e8e99a520d","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x000060e8e99a520d"}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source PV is completely pruned and pv doesnt exists on target
 		test.name = "7b"
@@ -3531,7 +3967,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3548,18 +3984,17 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetCas = cas2 * 10000000000000000
 		test.targetRevId = rev2
 		test.reqT.setCas = test.targetCas
-		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		// hlv will be macro-expanded and hence won't be verified.
-		test.hlv = ``
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x000060e8e99a520d","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x000060e8e99a520d"}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
-		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 < cas2 - target wins
 		test.name = "8"
@@ -3569,7 +4004,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3588,7 +4023,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3612,7 +4047,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3631,7 +4066,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3647,7 +4082,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3666,7 +4101,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3682,7 +4117,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3701,13 +4136,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -3717,7 +4154,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3736,13 +4173,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -3760,7 +4199,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3779,7 +4218,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3795,7 +4234,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3814,7 +4253,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3830,7 +4269,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3849,13 +4288,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -3865,7 +4306,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3884,13 +4325,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -3908,7 +4351,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3927,7 +4370,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3943,7 +4386,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3961,7 +4404,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -3978,7 +4421,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -3997,13 +4440,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -4013,7 +4458,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4032,13 +4477,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -4056,7 +4503,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4075,7 +4522,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4091,7 +4538,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4110,7 +4557,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4126,7 +4573,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4145,7 +4592,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4161,7 +4608,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4180,7 +4627,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4239,6 +4686,8 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -4259,7 +4708,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4277,7 +4726,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4293,7 +4742,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4311,7 +4760,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4327,7 +4776,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4345,7 +4794,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4361,7 +4810,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4379,7 +4828,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4403,7 +4852,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4421,7 +4870,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4437,7 +4886,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4455,7 +4904,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4471,7 +4920,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4489,7 +4938,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4505,7 +4954,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4523,7 +4972,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4547,7 +4996,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4565,7 +5014,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4581,7 +5030,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4599,7 +5048,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4615,7 +5064,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4633,13 +5082,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -4649,7 +5100,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4667,13 +5118,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -4691,7 +5144,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4709,7 +5162,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4725,7 +5178,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4743,7 +5196,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4759,7 +5212,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4777,13 +5230,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -4793,7 +5248,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4811,13 +5266,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -4835,7 +5292,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4853,7 +5310,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4869,7 +5326,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4887,7 +5344,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -4903,7 +5360,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4921,13 +5378,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -4937,7 +5396,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4955,13 +5414,15 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -4979,7 +5440,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -4997,7 +5458,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5013,7 +5474,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5031,7 +5492,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5047,7 +5508,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5065,7 +5526,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5081,7 +5542,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5099,7 +5560,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5148,7 +5609,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 				setOpcode:     mc.SET_WITH_META,
 				getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 				subdocLookup:  true,
-				specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+				specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 				casLocking:    true,
 				setNoTargetCR: true,
 				setHasXattrs:  true,
@@ -5158,6 +5619,8 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -5178,7 +5641,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5196,7 +5659,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5212,7 +5675,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5230,7 +5693,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5246,7 +5709,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5264,7 +5727,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5280,7 +5743,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5298,7 +5761,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5322,7 +5785,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5340,7 +5803,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5356,7 +5819,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5374,7 +5837,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5390,7 +5853,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5408,7 +5871,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5424,7 +5887,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5442,7 +5905,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5466,7 +5929,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5485,7 +5948,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5501,7 +5964,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5519,7 +5982,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5535,7 +5998,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5554,13 +6017,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -5570,7 +6035,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5589,13 +6054,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -5613,7 +6080,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5632,7 +6099,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5648,7 +6115,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5667,7 +6134,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5683,7 +6150,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5702,13 +6169,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -5718,7 +6187,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5737,13 +6206,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -5761,7 +6232,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5779,7 +6250,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5795,7 +6266,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5813,7 +6284,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5829,7 +6300,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5848,13 +6319,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -5864,7 +6337,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5883,13 +6356,15 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -5907,7 +6382,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5925,7 +6400,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5941,7 +6416,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5959,7 +6434,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -5975,7 +6450,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -5993,7 +6468,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6009,7 +6484,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6027,7 +6502,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6075,7 +6550,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 				setOpcode:     mc.SET_WITH_META,
 				getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 				subdocLookup:  true,
-				specs:         []string{base.XATTR_HLV, base.XATTR_IMPORTCAS, base.XATTR_PREVIOUSREV, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+				specs:         []string{base.XattributeToc, base.XATTR_HLV, base.XATTR_IMPORTCAS, base.XATTR_PREVIOUSREV, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 				casLocking:    true,
 				setNoTargetCR: true,
 				setHasXattrs:  true,
@@ -6085,6 +6560,8 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -6105,7 +6582,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6124,7 +6601,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6140,7 +6617,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6159,7 +6636,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6175,7 +6652,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6195,14 +6672,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but pv is completely pruned on source
 		test.name = "3a"
@@ -6212,7 +6691,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6232,14 +6711,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but pv is completely pruned on source and target PV doesn't exist.
 		test.name = "3b"
@@ -6249,7 +6730,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6269,14 +6750,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 < cas2 - target wins
 		test.name = "4"
@@ -6286,7 +6769,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6305,7 +6788,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6329,7 +6812,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6348,7 +6831,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6364,7 +6847,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6384,7 +6867,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6401,7 +6884,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6421,7 +6904,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6438,7 +6921,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6458,7 +6941,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6475,7 +6958,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6495,14 +6978,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source pv completely pruned
 		test.name = "7a"
@@ -6512,7 +6997,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6532,14 +7017,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlvWithPv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// same as above, but source pv completely pruned and pv doesn't exist on target
 		test.name = "7b"
@@ -6549,7 +7036,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1*10000000000000000, "Source")
 			mou1 := generateMou(cas1*10000000000000000-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6569,14 +7056,16 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setOpcode = base.SUBDOC_MULTI_MUTATION
 		hlv2 = generateHlv(cvCas2*10000000000000000, "Target")
 		mou2 = generateMou(cas2*10000000000000000, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = ``
 		test.mou = ``
+		test.hlvOutdated = true
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 		test.reqT.setOpcode = base.SET_WITH_META
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 < cas2 - target wins
 		test.name = "8"
@@ -6586,7 +7075,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6605,7 +7094,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6629,7 +7118,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6648,7 +7137,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6664,7 +7153,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6683,7 +7172,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6699,7 +7188,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6718,13 +7207,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -6734,7 +7225,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6753,13 +7244,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -6777,7 +7270,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6796,7 +7289,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6812,7 +7305,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6831,7 +7324,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6847,7 +7340,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6866,13 +7359,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -6882,7 +7377,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6901,13 +7396,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -6925,7 +7422,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6944,7 +7441,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6960,7 +7457,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -6978,7 +7475,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -6995,7 +7492,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7014,13 +7511,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -7030,7 +7529,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7049,13 +7548,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -7073,7 +7574,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7092,7 +7593,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7108,7 +7609,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7127,7 +7628,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7143,7 +7644,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7162,7 +7663,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7178,7 +7679,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7197,7 +7698,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7246,7 +7747,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 				setOpcode:     mc.SET_WITH_META,
 				getOpcode:     mc.SUBDOC_MULTI_LOOKUP,
 				subdocLookup:  true,
-				specs:         []string{base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
+				specs:         []string{base.XattributeToc, base.VXATTR_DATATYPE, base.VXATTR_FLAGS, base.VXATTR_EXPIRY, base.VXATTR_REVID, base.XATTR_MOBILE},
 				casLocking:    true,
 				setNoTargetCR: true,
 				setHasXattrs:  true,
@@ -7256,6 +7757,8 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			respT: respTestParams{
 				Status: mc.SUCCESS,
 			},
+			userXattrKey: userXattrKey,
+			userXattrVal: userXattr,
 		}
 
 		doc := []byte(targetDoc)
@@ -7276,7 +7779,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7294,7 +7797,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 := generateHlv(cvCas2, "Target")
 		mou2 := generateMou(cas2-1, pRev2)
-		body2, datatype2, err := generateBody(hlv2, mou2, nil, doc)
+		body2, datatype2, err := generateBody(hlv2, mou2, nil, []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7310,7 +7813,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7328,7 +7831,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7344,7 +7847,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7362,7 +7865,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7378,7 +7881,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7396,7 +7899,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7420,7 +7923,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7438,7 +7941,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7454,7 +7957,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7472,7 +7975,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7488,7 +7991,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7506,7 +8009,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7522,7 +8025,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7540,7 +8043,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7564,7 +8067,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7583,7 +8086,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7599,7 +8102,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7618,7 +8121,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7634,7 +8137,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7653,13 +8156,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "12"
@@ -7669,7 +8174,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7688,13 +8193,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5e00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5e00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cvCas1 > cas2 > cvCas2 OR rev1 > pRev1 > rev2 > pRev2
 		cas1, rev1 = cas-2, rev-2
@@ -7712,7 +8219,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7731,7 +8238,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7747,7 +8254,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7766,7 +8273,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7782,7 +8289,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7801,13 +8308,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "16"
@@ -7817,7 +8326,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7836,13 +8345,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x6000000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["6000000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas1 > cas2 > cvCas2 > cvCas1 OR rev1 > rev2 > pRev2 > pRev1
 		cas1, rev1 = cas-2, rev-2
@@ -7860,7 +8371,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7878,7 +8389,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7894,7 +8405,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7912,7 +8423,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -7928,7 +8439,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7947,13 +8458,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// non-import, non-import - cas1 > cas2 - source wins
 		test.name = "20"
@@ -7963,7 +8476,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -7982,13 +8495,15 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.reqT.setCas = test.targetCas
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
-		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":{"Source":"0x5c00000000000000"}}`
+		test.hlvOutdated = true
+		test.hlv = `{"cvCas":"0x6200000000000000","src":"D5j49m2akBIzCHraw6p0Gw","ver":"0x6200000000000000","pv":["5c00000000000000@Source"]}`
 		test.mou = ``
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
+		test.hlvOutdated = false
 
 		// cas2 > cvCas2 > cas1 > cvCas1 OR rev2 > pRev2 > rev1 > pRev1
 		cas2, rev2 = cas-2, rev-2
@@ -8006,7 +8521,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -8024,7 +8539,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -8040,7 +8555,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -8058,7 +8573,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -8074,7 +8589,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -8092,7 +8607,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
@@ -8108,7 +8623,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 			uprEvent.RevSeqno = rev1
 			hlv1 := generateHlv(cvCas1, "Source")
 			mou1 := generateMou(cas1-1, pRev1)
-			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), doc)
+			body1, datatype1, err := generateBody(hlv1, mou1, []byte(sourceSync), []byte(userXattrKey), []byte(userXattr), nil, nil, doc)
 			if err != nil {
 				return nil, err
 			}
@@ -8126,7 +8641,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetRevId = rev2
 		hlv2 = generateHlv(cvCas2, "Target")
 		mou2 = generateMou(cas2-1, pRev2)
-		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), doc)
+		body2, datatype2, err = generateBody(hlv2, mou2, []byte(targetSync), []byte(xattrK1), []byte(xattrV1), []byte(xattrK2), []byte(xattrV2), doc)
 		assert.Nil(err)
 		test.targetBody = body2
 		test.targetDatatype = datatype2

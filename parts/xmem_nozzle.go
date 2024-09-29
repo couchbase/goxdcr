@@ -1300,7 +1300,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			switch needSendStatus {
 			case Send:
 				lookupResp, err := batch.sendLookupMap.deregisterLookup(item.UniqueKey)
-				if xmem.nonOptimisticCROnly() && err != nil {
+				if xmem.nonOptimisticCROnly(item) && err != nil {
 					// only relevent when only source CR is to be done i.e. mobile and CCR mode
 					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for Send, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
 				}
@@ -2172,7 +2172,10 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	updateHLV := crMeta.NeedToUpdateHlv(sourceDocMeta, vbHlvMaxCas, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
 
 	if wrappedReq.IsSubdocOp() {
-		return xmem.updateSystemXattrForSubdocOp(wrappedReq, lookup, sourceDocMeta, updateHLV)
+		// for a subdoc op, we should always update HLV,
+		// given that we need to perform a cas macro expansion.
+		// Otherwise the target cas will rollback.
+		return xmem.updateSystemXattrForSubdocOp(wrappedReq, lookup, sourceDocMeta, true)
 	} else {
 		return xmem.updateSystemXattrForMetaOp(wrappedReq, lookup, sourceDocMeta, updateHLV)
 	}
@@ -2809,11 +2812,14 @@ func (xmem *XmemNozzle) markNonTempErrorResponse(response *mc.MCResponse, nonTem
 // Note that this function should not be used to
 // identify if a given request performs optimistic cas locking or not.
 // Use IsCasLockingRequest for that.
-func (xmem *XmemNozzle) nonOptimisticCROnly() bool {
-	if xmem.getCrossClusterVers() || xmem.getMobileCompatible() != base.MobileCompatibilityOff || xmem.source_cr_mode == base.CRMode_Custom {
-		return true
+func (xmem *XmemNozzle) nonOptimisticCROnly(req *base.WrappedMCRequest) bool {
+	if xmem.config.vbHlvMaxCas == nil || req == nil {
+		return false
 	}
-	return false
+
+	return xmem.getMobileCompatible() != base.MobileCompatibilityOff ||
+		(xmem.getCrossClusterVers() && req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
+		xmem.source_cr_mode == base.CRMode_Custom
 }
 
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {

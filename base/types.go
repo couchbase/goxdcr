@@ -917,7 +917,7 @@ func (req *WrappedMCRequest) IsCasLockingRequest() bool {
 	if req.Req.Opcode == ADD_WITH_META && req.Req.Cas == 0 {
 		return true
 	}
-	if req.Req.Opcode == SET_WITH_META && req.Req.Cas != 0 {
+	if (req.Req.Opcode == SET_WITH_META || req.Req.Opcode == DELETE_WITH_META) && req.Req.Cas != 0 {
 		return true
 	}
 	if req.IsSubdocOp() {
