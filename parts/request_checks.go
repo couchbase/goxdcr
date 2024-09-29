@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/couchbase/gocb/v2"
 	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/base"
 )
@@ -28,20 +29,42 @@ var reqTestCh chan reqTestParams
 var respTestCh chan respTestParams
 
 type targetWriter struct {
-	writer func(kvAddr, bucketName string, key, val []byte,
+	enabled bool
+	writer  func(kvAddr, bucketName string, key, val []byte,
 		datatype uint8, cas uint64, revId uint64, lww bool) error
-	kvAddr     string
-	bucketName string
-	key        []byte
-	val        []byte
-	datatype   uint8
-	cas        uint64
-	revId      uint64
-	lww        bool
+	waiter        func(bucket *gocb.Bucket, key, path string, expectedValue []byte, isXattr bool, accessDeleted bool) error
+	kvAddr        string
+	bucketName    string
+	key           []byte
+	val           []byte
+	datatype      uint8
+	cas           uint64
+	revId         uint64
+	lww           bool
+	bucket        *gocb.Bucket
+	expectedCas   []byte
+	expectedRev   []byte
+	accessDeleted bool
 }
 
 func (w targetWriter) changeTargetCas() error {
-	return w.writer(w.kvAddr, w.bucketName, w.key, w.val, w.datatype, w.cas, w.revId, w.lww)
+	err := w.writer(w.kvAddr, w.bucketName, w.key, w.val, w.datatype, w.cas, w.revId, w.lww)
+	if err != nil {
+		return err
+	}
+	// make sure cas/revId is changed as expected
+	if w.lww {
+		err = w.waiter(w.bucket, string(w.key), "$document.CAS", w.expectedCas, true, w.accessDeleted)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = w.waiter(w.bucket, string(w.key), "$document.revid", w.expectedRev, true, w.accessDeleted)
+		if err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 type reqTestParams struct {
@@ -53,7 +76,7 @@ type reqTestParams struct {
 	casLocking       bool
 	setNoTargetCR    bool
 	setHasXattrs     bool
-	targetCasChanger *targetWriter
+	targetCasChanger targetWriter
 	retryCnt         int
 }
 
@@ -69,11 +92,13 @@ func testMcRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse
 	var t reqTestParams
 	select {
 	case t = <-reqTestCh:
+		fmt.Printf("SUMUKH DEBUG PULLED targetCasChanger=%v\n", t.targetCasChanger)
 	default:
 		panic("No request to test")
 	}
 
-	if t.targetCasChanger != nil {
+	if t.targetCasChanger.enabled {
+		fmt.Printf("SUMUKH DEBUG changing cas\n")
 		err := t.targetCasChanger.changeTargetCas()
 		if err != nil {
 			panic(fmt.Sprintf("error writing conflict, err=%v", err))
@@ -84,7 +109,8 @@ func testMcRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse
 		panic(fmt.Sprintf("Set opcode mismatch - %v != %v", t.setOpcode, req.Req.Opcode))
 	}
 
-	if t.setCas != req.Req.Cas {
+	if !t.targetCasChanger.enabled && t.setCas != req.Req.Cas {
+		// req Cas will be changed if target cas was changed.
 		panic(fmt.Sprintf("Set cas mismatch - %v != %v", t.setCas, req.Req.Cas))
 	}
 
@@ -116,8 +142,8 @@ func testMcRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse
 		}
 	}
 
-	if t.retryCnt != req.RetryCRCount {
-		panic(fmt.Sprintf("RetryCnt mismatch - %v != %v", t.retryCnt, req.RetryCRCount))
+	if t.retryCnt != req.RetryCRCount && !(t.targetCasChanger.enabled && t.retryCnt+1 == req.RetryCRCount) {
+		panic(fmt.Sprintf("RetryCnt mismatch - %v != %v, caschanged=%v", t.retryCnt, req.RetryCRCount, t.targetCasChanger.enabled))
 	}
 
 	if lookup != nil {
@@ -155,6 +181,10 @@ func testMcResponse(resp *mc.MCResponse) {
 	}
 
 	if t.Status != resp.Status {
+		// fmt.Printf("Response status mismatch - %v != %v", t.Status, resp.Status)
+		// go func() {
+		// 	time.Sleep(2 * time.Second)
 		panic(fmt.Sprintf("Response status mismatch - %v != %v", t.Status, resp.Status))
+		// }()
 	}
 }

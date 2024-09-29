@@ -696,10 +696,10 @@ func TestMobilePreserveSync(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 	xmem.Receive(wrappedMCRequest)
-	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@couchbase.com\""), false); err != nil {
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@couchbase.com\""), false, false); err != nil {
 		assert.FailNow(err.Error())
 	}
-	if err = checkTarget(bucket, key, "_sync", nil, true); err != nil {
+	if err = checkTarget(bucket, key, "_sync", nil, true, false); err != nil {
 		assert.FailNow(err.Error())
 	}
 
@@ -712,10 +712,10 @@ func TestMobilePreserveSync(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(wrappedMCRequest)
 	xmem.Receive(wrappedMCRequest)
-	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@updated.couchbase.com\""), false); err != nil {
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@updated.couchbase.com\""), false, false); err != nil {
 		assert.FailNow(err.Error())
 	}
-	if err = checkTarget(bucket, key, "_sync", nil, true); err != nil {
+	if err = checkTarget(bucket, key, "_sync", nil, true, false); err != nil {
 		assert.FailNow(err.Error())
 	}
 
@@ -730,19 +730,32 @@ func TestMobilePreserveSync(t *testing.T) {
 	assert.NotNil(wrappedMCRequest)
 	xmem.Receive(wrappedMCRequest)
 
-	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@source.couchbase.com\""), false); err != nil {
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@source.couchbase.com\""), false, false); err != nil {
 		assert.FailNow(err.Error())
 	}
-	if err = checkTarget(bucket, key, "_sync", []byte("\"mobile sync XATTR target\""), true); err != nil {
+	if err = checkTarget(bucket, key, "_sync", []byte("\"mobile sync XATTR target\""), true, false); err != nil {
 		assert.FailNow(err.Error())
 	}
 }
 
-func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, isXattr bool) error {
+// check if target key and path exists with the expectedValue.
+func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, isXattr bool, accessDeleted bool) error {
 	var value []byte
+	var opts *gocb.LookupInOptions
+	if accessDeleted {
+		opts = &gocb.LookupInOptions{
+			Internal: struct {
+				DocFlags gocb.SubdocDocFlag
+				User     []byte
+			}{
+				DocFlags: gocb.SubdocDocFlagAccessDeleted,
+			},
+		}
+	}
+
 	for i := 0; i < 10; i++ {
 		res, err := bucket.DefaultCollection().LookupIn(key,
-			[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: isXattr})}, nil)
+			[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: isXattr})}, opts)
 		if err == nil {
 			res.ContentAt(0, &value)
 			if bytes.Equal(value, expectedValue) {
@@ -752,6 +765,33 @@ func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, is
 		time.Sleep(1 * time.Second)
 	}
 	return fmt.Errorf("value %q is not expected %q", value, expectedValue)
+}
+
+// check if target key and path DNE.
+// returns nil if DNE, returns error otherwise.
+// Make sure to call this function only after target has changed.
+func checkTargetDNE(bucket *gocb.Bucket, key, path string, isXattr, accessDeleted bool) error {
+	var opts *gocb.LookupInOptions
+	if accessDeleted {
+		opts = &gocb.LookupInOptions{
+			Internal: struct {
+				DocFlags gocb.SubdocDocFlag
+				User     []byte
+			}{
+				DocFlags: gocb.SubdocDocFlagAccessDeleted,
+			},
+		}
+	}
+
+	res, err := bucket.DefaultCollection().LookupIn(key,
+		[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: isXattr})}, opts)
+	if err != nil {
+		return err
+	}
+	if !res.Exists(0) {
+		return nil
+	}
+	return fmt.Errorf("path %q exists but should not exist", path)
 }
 
 // This test was useful in development but is disabled. TestMobilePreserveSync is used instead
@@ -805,7 +845,7 @@ func mobilePreserveSyncLiveRep(t *testing.T, bucketName string, crType gocb.Conf
 	assert.Nil(err)
 	err = waitForReplication(key, mutOut.Cas(), targetBucket)
 	assert.Nil(err)
-	if err = checkTarget(targetBucket, key, base.XATTR_MOBILE, nil, true); err != nil {
+	if err = checkTarget(targetBucket, key, base.XATTR_MOBILE, nil, true, false); err != nil {
 		assert.FailNow(err.Error())
 	}
 
@@ -817,7 +857,7 @@ func mobilePreserveSyncLiveRep(t *testing.T, bucketName string, crType gocb.Conf
 	assert.Nil(err)
 	err = waitForReplication(key, mutOut.Cas(), sourceBucket)
 	assert.Nil(err)
-	if err = checkTarget(sourceBucket, key, base.XATTR_MOBILE, []byte("\"cluster C1 value\""), true); err != nil {
+	if err = checkTarget(sourceBucket, key, base.XATTR_MOBILE, []byte("\"cluster C1 value\""), true, false); err != nil {
 		assert.FailNow(err.Error())
 	}
 }
@@ -875,7 +915,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	out, err := bucket.DefaultCollection().Get(key, nil)
 	assert.Nil(err)
 	assert.Equal(gocb.Cas(1700503142566854656), out.Cas())
-	err = checkTarget(bucket, key, base.XATTR_MOU, []byte(`{"importCAS":"0x0000223899669917","pRev":1}`), true)
+	err = checkTarget(bucket, key, base.XATTR_MOU, []byte(`{"importCAS":"0x0000223899669917","pRev":1}`), true, false)
 	assert.Nil(err)
 
 	// Test 2. Update the import document (Doc1). It should replicate with importCas removed
