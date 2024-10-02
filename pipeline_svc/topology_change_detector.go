@@ -516,7 +516,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 	for vbno, vb_err := range vb_err_map {
 		_, found := base.SearchVBInSortedList(vbno, diff_vb_list)
 		if !found {
-			top_detect_svc.logger.Errorf("Vbucket %v for pipeline saw an error, %v, that had not been caused by topology changes. diff_vb_list=%v", vbno, vb_err, diff_vb_list)
+			top_detect_svc.logger.Errorf("Vbucket %v for pipeline saw an error %v %v, that had not been caused by topology changes. diff_vb_list=%v", vbno, problematic_vb_key, vb_err, diff_vb_list)
 			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, vb_err))
 			return vb_err
 		}
