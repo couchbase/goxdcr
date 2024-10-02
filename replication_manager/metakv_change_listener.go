@@ -737,7 +737,7 @@ func (pscl *GlobalSettingChangeListener) validateGlobalSetting(settingObj interf
 	return psettings, nil
 }
 
-// Handler callback for prcoess setting changed event
+// Handler callback for process setting changed event
 // In case of globalsettings oldsetting object will be null as we dont cache the object.. so we dont have access to old value
 func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(settingId string, oldSettingObj interface{}, newSettingObj interface{}) error {
 

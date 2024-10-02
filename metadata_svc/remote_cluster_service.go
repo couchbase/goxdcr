@@ -1291,9 +1291,14 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		agentUuid := agent.pendingRef.Uuid()
 		agent.refMtx.RUnlock()
 		agent.logger.Infof("Agent %v %v started for cluster: %v synchronously? %v", agentId, agentName, agentUuid, userInitiated)
-		agent.agentWaitGrp.Add(2)
+
+		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
-		go agent.runHeartbeatSender()
+
+		if base.SrcHeartbeatEnabled {
+			agent.agentWaitGrp.Add(1)
+			go agent.runHeartbeatSender()
+		}
 	} else {
 		agent.logger.Warnf("Agent %v starting resulted in error: %v", newRef.Id(), err)
 	}
@@ -4089,7 +4094,6 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 func (agent *RemoteClusterAgent) setHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
 	agent.heartbeatAPIMtx.Lock()
 	defer agent.heartbeatAPIMtx.Unlock()
-
 	agent.heartbeatAPI = api
 }
 

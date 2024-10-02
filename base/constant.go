@@ -1302,7 +1302,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	srcHeartbeatExpiration time.Duration, srcHeartbeatCooldownSecs time.Duration) {
+	srcHeartbeatEnabled bool, srcHeartbeatExpiration time.Duration, srcHeartbeatCooldownSecs time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1461,6 +1461,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapellaHostnameSuffix = capellaHostNameSuffix
 	NWLatencyToleranceMilliSec = nwLatencyToleranceMilliSec
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
+	SrcHeartbeatEnabled = srcHeartbeatEnabled
 	SrcHeartbeatExpirationTimeout = srcHeartbeatExpiration
 	SrcHeartbeatCooldownPeriod = srcHeartbeatCooldownSecs
 }
@@ -1805,7 +1806,7 @@ const (
 
 // This is exposed as an internal setting (which triggers process restart which is necessary),
 // which needs to be turned on if new pipeline cas poisoning check is required.
-// 0 means disbaled, 1 means enabled.
+// 0 means disabled, 1 means enabled.
 var CasPoisoningPreCheckEnabled int = 0
 
 func IsCasPoisoningPreCheckEnabled() bool {
@@ -1819,7 +1820,11 @@ const (
 	MandatoryVal                   = "mandatory"
 )
 
-var SrcHeartbeatExpirationTimeout = 5 * time.Minute
-var SrcHeartbeatCooldownPeriod = 60 * time.Second
+// Target Awareness (Heartbeat) related attributes
+var (
+	SrcHeartbeatEnabled           = true
+	SrcHeartbeatExpirationTimeout = 5 * time.Minute
+	SrcHeartbeatCooldownPeriod    = 60 * time.Second
+)
 
 const XDCRSourceClustersPath = XDCRPrefix + "/sourceClusters"
