@@ -1,0 +1,265 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A Bucket2Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	waitForBgJobs
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function dismissLevel0 {
+	local eventId
+	getBrokenMapEntryId "C1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel1 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel2 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1" "col1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+	getBrokenMapEntryId "C1" "S1" "col2"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel3 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1" "col1" "S1" "col1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+	getBrokenMapEntryId "C1" "S1" "col2" "S1" "col2"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function pickARandomLevelToDismissBrokenMap {
+	randomCase=$(echo $(($RANDOM % 4)))
+	echo "Randomly picking to dismiss broken map with level $randomCase..."
+	case $randomCase in
+	0)
+		dismissLevel0
+		;;
+	1)
+		dismissLevel1
+		;;
+	2)
+		dismissLevel2
+		;;
+	3)
+		dismissLevel3
+		;;
+	esac
+}
+
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running collections live rediscover test case variableVB 128VB edition"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	# Get current instance
+	local -i currentBrokenInstanceCnt
+	local -i currentRepairedInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
+	local -i currentBackfillOsoDocCnt
+
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
+	currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
+	currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
+
+	local currentXdcrLog
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
+	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
+
+	setInternalSettings "C1" "VariableVBSupport=true"
+	setInternalSettings "C2" "VariableVBSupport=true"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 5 seconds before checking item count first pass"
+	sleep 5
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" 0
+
+	# One broken msg for B1.S1.c1 -> B2.S1.c1 and one for B1.S1.c2 -> B2.S1.c2
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 2))
+
+	# Validate brokenmap exists
+	validateBrokenMapExists "C1"
+	validateBrokenMapEntry "C1" "S1" "col1" "S1" "col1"
+	validateBrokenMapEntry "C1" "S1" "col2" "S1" "col2"
+
+	# We can only pick one so randomly pick one
+	pickARandomLevelToDismissBrokenMap
+	sleep 5
+	validateBrokenMapDoesNotExist "C1"
+
+	# Pause and resume pipeline should free up dismissal and brokenMap should show up again
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	validateBrokenMapExists "C1"
+
+	# run data load again to ensure brokenMapping is updated and displayed correctly
+	runDataLoad
+
+	# Try removing "S1.col2" and see if brokenMap entry gets removed
+	deleteCollection "C1" "B1" "S1" "col2"
+	validateBrokenMapExists "C1"
+	validateBrokenMapEntryDNE "C1" "S2" "col2" "S1" "col2"
+
+	# Repair it to set up correctly for original backfill test
+	createCollection "C1" "B1" "S1" "col2"
+	runDataLoad
+
+	# Then re-setup the implicit matching that matches
+	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+	setupTopologies
+	echo "Sleeping 30 seconds for discovery and automatic backfill"
+	sleep 30
+
+	printGlobalScopeAndCollectionInfo
+
+	# After sleeping, the backfill manager should have triggered the backfill
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	# Before running I/O, ckptMgr will raise a repaired message
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+
+	# Sometimes racey detection will detect collection manifest changes mid flight and raise more than one backfill
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
+
+	runDataLoad
+	# After running I/O, router should raise a repaired message
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
+	validateBrokenMapDoesNotExist "C1"
+
+	# Under normal I/O load, these should happen closely together
+	# Backfill Pipeline given VBMasterCheck will
+	echo "Sleeping 60..."
+	sleep 60
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2)) $(($currentBackfillInstanceCnt + 3))
+	date
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2)) $(($currentVBTasksDoneInstanceCnt + 3))
+	# No OSO because backfill 2 collections
+	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt))
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	cleanupBucketNamePropertyMap
+	# For magma clean up, sleep a bit
+	sleep 20
+
+	# remove trap as no longer needed
+	trap - EXIT
+}
