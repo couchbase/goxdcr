@@ -3486,6 +3486,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 				}
 			}
 
+			// TODO NEIL: ensure this works
 			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
 			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
 			if err != nil {
@@ -3842,7 +3843,7 @@ func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(highSeqnoAndVBUuid meta
 
 	// first check if vbuuid has changed or not
 	if !highSeqnoAndVBUuid.IsSame(globalTargetOpaque) {
-		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", globalTargetOpaque, highSeqnoAndVBUuid)
+		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", globalTargetOpaque.Value(), highSeqnoAndVBUuid)
 		return nil, targetVbuuidChangedError
 	}
 

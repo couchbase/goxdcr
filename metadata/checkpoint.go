@@ -289,13 +289,18 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 		return nil
 	}
 
-	opaqueMap := make(map[uint16]*TargetVBUuid)
+	tgtVBTimestampMap := make(map[uint16]*TargetVBTimestamp)
 	for k, v := range *g {
-		vbuuid := v.Target_vb_opaque.Value().(uint64)
-		opaqueMap[k] = &TargetVBUuid{Target_vb_uuid: vbuuid}
+		tgtVBTimestampMap[k] = &TargetVBTimestamp{
+			Target_vb_opaque:    v.Target_vb_opaque.Clone(),
+			Target_Seqno:        v.Target_Seqno,
+			TargetManifest:      v.TargetManifest,
+			BrokenMappingSha256: v.BrokenMappingSha256,
+			brokenMappings:      v.brokenMappings.Clone(),
+		}
 	}
 
-	return opaqueMap
+	return tgtVBTimestampMap
 }
 
 func (g *GlobalTimestamp) Clone() TargetVBOpaque {
@@ -1397,7 +1402,7 @@ func (g *GlobalTargetVbUuids) Value() interface{} {
 // meant to be a direct comparison between two GlobalTargetVbUuids objects
 // Use SameAs() for direct comparisons
 func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
-	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*TargetVBUuid)
+	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*TargetVBTimestamp)
 	if !ok {
 		// We don't accept any other type of TargetVBOpaque for global checkpointing
 		// But because interface is hard-coded, there's no other way to raise error and prefer not to
@@ -1412,14 +1417,16 @@ func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
 		return false
 	}
 
-	for vb, latestTargetVbUuid := range lastFetchedTargetOpaque {
+	for vb, latestTargetVBTimestamp := range lastFetchedTargetOpaque {
+		latestTargetVbUuid := latestTargetVBTimestamp.Target_vb_opaque.Value().(uint64)
+
 		currentKnownSeqnoAndVbuuid, ok := (*g)[vb]
 		if !ok {
 			return false
 		}
 		currentKnownVbUuid := currentKnownSeqnoAndVbuuid[1]
 
-		if currentKnownVbUuid != latestTargetVbUuid.Target_vb_uuid {
+		if currentKnownVbUuid != latestTargetVbUuid {
 			return false
 		}
 	}
@@ -1688,7 +1695,12 @@ func (c CheckpointSortRecordsList) Less(i, j int) bool {
 	}
 
 	// Last resort
-	return aRecord.Target_Seqno > bRecord.Target_Seqno
+	if aRecord.IsTraditional() {
+		return aRecord.Target_Seqno > bRecord.Target_Seqno
+	} else {
+		// For global checkpoint, arbitrarily just check to see who has a larger global timestamp length as a tie breaker
+		return len(aRecord.GlobalTimestamp) > len(bRecord.GlobalTimestamp)
+	}
 }
 
 // Returns:
@@ -1711,6 +1723,13 @@ func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord
 	} else if aRecord.CheckpointRecord == nil && bRecord.CheckpointRecord == nil {
 		// Just say yes
 		return true, false
+	}
+
+	if !source && !aRecord.IsTraditional() {
+		// For global target checkpoint there is no point to compare between target global timestamps
+		// purely because they are all over the place... each source VB could have up to 1024 target highSeqno/VBUUID
+		// pairs and it's not logical to find a way to sort that
+		return false, false
 	}
 
 	if source {
