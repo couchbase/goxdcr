@@ -861,7 +861,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markMCRequestAsIgnored(req *base.Wrappe
 		return
 	}
 	seqno := req.Seqno
-	vbno := req.Req.VBucket
+	vbno := req.GetSourceVB()
 	tsTracker.addIgnoredSeqno(vbno, seqno)
 }
 
@@ -1795,7 +1795,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 			cloned = true
 			syncCh = wrappedMcr.ClonedSyncCh
 		}
-		vbno = wrappedMcr.Req.VBucket
+		vbno = wrappedMcr.GetSourceVB()
 		seqno = wrappedMcr.Seqno
 	default:
 		panic("Implement me")
