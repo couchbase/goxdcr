@@ -155,7 +155,6 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc, xdcrTopologyS
 	connector.On("Id").Return(testRouter)
 
 	dcpNozzle.SetConnector(connector)
-
 }
 
 func setupInnerMock(runtimeCtx *common.PipelineRuntimeContext,

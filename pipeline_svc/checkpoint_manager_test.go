@@ -354,6 +354,7 @@ func setupMainPipelineMock(spec *metadata.ReplicationSpecification, supervisor *
 	pipeline.On("InstanceId").Return("randomInstance")
 
 	pipeline.On("UpdateSettings", mock.Anything).Return(nil)
+	pipeline.On("SetBrokenMap", mock.Anything).Return(nil)
 
 	return pipeline
 }
