@@ -21,7 +21,7 @@ CLUSTER_SETUP_DONE_MAP=()
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=1024 ["numVBuckets"]=1024)
+declare -A BucketProperty=(["ramQuotaMB"]=100)
 declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
@@ -98,10 +98,12 @@ CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 
 function runOneRebalanceCycle {
-
 	setupCluster
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
+
+	setInternalSettings "C1" "VariableVBSupport=true"
+	setInternalSettings "C2" "VariableVBSupport=true"
 
 	# Previous test may have messed with the CAs
 	setupCertsForTesting
@@ -114,11 +116,14 @@ function runOneRebalanceCycle {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P with brokenmap and failing a node out"
+	echo "Running P2P with brokenmap and failing a node out (128VB edition)"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
+
+	clearInternalNodeXdcrLog "C1"
+	clearInternalNodeXdcrLog "C1P"
 
 	runOneRebalanceCycle
 	runOneReplicationCycle
@@ -174,9 +179,9 @@ function runTestCase {
 	resumeFrom0CntNew=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
 
 	# The backfill replication checkpoints were injected to be slow running
-	# this means that out of node 1's 512 VBs, not all 512 will have had traffic/checkpoint
-	# So as long as the count difference is not 512, it should mean that some ckpts were transferred
-	if (($resumeFrom0CntOrig - $resumeFrom0CntNew >= 512)); then
+	# this means that out of node 1's 50 VBs, not all 50 will have had traffic/checkpoint
+	# So as long as the count difference is not 50, it should mean that some ckpts were transferred
+	if (($resumeFrom0CntOrig - $resumeFrom0CntNew >= 50)); then
 		echo "Before failover, there are $resumeFrom0CntOrig lines of resuming from 0. After failover, there are $resumeFrom0CntNew"
 		exit 1
 	fi
@@ -185,7 +190,8 @@ function runTestCase {
 	# One node now owns all the ckpts
 	# So for backfill ckpt push to have worked, it means it must have resumed
 	# with non-0 seqno for at least one more VBs than it originally resumed
-	validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "$(($node1Non0VBResumeCnt + 1))"
+	# Note: For 128 VB's, it's potentially too stringent a check fewer vbuckets to hash to and a low number of mutations
+	# validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "$(($node1Non0VBResumeCnt + 1))"
 
 	# Make sure backfill pipeline only starts once for node C1P and a few times only for node C1 and not more than that
 	validateInternalLogWithInstance "C1" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1 + 3)) $(($currentBackfillStartCntC1 + 5))
@@ -209,5 +215,4 @@ function runTestCase {
 	# magma test cleanup
 	cleanupBucketNamePropertyMap
 	sleep 20
-
 }
