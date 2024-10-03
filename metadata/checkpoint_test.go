@@ -341,14 +341,18 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 					},
 				},
 			},
-			want: map[uint16]*TargetVBTimestamp{
-				0: &TargetVBTimestamp{
-					Target_vb_opaque: &TargetVBUuid{1},
-					Target_Seqno:     2,
+			want: map[uint16]*GlobalVBTimestamp{
+				0: &GlobalVBTimestamp{
+					TargetVBTimestamp: TargetVBTimestamp{
+						Target_vb_opaque: &TargetVBUuid{1},
+						Target_Seqno:     2,
+					},
 				},
-				1: &TargetVBTimestamp{
-					Target_vb_opaque: &TargetVBUuid{5},
-					Target_Seqno:     3,
+				1: &GlobalVBTimestamp{
+					TargetVBTimestamp: TargetVBTimestamp{
+						Target_vb_opaque: &TargetVBUuid{5},
+						Target_Seqno:     3,
+					},
 				},
 			},
 		},
@@ -356,11 +360,11 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wantMap, ok := tt.want.(map[uint16]*TargetVBTimestamp)
+			wantMap, ok := tt.want.(map[uint16]*GlobalVBTimestamp)
 			assert.True(t, ok)
 
 			for k, v := range wantMap {
-				gts, ok := tt.g.GetValue().(map[uint16]*TargetVBTimestamp)
+				gts, ok := tt.g.GetValue().(map[uint16]*GlobalVBTimestamp)
 				assert.True(t, ok)
 				assert.True(t, gts[k].SameAs(v))
 			}

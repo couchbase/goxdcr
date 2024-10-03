@@ -2300,7 +2300,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	}
 
 	// Collection-Related items
-	err = ckmgr.enhanceTgtTimestampWithCollection(vbno, tgtManifestIds, remoteTimestamp)
+	remoteTimestamp, err = ckmgr.enhanceTgtTimestampWithCollection(vbno, tgtManifestIds, remoteTimestamp)
 	if err != nil {
 		return
 	}
@@ -2333,9 +2333,9 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	return
 }
 
-func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, tgtManifestIds map[uint16]uint64, remoteTimestamp metadata.TargetTimestamp) error {
+func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, tgtManifestIds map[uint16]uint64, remoteTimestamp metadata.TargetTimestamp) (metadata.TargetTimestamp, error) {
 	if !ckmgr.collectionEnabled() {
-		return nil
+		return remoteTimestamp, nil
 	}
 
 	tgtManifestId, ok := tgtManifestIds[vbno]
@@ -2356,21 +2356,22 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 
 	if len(brokenMapping) == 0 {
 		// Do not decorate with an empty brokenmap
-		return nil
+		return remoteTimestamp, nil
 	}
 
 	if remoteTimestamp.IsTraditional() {
 		tgtVbTimestamp, ok := remoteTimestamp.GetValue().(*metadata.TargetVBTimestamp)
 		if !ok {
-			return fmt.Errorf("expecting remoteTimestamp to be *metadata.TargetVBTimestamp, but got %T", remoteTimestamp)
+			return nil, fmt.Errorf("expecting remoteTimestamp to be *metadata.TargetVBTimestamp, but got %T", remoteTimestamp)
 		}
 
 		err := tgtVbTimestamp.SetBrokenMappingAsPartOfCreation(brokenMapping)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		tgtVbTimestamp.TargetManifest = tgtManifestId
+		return tgtVbTimestamp, nil
 	} else {
 		// TODO MB-63478: For now this is a safer implementation because we are taking what works checkpointing for
 		// traditional checkpoints and just extending it to a "global" checkpoint on a per VB basis
@@ -2379,27 +2380,31 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 		// map by deduplication is actually safe. It needs to be carefully thought through and is something to look
 		// at later
 
-		tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(*metadata.GlobalTimestamp)
+		//tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(*metadata.GlobalTimestamp)
+		tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(map[uint16]*metadata.GlobalVBTimestamp)
 		if !ok {
-			return fmt.Errorf("vb %v expecting *metadata.GlobalTimestamp, got %T", vbno, remoteTimestamp.GetValue())
+			//return fmt.Errorf("vb %v expecting *metadata.GlobalTimestamp, got %T", vbno, remoteTimestamp.GetValue())
+			return nil, fmt.Errorf("vb %v expecting map[uint16]*metadata.GlobalVBTimestamp, got %T", vbno, remoteTimestamp.GetValue())
 		}
 
 		if tgtVbTimestampMap == nil {
-			return fmt.Errorf("vb %v empty target timestamps for global ckpt", vbno)
+			return nil, fmt.Errorf("vb %v empty target timestamps for global ckpt", vbno)
 		}
 
 		errMap := make(base.ErrorMap)
-		for tgtVb, gts := range *tgtVbTimestampMap {
+		for tgtVb, gts := range tgtVbTimestampMap {
 			err := gts.SetBrokenMappingAsPartOfCreation(brokenMapping)
 			if err != nil {
 				errMap[fmt.Sprintf("src:tgt vb %v:%v", vbno, tgtVb)] = err
 			}
+			gts.TargetManifest = tgtManifestId
 		}
 		if len(errMap) > 0 {
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
+		globalTs := metadata.GlobalTimestamp(tgtVbTimestampMap)
+		return &globalTs, nil
 	}
-	return nil
 }
 
 func (ckmgr *CheckpointManager) getSrcCollectionItems(vbno uint16, srcManifestIds map[uint16]uint64) (uint64, uint64) {
@@ -3249,20 +3254,24 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 				if ckptRecord == nil {
 					continue
 				}
-				if ckptRecord.BrokenMappingSha256 == "" {
-					// no brokenmap, ok to keep
-					replacementList = append(replacementList, ckptRecord)
+				if ckptRecord.IsTraditional() {
+					if ckptRecord.BrokenMappingSha256 == "" {
+						// no brokenmap, ok to keep
+						replacementList = append(replacementList, ckptRecord)
+					} else {
+						if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
+							err := ckptRecord.LoadBrokenMapping(combinedShaMap)
+							if err != nil {
+								errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
+								continue
+							}
+							// BrokenMapping is found, ok to keep
+							replacementList = append(replacementList, ckptRecord)
+						}
+					}
 				} else {
-					// TODO MB-63467
-					//if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
-					//	err := ckptRecord.LoadBrokenMapping(*brokenMapping)
-					//	if err != nil {
-					//		errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
-					//		continue
-					//	}
-					//	// BrokenMapping is found, ok to keep
-					//	replacementList = append(replacementList, ckptRecord)
-					//}
+					// Global checkpoint has already loaded shas as part of the deserializing process
+					replacementList = append(replacementList, ckptRecord)
 				}
 			}
 			ckptDoc.Checkpoint_records = replacementList
@@ -3310,6 +3319,7 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 					continue
 				}
 
+				// NEIL TODO - file MB for this
 				ckptRecordVbUuid := ckptRecord.Target_vb_opaque.Value().(uint64)
 
 				for _, vbUuidSeqnoPair := range *failoverLog {
@@ -3459,6 +3469,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 		// Copy before passing to go-routines
 		i := iRaw
 		filteredMap := filteredMapRaw
+
 		switch i {
 		case int(common.MainPipeline):
 			ckptTopic = ckmgr.pipeline.Topic()
@@ -3486,7 +3497,6 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 				}
 			}
 
-			// TODO NEIL: ensure this works
 			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
 			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
 			if err != nil {
