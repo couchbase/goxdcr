@@ -105,6 +105,12 @@ func (g *GlobalVBTimestamp) GetValue() interface{} {
 	return g
 }
 
+func (g *GlobalVBTimestamp) BrokenMappingsClone() CollectionNamespaceMapping {
+	g.brokenMappingsMtx.RLock()
+	defer g.brokenMappingsMtx.RUnlock()
+	return g.brokenMappings.Clone()
+}
+
 // TargetVBTimestamp defines the necessary items to confirm that the checkpoint is valid for resuming
 type TargetVBTimestamp struct {
 	//target vb opaque / high seqno
@@ -152,6 +158,15 @@ func (t *TargetVBTimestamp) SetBrokenMappingAsPartOfCreation(brokenMap Collectio
 	t.brokenMappingsMtx.Lock()
 	defer t.brokenMappingsMtx.Unlock()
 	t.brokenMappings = brokenMap
+	return t.populateBrokenMappingShaNoLock()
+}
+
+func (t *TargetVBTimestamp) populateBrokenMappingShaNoLock() error {
+	sha, err := t.brokenMappings.Sha256()
+	if err != nil {
+		return err
+	}
+	t.BrokenMappingSha256 = fmt.Sprintf("%x", sha[:])
 	return nil
 }
 
@@ -162,15 +177,10 @@ func (t *TargetVBTimestamp) PopulateBrokenMappingSha() error {
 	defer t.brokenMappingsMtx.RUnlock()
 
 	if len(t.brokenMappings) > 0 {
-		sha, err := t.brokenMappings.Sha256()
-		if err != nil {
-			return err
-		}
-		t.BrokenMappingSha256 = fmt.Sprintf("%x", sha[:])
+		return t.populateBrokenMappingShaNoLock()
 	} else {
 		t.BrokenMappingSha256 = ""
 	}
-
 	return nil
 }
 
@@ -289,14 +299,16 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 		return nil
 	}
 
-	tgtVBTimestampMap := make(map[uint16]*TargetVBTimestamp)
+	tgtVBTimestampMap := make(map[uint16]*GlobalVBTimestamp)
 	for k, v := range *g {
-		tgtVBTimestampMap[k] = &TargetVBTimestamp{
-			Target_vb_opaque:    v.Target_vb_opaque.Clone(),
-			Target_Seqno:        v.Target_Seqno,
-			TargetManifest:      v.TargetManifest,
-			BrokenMappingSha256: v.BrokenMappingSha256,
-			brokenMappings:      v.brokenMappings.Clone(),
+		tgtVBTimestampMap[k] = &GlobalVBTimestamp{
+			TargetVBTimestamp: TargetVBTimestamp{
+				Target_vb_opaque:    v.Target_vb_opaque.Clone(),
+				Target_Seqno:        v.Target_Seqno,
+				TargetManifest:      v.TargetManifest,
+				BrokenMappingSha256: v.BrokenMappingSha256,
+				brokenMappings:      v.brokenMappings.Clone(),
+			},
 		}
 	}
 
@@ -613,6 +625,52 @@ func (c *CheckpointRecord) BrokenMappings() ShaToCollectionNamespaceMap {
 		}
 	}
 	return shaToBrokenMap
+}
+
+func (c *CheckpointRecord) GetBrokenMappingShaCount() int {
+	if c == nil {
+		return 0
+	}
+
+	var count int
+	if c.IsTraditional() {
+		c.brokenMappingsMtx.RLock()
+		if c.BrokenMappingSha256 != "" {
+			count++
+		}
+		c.brokenMappingsMtx.RUnlock()
+	} else {
+		for _, oneGlobalTs := range c.GlobalTimestamp {
+			oneGlobalTs.brokenMappingsMtx.RLock()
+			if oneGlobalTs.BrokenMappingSha256 != "" {
+				count++
+			}
+			oneGlobalTs.brokenMappingsMtx.RUnlock()
+		}
+	}
+	return count
+}
+
+func (c *CheckpointRecord) GetBrokenMappingSha256s() []string {
+	dedupMap := make(map[string]bool)
+	if c.IsTraditional() {
+		c.brokenMappingsMtx.RLock()
+		defer c.brokenMappingsMtx.RUnlock()
+		return []string{c.BrokenMappingSha256}
+	} else {
+		for _, oneGlobalTs := range c.GlobalTimestamp {
+			oneGlobalTs.brokenMappingsMtx.RLock()
+			if oneGlobalTs.BrokenMappingSha256 != "" {
+				dedupMap[oneGlobalTs.BrokenMappingSha256] = true
+			}
+			oneGlobalTs.brokenMappingsMtx.RUnlock()
+		}
+	}
+	retList := make([]string, 0, len(dedupMap))
+	for k, _ := range dedupMap {
+		retList = append(retList, k)
+	}
+	return retList
 }
 
 type ManifestIdAndBrokenMapPair struct {
@@ -1089,21 +1147,16 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 		}
 		return ckptRecord.PopulateBrokenMappingSha()
 	} else {
-		// First create an index for faster lookup, where key is the broken map sha
-		index := make(map[string]*GlobalVBTimestamp)
-		for _, oneGlobalTs := range ckptRecord.GlobalTimestamp {
-			if oneGlobalTs.BrokenMappingSha256 != "" {
-				objRef := *oneGlobalTs // because oneGlobalTs is a temporary pointer created
-				index[oneGlobalTs.BrokenMappingSha256] = &objRef
+		for _, globalTs := range ckptRecord.GlobalTimestamp {
+			if globalTs.BrokenMappingSha256 != "" {
+				brokenMap, exists := allShaToBrokenMaps[globalTs.BrokenMappingSha256]
+				if !exists || brokenMap == nil {
+					continue
+				}
+				globalTs.brokenMappingsMtx.Lock()
+				globalTs.brokenMappings = *brokenMap
+				globalTs.brokenMappingsMtx.Unlock()
 			}
-		}
-
-		for sha, brokenMap := range allShaToBrokenMaps {
-			objToLoad, exists := index[sha]
-			if !exists {
-				continue
-			}
-			objToLoad.brokenMappings = *brokenMap
 		}
 		return nil
 	}
@@ -1402,7 +1455,7 @@ func (g *GlobalTargetVbUuids) Value() interface{} {
 // meant to be a direct comparison between two GlobalTargetVbUuids objects
 // Use SameAs() for direct comparisons
 func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
-	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*TargetVBTimestamp)
+	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*GlobalVBTimestamp)
 	if !ok {
 		// We don't accept any other type of TargetVBOpaque for global checkpointing
 		// But because interface is hard-coded, there's no other way to raise error and prefer not to
@@ -1613,9 +1666,9 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMappingInfoType=%v}",
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingShaCnt=%v; BrokenMappingInfoType=%v}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
-		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
+		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.GetBrokenMappingShaCount(), ckpt_record.brokenMappings)
 }
 
 type CheckpointSortRecordsList []*CheckpointSortRecord
