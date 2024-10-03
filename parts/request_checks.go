@@ -92,13 +92,11 @@ func testMcRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse
 	var t reqTestParams
 	select {
 	case t = <-reqTestCh:
-		fmt.Printf("SUMUKH DEBUG PULLED targetCasChanger=%v\n", t.targetCasChanger)
 	default:
 		panic("No request to test")
 	}
 
 	if t.targetCasChanger.enabled {
-		fmt.Printf("SUMUKH DEBUG changing cas\n")
 		err := t.targetCasChanger.changeTargetCas()
 		if err != nil {
 			panic(fmt.Sprintf("error writing conflict, err=%v", err))

@@ -2077,7 +2077,11 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 // Preserve all Xattributes except source _sync and old HLV if it has been updated
 // Returns the error if any and a boolean which indicates if we are replicating the source _mou.
 // The caller may have to manually delete the target _mou if the return value is false.
-func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata, updatedHLV bool, updater func(key []byte, val []byte) error) (bool, error) {
+// If a non-nil "lookupMap" is passed by the caller, it will be populated with the source xattrs
+// written by "updater" (except _vv, _mou and _sync as they are well recognised by XDCR)
+func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata,
+	updatedHLV bool, updater func(key []byte, val []byte) error, lookupMap map[string]bool) (bool, error) {
+
 	mouIsReplicated := false
 	if !base.HasXattr(wrappedReq.Req.DataType) {
 		// no xattrs to process
@@ -2096,7 +2100,9 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 		if err != nil {
 			return mouIsReplicated, err
 		}
-		switch string(key) {
+
+		xattrKey := string(key)
+		switch xattrKey {
 		case base.XATTR_HLV:
 			if updatedHLV {
 				// We have updated the hlv so skip the old HLV
@@ -2121,6 +2127,10 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 					continue
 				}
 				value = wrappedReq.MouAfterProcessing
+			}
+		default:
+			if lookupMap != nil {
+				lookupMap[xattrKey] = true
 			}
 		}
 
@@ -2262,7 +2272,7 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	}
 
 	// decide to preserve or not preserve source xattrs before replicating to target
-	_, err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, xattrComposer.WriteKV)
+	_, err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, xattrComposer.WriteKV, nil)
 	if err != nil {
 		return err
 	}
@@ -2288,6 +2298,9 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	req := wrappedReq.Req
 	var spec base.SubdocMutationPathSpec
 	specs := base.NewSubdocMutationPathSpecs()
+	// lookup for all the source document xattrs,
+	// expect for _vv, _mou and _sync, as they are well recognised by XDCR.
+	sourceXattrsMap := make(map[string]bool)
 
 	if updateHLV {
 		maxHlvLen := 2 /* {...} */ +
@@ -2336,7 +2349,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	}
 
 	// decide to preserve or not preserve source xattrs before replicating to target
-	mouReplicated, err := xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, specs.WriteKV)
+	mouReplicated, err := xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, specs.WriteKV, sourceXattrsMap)
 	if err != nil {
 		return err
 	}
@@ -2348,8 +2361,8 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 		specs = append(specs, spec)
 	}
 
-	// delete all the other xattrs - user xattrs and system xattrs that XDCR doesn't recognise,
-	// which are present on target document, but not on the source document.
+	// delete all the other xattrs - user xattrs and system xattrs that XDCR doesn't recognise
+	// (other than _vv, _sync and _mou), that are present on target document, but not on the source document.
 	xtoc, err := lookup.ResponseForAPath(base.XattributeToc)
 	if err != nil {
 		return fmt.Errorf("%v: XTOC was not fetched, err=%v, eccv=%v, mobile=%v",
@@ -2367,11 +2380,8 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 			return err
 		}
 
-		if len(targetXattr) == 0 {
-			continue
-		}
-
-		if base.Equals(targetXattr, base.XATTR_HLV) ||
+		if len(targetXattr) == 0 ||
+			base.Equals(targetXattr, base.XATTR_HLV) ||
 			base.Equals(targetXattr, base.XATTR_MOBILE) ||
 			base.Equals(targetXattr, base.XATTR_MOU) {
 			// XDCR can recognise these system xattrs
@@ -2380,14 +2390,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 			continue
 		}
 
-		existsOnSourceDoc := false
-		for i := 0; i < len(specs); i++ {
-			if base.EqualBytes(targetXattr, specs[i].Path) {
-				existsOnSourceDoc = true
-				break
-			}
-		}
-
+		_, existsOnSourceDoc := sourceXattrsMap[string(targetXattr)]
 		if !existsOnSourceDoc {
 			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), targetXattr, nil)
 			specs = append(specs, spec)
