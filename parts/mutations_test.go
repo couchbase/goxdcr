@@ -785,11 +785,7 @@ func (test mutationTC) executeTest(assert assert.Assertions, bucketName string, 
 			if test.mobile {
 				mobileSetting = base.MobileCompatibilityActive
 			}
-			router.SetMobileCompatibility(uint32(mobileSetting))
-			router.crossClusterVersioning = 0
-			if test.eccv {
-				router.crossClusterVersioning = 1
-			}
+
 			setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 			settings[MOBILE_COMPATBILE] = mobileSetting
 			startTargetXmem(xmem, settings, bucketName, &assert)
@@ -857,14 +853,6 @@ func (test mutationTC) executeTest(assert assert.Assertions, bucketName string, 
 					cvCas := []byte(`"` + string(base.Uint64ToHexLittleEndian(uint64(newCas))) + `"`)
 					err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_CVCAS_PATH, cvCas, true, true)
 					assert.Nil(err)
-
-					// src := []byte(`"Source"`)
-					// err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_SRC_PATH, src, true)
-					// assert.Nil(err)
-
-					// ver := []byte(`"` + string(base.Uint64ToHexLittleEndian(uprEvent.Cas)) + `"`)
-					// err = checkTarget(bucket, string(uprEvent.Key), crMeta.XATTR_VER_PATH, ver, true)
-					// assert.Nil(err)
 				}
 
 				if sourceDocIsTombstone && (test.targetCasChanged || test.targetDocExists) {

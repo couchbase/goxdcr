@@ -179,10 +179,6 @@ func testMcResponse(resp *mc.MCResponse) {
 	}
 
 	if t.Status != resp.Status {
-		// fmt.Printf("Response status mismatch - %v != %v", t.Status, resp.Status)
-		// go func() {
-		// 	time.Sleep(2 * time.Second)
 		panic(fmt.Sprintf("Response status mismatch - %v != %v", t.Status, resp.Status))
-		// }()
 	}
 }
