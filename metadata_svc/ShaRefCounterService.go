@@ -692,10 +692,12 @@ func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadat
 			continue
 		}
 		for _, ckptRecord := range ckptDoc.Checkpoint_records {
-			if ckptRecord == nil || ckptRecord.BrokenMappingSha256 == "" {
+			if ckptRecord == nil || ckptRecord.GetBrokenMappingShaCount() == 0 {
 				continue
 			}
-			c.refCnt[ckptRecord.BrokenMappingSha256]++
+			for _, oneSha := range ckptRecord.GetBrokenMappingSha256s() {
+				c.refCnt[oneSha]++
+			}
 		}
 	}
 	c.setNeedToSyncNoLock(true)

@@ -268,9 +268,10 @@ func (ckpt_svc *CheckpointsService) postDelCheckpointsDoc(replicationId string, 
 		if ckptRecord == nil {
 			continue
 		}
-		shaInRecord := ckptRecord.BrokenMappingSha256
-		if shaInRecord != "" {
-			decrementerFunc(shaInRecord)
+		if ckptRecord.GetBrokenMappingShaCount() > 0 {
+			for _, oneSha := range ckptRecord.GetBrokenMappingSha256s() {
+				decrementerFunc(oneSha)
+			}
 		}
 		modified = true
 	}
@@ -323,7 +324,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 				continue
 			}
 			brokenMap := record.BrokenMappings()
-			if brokenMap != nil && len(record.BrokenMappingSha256) > 0 {
+			if brokenMap != nil && record.GetBrokenMappingShaCount() > 0 {
 				needToDoRefCntDecrement = true
 			}
 		}
@@ -397,7 +398,6 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 
 		//always update the checkpoint without revision
 		err = ckpt_svc.metadata_svc.Set(key, ckpt_json, nil)
-
 		if err != nil {
 			ckpt_svc.logger.Errorf("Failed to set checkpoint doc key=%v, err=%v\n", key, err)
 		} else {
@@ -548,8 +548,10 @@ func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRec
 
 	// The following was in a potential wrong place in earlier releases
 	for _, removedRecord := range removedRecords {
-		if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
-			decrementerFunc(removedRecord.BrokenMappingSha256)
+		if removedRecord != nil && removedRecord.GetBrokenMappingShaCount() > 0 {
+			for _, oneSha256 := range removedRecord.GetBrokenMappingSha256s() {
+				decrementerFunc(oneSha256)
+			}
 		}
 	}
 	return nil
