@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,7 +21,6 @@ import (
 
 	mcc "github.com/couchbase/gomemcached/client"
 	mccMock "github.com/couchbase/gomemcached/client/mocks"
-
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	commonMock "github.com/couchbase/goxdcr/v8/common/mocks"
@@ -429,6 +430,9 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 			arg[vb] = highSeqnoPair
 		}
 	}).Return(nil, nil)
+	utilsMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration {
+		return 0
+	})
 
 	utilsMock.On("ExponentialBackoffExecutorWithFinishSignal", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsReal.ExponentialBackoffExecutorWithFinishSignal(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc2), args.Get(5), args.Get(6).(chan bool))
@@ -458,12 +462,20 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	ckptSvc.On("UpsertCheckpointsDone", mock.Anything, mock.Anything).Return(upsertCkptsDoneErr)
 	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
+	// Generally speaking, return empty checkpoints
+	// We want to simulate checkpoint service where each call will return a cloned object
+	// If we don't have multiple lines here, it'd return the same object every time and trigger golang concurrent r/w map panic
+	// See: https://stackoverflow.com/questions/46374174/how-to-mock-for-same-input-and-different-return-values-in-a-for-loop-in-golang
+	// If needed, just copy and paste more instances below
+	ckptSvc.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(map[uint16]*metadata.CheckpointsDoc{}, nil).Once()
+	ckptSvc.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(map[uint16]*metadata.CheckpointsDoc{}, nil).Once()
 
 	for k, client := range mcMap {
 		client.On("StatsMap", base.VBUCKET_SEQNO_STAT_NAME).Run(func(args mock.Arguments) { time.Sleep(time.Duration(delayMap[k]) * time.Second) }).Return(result[k].statsMap, result[k].err)
 	}
 
 	colManSvc.On("PersistNeededManifests", mock.Anything).Return(nil)
+	colManSvc.On("PersistReceivedManifests", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	supervisor.On("OnEvent", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		atomic.AddUint32(&supervisorErrCnt, 1)
@@ -1259,4 +1271,100 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 	assert.True(match)
 	assert.Equal(uint32(2), atomic.LoadUint32(&preReplicateCounter))
 
+}
+
+func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptmgrStopTheWorldMergeGlobal =================")
+	defer fmt.Println("============== Test case end: TestCkptmgrStopTheWorldMergeGlobal =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc, true)
+
+	assert.Nil(err)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
+	ckptMgr.pipeline = mainPipeline
+
+	mergeCkptArgsJson, err := os.ReadFile("./unitTestdata/globalMergeCkpt.json")
+	assert.Nil(err)
+	mergeCkptArgs := &MergeCkptArgs{}
+	err = json.Unmarshal(mergeCkptArgsJson, mergeCkptArgs)
+	assert.Nil(err)
+	assert.NotEqual(0, len(mergeCkptArgs.PipelinesCkptDocs))
+	assert.NotEqual(0, len(mergeCkptArgs.BrokenMappingShaMap))
+
+	var recordWithBrokenmapSha int
+	for _, vbsCkptDocMap := range mergeCkptArgs.PipelinesCkptDocs {
+		for _, ckptDoc := range vbsCkptDocMap {
+			assert.False(ckptDoc.IsTraditional())
+			for _, aRecord := range ckptDoc.Checkpoint_records {
+				if aRecord == nil {
+					continue
+				}
+				assert.False(aRecord.IsTraditional())
+				for _, gts := range aRecord.GlobalTimestamp {
+					if gts.BrokenMappingSha256 != "" {
+						recordWithBrokenmapSha++
+					}
+				}
+			}
+		}
+	}
+	assert.NotEqual(0, recordWithBrokenmapSha)
+
+	setupStopTheWorldCkptSvcMock(ckptSvc, true, assert, recordWithBrokenmapSha)
+
+	getter := func() *MergeCkptArgs {
+		return mergeCkptArgs
+	}
+	assert.Nil(ckptMgr.stopTheWorldAndMergeCkpts(getter))
+
+}
+
+// This is used specific for globalMergeCkpt.json
+func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alreadyExist bool, assert *assert.Assertions, brokenMapCntExpected int) {
+	dummyIncrfunc := service_def_real.IncrementerFunc(func(string, *metadata.CollectionNamespaceMapping) {})
+	mappingDoc := &metadata.CollectionNsMappingsDoc{}
+	emptyShaMap := make(metadata.ShaToCollectionNamespaceMap)
+	ckptSvc.On("LoadBrokenMappings", mock.Anything).Return(emptyShaMap, mappingDoc, dummyIncrfunc, alreadyExist, nil)
+	ckptSvc.On("UpsertAndReloadCheckpointCompleteSet", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		var recordWithBrokenmapSha int
+		specId := args.Get(0).(string)
+		if strings.Contains(specId, "backfill") {
+			return
+		}
+		ckptDocs := args.Get(2).(map[uint16]*metadata.CheckpointsDoc)
+		assert.NotEqual(0, len(ckptDocs))
+		for _, aDoc := range ckptDocs {
+			assert.False(aDoc.IsTraditional())
+			for _, aRecord := range aDoc.Checkpoint_records {
+				if aRecord == nil {
+					continue
+				}
+				for _, gts := range aRecord.GlobalTimestamp {
+					if gts.BrokenMappingSha256 != "" {
+						recordWithBrokenmapSha++
+					}
+				}
+			}
+		}
+		assert.Equal(brokenMapCntExpected, recordWithBrokenmapSha)
+
+		checkMappingDoc := args.Get(1).(*metadata.CollectionNsMappingsDoc)
+		assert.Len(checkMappingDoc.NsMappingRecords, 1)
+	}).Return(nil)
 }

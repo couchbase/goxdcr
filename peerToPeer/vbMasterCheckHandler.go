@@ -16,6 +16,8 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
+	"math/rand"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -238,6 +240,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	// Final Callback
 	doneProcessedTime := time.Now()
+	respBytes, _ := resp.Serialize()
+	randNum := rand.Int()
+	os.WriteFile(fmt.Sprintf("/tmp/p2pSerialize.json_%v", randNum), respBytes, 0644)
 	handlerResult, err := req.CallBack(resp)
 	if err != nil || handlerResult != nil && handlerResult.GetError() != nil {
 		var handlerResultErr error

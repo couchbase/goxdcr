@@ -26,7 +26,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" [
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=1000 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
 
 # Bucket -> Scopes
 # -----------------
@@ -87,8 +87,8 @@ function runOneReplicationCycleAndPause {
 
 	runDataLoad
 
-	echo "Sleeping 20 seconds before changes left check"
-	sleep 20
+	echo "Sleeping 30 seconds before changes left check"
+	sleep 30
 
 	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
 
@@ -97,8 +97,8 @@ function runOneReplicationCycleAndPause {
 	grepForPanics
 
 	pauseReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+	echo "Waiting 30 seconds for pipeline to really pause"
+	sleep 30
 	grepForPanics
 
 	# At this stage, we have S2.col1 -> S2.col1 data transferred but S1.col1 -> X (broken)
@@ -106,17 +106,21 @@ function runOneReplicationCycleAndPause {
 	#createScope "C2" "B1" "S1"
 	#createCollection "C2" "B1" "S1" "col1"
 
-	#echo "Sleeping 15 secs before resuming replication"
-	#sleep 15
+	#echo "Sleeping 30 secs before resuming replication"
+	#sleep 30
 	#resumeReplication "C1" "B0" "C2" "B1"
+
+	#sleep 15
 
 	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	#grepForPanics
 
+	#sleep 30
+
 	# Once all is done, pause to re-create checkpoint
 	#pauseReplication "C1" "B0" "C2" "B1"
-	#echo "Waiting 10 seconds for pipeline to really pause"
-	#sleep 10
+	#echo "Waiting 30 seconds for pipeline to really pause"
+	#sleep 30
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
@@ -211,7 +215,7 @@ function runReplicationResume {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P with broken map and rebalancing a node in"
+	echo "Running P2P with broken map and rebalancing a node in 1024 -> 128 VB"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited

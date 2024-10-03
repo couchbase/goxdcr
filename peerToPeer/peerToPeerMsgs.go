@@ -1429,6 +1429,7 @@ func (p *VBMasterPayload) PostDecompressInit() error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -1522,6 +1523,7 @@ func (v *VBsPayload) SameAs(other *VBsPayload) bool {
 	return true
 }
 
+// TODO NEIL - perhaps we have not been populating brokenmapping properly??
 func (v *VBsPayload) PostDecompressInit() error {
 	if v == nil {
 		return nil
@@ -1531,6 +1533,7 @@ func (v *VBsPayload) PostDecompressInit() error {
 		if payload == nil || payload.BackfillTsks == nil {
 			continue
 		}
+
 		payload.BackfillTsks.PostUnmarshalInit()
 	}
 	return nil
@@ -1551,6 +1554,34 @@ func (v *VBsPayload) ContainsBackfillCheckpoints() bool {
 		}
 	}
 	return false
+}
+
+func (v *VBsPayload) LoadBrokenMaps(brokenMappingDoc *metadata.CollectionNsMappingsDoc) error {
+	if brokenMappingDoc == nil {
+		return nil
+	}
+
+	shaMap, err := brokenMappingDoc.ToShaMap()
+	if err != nil {
+		return err
+	}
+
+	for _, payload := range *v {
+		if payload == nil || payload.CheckpointsDoc == nil {
+			continue
+		}
+		for _, record := range payload.CheckpointsDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+			err = record.LoadBrokenMapping(shaMap)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func NewVBMasterPayload() *VBMasterPayload {

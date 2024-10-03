@@ -164,6 +164,59 @@ func TestVBMasterPayloadMap(t *testing.T) {
 	}
 }
 
+func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestVBMasterGlobalPayloadMap =================")
+	defer fmt.Println("============== Test case end: TestVBMasterGlobalPayloadMap =================")
+	assert := assert.New(t)
+
+	// File to be sent from a node with global checkpoint
+	file := "./unitTestData/bucketVBMGlobalPayload.json"
+	vbMasterPayload := &VBMasterCheckResp{}
+	data, err := ioutil.ReadFile(file)
+	err = vbMasterPayload.DeSerialize(data)
+	assert.Nil(err)
+
+	payloadMap, _ := vbMasterPayload.GetReponse()
+	assert.NotNil(payloadMap)
+	var b0Found bool
+	for k, _ := range *payloadMap {
+		if k == "B0" {
+			b0Found = true
+		}
+	}
+	assert.True(b0Found)
+	payload := (*payloadMap)["B0"]
+	assert.NotNil(payload)
+	oneNodeVbsCkptMap := payload.GetAllCheckpoints(common.MainPipeline)
+	assert.NotEqual(0, len(oneNodeVbsCkptMap))
+
+	var brokenMapShaFound bool
+	for _, ckptDoc := range oneNodeVbsCkptMap {
+		if brokenMapShaFound {
+			break
+		}
+		if ckptDoc == nil {
+			continue
+		}
+		for _, record := range ckptDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+			for _, gts := range record.GlobalTimestamp {
+				if gts.BrokenMappingSha256 != "" {
+					brokenMapShaFound = true
+					break
+				}
+			}
+		}
+	}
+	assert.True(brokenMapShaFound)
+
+	brokenMap := payload.GetBrokenMappingDoc()
+	assert.NotNil(brokenMap)
+	assert.True(brokenMap.SpecInternalId != "")
+}
+
 func TestManifestLoadTest(t *testing.T) {
 	fmt.Println("============== Test case start: TestManifestLoadTest =================")
 	defer fmt.Println("============== Test case end: TestManifestLoadTest =================")
