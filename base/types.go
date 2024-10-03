@@ -1876,12 +1876,6 @@ func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
 			return
 		}
 		value = xfi.xattr[beginValue : endValue+1]
-	} else if xfi.xattr[beginValue] == '[' {
-		endValue = beginValue + 1 + bytes.Index(xfi.xattr[beginValue+1:], []byte{']'})
-		if endValue < beginValue {
-			err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
-		}
-		value = xfi.xattr[beginValue : endValue+1]
 	} else {
 		err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
 		return

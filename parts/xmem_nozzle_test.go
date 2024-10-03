@@ -679,7 +679,6 @@ func TestMobilePreserveSync(t *testing.T) {
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
@@ -891,7 +890,6 @@ func TestMobileImportCasLWW(t *testing.T) {
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
@@ -982,20 +980,17 @@ func TestMobileMixedMode(t *testing.T) {
 
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.crossClusterVersioning = 1
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityOff
 	xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
-	router.SetMobileCompatibility(base.MobileCompatibilityOff)
 	startTargetXmem(xmem, settings, bucketName, assert)
 	fmt.Println("=== Test mobile mixed mode with mobile off ===")
 	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
 
 	fmt.Println("=== Test mobile mixed mode with mobile active ===")
 	xmem.config.mobileCompatible = base.MobileCompatibilityActive
-	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
 }
 

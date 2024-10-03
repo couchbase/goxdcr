@@ -374,51 +374,6 @@ func (_c *TargetNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base
 	return _c
 }
 
-// GetVersionPruningWindowHrs provides a mock function with given fields:
-func (_m *TargetNotification) GetVersionPruningWindowHrs() int {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetVersionPruningWindowHrs")
-	}
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func() int); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// TargetNotification_GetVersionPruningWindowHrs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersionPruningWindowHrs'
-type TargetNotification_GetVersionPruningWindowHrs_Call struct {
-	*mock.Call
-}
-
-// GetVersionPruningWindowHrs is a helper method to define mock.On call
-func (_e *TargetNotification_Expecter) GetVersionPruningWindowHrs() *TargetNotification_GetVersionPruningWindowHrs_Call {
-	return &TargetNotification_GetVersionPruningWindowHrs_Call{Call: _e.mock.On("GetVersionPruningWindowHrs")}
-}
-
-func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) Run(run func()) *TargetNotification_GetVersionPruningWindowHrs_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) Return(_a0 int) *TargetNotification_GetVersionPruningWindowHrs_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) RunAndReturn(run func() int) *TargetNotification_GetVersionPruningWindowHrs_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // IsSourceNotification provides a mock function with given fields:
 func (_m *TargetNotification) IsSourceNotification() bool {
 	ret := _m.Called()

@@ -41,21 +41,21 @@ import (
 // STEP 4) Run the Mutations tests using the following command: (use -v for verbose output on stdout)
 /*
 	(if necessary) go clean -cache
-	go test -timeout 12000s -run ^Test_LegacyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVOnlyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_MobileOnlyMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVAndMobileMutations$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_LegacyMutations$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutations$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_MobileOnlyMutations$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileMutations$ github.com/couchbase/goxdcr/parts -failfast
 */
 //
 // STEP 5) Run the Mutations CR tests using the following command: (use -v for verbose output on stdout)
 /*
 	(if necessary) go clean -cache
-	go test -timeout 12000s -run ^Test_LegacyMutationsCRTest$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_MobileOnlyMutationsCRTest$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
-	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/v8/parts -failfast
+	go test -timeout 12000s -run ^Test_LegacyMutationsCRTest$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_MobileOnlyMutationsCRTest$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas$ github.com/couchbase/goxdcr/parts -failfast
+	go test -timeout 12000s -run ^Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas$ github.com/couchbase/goxdcr/parts -failfast
 */
 //
 // STEP 6) Manually delete the injected TestMcRequest and TestMcResponse function calls from xmem.
