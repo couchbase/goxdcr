@@ -57,11 +57,11 @@ const (
 // 1. Update its HLV, with cvCAS set to the pre-import document CAS.
 // 2. Update mobile metadata (_sync XATTR)
 // 3. Write back the document.
-// This results in a new mutation with new CAS. Mobile will set an XATTR _importCAS to the same value as the new CAS
+// This results in a new mutation with new CAS. Mobile will set an XATTR importCAS (_mou.cas) to the same value as the new CAS
 // using macro-expansion.
 //
 // The resulting import mutation has the following properties:
-// 1. importCAS == document.CAS
+// 1. importCAS (_mou.cas) == document.CAS
 // 2. cvCAS == pre-import document CAS
 // We don't want import mutation to win over its pre-import predecessor. To achieve that,
 // we will use pre-import CAS value for conflict resolution so docMeta.Cas will be set to this value.
@@ -69,7 +69,7 @@ const (
 // revId CR cannot be supported either (unless mobile savs pre-import revId)
 //
 // If there is a new mutation after the import, the new mutation will have:
-// - document.CAS > importCAS
+// - document.CAS > importCAS (_mou.cas)
 // This document is no longer considered import mutation. It is a local mutation. When it is replicated to a
 // target, the importCAS XATTR will be removed.
 type CRMetadata struct {
@@ -85,9 +85,9 @@ type CRMetadata struct {
 	hadHlv bool
 	// If the document has _mou, we need the following to decide whether to delete _mou in the subdoc command.
 	hadMou bool
-	// It is import mutation if importCas == document.CAS. In that case, docMeta.Cas is the pre-import CAS value.
+	// It is import mutation if importCas (_mou.cas) == document.CAS. In that case, docMeta.Cas is the pre-import CAS value.
 	isImport bool
-	// This is the value parsed from the XATTR _importCAS.
+	// This is the value parsed from the XATTR importCAS (_mou.cas).
 	importCas uint64
 	// if isImport is true, we will use this to store the actual Cas,
 	// since we replace doc.Cas with pre-import Cas i.e. cvCas for conflict resolution
@@ -183,7 +183,7 @@ func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRM
 	meta := CRMetadata{
 		docMeta:   &docMeta,
 		actualCas: docMeta.Cas,
-		hadMou:    importCas > 0, // we will use the presence of importCAS to determine if we have _mou
+		hadMou:    importCas > 0, // we will use the presence of importCAS (_mou.cas) to determine if we have _mou
 	}
 
 	err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
@@ -250,7 +250,7 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 				return nil, err
 			}
 
-			// We will use the presence of importCAS to determine if we have _mou
+			// We will use the presence of importCAS (_mou.cas) to determine if we have _mou
 			meta.hadMou = importCas > 0
 
 			err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
@@ -936,7 +936,9 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 		}
 	}
 
-	// It is ok to not find _mou.importCAS or _mou.pRev, since we may not be getting it if enableCrossClusterVersioning is not on, or target is not an import mutation.
+	// It is ok to not find _mou.cas (importCas) or _mou.pRev,
+	// since we may not be getting it if enableCrossClusterVersioning is not on,
+	// or target is not an import mutation.
 	xattr, err1 = lookupResp.ResponseForAPath(XATTR_IMPORTCAS)
 	xattrLen := len(xattr)
 	if err1 == nil && xattrLen == base.MaxHexCASLength {
@@ -953,7 +955,7 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 	return
 }
 
-// This will find the custom CR XATTR from the req body, including HLV and _importCas
+// This will find the custom CR XATTR from the req body, including HLV and importCas (_mou.cas)
 func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
 
 	req := wrappedReq.Req
