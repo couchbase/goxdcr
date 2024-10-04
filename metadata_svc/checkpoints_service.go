@@ -68,7 +68,6 @@ func (b *BrokenMapShaRefCounter) RegisterCkptDoc(doc *metadata.CheckpointsDoc) {
 }
 
 type CheckpointsService struct {
-	*ShaRefCounterService
 	metadata_svc service_def.MetadataSvc
 	logger       *log.CommonLogger
 	utils        utilities.UtilsIface
@@ -84,7 +83,8 @@ type CheckpointsService struct {
 	backfillSpecsMtx    sync.RWMutex
 	cachedBackfillSpecs map[string]*metadata.BackfillReplicationSpec
 
-	replicationSpecSvc service_def.ReplicationSpecSvc
+	replicationSpecSvc   service_def.ReplicationSpecSvc
+	brokenMapRefCountSvc *ShaRefCounterService
 }
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface, replicationSpecService service_def.ReplicationSpecSvc) (*CheckpointsService, error) {
@@ -95,7 +95,7 @@ func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log
 	}
 	ckptSvc := &CheckpointsService{metadata_svc: metadata_svc,
 		logger:                     logger,
-		ShaRefCounterService:       shaRefSvc,
+		brokenMapRefCountSvc:       shaRefSvc,
 		cachedSpecs:                make(map[string]*metadata.ReplicationSpecification),
 		ckptCaches:                 map[string]CheckpointsServiceCache{},
 		cachedBackfillSpecs:        make(map[string]*metadata.BackfillReplicationSpec),
@@ -133,7 +133,7 @@ func (ckpt_svc *CheckpointsService) checkpointsDocInternal(replicationId string,
 	}
 
 	// Should exist because checkpoint manager must finish loading before allowing ckpt operations
-	shaMap, _ := ckpt_svc.GetShaNamespaceMap(replicationId)
+	shaMap, _ := ckpt_svc.brokenMapRefCountSvc.GetShaNamespaceMap(replicationId)
 
 	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev, shaMap)
 	if err == service_def.MetadataNotFoundErr {
@@ -225,7 +225,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cleanupErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
+		cleanupErr := ckpt_svc.brokenMapRefCountSvc.CleanupMapping(replicationId, ckpt_svc.utils)
 		if cleanupErr != nil {
 			errMsg := fmt.Sprintf("Failed to clean up internal counter for %v : %v - manual clean up may be required\n", replicationId, cleanupErr)
 			ckpt_svc.logger.Errorf(errMsg)
@@ -238,7 +238,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 			// DelCheckpointsDocs is being called even though spec still exist
 			// This means that this is called as a part of cleaning up pipeline
 			// and not because a replication spec has been deleted
-			ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, curSpec.InternalId)
+			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(replicationId, curSpec.InternalId)
 		}
 	}()
 
@@ -259,7 +259,7 @@ func (ckpt_svc *CheckpointsService) postDelCheckpointsDoc(replicationId string, 
 	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
 	mtx.Lock()
 	defer mtx.Unlock()
-	decrementerFunc, err := ckpt_svc.GetDecrementerFunc(replicationId)
+	decrementerFunc, err := ckpt_svc.brokenMapRefCountSvc.GetDecrementerFunc(replicationId)
 	if err != nil {
 		return
 	}
@@ -342,7 +342,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 	}
 
 	if modified {
-		err = ckpt_svc.UpsertMapping(replicationId, specInternalId)
+		err = ckpt_svc.brokenMapRefCountSvc.UpsertMapping(replicationId, specInternalId)
 		if err != nil {
 			ckpt_svc.logger.Warnf("%v - postDelCheckpointsDoc returned %v", err)
 			return err
@@ -474,11 +474,11 @@ func (ckpt_svc *CheckpointsService) PreUpsertBrokenMapping(replicationId string,
 	if oneBrokenMapping == nil || len(*oneBrokenMapping) == 0 {
 		return nil
 	}
-	return ckpt_svc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping)
+	return ckpt_svc.brokenMapRefCountSvc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping)
 }
 
 func (ckpt_svc *CheckpointsService) UpsertBrokenMapping(replicationId string, specInternalId string) error {
-	return ckpt_svc.UpsertMapping(replicationId, specInternalId)
+	return ckpt_svc.brokenMapRefCountSvc.UpsertMapping(replicationId, specInternalId)
 }
 
 func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
@@ -497,26 +497,26 @@ func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (me
 }
 
 func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
-	shaMap, err := ckpt_svc.ShaRefCounterService.GetShaNamespaceMap(replicationId)
+	shaMap, err := ckpt_svc.brokenMapRefCountSvc.GetShaNamespaceMap(replicationId)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
 		return emptyMap, nil, nil, false, err
 	}
 	alreadyExists := len(shaMap) > 0
 
-	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
+	mappingsDoc, err := ckpt_svc.brokenMapRefCountSvc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
 		return emptyMap, nil, nil, false, err
 	}
 
-	shaToNamespaceMap, err := ckpt_svc.GetShaToCollectionNsMap(replicationId, mappingsDoc)
+	shaToNamespaceMap, err := ckpt_svc.brokenMapRefCountSvc.GetShaToCollectionNsMap(replicationId, mappingsDoc)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
 		return emptyMap, nil, nil, false, err
 	}
 
-	incrementerFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
+	incrementerFunc, err := ckpt_svc.brokenMapRefCountSvc.GetIncrementerFunc(replicationId)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
 		return emptyMap, nil, nil, false, err
@@ -529,11 +529,11 @@ func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId str
 // Ensure that the old, bumped out ones are refcounted correctly
 // And do refcount for the newly added record's count as well
 func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRecord *metadata.CheckpointRecord, removedRecords []*metadata.CheckpointRecord) error {
-	incrementerFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
+	incrementerFunc, err := ckpt_svc.brokenMapRefCountSvc.GetIncrementerFunc(replicationId)
 	if err != nil {
 		return err
 	}
-	decrementerFunc, err := ckpt_svc.GetDecrementerFunc(replicationId)
+	decrementerFunc, err := ckpt_svc.brokenMapRefCountSvc.GetDecrementerFunc(replicationId)
 	if err != nil {
 		return err
 	}
@@ -655,7 +655,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 	}
 
 	if brokenMappingsNeeded {
-		err = ckpt_svc.GCDocUsingLatestCounterInfo(replicationId, CollectionNsMappingsDoc)
+		err = ckpt_svc.brokenMapRefCountSvc.GCDocUsingLatestCounterInfo(replicationId, CollectionNsMappingsDoc)
 		if err != nil {
 			ckpt_svc.logger.Errorf("Unable to GC brokenmapping cache - %v", err)
 			return checkpointsDocs, err
@@ -667,7 +667,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 			return checkpointsDocs, err
 		}
 
-		err = ckpt_svc.InitCounterShaToActualMappings(replicationId, CollectionNsMappingsDoc.SpecInternalId, shaToBrokenMapping)
+		err = ckpt_svc.brokenMapRefCountSvc.InitCounterShaToActualMappings(replicationId, CollectionNsMappingsDoc.SpecInternalId, shaToBrokenMapping)
 		if err == nil {
 			ckpt_svc.logger.Infof("Loaded brokenMap: %v", shaToBrokenMapping)
 		} else {
@@ -847,11 +847,11 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 			delete(ckpt_svc.ckptCaches, backfillId)
 		}
 		ckpt_svc.specsMtx.Unlock()
-		cleanupErr := ckpt_svc.ShaRefCounterService.CleanupMapping(oldSpec.Id, ckpt_svc.utils)
+		cleanupErr := ckpt_svc.brokenMapRefCountSvc.CleanupMapping(oldSpec.Id, ckpt_svc.utils)
 		if cleanupErr != nil {
 			ckpt_svc.logger.Errorf("DelCheckpointsDoc for %v brokenmapping had error: %v - manual clean up may be required", oldSpec.Id, cleanupErr)
 		}
-		cleanupErr = ckpt_svc.ShaRefCounterService.CleanupMapping(backfillId, ckpt_svc.utils)
+		cleanupErr = ckpt_svc.brokenMapRefCountSvc.CleanupMapping(backfillId, ckpt_svc.utils)
 		if cleanupErr != nil {
 			ckpt_svc.logger.Errorf("DelCheckpointsDoc for %v brokenmapping had error: %v - manual clean up may be required", backfillId, cleanupErr)
 		}
@@ -865,8 +865,8 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 			go ckpt_svc.cleanOldLeftoverCkpts(backfillId, newSpec.InternalId, &waitGrp)
 			waitGrp.Wait()
 
-			ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
-			ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(backfillId, newSpec.InternalId)
+			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
+			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(backfillId, newSpec.InternalId)
 		}
 		ckpt_svc.specsMtx.Lock()
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
@@ -936,8 +936,8 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 			toBeDelNamespace := make(metadata.CollectionNamespaceMapping)
 			populateToDelNamespaces(brokenMappings, sources, toBeDelNamespace)
 			if len(toBeDelNamespace) > 0 {
-				incFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
-				decFunc, err2 := ckpt_svc.GetDecrementerFunc(replicationId)
+				incFunc, err := ckpt_svc.brokenMapRefCountSvc.GetIncrementerFunc(replicationId)
+				decFunc, err2 := ckpt_svc.brokenMapRefCountSvc.GetDecrementerFunc(replicationId)
 				if err != nil || err2 != nil {
 					ckpt_svc.logger.Errorf("Unable to get increment or decrement func for %v when removing mapping", replicationId)
 					continue
@@ -950,7 +950,7 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 		}
 	}
 	if mappingChanged {
-		err = ckpt_svc.UpsertMapping(replicationId, internalId)
+		err = ckpt_svc.brokenMapRefCountSvc.UpsertMapping(replicationId, internalId)
 	}
 	return
 }
@@ -1109,13 +1109,13 @@ func (ckpt_svc *CheckpointsService) initWithSpecs() error {
 		ckpt_svc.cachedSpecs[specId] = spec
 		ckpt_svc.stopTheWorldMtx[specId] = &sync.RWMutex{}
 		ckpt_svc.initCheckpointsDocsSerializeMapNoLock(specId)
-		alreadyExists := ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
+		alreadyExists := ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
 		if alreadyExists {
 			// Odd error - shouldn't happen
 			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", specId, spec.InternalId)
 		}
 		backfillSpecId := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
-		alreadyExists = ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
+		alreadyExists = ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
 		if alreadyExists {
 			// Odd error - shouldn't happen
 			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", backfillSpecId, spec.InternalId)
@@ -1166,7 +1166,7 @@ func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replica
 
 	// This step will take the set of {ckptDocs, brokenMaps} and use it as the gold standard for ref counting
 	stopFunc2 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.reInitUsingMergedMappingDoc", base.DiagCkptMergeThreshold)
-	reInitErr := ckpt_svc.reInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDocs, internalId)
+	reInitErr := ckpt_svc.brokenMapRefCountSvc.reInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDocs, internalId)
 	stopFunc2()
 	if reInitErr != nil {
 		mtx.Unlock()
@@ -1195,11 +1195,11 @@ func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replica
 }
 
 func (ckpt_svc *CheckpointsService) DisableRefCntDecrement(topic string) {
-	ckpt_svc.ShaRefCounterService.DisableRefCntDecrement(topic)
+	ckpt_svc.brokenMapRefCountSvc.DisableRefCntDecrement(topic)
 }
 
 func (ckpt_svc *CheckpointsService) EnableRefCntDecrement(topic string) {
-	ckpt_svc.ShaRefCounterService.EnableRefCntDecrement(topic)
+	ckpt_svc.brokenMapRefCountSvc.EnableRefCntDecrement(topic)
 }
 
 func (ckpt_svc *CheckpointsService) validateSpecIsValid(fullReplId string, internalId string) error {
