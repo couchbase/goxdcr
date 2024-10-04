@@ -1914,7 +1914,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				switch res {
 				case base.SendToTarget:
 					// Import mutations sent will be counted when we send since we will get a more accurate count then.
-					// If target document does not exist, we only parse for importCas at send time.
+					// If target document does not exist, we only parse for importCas (_mou.cas) at send time.
 					err := sendLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for SendToTarget response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
@@ -1981,7 +1981,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 		getSpecs = getBodySpec
 	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[incomingReq.VBucket] {
 		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
-		// and current source mutation already has HLV, we still don't get target importCas/HLV. The reason is to
+		// and current source mutation already has HLV, we still don't get target importCas (_mou.cas) / HLV. The reason is to
 		// figure out that current source mutation already has HLV will require us to parse the body. It has a
 		// performance impact. Mobile does not expect to support import on target in mixed mode. This is because for
 		// cas < max_cas or in mixed mode only active-passive XDCR-SGW setup is originally supported. Doing import
@@ -2118,11 +2118,11 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 		case base.XATTR_MOU:
 			mouIsReplicated = true
 			if sourceDocMeta != nil && !sourceDocMeta.IsImportMutation() {
-				// Remove importCAS from _mou if it is no longer an import mutation.
+				// Remove cas (importCAS) from _mou if it is no longer an import mutation.
 				// This happens when there are non-imported updates on top of an import mutation
 
 				if wrappedReq.MouAfterProcessing == nil {
-					// _mou had only importCAS and pRev, no need to write
+					// _mou had only cas (importCAS) and pRev, no need to write
 					mouIsReplicated = false
 					continue
 				}

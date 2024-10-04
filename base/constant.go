@@ -1542,7 +1542,7 @@ var (
 // Required for conflict resolution
 const (
 	PERIOD      = "."
-	IMPORTCAS   = "importCAS"
+	IMPORTCAS   = "cas"
 	PREVIOUSREV = "pRev"
 
 	// This is for subdoc set operation

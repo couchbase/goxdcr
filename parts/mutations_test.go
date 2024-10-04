@@ -1085,7 +1085,7 @@ var legacyMutationTCs = []mutationTC{
 		max_cas_delta: 0,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x0000f6942f7ce817","src":"27hMZgvcvI5YMQJBIGkxxw","ver":"0x0000f6942f7ce817"}`,
-		mou:           `{"importCAS":"0x00008d393a7ce817","pRev":"9"}`,
+		mou:           `{"cas":"0x00008d393a7ce817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
 		respT: respTestParams{
@@ -1110,7 +1110,7 @@ var legacyMutationTCs = []mutationTC{
 		max_cas_delta: 0,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x18fcf8cbc47de817","src":"qa5lP/5Ae1V6ZQt4VojG6g","ver":"0x18fcf8cbc47de817"}`,
-		mou:           `{"importCAS":"0x00006f49c87de817","pRev":"9"}`,
+		mou:           `{"cas":"0x00006f49c87de817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
@@ -1343,7 +1343,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		max_cas_delta: -100,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x0000f6942f7ce817","src":"27hMZgvcvI5YMQJBIGkxxw","ver":"0x0000f6942f7ce817"}`,
-		mou:           `{"importCAS":"0x00008d393a7ce817","pRev":"9"}`,
+		mou:           `{"cas":"0x00008d393a7ce817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
 		respT: respTestParams{
@@ -1369,7 +1369,7 @@ var eccvOnlyMutationTCsWithCasGreaterThanMaxCas = []mutationTC{
 		max_cas_delta: -100,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x18fcf8cbc47de817","src":"qa5lP/5Ae1V6ZQt4VojG6g","ver":"0x18fcf8cbc47de817"}`,
-		mou:           `{"importCAS":"0x00006f49c87de817","pRev":"9"}`,
+		mou:           `{"cas":"0x00006f49c87de817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
@@ -1552,7 +1552,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		max_cas_delta: 100,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x0000f6942f7ce817","src":"27hMZgvcvI5YMQJBIGkxxw","ver":"0x0000f6942f7ce817"}`,
-		mou:           `{"importCAS":"0x00008d393a7ce817","pRev":"9"}`,
+		mou:           `{"cas":"0x00008d393a7ce817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
 		respT: respTestParams{
@@ -1578,7 +1578,7 @@ var eccvOnlyMutationTCsWithCasLessThanMaxCas = []mutationTC{
 		max_cas_delta: 100,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x18fcf8cbc47de817","src":"qa5lP/5Ae1V6ZQt4VojG6g","ver":"0x18fcf8cbc47de817"}`,
-		mou:           `{"importCAS":"0x00006f49c87de817","pRev":"9"}`,
+		mou:           `{"cas":"0x00006f49c87de817","pRev":"9"}`,
 		sync:          `{"cas":"0x1234567890123456","revid":"1-abcde"}`,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
@@ -1942,7 +1942,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		max_cas_delta: 0,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x0000f6942f7ce817","src":"27hMZgvcvI5YMQJBIGkxxw","ver":"0x0000f6942f7ce817"}`,
-		mou:           `{"importCAS":"0x00008d393a7ce817","pRev":"9"}`,
+		mou:           `{"cas":"0x00008d393a7ce817","pRev":"9"}`,
 		sync:          ``,
 		getUprEvent:   syncAndMouAndHlvAndUserXattrs,
 		respT: respTestParams{
@@ -1967,7 +1967,7 @@ var mobileOnlyMutationTCs = []mutationTC{
 		max_cas_delta: 0,
 		casDelta:      0,
 		hlv:           `{"cvCas":"0x18fcf8cbc47de817","src":"qa5lP/5Ae1V6ZQt4VojG6g","ver":"0x18fcf8cbc47de817"}`,
-		mou:           `{"importCAS":"0x00006f49c87de817","pRev":"9"}`,
+		mou:           `{"cas":"0x00006f49c87de817","pRev":"9"}`,
 		sync:          ``,
 		getUprEvent:   syncAndMouAndHlvXattrs,
 		respT: respTestParams{
@@ -2895,7 +2895,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -2929,7 +2929,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -3043,7 +3043,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -3077,7 +3077,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -3191,7 +3191,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -3225,7 +3225,7 @@ func Test_LegacyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -4059,7 +4059,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cvCas2 - source wins
@@ -4094,7 +4094,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -4211,7 +4211,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cvCas2 - source wins
@@ -4246,7 +4246,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -4363,7 +4363,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cvCas2 - target wins
@@ -4398,7 +4398,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T) {
 		test.targetDatatype = datatype2
 		test.reqT.setCas = test.targetCas
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -5007,7 +5007,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -5041,7 +5041,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -5155,7 +5155,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -5189,7 +5189,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -5303,7 +5303,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cas1 > cas2 - source wins
@@ -5337,7 +5337,7 @@ func Test_ECCVOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -5941,7 +5941,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cas2 - target wins
@@ -5975,7 +5975,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -6092,7 +6092,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cas2 - source wins
@@ -6127,7 +6127,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -6243,7 +6243,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cas2 - target wins
@@ -6277,7 +6277,7 @@ func Test_MobileOnlyMutationsCRTest(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -7130,7 +7130,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cvCas2 - source wins
@@ -7165,7 +7165,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -7282,7 +7282,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cvCas2 - source wins
@@ -7317,7 +7317,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -7434,7 +7434,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cvCas2 - target wins
@@ -7469,7 +7469,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasGreaterThanMaxCas(t *testing.T)
 		test.targetDatatype = datatype2
 		test.reqT.setCas = test.targetCas
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cvCas2 - source wins
@@ -8079,7 +8079,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cas2 - target wins
@@ -8114,7 +8114,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5e00000000000000","src":"Source","ver":"0x5e00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"24"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"24"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -8231,7 +8231,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 > cas2 - source wins
@@ -8266,7 +8266,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x6000000000000000","src":"Source","ver":"0x6000000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"26"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"26"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins
@@ -8382,7 +8382,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// import, import - cvCas1 < cas2 - target wins
@@ -8416,7 +8416,7 @@ func Test_ECCVAndMobileOnlyMutationsCRTestWithCasLessThanMaxCas(t *testing.T) {
 		test.targetBody = body2
 		test.targetDatatype = datatype2
 		test.hlv = `{"cvCas":"0x5c00000000000000","src":"Source","ver":"0x5c00000000000000"}`
-		test.mou = `{"importCAS":"0x6200000000000000","pRev":"22"}`
+		test.mou = `{"cas":"0x6200000000000000","pRev":"22"}`
 		test.executeTest(*assert, bucketName, xmemBuckets[i], cluster)
 
 		// non-import, import - cas1 > cas2 - source wins

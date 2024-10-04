@@ -913,7 +913,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	out, err := bucket.DefaultCollection().Get(key, nil)
 	assert.Nil(err)
 	assert.Equal(gocb.Cas(1700503142566854656), out.Cas())
-	err = checkTarget(bucket, key, base.XATTR_MOU, []byte(`{"importCAS":"0x0000223899669917","pRev":1}`), true, false)
+	err = checkTarget(bucket, key, base.XATTR_MOU, []byte(`{"cas":"0x0000223899669917","pRev":1}`), true, false)
 	assert.Nil(err)
 
 	// Test 2. Update the import document (Doc1). It should replicate with importCas removed
@@ -1220,13 +1220,13 @@ func getVVXattr(bucket *gocb.Bucket, key, colName, scopeName string, a *assert.A
 //     importCAS which has the same value as the new CAS
 //
 // The resulting import mutation has the following properties:
-// 1. importCAS == document.CAS
+// 1. importCAS (_mou.cas) == document.CAS
 // 2. cvCAS == pre-import document CAS
 // cvCAS represents the HLV version. It is the CAS value used for conflict resolution
 // If there is a new mutation on the document, the new mutation will have:
-// document.CAS > importCAS
+// document.CAS > importCAS (_mou.cas)
 // This new mutation is no longer considered import mutation. It is a local mutation. When it is replicated to a target,
-// the importCAS XATTR will be removed.
+// the importCAS (_mou.cas) XATTR will be removed.
 func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeName string, bucketId hlv.DocumentSourceId, curNonImportCas uint64, preImportRevId uint64) gocb.Cas {
 	// xattr Lookup
 	cvCas, src, ver, mv, pv, _ := getVVXattr(bucket, key, colName, scopeName, a)
@@ -1257,7 +1257,7 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, col
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_VER_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	// Update cvCas to the same value
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
-	// Add _mou.importCas
+	// Add _mou.cas (importCAS)
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_IMPORTCAS, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	// Add _mou.pRev
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PREVIOUSREV, fmt.Sprintf(`%v`, preImportRevId), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))

@@ -1923,7 +1923,7 @@ func (xfi *ArrayXattrFieldIterator) Next() (value []byte, err error) {
 type SubdocSpecOption struct {
 	IncludeHlv        bool // Get target HLV only for CCR
 	IncludeMobileSync bool // Get target _sync if we need to preserve target _sync
-	IncludeImportCas  bool // Include target importCas if enableCrossClusterVersioning.
+	IncludeImportCas  bool // Include target importCas (_mou.cas) if enableCrossClusterVersioning if enabled and cas >= max_cas.
 	IncludeBody       bool // Get the target body for merge
 	IncludeVXattr     bool // Get the target document metadata as Virtual so we can perform CR and format target HLV
 	IncludeXTOC       bool // Get xattr table of content (all xattr keys)

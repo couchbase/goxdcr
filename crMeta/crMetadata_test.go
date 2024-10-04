@@ -940,7 +940,7 @@ func TestParseHlvFromMCRequest(t *testing.T) {
 			a.Equal(importCas, uint64(0))
 			a.Equal(pRev, uint64(0))
 
-			// 3. _vv.src, _vv.ver, _vv.pv, and _mou.importCAS
+			// 3. _vv.src, _vv.ver, _vv.pv, and _mou.cas (importCAS)
 			objs := []string{}
 			possibleObjFields := []string{objStr, objNum, objObj1, objObj2}
 			objIdxs := []int{0, 1, 2, 3}
@@ -1132,7 +1132,7 @@ func Test_MouNestedXattrParsing(t *testing.T) {
 
 	// As of the date of writing this test, _mou will contain the following 3 fields.
 	// Add more and test them here when mobile adds more.
-	pCAS := "\"pCAS\":\"0x1234567890123456\""
+	pCAS := "\"pCas\":\"0x1234567890123456\""
 	importCas := fmt.Sprintf("\"%s\":\"0x1234567890123456\"", base.IMPORTCAS)
 	pRev := fmt.Sprintf("\"%s\":\"1234567890123456\"", base.PREVIOUSREV)
 
@@ -1178,27 +1178,27 @@ func Test_MouNestedXattrParsing(t *testing.T) {
 		},
 		{
 			name:            "only importCAS and pRev",
-			before:          []byte("{\"pRev\":\"12345\",\"importCAS\":\"0x1234567890123456\"}"),
+			before:          []byte("{\"pRev\":\"12345\",\"cas\":\"0x1234567890123456\"}"),
 			expectedAfter:   []byte("{}"),
 			expectedRemoved: 2,
 		},
 		{
 			name:            "only importCAS",
-			before:          []byte("{\"importCAS\":\"0x1234567890123456\"}"),
+			before:          []byte("{\"cas\":\"0x1234567890123456\"}"),
 			expectedAfter:   []byte("{}"),
 			expectedRemoved: 1,
 		},
 		{
 			name:                       "only importCas and pCas",
-			before:                     []byte("{\"pCAS\":\"0x1234567890123456\",\"importCAS\":\"0x1234567890123456\"}"),
-			expectedAfter:              []byte("{\"pCAS\":\"0x1234567890123456\"}"),
+			before:                     []byte("{\"pCas\":\"0x1234567890123456\",\"cas\":\"0x1234567890123456\"}"),
+			expectedAfter:              []byte("{\"pCas\":\"0x1234567890123456\"}"),
 			expectedRemoved:            1,
 			expectedAtleastOnFieldLeft: true,
 		},
 		{
 			name:                       "only pCas",
-			before:                     []byte("{\"pCAS\":\"0x1234567890123456\"}"),
-			expectedAfter:              []byte("{\"pCAS\":\"0x1234567890123456\"}"),
+			before:                     []byte("{\"pCas\":\"0x1234567890123456\"}"),
+			expectedAfter:              []byte("{\"pCas\":\"0x1234567890123456\"}"),
 			expectedRemoved:            0,
 			expectedAtleastOnFieldLeft: true,
 		},
