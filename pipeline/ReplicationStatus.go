@@ -506,7 +506,7 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	// if replicationStatus has errors, note them so prometheus can read the stats
 	numErrs := len(rs.err_list)
 	if numErrs > 0 {
-		settingsMap[service_def.PIPELINE_STATUS] = base.PipelineStatusError
+		settingsMap[service_def.PIPELINE_STATUS] = int(base.PipelineStatusError)
 	}
 	settingsMap[service_def.PIPELINE_ERRORS] = numErrs
 	return settingsMap
