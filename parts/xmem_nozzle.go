@@ -3004,10 +3004,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							}
 						}
 						// for other non-temporary errors, repair connections
-						xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Body=%v%v%v, req.Datatype=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, req.DataType, req.Cas, req.Extras)
-						if response.Status == mc.EINVAL {
-							xmem.Logger().Errorf("%v Reason for EINVAL response from memcached for %v%s%v is %v%s%v", xmem.Id(), base.UdTagBegin, string(req.Key), base.UdTagEnd, base.UdTagBegin, response.Body, base.UdTagEnd)
-						}
+						xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Body=%v%v%v, req.Datatype=%v, req.Cas=%v, req.Extras=%v, response=%v%v%v",
+							xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, req.DataType, req.Cas, req.Extras, base.UdTagBegin, response.Body, base.UdTagEnd)
 						xmem.client_for_setMeta.ReportUnknownResponseReceived(response.Status)
 
 						nonTempErrReceived = true
