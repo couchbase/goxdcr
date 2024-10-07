@@ -697,12 +697,23 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				if !b.validateReplIdExists(specId) {
 					return nil
 				}
+
+				srcUid, err := b.getLastHandledSourceManifestId(specId)
+				if err != nil {
+					b.logger.Errorf("Unable to find retry manifestID for spec %v", specForId)
+				}
+				diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+					Added:                      added,
+					Removed:                    removed,
+					CorrespondingSrcManifestId: srcUid,
+				}
+
 				if errMeansReqNeedsToBeRetried(err) {
 					req := BackfillRetryRequest{
 						replId:                     specId,
-						req:                        specForId,
+						req:                        diffPair,
 						force:                      false,
-						correspondingSrcManifestId: srcMan.Uid(),
+						correspondingSrcManifestId: srcUid,
 						handler:                    b.internalGetHandler(specId),
 					}
 					b.retryBackfillRequest(req)
