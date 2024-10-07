@@ -3017,15 +3017,17 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 		pos = pos + n
 	}
 
-	var extras []byte
 	cas := targetCas
 
-	// Set expiry
+	var expiry []byte // document expiry value
+	var flags uint8   // subdoc command doc level flags
+	var extrasLen int
+
 	if len(source.Extras) >= 8 && binary.BigEndian.Uint32(source.Extras[4:8]) != 0 {
-		extras = source.Extras[4:8]
+		expiry = source.Extras[4:8]
+		extrasLen += len(expiry)
 	}
 
-	var flags uint8 = 0
 	if targetDocIsTombstone {
 		if !sourceDocIsTombstone {
 			// The subdoc command will follow the ADD semantics i.e.
@@ -3040,10 +3042,26 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 			flags |= mc.SUBDOC_FLAG_ACCESS_DELETED
 		}
 	}
-
-	// Set Flags
 	if flags != 0 {
-		extras = append(extras, flags)
+		extrasLen += 1
+	}
+
+	// extras for the command can be:
+	// 1. len=0 => no flags, no expiry
+	// 2. len=1 => only flags
+	// 3. len=4 => only expiry
+	// 4. len=5 => both flags and expiry.
+	extras := make([]byte, 0, extrasLen)
+	if extrasLen != 0 {
+		// Set expiry
+		if len(expiry) != 0 {
+			extras = append(extras, expiry...)
+		}
+
+		// Set flags
+		if flags != 0 {
+			extras = append(extras, flags)
+		}
 	}
 
 	if reuseReq {
