@@ -11,15 +11,16 @@ package metadata_svc
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const BackfillKey = "backfill"
@@ -271,14 +272,19 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 func (b *BackfillReplicationService) backfillSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	val, ok := b.getCache().Get(replicationId)
 	if !ok {
+		b.logger.Errorf("%v not found in backfill cache", replicationId)
 		return nil, base.ReplNotFoundErr
 	}
 	replSpecVal, ok := val.(*ReplicationSpecVal)
 	if !ok || replSpecVal == nil {
+		b.logger.Errorf("%v wrong type of object in backfill cache, ok=%v, replSpecVal=%v (%T)",
+			replicationId, ok, replSpecVal, val)
 		return nil, base.ReplNotFoundErr
 	}
 	backfillReplSpec, ok := replSpecVal.spec.(*metadata.BackfillReplicationSpec)
 	if !ok || backfillReplSpec == nil {
+		b.logger.Errorf("%v wrong type of object in replication spec, ok=%v, backfillReplSpec=%v (%T)",
+			replicationId, ok, backfillReplSpec, replSpecVal.spec)
 		return nil, base.ReplNotFoundErr
 	}
 
