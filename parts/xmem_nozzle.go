@@ -695,9 +695,16 @@ type XmemNozzle struct {
 
 	eventsProducer common.PipelineEventsProducer
 
-	// position of the item in the buffer to non-temporary error code mapping
-	nonTempErrsSeen    map[uint16]mc.Status
-	nonTempErrsSeenMtx sync.RWMutex
+	// position of the item in the buffer to error code mapping (for which UI alert is to be raised)
+	errsForUIAlert    map[uint16]mc.Status
+	errsForUIAlertMtx sync.RWMutex
+
+	// for tracking temporary memcached errors
+	tempMCErrMtx       sync.RWMutex
+	tempMCErrLastSeen  time.Time
+	tempMCErrSetShow   *time.Timer
+	tempMCErrShow      bool
+	tempMCErrUnsetShow *time.Timer
 }
 
 func NewXmemNozzle(id string,
@@ -753,7 +760,7 @@ func NewXmemNozzle(id string,
 		vbList:              vbList,
 		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
 		eventsProducer:      eventsProducer,
-		nonTempErrsSeen:     make(map[uint16]mc.Status),
+		errsForUIAlert:      make(map[uint16]mc.Status),
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -2634,45 +2641,45 @@ func (xmem *XmemNozzle) setClient(client *base.XmemClient, isSetMeta bool) {
 	}
 }
 
-func shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen bool, nonTempErrSeenBefore, nonTempErrSeenNow mc.Status) bool {
-	return nonTempErrSeen &&
-		(!seenBefore || (seenBefore && nonTempErrSeenBefore != nonTempErrSeenNow))
+func shouldUpdateXmemErrorUIAlerts(posSeenBefore, seenErrForUIAlert bool, errSeenBefore, errSeenNow mc.Status) bool {
+	return seenErrForUIAlert &&
+		(!posSeenBefore || (posSeenBefore && errSeenBefore != errSeenNow))
 }
 
-// Used to create a UI alert when non-temporary errors are received from xmem.client_for_setMeta,
+// Used to raise/update UI alert for certain errors received by xmem.client_for_setMeta,
 // and then subsequently dismiss them when some other type of response is received for the same buffer "pos".
-func (xmem *XmemNozzle) markNonTempErrorResponse(response *mc.MCResponse, nonTempErrSeen bool) {
+func (xmem *XmemNozzle) updateErrsForUIAlert(response *mc.MCResponse, seenErrForUIAlert bool) {
 	if response == nil {
 		return
 	}
 
 	pos := xmem.getPosFromOpaque(response.Opaque)
-	nonTempErrSeenNow := response.Status
+	errSeenNow := response.Status
 
-	xmem.nonTempErrsSeenMtx.RLock()
-	nonTempErrSeenBefore, seenBefore := xmem.nonTempErrsSeen[pos]
-	xmem.nonTempErrsSeenMtx.RUnlock()
+	xmem.errsForUIAlertMtx.RLock()
+	errSeenBefore, posSeenBefore := xmem.errsForUIAlert[pos]
+	xmem.errsForUIAlertMtx.RUnlock()
 
-	if shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen, nonTempErrSeenBefore, nonTempErrSeenNow) {
-		xmem.nonTempErrsSeenMtx.Lock()
-		nonTempErrSeenBefore, seenBefore := xmem.nonTempErrsSeen[pos]
-		if shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen, nonTempErrSeenBefore, nonTempErrSeenNow) {
-			xmem.nonTempErrsSeen[pos] = nonTempErrSeenNow
+	if shouldUpdateXmemErrorUIAlerts(posSeenBefore, seenErrForUIAlert, errSeenBefore, errSeenNow) {
+		xmem.errsForUIAlertMtx.Lock()
+		errSeenBefore, seenBefore := xmem.errsForUIAlert[pos]
+		if shouldUpdateXmemErrorUIAlerts(seenBefore, seenErrForUIAlert, errSeenBefore, errSeenNow) {
+			xmem.errsForUIAlert[pos] = errSeenNow
 		}
-		xmem.nonTempErrsSeenMtx.Unlock()
-	} else if !nonTempErrSeen && seenBefore {
-		xmem.nonTempErrsSeenMtx.Lock()
-		if _, seenBefore := xmem.nonTempErrsSeen[pos]; !nonTempErrSeen && seenBefore {
-			delete(xmem.nonTempErrsSeen, pos)
+		xmem.errsForUIAlertMtx.Unlock()
+	} else if !seenErrForUIAlert && posSeenBefore {
+		xmem.errsForUIAlertMtx.Lock()
+		if _, seenBefore := xmem.errsForUIAlert[pos]; !seenErrForUIAlert && seenBefore {
+			delete(xmem.errsForUIAlert, pos)
 		}
-		xmem.nonTempErrsSeenMtx.Unlock()
+		xmem.errsForUIAlertMtx.Unlock()
 	}
 }
 
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 
-	var nonTempErrReceived bool
+	var seenErrForUIAlert bool
 	for {
 		select {
 		case <-finch:
@@ -2684,7 +2691,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				goto done
 			}
 
-			nonTempErrReceived = false
+			seenErrForUIAlert = false
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta, true)
 			if err != nil {
 				if err == PartStoppedError {
@@ -2726,6 +2733,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					// Don't spam the log. Keep a counter instead
 					atomic.AddUint64(&xmem.counter_tmperr, 1)
 					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
+					seenErrForUIAlert = true
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
@@ -2737,7 +2745,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					// Don't spam the log. Keep a counter instead
 					atomic.AddUint64(&xmem.counter_eaccess, 1)
 					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
-					nonTempErrReceived = true
+					seenErrForUIAlert = true
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 				} else if (base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status)) && xmem.source_cr_mode == base.CRMode_Custom {
 					// request failed because target Cas changed. Raise event.
@@ -2828,7 +2836,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 									}
 								}
 
-								nonTempErrReceived = true
+								seenErrForUIAlert = true
 
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
@@ -2898,7 +2906,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				}
 			}
 
-			xmem.markNonTempErrorResponse(response, nonTempErrReceived)
+			xmem.updateErrsForUIAlert(response, seenErrForUIAlert)
 		}
 	}
 
@@ -3000,8 +3008,8 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	// freeze_counter is used to count the number of check iterations that data has been stuck
 	var freeze_counter uint32 = 0
 
-	var nonTempErrMsgId int64 = -1
-	var lastTotalNonTempErrMap map[mc.Status]uint16
+	var msgIdForUIAlert int64 = -1
+	var previousTotalErrsForUIAlert map[mc.Status]uint16
 
 	for {
 		select {
@@ -3057,38 +3065,35 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				goto done
 			}
 
-			// non-temp error response to number of items in the current state of the buffer with the given reponse mapping
-			var totalNonTempErrCodes map[mc.Status]uint16
-			xmem.nonTempErrsSeenMtx.RLock()
-			if len(xmem.nonTempErrsSeen) > 0 {
-				totalNonTempErrCodes = make(map[mc.Status]uint16)
-				for _, status := range xmem.nonTempErrsSeen {
-					totalNonTempErrCodes[status]++
-				}
-			} else if len(lastTotalNonTempErrMap) > 0 {
-				lastTotalNonTempErrMap = map[mc.Status]uint16{}
+			// map of error responses (meant to get UI alerts) to their total count in the buffer
+			var totalErrsForUIAlert map[mc.Status]uint16
+			xmem.errsForUIAlertMtx.RLock()
+			if len(xmem.errsForUIAlert) > 0 {
+				xmem.processErrsForUIAlert(&totalErrsForUIAlert)
+			} else if len(previousTotalErrsForUIAlert) > 0 {
+				previousTotalErrsForUIAlert = map[mc.Status]uint16{}
 			}
-			xmem.nonTempErrsSeenMtx.RUnlock()
+			xmem.errsForUIAlertMtx.RUnlock()
 
-			if totalNonTempErrCodes == nil {
-				if nonTempErrMsgId >= 0 {
-					// delete the message if any, since there are no non-temp error responses seen
-					err := xmem.eventsProducer.DismissEvent(int(nonTempErrMsgId))
+			if totalErrsForUIAlert == nil {
+				if msgIdForUIAlert >= 0 {
+					// delete the message if any, since there are no more error responses (for UI alerts) seen
+					err := xmem.eventsProducer.DismissEvent(int(msgIdForUIAlert))
 					if err != nil {
-						xmem.Logger().Warnf("Unable to dismiss event %v: %v", nonTempErrMsgId, err)
+						xmem.Logger().Warnf("Unable to dismiss event %v: %v", msgIdForUIAlert, err)
 					} else {
-						nonTempErrMsgId = -1
+						msgIdForUIAlert = -1
 					}
 				}
 				continue
 			}
 
 			var eventMsgStrBuilder strings.Builder
-			eventMsgStrBuilder.WriteString("Following number of mutations are rejected by target due to non-temporary error responses: ")
+			eventMsgStrBuilder.WriteString("Following number of mutations are rejected by target due to error responses: ")
 			changed := false
-			for status, count := range totalNonTempErrCodes {
+			for status, count := range totalErrsForUIAlert {
 				eventMsgStrBuilder.WriteString(fmt.Sprintf("{%v : count=%v} | ", status, count))
-				if !changed && count != lastTotalNonTempErrMap[status] {
+				if !changed && count != previousTotalErrsForUIAlert[status] {
 					changed = true
 				}
 			}
@@ -3099,17 +3104,17 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 
 			eventMsgStrBuilder.WriteString("XMEM ID: " + xmem.Id())
-			if nonTempErrMsgId >= 0 {
+			if msgIdForUIAlert >= 0 {
 				// update the message
-				err := xmem.eventsProducer.UpdateEvent(nonTempErrMsgId, eventMsgStrBuilder.String(), nil)
+				err := xmem.eventsProducer.UpdateEvent(msgIdForUIAlert, eventMsgStrBuilder.String(), nil)
 				if err != nil {
-					xmem.Logger().Warnf("Unable to update event %v: %v", nonTempErrMsgId, err)
+					xmem.Logger().Warnf("Unable to update event %v: %v", msgIdForUIAlert, err)
 				}
 			} else {
 				// new message
-				nonTempErrMsgId = xmem.eventsProducer.AddEvent(base.LowPriorityMsg, eventMsgStrBuilder.String(), base.EventsMap{}, nil)
+				msgIdForUIAlert = xmem.eventsProducer.AddEvent(base.LowPriorityMsg, eventMsgStrBuilder.String(), base.EventsMap{}, nil)
 			}
-			lastTotalNonTempErrMap = totalNonTempErrCodes
+			previousTotalErrsForUIAlert = totalErrsForUIAlert
 
 		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))
@@ -3118,6 +3123,55 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 done:
 	xmem.Logger().Infof("%v selfMonitor routine exits", xmem.Id())
 
+}
+
+// Helper function utilised by the (*XmemNozzle).selfMonitor() method
+func (xmem *XmemNozzle) processErrsForUIAlert(totalErrsForUIAlert *map[mc.Status]uint16) {
+	*totalErrsForUIAlert = make(map[mc.Status]uint16)
+	tempMCErrSetShowDelay := xmem.config.selfMonitorInterval * time.Duration(base.TempMCErrorDisplayDelayFactor)
+
+	for _, responseCode := range xmem.errsForUIAlert {
+		// non-temporary errors are always displayed
+		if !base.IsTemporaryMCError(responseCode) {
+			(*totalErrsForUIAlert)[responseCode]++
+			continue
+		}
+
+		xmem.tempMCErrMtx.Lock()
+		xmem.tempMCErrLastSeen = time.Now()
+		if xmem.tempMCErrSetShow == nil {
+			xmem.tempMCErrSetShow = time.AfterFunc(
+				tempMCErrSetShowDelay,
+				func() {
+					xmem.tempMCErrMtx.RLock()
+					if xmem.tempMCErrLastSeen.Before(time.Now().Add(-xmem.config.selfMonitorInterval)) {
+						xmem.tempMCErrMtx.RUnlock()
+						return
+					}
+					xmem.tempMCErrMtx.RUnlock()
+
+					xmem.tempMCErrMtx.Lock()
+					xmem.tempMCErrShow = true
+					xmem.tempMCErrUnsetShow = time.AfterFunc(tempMCErrSetShowDelay,
+						func() {
+							xmem.tempMCErrMtx.Lock()
+							xmem.tempMCErrSetShow = nil
+							xmem.tempMCErrShow = false
+							xmem.tempMCErrUnsetShow = nil
+							xmem.tempMCErrMtx.Unlock()
+						},
+					)
+					xmem.tempMCErrMtx.Unlock()
+				},
+			)
+		} else if xmem.tempMCErrShow {
+			(*totalErrsForUIAlert)[responseCode]++
+			if xmem.tempMCErrUnsetShow != nil && xmem.tempMCErrUnsetShow.Stop() { // to prevent an extraneous Reset() on the timer
+				xmem.tempMCErrUnsetShow.Reset(tempMCErrSetShowDelay)
+			}
+		}
+		xmem.tempMCErrMtx.Unlock()
+	}
 }
 
 /**

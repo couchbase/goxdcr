@@ -279,6 +279,8 @@ const (
 	NWLatencyToleranceMilliSecKey = "NWLatencyToleranceMilliSec"
 
 	CasPoisoningPreCheckEnabledKey = "CasPoisoningPreCheckEnabled"
+
+	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -403,6 +405,7 @@ var CapellaHostnameSuffixConfig = &SettingsConfig{base.CapellaHostnameSuffix, ni
 var DatapoolLogFrequencyConfig = &SettingsConfig{base.DatapoolLogFrequency, &Range{0, 10000}}
 var NWLatencyToleranceMilliSecConfig = &SettingsConfig{int(base.NWLatencyToleranceMilliSec / time.Millisecond), &Range{0, 60000}}
 var CasPoisoningPreCheckEnabledConfig = &SettingsConfig{base.CasPoisoningPreCheckEnabled, &Range{0, 1} /* 0 is disbaled, 1 is enabled */}
+var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -527,6 +530,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	DatapoolLogFrequencyKey:                       DatapoolLogFrequencyConfig,
 	NWLatencyToleranceMilliSecKey:                 NWLatencyToleranceMilliSecConfig,
 	CasPoisoningPreCheckEnabledKey:                CasPoisoningPreCheckEnabledConfig,
+	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

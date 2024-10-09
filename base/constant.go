@@ -1160,6 +1160,10 @@ var P2PReplicaReplicatorReloadChSize = 10
 var ThroughSeqnoBgScannerFreq = 5 * time.Second
 var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
 
+// Factor multiplied with an xmem nozzle's `selfMonitorInterval` to set the duration
+// of the delay after which temporary memcached errors like `ETMPFAIL` are displayed on UI
+var TempMCErrorDisplayDelayFactor = 20
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1225,7 +1229,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	dnsSrvReBootstrap bool,
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
 	capellaHostNameSuffix string, datapoolLogFrequency int,
-	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int) {
+	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
+	tempMCErrorDisplayDelayFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1378,6 +1383,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DatapoolLogFrequency = datapoolLogFrequency
 	NWLatencyToleranceMilliSec = nwLatencyToleranceMilliSec
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
+	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 }
 
 // XDCR Dev hidden replication settings

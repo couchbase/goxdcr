@@ -353,6 +353,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.DatapoolLogFrequencyKey].(int),
 		time.Duration(internal_settings.Values[metadata.NWLatencyToleranceMilliSecKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.CasPoisoningPreCheckEnabledKey].(int),
+		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
 	)
 }
 
