@@ -1231,6 +1231,10 @@ var P2PManifestsCacheCleanupInterval = 5 * time.Minute
 var ThroughSeqnoBgScannerFreq = 5 * time.Second
 var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
 
+// Factor multiplied with an xmem nozzle's `selfMonitorInterval` to set the duration
+// of the delay after which temporary memcached errors like `ETMPFAIL` are displayed on UI
+var TempMCErrorDisplayDelayFactor = 20
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1303,7 +1307,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatEnabled bool, srcHeartbeatIgnoreIncoming bool,
 	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
-	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration) {
+	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
+	tempMCErrorDisplayDelayFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1477,6 +1482,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CLogSkipTlsVerify = cLogSkipTlsVerify
 	CLogResourceManagerBoost = cLogRMBoost
 	CLogStatsLoggingMaxFreqInterval = cLogStatsMaxFreq
+
+	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 }
 
 // XDCR Dev hidden replication settings
