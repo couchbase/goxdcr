@@ -133,6 +133,11 @@ func (filter *FilterImpl) SetShouldSkipBinaryDocs(val bool) {
 	}
 }
 
+// only used by xdcrDiffer
+func (filter *FilterImpl) SetMobileCompatibility(val int) {
+	filter.mobileCompatible = val
+}
+
 func (filter *FilterImpl) getMobileCompatibility() int {
 	return filter.mobileCompatible
 }

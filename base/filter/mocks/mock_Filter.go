@@ -98,6 +98,39 @@ func (_c *Filter_FilterUprEvent_Call) RunAndReturn(run func(*base.WrappedUprEven
 	return _c
 }
 
+// SetMobileCompatibility provides a mock function with given fields: val
+func (_m *Filter) SetMobileCompatibility(val int) {
+	_m.Called(val)
+}
+
+// Filter_SetMobileCompatibility_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMobileCompatibility'
+type Filter_SetMobileCompatibility_Call struct {
+	*mock.Call
+}
+
+// SetMobileCompatibility is a helper method to define mock.On call
+//   - val int
+func (_e *Filter_Expecter) SetMobileCompatibility(val interface{}) *Filter_SetMobileCompatibility_Call {
+	return &Filter_SetMobileCompatibility_Call{Call: _e.mock.On("SetMobileCompatibility", val)}
+}
+
+func (_c *Filter_SetMobileCompatibility_Call) Run(run func(val int)) *Filter_SetMobileCompatibility_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int))
+	})
+	return _c
+}
+
+func (_c *Filter_SetMobileCompatibility_Call) Return() *Filter_SetMobileCompatibility_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *Filter_SetMobileCompatibility_Call) RunAndReturn(run func(int)) *Filter_SetMobileCompatibility_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetShouldSkipBinaryDocs provides a mock function with given fields: val
 func (_m *Filter) SetShouldSkipBinaryDocs(val bool) {
 	_m.Called(val)

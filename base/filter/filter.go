@@ -27,6 +27,7 @@ type Filter interface {
 
 	SetShouldSkipUncommittedTxn(val bool)
 	SetShouldSkipBinaryDocs(val bool)
+	SetMobileCompatibility(val int)
 }
 
 type FilterUtils interface {
