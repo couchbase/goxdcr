@@ -37,7 +37,7 @@ import (
 	_ "net/http/pprof"
 )
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath, base.XDCRSourceClustersPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath, base.XDCRSourceClustersPath, base.XDCRClusterToClusterPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger(base.AdminPortKey, log.GetOrCreateContext(base.AdminPortKey))
@@ -244,6 +244,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetConnectionPreCheckResultRequest(request)
 	case base.XDCRSourceClustersPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetSourceClustersRequest(request)
+	case base.XDCRClusterToClusterPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doPostClusterToClusterRequest(request)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -1456,4 +1458,33 @@ func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*
 	}
 
 	return NewSourceClustersV1Response(srcNames, srcSpecs, srcNodes)
+}
+
+func (adminport *Adminport) doPostClusterToClusterRequest(request *http.Request) (*ap.Response, error) {
+	localRemoteIPs := getLocalAndRemoteIps(request) // The remoteIP is not really accurate since ns_server redirects
+	response, err := authWebCreds(request, base.PermissionC2cCommunications)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils, adminport.securitySvc, adminport.Logger(), adminport.xdcrCompTopologySvc)
+	if err != nil {
+		adminport.Logger().Errorf("Unable to generate req or resp from %v err: %v\n", localRemoteIPs.Remote, err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
+	}
+
+	reqOpCode := req.GetOpcode()
+	if !peerToPeer.IsC2cCompatibleOpCode(reqOpCode) {
+		err = fmt.Errorf("doPostClusterToClusterRequest received with incompatible OpCode %v from %v", reqOpCode, localRemoteIPs.Remote)
+		adminport.Logger().Warn(err.Error())
+		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
+	}
+	logger_ap.Infof("doPostClusterToClusterRequest of type %v from %v", reqOpCode, req.GetSender())
+
+	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
+	if err != nil {
+		adminport.Logger().Errorf("P2PReceive on %v request from %v resulted in err %v", base.XDCRClusterToClusterPath, req.GetSender(), err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
+	}
+	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())
 }

@@ -432,9 +432,10 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
 					p.receiveHandlersMtx.RUnlock()
 				} else if cbOpts.remoteClusterRef != nil {
-					// If we are sending to a remote cluster, the remote cluster won't be able
-					// to directly reply back to us because they do not have response back capability since they are not
-					// in the same cluster
+					// If we are sending to a remote cluster, the remote cluster won't be able to
+					// directly reply back to us because they do not have response back capability,
+					// since they are not in the same cluster. Hence clearing the opaque as
+					// no meaningful response is expected.
 					p.receiveHandlersMtx.RLock()
 					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
 					p.receiveHandlersMtx.RUnlock()
@@ -501,7 +502,9 @@ type SendOpts struct {
 
 	maxRetry int
 
-	remoteClusterRef *metadata.RemoteClusterReference // non-nil if we plan to send to a remote cluster's XDCR
+	// Non-nil if we plan to send to a remote cluster's XDCR; which leads to the use of
+	// (PeerToPeerCommAPI).P2PRemoteSend() method for inter-cluster communication (/xdcr/c2cCommunications).
+	remoteClusterRef *metadata.RemoteClusterReference
 }
 
 type SendOptsMap map[string]chan ReqRespPair

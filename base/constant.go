@@ -65,6 +65,7 @@ const ScopesPath = "/scopes/"
 const CollectionsPath = "/collections/"
 const ClientCertAuthPath = "/settings/clientCertAuth"
 const TerseClusterInfoPath = "/pools/default/terseClusterInfo"
+const XDCRClusterToClusterPath = XDCRPrefix + "/c2cCommunications"
 
 // Streaming API paths. They are used for source clusters only
 const ObservePoolPath = "/poolsStreaming/default"
@@ -623,6 +624,7 @@ const (
 	PermissionXDCRAdminInternalRead   = "cluster.admin.internal.xdcr!read"
 	PermissionXDCRAdminInternalWrite  = "cluster.admin.internal.xdcr!write"
 	PermissionXDCRPrometheusRead      = "cluster.admin.internal.stats!read"
+	PermissionC2cCommunications       = "cluster.xdcr.c2c_communications!all"
 
 	//  XDCR Admin has following permissions but not cluster.admin.internal.xdcr
 	PermissionXDCRInternalRead  = "cluster.xdcr.internal!read"

@@ -204,7 +204,7 @@ func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteCluste
 	}
 
 	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), base.MethodPost, base.JsonContentType,
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRClusterToClusterPath, false, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), base.MethodPost, base.JsonContentType,
 		payload, base.ShortHttpTimeout, &out, nil, false, logger)
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
