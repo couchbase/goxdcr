@@ -129,6 +129,10 @@ func (s *SrcHeartbeatHandler) handler() {
 		case <-s.finCh:
 			return
 		case req := <-s.receiveReqCh:
+			if base.SrcHeartbeatIgnoreIncoming {
+				s.logger.Debugf("ignoring heartbeat from remote: %v", req)
+				continue
+			}
 			sourceHeartbeatReq, isReq := req.(*SourceHeartbeatReq)
 			if isReq {
 				go s.handleRequest(sourceHeartbeatReq)
@@ -275,6 +279,10 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[
 }
 
 func (s *SrcHeartbeatHandler) periodicPrintSummary() {
+	if base.SrcHeartbeatIgnoreIncoming {
+		return
+	}
+
 	ticker := time.NewTicker(base.SrcHeartbeatExpirationTimeout)
 	for {
 		select {

@@ -1304,7 +1304,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	srcHeartbeatEnabled bool, srcHeartbeatExpiration time.Duration, srcHeartbeatCooldownSecs time.Duration) {
+	srcHeartbeatEnabled bool, srcHeartbeatExpiration time.Duration, srcHeartbeatCooldownSecs time.Duration,
+	srcHeartbeatIgnoreIncoming bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1466,6 +1467,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	SrcHeartbeatEnabled = srcHeartbeatEnabled
 	SrcHeartbeatExpirationTimeout = srcHeartbeatExpiration
 	SrcHeartbeatCooldownPeriod = srcHeartbeatCooldownSecs
+	SrcHeartbeatIgnoreIncoming = srcHeartbeatIgnoreIncoming
 }
 
 // XDCR Dev hidden replication settings
@@ -1822,9 +1824,11 @@ const (
 	MandatoryVal                   = "mandatory"
 )
 
-// Target Awareness (Heartbeat) related attributes
+// Target Awareness (Heartbeat) related Internal Setting
 var (
-	SrcHeartbeatEnabled           = true
+	SrcHeartbeatEnabled        = true  // to enable/disable sending heartbeats as a Source cluster
+	SrcHeartbeatIgnoreIncoming = false // to accept or ignore heartbeats from remote Source clusters
+
 	SrcHeartbeatExpirationTimeout = 5 * time.Minute
 	SrcHeartbeatCooldownPeriod    = 60 * time.Second
 )
