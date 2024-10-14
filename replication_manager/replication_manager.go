@@ -363,6 +363,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.SrcHeartbeatExpirationTimeoutMinKey].(int))*time.Minute,
 		time.Duration(internal_settings.Values[metadata.SrcHeartbeatCooldownPeriodSecsKey].(int))*time.Second,
 		internal_settings.Values[metadata.SrcHeartbeatIgnoreIncomingKey].(bool),
+		internal_settings.Values[metadata.SrcHeartbeatSkipIntraClusterKey].(bool),
 	)
 }
 

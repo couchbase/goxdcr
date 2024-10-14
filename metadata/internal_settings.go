@@ -292,6 +292,7 @@ const (
 	SrcHeartbeatExpirationTimeoutMinKey = "SrcHeartbeatExprationTimeoutMin"
 	SrcHeartbeatCooldownPeriodSecsKey   = "SrcHeartbeatCooldownPeriodSec"
 	SrcHeartbeatIgnoreIncomingKey       = "SrcHeartbeatIgnoreIncoming"
+	SrcHeartbeatSkipIntraClusterKey     = "SrcHeartbeatSkipIntraCluster"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -425,6 +426,7 @@ var SrcHeartbeatEnabledConfig = &SettingsConfig{base.SrcHeartbeatEnabled, nil}
 var SrcHeartbeatExpirationTimeoutConfig = &SettingsConfig{int(base.SrcHeartbeatExpirationTimeout / time.Minute), &Range{1, 2440}}
 var SrcHeartbeatCooldownPeriodConfig = &SettingsConfig{int(base.SrcHeartbeatCooldownPeriod / time.Second), &Range{15, 600}}
 var SrcHeartbeatIgnoreIncomingConfig = &SettingsConfig{base.SrcHeartbeatIgnoreIncoming, nil}
+var SrcHeartbeatSkipIntraClusterConfig = &SettingsConfig{base.SrcHeartbeatSkipIntraCluster, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -558,6 +560,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	SrcHeartbeatExpirationTimeoutMinKey:           SrcHeartbeatExpirationTimeoutConfig,
 	SrcHeartbeatCooldownPeriodSecsKey:             SrcHeartbeatCooldownPeriodConfig,
 	SrcHeartbeatIgnoreIncomingKey:                 SrcHeartbeatIgnoreIncomingConfig,
+	SrcHeartbeatSkipIntraClusterKey:               SrcHeartbeatSkipIntraClusterConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

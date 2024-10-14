@@ -1295,7 +1295,7 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
 
-		if base.SrcHeartbeatEnabled {
+		if agent.allowedToSendHeartbeats(agentUuid) {
 			agent.agentWaitGrp.Add(1)
 			go agent.runHeartbeatSender()
 		}
@@ -1310,6 +1310,22 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		atomic.StoreUint32(&agent.initDone, 1)
 	}
 	return err
+}
+
+func (agent *RemoteClusterAgent) allowedToSendHeartbeats(remoteUUID string) bool {
+	if !base.SrcHeartbeatEnabled {
+		return false
+	}
+
+	if !base.SrcHeartbeatSkipIntraCluster {
+		return true
+	}
+
+	myUUID, err := agent.topologySvc.MyClusterUUID()
+	if err != nil {
+		agent.logger.Warnf("agent for remote cluster %v failed to fetch local cluster's UUID: %v", remoteUUID, err.Error())
+	}
+	return (myUUID != remoteUUID)
 }
 
 func (agent *RemoteClusterAgent) stopAllGoRoutines() {

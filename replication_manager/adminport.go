@@ -1372,6 +1372,7 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 		adminport.Logger().Errorf("Unable to generate req or resp from %v err: %v\n", localRemoteIPs.Remote, err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
+
 	logger_ap.Infof("doPostPeerToPeerRequest of type %v from %v", req.GetOpcode(), req.GetSender())
 
 	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
