@@ -816,6 +816,19 @@ func (v *ReplicationPayload) LoadBrokenMappingDoc(brokenMappingDoc metadata.Coll
 	return nil
 }
 
+func (v *ReplicationPayload) LoadGlobaltimestampDoc(gtsDoc metadata.GlobalTimestampCompressedDoc, srcBucketName string) error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
+
+	payload, found := (*v.payload)[srcBucketName]
+	if !found {
+		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+	}
+
+	payload.GlobalTimestampDoc = &gtsDoc
+	return nil
+}
+
 func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMapType, srcBucketName string, srcManifestId uint64) error {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
@@ -1181,8 +1194,9 @@ type VBMasterPayload struct {
 	SrcManifests *metadata.ManifestsCache
 	TgtManifests *metadata.ManifestsCache
 
-	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc // Shallow copied
-	BackfillMappingDoc *metadata.CollectionNsMappingsDoc // Shallow copied
+	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc      // Shallow copied
+	BackfillMappingDoc *metadata.CollectionNsMappingsDoc      // Shallow copied
+	GlobalTimestampDoc *metadata.GlobalTimestampCompressedDoc // Shallow copied
 }
 
 func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload {
@@ -1200,6 +1214,7 @@ func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload
 		TgtManifests:       p.TgtManifests.Clone(),
 		BrokenMappingDoc:   p.BrokenMappingDoc,
 		BackfillMappingDoc: p.BackfillMappingDoc,
+		GlobalTimestampDoc: p.GlobalTimestampDoc,
 	}
 	return retPayload
 }
@@ -1219,6 +1234,7 @@ func (p *VBMasterPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16) *
 		TgtManifests:       p.TgtManifests.Clone(),
 		BrokenMappingDoc:   p.BrokenMappingDoc,
 		BackfillMappingDoc: p.BackfillMappingDoc,
+		GlobalTimestampDoc: p.GlobalTimestampDoc,
 	}
 	return retPayload
 }
@@ -1401,7 +1417,7 @@ func (p *VBMasterPayload) SameAs(other *VBMasterPayload) bool {
 		return p.NotMyVBs.SameAs(other.NotMyVBs) && p.ConflictingVBs.SameAs(other.ConflictingVBs) &&
 			p.PushVBs.SameAs(other.PushVBs) && p.SrcManifests.SameAs(other.SrcManifests) &&
 			p.TgtManifests.SameAs(other.TgtManifests) && p.BrokenMappingDoc.SameAs(other.BrokenMappingDoc) &&
-			p.BackfillMappingDoc.SameAs(other.BackfillMappingDoc)
+			p.BackfillMappingDoc.SameAs(other.BackfillMappingDoc) && p.GlobalTimestampDoc.SameAs(other.GlobalTimestampDoc)
 	}
 }
 
@@ -1523,7 +1539,6 @@ func (v *VBsPayload) SameAs(other *VBsPayload) bool {
 	return true
 }
 
-// TODO NEIL - perhaps we have not been populating brokenmapping properly??
 func (v *VBsPayload) PostDecompressInit() error {
 	if v == nil {
 		return nil

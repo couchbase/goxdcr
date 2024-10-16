@@ -57,20 +57,6 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			GuardrailDiskSpaceCnt:     300,
 			CasPoisonCnt:              1,
 		},
-		GlobalTimestamp: GlobalTimestamp{
-			100: &GlobalVBTimestamp{
-				TargetVBTimestamp{
-					Target_vb_opaque: vbUuidAndTimestamp,
-					Target_Seqno:     5,
-					TargetManifest:   10,
-				},
-			},
-		},
-		GlobalCounters: GlobalTargetCounters{
-			1: &TargetPerVBCounters{
-				CasPoisonCnt: 2,
-			},
-		},
 	}
 
 	brokenMap := make(CollectionNamespaceMapping)
@@ -409,6 +395,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			},
 		},
 	}
+	assert.Nil(newCkptRecord.PopulateGlobalTimestampSha())
 
 	ns1, err := base.NewCollectionNamespaceFromString("s1.col1")
 	assert.Nil(err)
@@ -465,6 +452,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
+	assert.Nil(ckptRecord2.PopulateGlobalTimestampSha())
 
 	ckpt_doc := NewCheckpointsDoc("testInternalId")
 	added, _ := ckpt_doc.AddRecord(&newCkptRecord)
@@ -478,12 +466,25 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 	ckptDocCompressed, shaMapCompressed, err := ckpt_doc.SnappyCompress()
 	assert.Nil(err)
 
+	// Before checking, need to get sha for global timestamp
+	gtsShaMap := make(ShaToGlobalTimestampMap)
+	for _, record := range ckpt_doc.Checkpoint_records {
+		if record == nil {
+			continue
+		}
+		gts := record.GlobalTimestamp
+		gtsShaMap[record.GlobalTimestampSha256] = &gts
+	}
+
 	var checkDoc CheckpointsDoc
 	err = json.Unmarshal(marshalledData, &checkDoc)
 	assert.Nil(err)
-	shaToBrokenMap := make(ShaToCollectionNamespaceMap)
-	shaToBrokenMap[fmt.Sprintf("%s", brokenMap1Sha)] = &brokenMap
-	shaToBrokenMap[fmt.Sprintf("%s", brokenMap2Sha)] = &brokenMap2
+	for _, record := range checkDoc.Checkpoint_records {
+		if record == nil {
+			continue
+		}
+		assert.Nil(record.LoadGlobalTsMapping(gtsShaMap))
+	}
 
 	assert.Equal(5, len(checkDoc.Checkpoint_records))
 	assert.NotNil(checkDoc.Checkpoint_records[1])

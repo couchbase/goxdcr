@@ -16,8 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"math/rand"
-	"os"
+
 	"reflect"
 	"sync"
 	"time"
@@ -118,10 +117,11 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	waitGrp.Add(1)
 	go h.fetchAllManifests(req.ReplicationId, &cachedSrcManifests, &cachedTgtManifests, &manifestErr, waitGrp, finCh)
 
-	var brokenMappingErr error
+	var shaMappingDocErr error
 	var brokenMappingDoc metadata.CollectionNsMappingsDoc
+	var globalTimestampDoc metadata.GlobalTimestampCompressedDoc
 	waitGrp.Add(1)
-	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp, finCh)
+	go h.fetchShaMappingDocs(req.ReplicationId, &brokenMappingDoc, &globalTimestampDoc, &shaMappingDocErr, waitGrp, finCh)
 
 	var backfillTasksErr error
 	var backfillTaskSrcManifestId uint64
@@ -163,9 +163,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	if brokenMappingErr != nil {
-		h.logger.Errorf("%v (%v) - brokenMapping error %v", req.ReplicationId, req.GetOpaque(), brokenMappingErr)
-		resp.ErrorString = brokenMappingErr.Error()
+	if shaMappingDocErr != nil {
+		h.logger.Errorf("%v (%v) - compressed sha mapping error %v", req.ReplicationId, req.GetOpaque(), shaMappingDocErr)
+		resp.ErrorString = shaMappingDocErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
 			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
@@ -238,11 +238,19 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
+	err = resp.LoadGlobaltimestampDoc(globalTimestampDoc, req.SourceBucketName)
+	if err != nil {
+		h.logger.Errorf("%v (%v) - when loading global timestamp doc into response, got %v", req.ReplicationId, req.GetOpaque(), err)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
+		}
+		return
+	}
+
 	// Final Callback
 	doneProcessedTime := time.Now()
-	respBytes, _ := resp.Serialize()
-	randNum := rand.Int()
-	os.WriteFile(fmt.Sprintf("/tmp/p2pSerialize.json_%v", randNum), respBytes, 0644)
 	handlerResult, err := req.CallBack(resp)
 	if err != nil || handlerResult != nil && handlerResult.GetError() != nil {
 		var handlerResultErr error
@@ -448,15 +456,16 @@ func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *me
 	*tgtManifests = tgt
 }
 
-func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
+func (v *VBMasterCheckHandler) fetchShaMappingDocs(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, globalTsDoc *metadata.GlobalTimestampCompressedDoc, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
 
 	var err error
 	var loadedDoc *metadata.CollectionNsMappingsDoc
+	var loadedGtsDoc *metadata.GlobalTimestampCompressedDoc
 	doneCh := make(chan bool)
 
 	go func() {
-		_, loadedDoc, _, _, err = v.ckptSvc.LoadBrokenMappings(replId)
+		loadedDoc, loadedGtsDoc, err = v.ckptSvc.LoadAllShaMappings(replId)
 		close(doneCh)
 	}()
 
@@ -475,10 +484,11 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 		return
 	}
 	if loadedDoc == nil {
-		*errPtr = fmt.Errorf("Nil doc when loading brokenMapping")
+		*errPtr = fmt.Errorf("Nil doc when loading brokenMapping or global timestamp doc")
 		return
 	}
 	*mappingDoc = *loadedDoc
+	*globalTsDoc = *loadedGtsDoc
 }
 
 func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, backfillTaskSrcManifestId *uint64, waitGrp *sync.WaitGroup, finCh chan bool) {

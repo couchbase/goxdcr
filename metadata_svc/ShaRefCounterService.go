@@ -238,9 +238,14 @@ func (s *ShaRefCounterService) InitCounterShaToActualMappings(topic, internalSpe
 // Register a specific mapping - without actually adding a count
 // If the mapping is already registered, then no-op
 // If the mapping does not exist, then the mapping is saved and upserted to metakv
-func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, mapping *metadata.CollectionNamespaceMapping) error {
+func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, mapping interface{}) error {
 	if mapping == nil {
 		return base.ErrorInvalidInput
+	}
+	_, collectionOk := mapping.(*metadata.CollectionNamespaceMapping)
+	_, gtsOK := mapping.(*metadata.GlobalTimestamp)
+	if !collectionOk && !gtsOK {
+		return fmt.Errorf("invalid type: %T", mapping)
 	}
 
 	s.topicMapMtx.RLock()
@@ -264,6 +269,18 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 	}
 
 	return counter.upsertMapping(specInternalId, true)
+}
+
+func (s *ShaRefCounterService) UpsertGlobalTimestamps(topic, specInternalId string) error {
+	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
+	counter, ok := s.topicMaps[topic]
+
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	return counter.upsertGts(specInternalId, true)
 }
 
 func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.UtilsIface) error {
@@ -336,7 +353,7 @@ type MapShaRefCounter struct {
 	lock               sync.RWMutex
 	singleUpsert       chan bool
 	finch              chan bool
-	refCnt             map[string]uint64                    // map of sha to refCnt
+	refCnt             map[string]uint64                    // map of sha to refCnt (shared between shaToMapping and shaToGlobalTs due to unlikelihood of collision)
 	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping
 	shaToGlobalTs      metadata.ShaToGlobalTimestampMap
 	needToSync         bool // needs to sync refCnt to shaMap and then also persist to metakv
@@ -555,10 +572,35 @@ func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string,
 }
 
 // Currently, starts count at 0
-func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metadata.CollectionNamespaceMapping) error {
+func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mappingGeneric interface{}) error {
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
+
+	colMapping, collectionOk := mappingGeneric.(*metadata.CollectionNamespaceMapping)
+	gts, gtsOK := mappingGeneric.(*metadata.GlobalTimestamp)
+	if !collectionOk && !gtsOK {
+		return fmt.Errorf("invalid type %T", mappingGeneric)
+	}
+
+	if collectionOk {
+		err := c.registerCollectionMapping(colMapping)
+		if err != nil {
+			return err
+		}
+		return c.upsertMapping(internalSpecId, false)
+	} else if gtsOK {
+		err := c.registerGtsMapping(gts)
+		if err != nil {
+			return err
+		}
+		return nil
+	} else {
+		return fmt.Errorf("invalid type: %T", mappingGeneric)
+	}
+}
+
+func (c *MapShaRefCounter) registerCollectionMapping(mapping *metadata.CollectionNamespaceMapping) error {
 	sha, err := mapping.Sha256()
 	if err != nil {
 		return fmt.Errorf("Unable to get sha256 %v for mapping %v", c.id, mapping.String())
@@ -583,8 +625,29 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metad
 		}
 		c.lock.Unlock()
 	}
+	return nil
+}
 
-	return c.upsertMapping(internalSpecId, false)
+// During checkpoint operation, it is expected that for every source VB that performs a checkpoint and that
+// has a valid global timestamp, this function will be called
+func (c *MapShaRefCounter) registerGtsMapping(globalTs *metadata.GlobalTimestamp) error {
+	sha, err := globalTs.Sha256()
+	if err != nil {
+		return fmt.Errorf("Unable to get sha256 %v for globalTs %v", c.id, globalTs)
+	}
+	shaString := fmt.Sprintf("%x", sha[:])
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	_, exists := c.shaToGlobalTs[shaString]
+	if !exists {
+		c.shaToGlobalTs[shaString] = globalTs
+		c.refCnt[shaString] = 1
+		c.setNeedToSyncNoLock(true)
+	} else {
+		c.refCnt[shaString]++
+	}
+	return nil
 }
 
 func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.CompressedMappings, error) {
@@ -642,7 +705,79 @@ func (c *MapShaRefCounter) setNeedToSyncNoLock(val bool) {
 	c.needToSyncRevision++
 }
 
+func (c *MapShaRefCounter) upsertGts(specInternalId string, cleanup bool) error {
+	getShaMapToLoad := func() (map[string]metadata.SnappyCompressableVal, error) {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		if c.internalSpecId == "" {
+			c.internalSpecId = specInternalId
+		} else if specInternalId != "" && c.internalSpecId != specInternalId {
+			err := fmt.Errorf("upserting failed with mismatching internalId %v vs %v", c.internalSpecId, specInternalId)
+			return nil, err
+		}
+		// First sync clean up the mapping
+		if cleanup {
+			var keysToCleanUp []string
+			for sha, _ := range c.shaToGlobalTs {
+				count, exists := c.refCnt[sha]
+				if !exists || count == 0 {
+					if count == 0 {
+						delete(c.refCnt, sha)
+					}
+					keysToCleanUp = append(keysToCleanUp, sha)
+				}
+			}
+			for _, key := range keysToCleanUp {
+				delete(c.shaToGlobalTs, key)
+			}
+		}
+
+		// Make a clone for the upsert
+		clonedMapping := c.shaToGlobalTs.Clone()
+		return clonedMapping.ToSnappyCompressableMap(), nil
+	}
+
+	return c.upsertInternal(specInternalId, cleanup, c.upsertGts, getShaMapToLoad)
+}
+
 func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) error {
+	getShaMapToLoad := func() (map[string]metadata.SnappyCompressableVal, error) {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		if c.internalSpecId == "" {
+			c.internalSpecId = specInternalId
+		} else if specInternalId != "" && c.internalSpecId != specInternalId {
+			err := fmt.Errorf("Upserting failed with mismatching internalId %v vs %v", c.internalSpecId, specInternalId)
+			return nil, err
+		}
+		// First sync clean up the mapping
+		if cleanup {
+			var keysToCleanUp []string
+			for sha, _ := range c.shaToMapping {
+				count, exists := c.refCnt[sha]
+				if !exists || count == 0 {
+					if count == 0 {
+						delete(c.refCnt, sha)
+					}
+					keysToCleanUp = append(keysToCleanUp, sha)
+				}
+			}
+			for _, key := range keysToCleanUp {
+				delete(c.shaToMapping, key)
+			}
+		}
+
+		// Make a clone for the upsert
+		clonedMapping := c.shaToMapping.Clone()
+		return clonedMapping.ToSnappyCompressableMap(), nil
+	}
+	return c.upsertInternal(specInternalId, cleanup, c.upsertMapping, getShaMapToLoad)
+}
+
+func (c *MapShaRefCounter) upsertInternal(specInternalId string, cleanup bool,
+	retryFunc func(string, bool) error,
+	getShamapToLoad func() (map[string]metadata.SnappyCompressableVal, error)) error {
+
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
@@ -675,40 +810,11 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 				}
 				c.lock.Unlock()
 				if needToReUpsert {
-					defer c.upsertMapping(specInternalId, cleanup)
+					defer retryFunc(specInternalId, cleanup)
 				}
 			}
 			upsertCh <- true
 		}()
-
-		c.lock.Lock()
-		if c.internalSpecId == "" {
-			c.internalSpecId = specInternalId
-		} else if specInternalId != "" && c.internalSpecId != specInternalId {
-			err = fmt.Errorf("Upserting failed with mismatching internalId %v vs %v", c.internalSpecId, specInternalId)
-			c.lock.Unlock()
-			return err
-		}
-		// First sync clean up the mapping
-		if cleanup {
-			var keysToCleanUp []string
-			for sha, _ := range c.shaToMapping {
-				count, exists := c.refCnt[sha]
-				if !exists || count == 0 {
-					if count == 0 {
-						delete(c.refCnt, sha)
-					}
-					keysToCleanUp = append(keysToCleanUp, sha)
-				}
-			}
-			for _, key := range keysToCleanUp {
-				delete(c.shaToMapping, key)
-			}
-		}
-
-		// Make a clone for the upsert
-		clonedMapping := c.shaToMapping.Clone()
-		c.lock.Unlock()
 
 		// Perform RMW
 		mappingDoc, err := c.GetMappingsDoc(false /*initIfNotFound*/)
@@ -722,15 +828,20 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 			return err
 		}
 
-		collectionNsMappingsDoc := (*metadata.CollectionNsMappingsDoc)(mappingDoc)
-		err = collectionNsMappingsDoc.LoadShaMap(clonedMapping)
+		shaMap, err := getShamapToLoad()
 		if err != nil {
 			return err
 		}
+
+		err = mappingDoc.LoadShaMap(shaMap)
+		if err != nil {
+			return err
+		}
+
 		err = c.upsertCompressedMappingDoc(mappingDoc, false /*new*/)
 		return err
 	default:
-		return fmt.Errorf("Error upserting broken mapping for %v as an operation is happening already", c.id)
+		return fmt.Errorf("Error upserting mapping for %v as an operation is happening already", c.id)
 	}
 }
 
