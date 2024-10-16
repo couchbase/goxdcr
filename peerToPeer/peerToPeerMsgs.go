@@ -2123,6 +2123,7 @@ type SourceHeartbeatReq struct {
 	SourceClusterName string
 	NodesList         []string
 	ProxyMode         bool // ProxyMode is set when the receiver node needs to forward the request to its peers
+	TTL               time.Duration
 
 	specs []*metadata.ReplicationSpecification // Use this but not meant for over the wire
 
@@ -2144,6 +2145,7 @@ func (s *SourceHeartbeatReq) LoadInfoFrom(orig *SourceHeartbeatReq) *SourceHeart
 	s.specs = orig.specs
 	s.NodesList = orig.NodesList
 	s.ProxyMode = orig.ProxyMode
+	s.TTL = orig.TTL
 	return s
 }
 
@@ -2168,6 +2170,11 @@ func (s *SourceHeartbeatReq) DisableProxyMode() *SourceHeartbeatReq {
 
 func (s *SourceHeartbeatReq) SetNodesList(nodesList []string) *SourceHeartbeatReq {
 	s.NodesList = nodesList
+	return s
+}
+
+func (s *SourceHeartbeatReq) SetTTL(ttl time.Duration) *SourceHeartbeatReq {
+	s.TTL = ttl
 	return s
 }
 
@@ -2212,6 +2219,7 @@ func (s *SourceHeartbeatReq) SameAs(otherRaw interface{}) (bool, error) {
 
 	if s.SourceClusterUUID != other.SourceClusterUUID ||
 		s.SourceClusterName != other.SourceClusterName ||
+		s.TTL != other.TTL ||
 		len(s.NodesList) != len(other.NodesList) ||
 		len(s.specs) != len(other.specs) {
 		return false, nil

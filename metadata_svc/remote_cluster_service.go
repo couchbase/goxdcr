@@ -404,10 +404,11 @@ type RemoteClusterAgent struct {
 	// When set to true, the refresh loop goes into bootstrap mode
 	bootstrap bool
 
-	// These are heartbeat related APIs
+	// These are heartbeat related attributes
 	heartbeatAPIMtx             sync.RWMutex
 	heartbeatAPI                service_def.ClusterHeartbeatAPI
 	srcClusterSupportsHeartbeat bool
+	lastSentHeartbeatMetadata   *metadata.HeartbeatMetadata
 
 	// specsReader is used to avoid circular reference with replication spec svc
 	specsReaderMtx sync.RWMutex
@@ -4080,8 +4081,11 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 	cachedId := agent.reference.Id()
 	agent.refMtx.RUnlock()
 
-	ticker := time.NewTicker(base.RemoteHeartbeatCheckInterval)
-	defer ticker.Stop()
+	minHBIntervalTicker := time.NewTicker(base.SrcHeartbeatMinInterval)
+	defer minHBIntervalTicker.Stop()
+
+	maxHBIntervalTicker := time.NewTicker(base.SrcHeartbeatMaxInterval())
+	defer maxHBIntervalTicker.Stop()
 
 	for {
 		select {
@@ -4089,26 +4093,67 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 			agent.logger.Infof("Heartbeat sensor %v is stopped", cachedId)
 			return
 
-		case <-ticker.C:
-			amIOrchestrator, err := agent.topologySvc.IsOrchestratorNode()
-			if err != nil || !amIOrchestrator {
-				continue
-			}
-
-			if !agent.heartbeatAPIReady() || !agent.specsReaderReady() || !agent.srcSupportsHeartbeat() {
-				continue
-			}
-
-			// check if every node in the target cluster supports heartbeat
-			capability, err := agent.GetCapability()
-			if err != nil || !capability.HasHeartbeatSupport() {
+		case <-minHBIntervalTicker.C:
+			if !agent.heartbeatPreCheck() {
+				agent.logger.Debugf("heartbeat pre-check failed")
 				// check again later
 				continue
 			}
 
-			agent.sendHeartbeat()
+			hbMetadata, err := agent.generateHeartbeatMetadata(agent.GetReferenceClone())
+			if err != nil {
+				agent.logger.Warnf("failed to generate heartbeat metadata for cluster %v due to: %v", agent.reference.Uuid(), err)
+				continue
+			}
+
+			agent.heartbeatAPIMtx.RLock()
+			if agent.lastSentHeartbeatMetadata.SameAs(hbMetadata) {
+				agent.logger.Debugf("no metadata change for cluster %v since last heartbeat", agent.reference.Uuid())
+				agent.heartbeatAPIMtx.RUnlock()
+				continue
+			}
+			agent.heartbeatAPIMtx.RUnlock()
+
+			maxHBIntervalTicker.Reset(base.SrcHeartbeatMaxInterval()) // delay by atmost SrcHeartbeatMaxInterval
+			agent.sendHeartbeat(hbMetadata)
+
+		case <-maxHBIntervalTicker.C:
+			if !agent.heartbeatPreCheck() {
+				agent.logger.Debugf("heartbeat pre-check failed")
+				// check again later
+				continue
+			}
+
+			hbMetadata, err := agent.generateHeartbeatMetadata(agent.GetReferenceClone())
+			if err != nil {
+				agent.logger.Warnf("failed to generate heartbeat metadata for cluster %v due to: %v", agent.reference.Uuid(), err)
+				continue
+			}
+
+			agent.sendHeartbeat(hbMetadata)
+			minHBIntervalTicker.Reset(base.SrcHeartbeatMinInterval) // delay by atleast SrcHeartbeatMinInterval
 		}
 	}
+}
+
+// Performs a pre-check for the conditions necessary to send a heartbeat
+func (agent *RemoteClusterAgent) heartbeatPreCheck() bool {
+	amIOrchestrator, err := agent.topologySvc.IsOrchestratorNode()
+	if err != nil || !amIOrchestrator {
+		return false
+	}
+
+	if !agent.heartbeatAPIReady() || !agent.specsReaderReady() || !agent.srcSupportsHeartbeat() {
+		return false
+	}
+
+	// check if every node in the target cluster supports heartbeat
+	capability, err := agent.GetCapability()
+	if err != nil || !capability.HasHeartbeatSupport() {
+		return false
+	}
+
+	return true
 }
 
 func (agent *RemoteClusterAgent) setHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
@@ -4124,23 +4169,61 @@ func (agent *RemoteClusterAgent) setReplReader(reader service_def.ReplicationSpe
 	agent.specsReader = reader
 }
 
-func (agent *RemoteClusterAgent) sendHeartbeat() {
-	if !agent.InitDone() {
-		// Don't send heartbeat
+func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata) {
+	clonedRef := agent.GetReferenceClone()
+	err := agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, hbMetadata)
+	if err != nil {
+		agent.logger.Warnf("sending heartbeat to %v has err %v", clonedRef.Name(), err)
 		return
 	}
-	clonedRef := agent.GetReferenceClone()
+
+	agent.heartbeatAPIMtx.Lock()
+	agent.lastSentHeartbeatMetadata = hbMetadata
+	agent.heartbeatAPIMtx.Unlock()
+}
+
+func (agent *RemoteClusterAgent) generateHeartbeatMetadata(clonedRef *metadata.RemoteClusterReference) (*metadata.HeartbeatMetadata, error) {
+	var err error
+	if !agent.InitDone() {
+		// Don't send heartbeat
+		err = fmt.Errorf("RemoteClusterAgent.InitDone() for cluster %v returned false", agent.reference.Uuid())
+		return nil, err
+	}
+
+	var sourceClusterUUID, sourceClusterName string
+
+	if sourceClusterUUID, err = agent.topologySvc.MyClusterUUID(); err != nil {
+		return nil, err
+	}
+	if sourceClusterName, err = agent.topologySvc.MyClusterName(); err != nil {
+		return nil, err
+	}
 
 	specs, err := agent.specsReader.AllReplicationSpecsWithRemote(clonedRef)
 	if err != nil {
-		agent.logger.Warnf("Unable to send heartbeat to %v as polling specs has err %v", clonedRef.Name(), err)
-		return
+		return nil, err
 	}
 
-	err = agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, specs)
+	nodesList, err := agent.topologySvc.PeerNodesAdminAddrs()
 	if err != nil {
-		agent.logger.Warnf("Sending heartbeat to %v has err %v", clonedRef.Name(), err)
+		return nil, err
 	}
+
+	srcStr, err := agent.topologySvc.MyHostAddr()
+	if err != nil {
+		return nil, err
+	}
+	nodesList = append(nodesList, srcStr) // Add local node back amongst the peers
+
+	hbMetadata := &metadata.HeartbeatMetadata{
+		SourceClusterUUID: sourceClusterUUID,
+		SourceClusterName: sourceClusterName,
+		SourceSpecsList:   specs,
+		NodesList:         nodesList,
+		TTL:               time.Duration(base.SrcHeartbeatExpiryFactor) * base.SrcHeartbeatMaxInterval(),
+	}
+
+	return hbMetadata, nil
 }
 
 func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {

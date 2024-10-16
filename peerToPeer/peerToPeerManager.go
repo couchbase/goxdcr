@@ -1195,7 +1195,7 @@ func (p *P2PManagerImpl) SendDelBackfill(specId string) error {
 	return nil
 }
 
-func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error {
+func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hb *metadata.HeartbeatMetadata) error {
 	srcStr, err := p.xdcrCompSvc.MyHostAddr()
 	if err != nil {
 		return err
@@ -1205,25 +1205,14 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 		return err
 	}
 
-	nodesList, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
-	if err != nil {
-		return err
-	}
-	// Add myself back in amongst the peers
-	nodesList = append(nodesList, srcStr)
-
-	var sourceClusterUUID, sourceClusterName string
-	if sourceClusterUUID, err = p.xdcrCompSvc.MyClusterUUID(); err != nil {
-		return err
-	}
-	if sourceClusterName, err = p.xdcrCompSvc.MyClusterName(); err != nil {
-		return err
-	}
-
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(srcStr, target, p.GetLifecycleId(), "", getOpaqueWrapper())
-		req := NewSourceHeartbeatReq(common).SetUUID(sourceClusterUUID).SetClusterName(sourceClusterName).SetNodesList(nodesList)
-		for _, spec := range specs {
+		req := NewSourceHeartbeatReq(common).
+			SetUUID(hb.SourceClusterUUID).
+			SetClusterName(hb.SourceClusterName).
+			SetNodesList(hb.NodesList).
+			SetTTL(hb.TTL)
+		for _, spec := range hb.SourceSpecsList {
 			req.AppendSpec(spec)
 		}
 		return req
@@ -1248,16 +1237,16 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 	return nil
 }
 
-func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
 	p.receiveHandlersMtx.RLock()
 	handlerGeneric, ok := p.receiveHandlers[ReqSrcHeartbeat]
 	p.receiveHandlersMtx.RUnlock()
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("unable to find heartbeat handler")
+		return nil, nil, nil, nil, nil, fmt.Errorf("unable to find heartbeat handler")
 	}
 	srcClustersProvider, ok := handlerGeneric.(SourceClustersProvider)
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
+		return nil, nil, nil, nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
 	}
 	return srcClustersProvider.GetSourceClustersInfoV1()
 }

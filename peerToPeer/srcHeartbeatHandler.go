@@ -13,19 +13,15 @@ import (
 )
 
 type SourceClustersProvider interface {
-	GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
+	GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error)
 }
 
 type HeartbeatCache struct {
-	cacheMtx sync.RWMutex
+	metadata.HeartbeatMetadata
 
+	cacheMtx    sync.RWMutex
 	expiryTimer *time.Timer
 	refreshTime time.Time
-
-	SourceClusterUUID string
-	SourceClusterName string
-	SourceSpecsList   metadata.ReplSpecList
-	NodesList         []string
 }
 
 // note: should NOT be concurrently called on the same HeartbeatCache value
@@ -34,9 +30,15 @@ func (h *HeartbeatCache) LoadInfoFrom(req *SourceHeartbeatReq) {
 	h.SourceClusterName = req.SourceClusterName
 	h.NodesList = req.NodesList
 	h.SourceSpecsList = req.specs
+	h.TTL = req.TTL
 }
 
 func (h *HeartbeatCache) HasHeartbeatMetadataChanged(incomingReq *SourceHeartbeatReq) bool {
+	// check if source cluster's TTL for heartbeats has changed
+	if h.TTL != incomingReq.TTL {
+		return true
+	}
+
 	// check if the list of source cluster nodes has changed
 	if len(h.NodesList) != len(incomingReq.NodesList) ||
 		len(base.StringListsFindMissingFromFirst(h.NodesList, incomingReq.NodesList)) > 0 {
@@ -52,31 +54,14 @@ func (h *HeartbeatCache) HasHeartbeatMetadataChanged(incomingReq *SourceHeartbea
 	return false
 }
 
-func (h *HeartbeatCache) IsRequestTooSoon() bool {
-	// currently called time
-	currentTime := time.Now()
-	h.cacheMtx.RLock()
-	defer h.cacheMtx.RUnlock()
-
-	if h.refreshTime.After(currentTime) {
-		// odd
-		return true
-	}
-
-	// If this heartbeat has been heard within a threshold, we should ignore
-	difference := currentTime.Sub(h.refreshTime)
-	// Each source cluster should send a heartbeat only once every RemoteHeartbeatCheckInterval (15 seconds)
-	return (difference.Seconds() < base.RemoteHeartbeatCheckInterval.Seconds())
-}
-
 // note: should NOT be concurrently called on the same HeartbeatCache value
 func (h *HeartbeatCache) UpdateRefreshTime() {
 	h.refreshTime = time.Now()
 }
 
-func NewHeartbeatCache(destroyOp func()) *HeartbeatCache {
+func NewHeartbeatCache(ttl time.Duration, destroyOp func()) *HeartbeatCache {
 	return &HeartbeatCache{
-		expiryTimer: time.AfterFunc(base.SrcHeartbeatExpirationTimeout, destroyOp),
+		expiryTimer: time.AfterFunc(ttl, destroyOp),
 		refreshTime: time.Now(),
 	}
 }
@@ -87,8 +72,7 @@ type SrcHeartbeatHandler struct {
 	sendFunc            sendPeerOnceFunc
 	lifecycleIdGetter   func() string
 
-	finCh              chan bool
-	printStatusTokenCh chan bool
+	finCh chan bool
 
 	heartbeatMtx sync.RWMutex
 	heartbeatMap map[string]*HeartbeatCache // key is cluster UUID
@@ -103,11 +87,9 @@ func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, 
 		finCh:               finCh,
 		xdcrCompTopologySvc: xdcrCompTopologySvc,
 		heartbeatMap:        map[string]*HeartbeatCache{},
-		printStatusTokenCh:  make(chan bool, 1),
 		sendFunc:            sendPeerOnce,
 		lifecycleIdGetter:   getLifeCycleId,
 	}
-	handler.printStatusTokenCh <- true
 	return handler
 }
 
@@ -153,10 +135,6 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 	if found {
 		defer s.heartbeatMtx.RUnlock()
 
-		if hbCache.IsRequestTooSoon() { // due to network delays or partition(s) between source cluster nodes
-			return
-		}
-
 		hbCache.cacheMtx.Lock()
 		defer hbCache.cacheMtx.Unlock()
 
@@ -164,7 +142,7 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 			// heartbeat arrived too late; cache entry has already expired
 			return
 		}
-		hbCache.expiryTimer.Reset(base.SrcHeartbeatExpirationTimeout)
+		hbCache.expiryTimer.Reset(req.TTL)
 
 		if req.ProxyMode {
 			go s.forwardToPeers(req)
@@ -185,11 +163,13 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 	s.heartbeatMtx.Lock()
 	_, found = s.heartbeatMap[req.SourceClusterUUID]
 	if !found {
-		hbCache = NewHeartbeatCache(func() {
-			s.heartbeatMtx.Lock()
-			delete(s.heartbeatMap, req.SourceClusterUUID)
-			s.heartbeatMtx.Unlock()
-		})
+		hbCache = NewHeartbeatCache(req.TTL,
+			func() {
+				s.heartbeatMtx.Lock()
+				delete(s.heartbeatMap, req.SourceClusterUUID)
+				s.heartbeatMtx.Unlock()
+			},
+		)
 		s.heartbeatMap[req.SourceClusterUUID] = hbCache
 		hbCache.LoadInfoFrom(req)
 	}
@@ -203,17 +183,6 @@ func (s *SrcHeartbeatHandler) handleResponse(resp *SourceHeartbeatResp) {
 }
 
 func (s *SrcHeartbeatHandler) PrintStatusSummary() {
-	select {
-	case <-s.printStatusTokenCh:
-		defer func() {
-			time.Sleep(base.SrcHeartbeatCooldownPeriod)
-			s.printStatusTokenCh <- true
-		}()
-	default:
-		// Still in cooldown, don't print
-		return
-	}
-
 	s.heartbeatMtx.RLock()
 	defer s.heartbeatMtx.RUnlock()
 
@@ -229,7 +198,7 @@ func (s *SrcHeartbeatHandler) PrintStatusSummary() {
 		for _, spec := range cache.SourceSpecsList {
 			statusLogStmt.WriteString(fmt.Sprintf("SrcBucket %v => TgtBucket %v ", spec.SourceBucketName, spec.TargetBucketName))
 		}
-		statusLogStmt.WriteString("} ")
+		statusLogStmt.WriteString(fmt.Sprintf("} RefreshTime: %v TTL: %v", cache.refreshTime, cache.TTL))
 	}
 
 	s.logger.Infof(statusLogStmt.String())
@@ -258,10 +227,12 @@ func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
 	}
 }
 
-func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
 	sourceClusterNamesMap := make(map[string]string)
 	sourceUuidSpecsMap := make(map[string][]*metadata.ReplicationSpecification)
 	sourceUuidNodesMap := make(map[string][]string)
+	heartbeatReceiveTime := make(map[string]time.Time)
+	heartbeatExpiryTime := make(map[string]time.Time)
 
 	s.heartbeatMtx.RLock()
 	defer s.heartbeatMtx.RUnlock()
@@ -271,11 +242,13 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[
 		sourceClusterNamesMap[srcUUID] = hb.SourceClusterName
 		sourceUuidSpecsMap[srcUUID] = hb.SourceSpecsList.Clone()
 		sourceUuidNodesMap[srcUUID] = base.SortStringList(base.CloneStringList(hb.NodesList))
+		heartbeatReceiveTime[srcUUID] = hb.refreshTime
+		heartbeatExpiryTime[srcUUID] = hb.refreshTime.Add(hb.TTL)
 
 		hb.cacheMtx.RUnlock()
 	}
 
-	return sourceClusterNamesMap, sourceUuidSpecsMap, sourceUuidNodesMap, nil
+	return sourceClusterNamesMap, sourceUuidSpecsMap, sourceUuidNodesMap, heartbeatReceiveTime, heartbeatExpiryTime, nil
 }
 
 func (s *SrcHeartbeatHandler) periodicPrintSummary() {
@@ -283,7 +256,7 @@ func (s *SrcHeartbeatHandler) periodicPrintSummary() {
 		return
 	}
 
-	ticker := time.NewTicker(base.SrcHeartbeatExpirationTimeout)
+	ticker := time.NewTicker(base.SrcHeartbeatSummaryInterval)
 	for {
 		select {
 		case <-s.finCh:

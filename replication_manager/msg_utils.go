@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	ap "github.com/couchbase/goxdcr/v8/adminport"
 	"github.com/couchbase/goxdcr/v8/base"
@@ -163,10 +164,12 @@ const (
 
 // Hearbeat related output constants
 const (
-	SrcClusterUUID  = "SourceClusterUUID"
-	SrcClusterName  = "SourceClusterName"
-	SrcClusterSpecs = "SourceClusterReplSpecs"
-	SrcClusterNodes = "SourceClusterNodes"
+	SrcClusterUUID          = "SourceClusterUUID"
+	SrcClusterName          = "SourceClusterName"
+	SrcClusterSpecs         = "SourceClusterReplSpecs"
+	SrcClusterNodes         = "SourceClusterNodes"
+	SrcClusterHBReceiveTime = "SourceClusterHBReceiveTime"
+	SrcClusterHBExpiryTime  = "SourceClusterHBExpiryTime"
 )
 
 // errors
@@ -1500,13 +1503,15 @@ func NewConnectionPreCheckGetResponse(taskId string, res base.ConnectionErrMapTy
 	return response, err
 }
 
-func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string][]*metadata.ReplicationSpecification, nodesMap map[string][]string) (*ap.Response, error) {
+func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string][]*metadata.ReplicationSpecification, nodesMap map[string][]string, receiveTimes, expiryTimes map[string]time.Time) (*ap.Response, error) {
 	var respLists []interface{}
 
 	for uuid, specsList := range specsMap {
 		singleSrcResult := make(map[string]interface{})
 		singleSrcResult[SrcClusterUUID] = uuid
 		singleSrcResult[SrcClusterName] = namesMap[uuid]
+		singleSrcResult[SrcClusterHBReceiveTime] = receiveTimes[uuid]
+		singleSrcResult[SrcClusterHBExpiryTime] = expiryTimes[uuid]
 		singleSrcResult[SrcClusterSpecs] = specsList
 		singleSrcResult[SrcClusterNodes] = nodesMap[uuid]
 		respLists = append(respLists, singleSrcResult)

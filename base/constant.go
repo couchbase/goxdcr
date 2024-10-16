@@ -924,9 +924,6 @@ var CapiDataChanSizeMultiplier = 1
 // interval for refreshing remote cluster references
 var RefreshRemoteClusterRefInterval = 15 * time.Second
 
-// interval for potentially posting heartbeats
-var RemoteHeartbeatCheckInterval = 60 * time.Second
-
 // max retry for capi batchUpdateDocs operation
 var CapiMaxRetryBatchUpdateDocs = 6
 
@@ -1304,8 +1301,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	srcHeartbeatEnabled bool, srcHeartbeatExpiration time.Duration, srcHeartbeatCooldownSecs time.Duration,
-	srcHeartbeatIgnoreIncoming bool, srcHeartbeatSkipIntraCluster bool) {
+	srcHeartbeatEnabled bool,
+	srcHeartbeatIgnoreIncoming bool, srcHeartbeatSkipIntraCluster bool,
+	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1465,10 +1463,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	NWLatencyToleranceMilliSec = nwLatencyToleranceMilliSec
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
 	SrcHeartbeatEnabled = srcHeartbeatEnabled
-	SrcHeartbeatExpirationTimeout = srcHeartbeatExpiration
-	SrcHeartbeatCooldownPeriod = srcHeartbeatCooldownSecs
 	SrcHeartbeatIgnoreIncoming = srcHeartbeatIgnoreIncoming
 	SrcHeartbeatSkipIntraCluster = srcHeartbeatSkipIntraCluster
+	SrcHeartbeatMinInterval = srcHeartbeatMinInterval
+	SrcHeartbeatMaxIntervalFactor = srcHeartbeatMaxIntervalFactor
 }
 
 // XDCR Dev hidden replication settings
@@ -1827,12 +1825,19 @@ const (
 
 // Target Awareness (Heartbeat) related Internal Setting
 var (
-	SrcHeartbeatEnabled          = true  // to enable/disable sending heartbeats as a Source cluster
-	SrcHeartbeatIgnoreIncoming   = false // to accept or ignore heartbeats from remote Source clusters
-	SrcHeartbeatSkipIntraCluster = true  // to skip sending heartbeats for intra-cluster replications
-
-	SrcHeartbeatExpirationTimeout = 5 * time.Minute
-	SrcHeartbeatCooldownPeriod    = 60 * time.Second
+	SrcHeartbeatEnabled           = true             // to enable/disable sending heartbeats as a Source cluster
+	SrcHeartbeatIgnoreIncoming    = false            // to accept or ignore heartbeats from remote Source clusters
+	SrcHeartbeatSkipIntraCluster  = true             // to skip sending heartbeats for intra-cluster replications
+	SrcHeartbeatMinInterval       = 60 * time.Second // upper bound on heartbeat frequency
+	SrcHeartbeatMaxIntervalFactor = 5                // factor to set lower bound on heartbeat frequency
 )
 
-const XDCRSourceClustersPath = XDCRPrefix + "/sourceClusters"
+const (
+	XDCRSourceClustersPath      = XDCRPrefix + "/sourceClusters"
+	SrcHeartbeatExpiryFactor    = 2
+	SrcHeartbeatSummaryInterval = 5 * time.Minute
+)
+
+func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequency
+	return time.Duration(SrcHeartbeatMaxIntervalFactor) * SrcHeartbeatMinInterval
+}

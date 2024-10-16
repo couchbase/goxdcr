@@ -1335,7 +1335,7 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 	}
 	adminport.prometheusExporter.LoadExpVarMap(expVarMap)
 
-	sourceClusterNames, sourceSpecs, sourceNodes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	sourceClusterNames, sourceSpecs, sourceNodes, _, _, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {
 		return nil, err
 	}
@@ -1446,7 +1446,7 @@ func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*
 
 	options := parseGetSourcesRequestQuery(request)
 
-	srcNames, srcSpecs, srcNodes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {
 		return nil, err
 	}
@@ -1458,7 +1458,7 @@ func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*
 		}
 	}
 
-	return NewSourceClustersV1Response(srcNames, srcSpecs, srcNodes)
+	return NewSourceClustersV1Response(srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes)
 }
 
 func (adminport *Adminport) doPostClusterToClusterRequest(request *http.Request) (*ap.Response, error) {
