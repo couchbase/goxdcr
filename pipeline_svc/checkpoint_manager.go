@@ -1142,7 +1142,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	// Get persisted checkpoints from metakv - each valid vbucket has a *metadata.CheckpointsDoc
 	ckmgr.logger.Infof("Getting checkpoint\n")
-	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, true /*needBrokenMapping*/)
+	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, true)
 	if err != nil {
 		ckmgr.logger.Errorf("Getting checkpoint had error %v", err)
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
