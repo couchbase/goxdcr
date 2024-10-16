@@ -1881,8 +1881,8 @@ type CollectionNamespaceMappingsDiffPair struct {
 	CorrespondingSrcManifestId uint64
 }
 
-type CollectionNsMappingsDoc struct {
-	NsMappingRecords CompressedColNamespaceMappingList `json:"NsMappingRecords"`
+type CompressedMappings struct {
+	NsMappingRecords CompressedShaMappingList `json:"NsMappingRecords"`
 
 	// internal id of repl spec - for detection of repl spec deletion and recreation event
 	SpecInternalId string `json:"specInternalId"`
@@ -1890,6 +1890,65 @@ type CollectionNsMappingsDoc struct {
 	//revision number
 	revision interface{}
 }
+
+type GlobalTimestampCompressedDoc CompressedMappings
+
+func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, error) {
+	if g == nil {
+		return nil, fmt.Errorf("Calling ToShaMap() on a nil GlobalTimestampCompresedDoc")
+	}
+
+	errorMap := make(base.ErrorMap)
+	shaMap := make(ShaToGlobalTimestampMap)
+	for _, oneRecord := range g.NsMappingRecords {
+		if oneRecord == nil {
+			continue
+		}
+
+		serializedBytes, err := snappy.Decode(nil, oneRecord.CompressedMapping)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
+			continue
+		}
+
+		var serializedMap map[string]interface{}
+		err = json.Unmarshal(serializedBytes, &serializedMap)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling data failed %v", err)
+			continue
+		}
+
+		actualMap := make(GlobalTimestamp)
+		err = actualMap.LoadUnmarshalled(serializedMap)
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
+			continue
+		}
+		// Sanity check
+		checkSha, err := actualMap.Sha256()
+		if err != nil {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
+			continue
+		}
+		checkShaString := fmt.Sprintf("%x", checkSha[:])
+		if checkShaString != oneRecord.Sha256Digest {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("SHA validation mismatch %v", checkShaString)
+			continue
+		}
+
+		shaMap[oneRecord.Sha256Digest] = &actualMap
+	}
+
+	var err error
+	if len(errorMap) > 0 {
+		errStr := base.FlattenErrorMap(errorMap)
+		err = fmt.Errorf(errStr)
+	}
+	return shaMap, err
+
+}
+
+type CollectionNsMappingsDoc CompressedMappings
 
 func (b *CollectionNsMappingsDoc) Size() int {
 	if b == nil {
@@ -1965,7 +2024,7 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 			continue
 		}
 
-		oneRecord := &CompressedColNamespaceMapping{compressedMapping, sha}
+		oneRecord := &CompressedShaMapping{compressedMapping, sha}
 		b.NsMappingRecords.SortedInsert(oneRecord)
 	}
 
@@ -2085,26 +2144,26 @@ func (s *ShaToCollectionNamespaceMap) CompressToShaCompressedMap(preExistMap Sha
 	}
 }
 
-type CompressedColNamespaceMapping struct {
-	// Snappy compressed byte slice of CollectionNamespaceMapping
+type CompressedShaMapping struct {
+	// Snappy compressed byte slice of Sha -> Data mapping
 	CompressedMapping []byte `json:compressedMapping`
 	Sha256Digest      string `json:string`
 }
 
-func (c *CompressedColNamespaceMapping) String() string {
+func (c *CompressedShaMapping) String() string {
 	return fmt.Sprintf("Sha: %v Bytes: %v", c.Sha256Digest, fmt.Sprintf("%x", c.CompressedMapping[:]))
 }
 
-func (c *CompressedColNamespaceMapping) Size() int {
+func (c *CompressedShaMapping) Size() int {
 	if c == nil {
 		return 0
 	}
 	return len(c.CompressedMapping) + len(c.Sha256Digest)
 }
 
-type CompressedColNamespaceMappingList []*CompressedColNamespaceMapping
+type CompressedShaMappingList []*CompressedShaMapping
 
-func (c *CompressedColNamespaceMappingList) Size() int {
+func (c *CompressedShaMappingList) Size() int {
 	if c == nil {
 		return 0
 	}
@@ -2116,7 +2175,7 @@ func (c *CompressedColNamespaceMappingList) Size() int {
 	return totalSize
 }
 
-func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColNamespaceMapping) {
+func (c *CompressedShaMappingList) SortedInsert(elem *CompressedShaMapping) {
 	if c == nil {
 		return
 	}
@@ -2139,7 +2198,7 @@ func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColName
 	(*c)[i] = elem
 }
 
-func (c *CompressedColNamespaceMappingList) SameAs(other CompressedColNamespaceMappingList) bool {
+func (c *CompressedShaMappingList) SameAs(other CompressedShaMappingList) bool {
 	if c == nil {
 		return false
 	}

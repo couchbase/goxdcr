@@ -1337,7 +1337,7 @@ func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 
 // This is used specific for globalMergeCkpt.json
 func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alreadyExist bool, assert *assert.Assertions, brokenMapCntExpected int) {
-	dummyIncrfunc := service_def_real.IncrementerFunc(func(string, *metadata.CollectionNamespaceMapping) {})
+	dummyIncrfunc := service_def_real.IncrementerFunc(func(string, interface{}) {})
 	mappingDoc := &metadata.CollectionNsMappingsDoc{}
 	emptyShaMap := make(metadata.ShaToCollectionNamespaceMap)
 	ckptSvc.On("LoadBrokenMappings", mock.Anything).Return(emptyShaMap, mappingDoc, dummyIncrfunc, alreadyExist, nil)

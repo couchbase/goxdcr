@@ -38,6 +38,6 @@ type CheckpointsService interface {
 	EnableRefCntDecrement(topic string)
 }
 
-type IncrementerFunc func(shaString string, mapping *metadata.CollectionNamespaceMapping)
+type IncrementerFunc func(shaString string, valueToCount interface{})
 
 type DecrementerFunc func(shaString string)

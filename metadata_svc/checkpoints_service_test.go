@@ -42,7 +42,7 @@ func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *s
 var timeAfterDelAllFromCatalog int64
 var timeAfterGet int64
 
-func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte, replSpecSvc *service_def.ReplicationSpecSvc, opMap map[string]error, delayMap map[string]time.Duration) {
+func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte, replSpecSvc *service_def.ReplicationSpecSvc, opMap map[string]error, delayMap map[string]time.Duration, globalTsDocMarshalled, globaTsNewUpsert []byte) {
 
 	metadataSvc.On("GetAllMetadataFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Return(metadataEntry, opMap["GetAllMetadataFromCatalog"])
 	metadataSvc.On("DelAllFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Run(func(arg mock.Arguments) {
@@ -61,6 +61,12 @@ func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerCont
 	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
 	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Del"])
 	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Add"])
+
+	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey)).Run(func(args mock.Arguments) {
+		timeInUint := time.Now().UnixMicro()
+		atomic.StoreInt64(&timeAfterGet, timeInUint)
+	}).Return(globalTsDocMarshalled, nil, opMap["Get"])
+	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), globaTsNewUpsert, mock.Anything).Return(opMap["Set"])
 
 	dummyMap := make(map[string]*metadata.ReplicationSpecification)
 	dummyRepl := &metadata.ReplicationSpecification{Id: replId, InternalId: internalId}
@@ -96,10 +102,18 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	}
 	entries := getEntries(ckptRecord, err, assert)
 
-	marshalledDoc := getbrokenMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
+	marshalledDoc := getCompressedMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
+
+	gts := generateGlobalTimestampMap()
+	shaSlice, err = gts.Sha256()
+	assert.Nil(err)
+	gtsCompressed, err := gts.ToSnappyCompressed()
+	assert.Nil(err)
+	gtsMarshalledDoc := getCompressedMapUnmarshalledDoc(gtsCompressed, shaSlice, err, assert)
 
 	// New map should be just: SOURCE ||Scope: S2 Collection: C2|| -> TARGET(s) |Scope: S2T Collection: C2T|
-	newMap, _, _, upsertMappingDocSlice := getUpsertMap()
+	newMap := generateUpsertMap()
+	_, _, upsertMappingDocSlice := getUpsertMap(newMap)
 	newMapShaSlice, _ := newMap.Sha256()
 	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
 	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
@@ -113,7 +127,14 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 
 	metadataSvcDelayMap := make(map[string]time.Duration)
 
-	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap)
+	// We feed it an "non-nil but empty" sha map but the global checkpoint is not in use
+	// We should anticipate the sha ref counter service to strip all and store an empty doc
+	emptyDoc := &metadata.CompressedMappings{}
+	emptyDoc.SpecInternalId = internalId
+	emptyDocMarshalled, err := json.Marshal(emptyDoc)
+	assert.Nil(err)
+
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap, gtsMarshalledDoc, emptyDocMarshalled)
 
 	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, nil, replSpecSvc)
 	assert.NotNil(ckptSvc)
@@ -134,7 +155,7 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 		assert.Equal(2, len(*brokenMappingFromRecord))
 	}
 
-	counter, exists := ckptSvc.ShaRefCounterService.topicMaps[replId]
+	counter, exists := ckptSvc.brokenMapRefCountSvc.topicMaps[replId]
 	assert.True(exists)
 	assert.NotNil(counter)
 	assert.Equal(1, len(counter.shaToMapping)) // representing the original 2-entries brokenmap
@@ -162,7 +183,7 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	assert.Nil(err)
 }
 
-func getUpsertMap() (*metadata.CollectionNamespaceMapping, []byte, *metadata.CollectionNsMappingsDoc, []byte) {
+func generateUpsertMap() metadata.CollectionNamespaceMapping {
 	newUpsertingMap := make(metadata.CollectionNamespaceMapping)
 	src2 := &base.CollectionNamespace{
 		ScopeName:      "S2",
@@ -173,6 +194,10 @@ func getUpsertMap() (*metadata.CollectionNamespaceMapping, []byte, *metadata.Col
 		CollectionName: "C2T",
 	}
 	newUpsertingMap.AddSingleMapping(src2, tgt2)
+	return newUpsertingMap
+}
+
+func getUpsertMap(newUpsertingMap metadata.CollectionNamespaceMapping) ([]byte, *metadata.CollectionNsMappingsDoc, []byte) {
 	marshalledMap, _ := json.Marshal(&newUpsertingMap)
 	shaSlice, _ := newUpsertingMap.Sha256()
 
@@ -180,12 +205,14 @@ func getUpsertMap() (*metadata.CollectionNamespaceMapping, []byte, *metadata.Col
 	if err != nil {
 		panic(err.Error())
 	}
-	mappingRecord := metadata.CompressedColNamespaceMapping{
+	mappingRecord := metadata.CompressedShaMapping{
 		CompressedMapping: compressedMap,
 		Sha256Digest:      fmt.Sprintf("%x", shaSlice[:]),
 	}
-	var mappingRecords metadata.CompressedColNamespaceMappingList
-	mappingRecords.SortedInsert(&mappingRecord)
+	var mappingRecords metadata.CompressedShaMappingList
+	if len(newUpsertingMap) > 0 {
+		mappingRecords.SortedInsert(&mappingRecord)
+	}
 	mappingDoc := &metadata.CollectionNsMappingsDoc{
 		NsMappingRecords: mappingRecords,
 		SpecInternalId:   internalId,
@@ -194,15 +221,15 @@ func getUpsertMap() (*metadata.CollectionNamespaceMapping, []byte, *metadata.Col
 	if err != nil {
 		panic(err.Error())
 	}
-	return &newUpsertingMap, marshalledMap, mappingDoc, mappingsDocMarshalled
+	return marshalledMap, mappingDoc, mappingsDocMarshalled
 }
 
-func getbrokenMapUnmarshalledDoc(compressedMap []byte, shaSlice [32]byte, err error, assert *assert.Assertions) []byte {
-	compressedNamespaceMapping := &metadata.CompressedColNamespaceMapping{
+func getCompressedMapUnmarshalledDoc(compressedMap []byte, shaSlice [32]byte, err error, assert *assert.Assertions) []byte {
+	compressedNamespaceMapping := &metadata.CompressedShaMapping{
 		CompressedMapping: compressedMap,
 		Sha256Digest:      fmt.Sprintf("%x", shaSlice[:]),
 	}
-	var compressedList metadata.CompressedColNamespaceMappingList
+	var compressedList metadata.CompressedShaMappingList
 	compressedList = append(compressedList, compressedNamespaceMapping)
 	brokenMappingDoc := &metadata.CollectionNsMappingsDoc{
 		SpecInternalId:   internalId,
@@ -256,6 +283,11 @@ func generateBrokenMap() metadata.CollectionNamespaceMapping {
 	return brokenMap
 }
 
+func generateGlobalTimestampMap() metadata.GlobalTimestamp {
+	gts := make(metadata.GlobalTimestamp)
+	return gts
+}
+
 func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
 	fmt.Println("============== Test case start: TestCkptSvcConcurrentRemAndCreate =================")
 	defer fmt.Println("============== Test case end: TestCkptSvcConcurrentRemAndCreate =================")
@@ -280,10 +312,11 @@ func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
 	}
 	entries := getEntries(ckptRecord, err, assert)
 
-	marshalledDoc := getbrokenMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
+	marshalledDoc := getCompressedMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
 
 	// New map should be just: SOURCE ||Scope: S2 Collection: C2|| -> TARGET(s) |Scope: S2T Collection: C2T|
-	newMap, _, _, upsertMappingDocSlice := getUpsertMap()
+	newMap := generateUpsertMap()
+	_, _, upsertMappingDocSlice := getUpsertMap(newMap)
 	newMapShaSlice, _ := newMap.Sha256()
 	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
 	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
@@ -299,7 +332,21 @@ func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
 	metadataSvcDelayMap := make(map[string]time.Duration)
 	metadataSvcDelayMap["DelAllFromCatalog"] = 3 * time.Second
 
-	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap)
+	gts := generateGlobalTimestampMap()
+	shaSlice, err = gts.Sha256()
+	assert.Nil(err)
+	gtsCompressed, err := gts.ToSnappyCompressed()
+	assert.Nil(err)
+	gtsMarshalledDoc := getCompressedMapUnmarshalledDoc(gtsCompressed, shaSlice, err, assert)
+
+	// We feed it an "non-nil but empty" sha map but the global checkpoint is not in use
+	// We should anticipate the sha ref counter service to strip all and store an empty doc
+	emptyDoc := &metadata.CompressedMappings{}
+	emptyDoc.SpecInternalId = internalId
+	emptyDocMarshalled, err := json.Marshal(emptyDoc)
+	assert.Nil(err)
+
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap, gtsMarshalledDoc, emptyDocMarshalled)
 
 	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, testUtils, replSpecSvc)
 	assert.NotNil(ckptSvc)
@@ -347,4 +394,83 @@ func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
 	// The Checkpoint Delete should have blocked the loadBrokenMapping from recreating a counter
 	// Very raw way to verify
 	assert.True(timeAfterGet > timeAfterDelAllFromCatalog)
+}
+
+func TestCkptSvcLoadGlobalTimestamp(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptSvcLoadGlobalTimestamp =================")
+	defer fmt.Println("============== Test case end: TestCkptSvcLoadGlobalTimestamp =================")
+	assert := assert.New(t)
+
+	metadataSvc, loggerCtx, replSpecSvc := setupCkptSvcBoilerPlate()
+
+	metadataSvcOpMap := make(map[string]error)
+	metadataSvcOpMap["Del"] = nil
+	metadataSvcOpMap["Get"] = nil
+	metadataSvcOpMap["Set"] = nil
+	metadataSvcOpMap["Add"] = nil
+	metadataSvcOpMap["DelAllFromCatalog"] = nil
+	metadataSvcOpMap["GetAllMetadataFromCatalog"] = nil
+
+	metadataSvcDelayMap := make(map[string]time.Duration)
+	metadataSvcDelayMap["DelAllFromCatalog"] = 3 * time.Second
+
+	gts := generateGlobalTimestampMap()
+	gts[0] = &metadata.GlobalVBTimestamp{
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:     1,
+			Target_vb_opaque: &metadata.TargetVBUuid{345},
+		},
+	}
+	gts[1] = &metadata.GlobalVBTimestamp{
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:     2,
+			Target_vb_opaque: &metadata.TargetVBUuid{456},
+		},
+	}
+
+	marshalOut, err := json.Marshal(gts)
+	assert.Nil(err)
+
+	unmarshalTest := generateGlobalTimestampMap()
+	var fieldMap map[string]interface{}
+	assert.Nil(json.Unmarshal(marshalOut, &fieldMap))
+	assert.Nil(unmarshalTest.LoadUnmarshalled(fieldMap))
+
+	shaSlice, err := gts.Sha256()
+	assert.Nil(err)
+	gtsCompressed, err := gts.ToSnappyCompressed()
+	assert.Nil(err)
+	gtsMarshalledDoc := getCompressedMapUnmarshalledDoc(gtsCompressed, shaSlice, err, assert)
+	sha256String := fmt.Sprintf("%x", shaSlice[:])
+
+	// The checkpoint record to return where the global sha is in use and its members are empty
+	// The test should expect that the global timestamps are populated automatically upon reading both
+	// the sha map entry and the checkpoint itself
+	ckptRecord := metadata.CheckpointRecord{
+		GlobalTimestampSha256: sha256String,
+	}
+	entries := getEntries(ckptRecord, err, assert)
+	emptyBrokenMap := make(metadata.CollectionNamespaceMapping)
+	marshalledBytes, _, newMapMarshalled := getUpsertMap(emptyBrokenMap)
+
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledBytes, newMapMarshalled, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap, gtsMarshalledDoc, gtsMarshalledDoc)
+
+	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, testUtils, replSpecSvc)
+	assert.NotNil(ckptSvc)
+	assert.Nil(err)
+
+	// The service should load the ckpt docs
+	vbCkptDocs, err := ckptSvc.CheckpointsDocs(replId, true)
+	assert.Nil(err)
+
+	// The metakv mocks here in this test will hard-code vb12 as the key to return
+	vb12Docs := vbCkptDocs[12]
+	assert.NotNil(vb12Docs)
+	assert.False(vb12Docs.IsTraditional())
+	assert.Len(vb12Docs.Checkpoint_records, 1)
+
+	record := vb12Docs.Checkpoint_records[0]
+	assert.Len(record.GlobalTimestamp, 2)
+	assert.Equal(uint64(1), record.GlobalTimestamp[0].Target_Seqno)
+	assert.Equal(uint64(2), record.GlobalTimestamp[1].Target_Seqno)
 }
