@@ -165,8 +165,8 @@ func TestVBMasterPayloadMap(t *testing.T) {
 }
 
 func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
-	fmt.Println("============== Test case start: TestVBMasterGlobalPayloadMap =================")
-	defer fmt.Println("============== Test case end: TestVBMasterGlobalPayloadMap =================")
+	fmt.Println("============== Test case start: TestVBMasterRespGlobalPayloadMap =================")
+	defer fmt.Println("============== Test case end: TestVBMasterRespGlobalPayloadMap =================")
 	assert := assert.New(t)
 
 	// File to be sent from a node with global checkpoint

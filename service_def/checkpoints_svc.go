@@ -24,7 +24,9 @@ type CheckpointsService interface {
 	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
+	PreUpsertGlobalTs(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp) error
 	UpsertBrokenMapping(replicationId string, specInternalId string) error
+	UpsertGlobalTimestamps(replicationId string, specInternalId string) error
 
 	CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 	ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error
@@ -36,6 +38,8 @@ type CheckpointsService interface {
 	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error
 	DisableRefCntDecrement(topic string)
 	EnableRefCntDecrement(topic string)
+
+	LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)
 }
 
 type IncrementerFunc func(shaString string, valueToCount interface{})

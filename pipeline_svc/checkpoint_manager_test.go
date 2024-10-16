@@ -462,6 +462,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	ckptSvc.On("UpsertCheckpointsDone", mock.Anything, mock.Anything).Return(upsertCkptsDoneErr)
 	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
+	ckptSvc.On("UpsertGlobalTimestamps", mock.Anything, mock.Anything).Return(nil)
 	// Generally speaking, return empty checkpoints
 	// We want to simulate checkpoint service where each call will return a cloned object
 	// If we don't have multiple lines here, it'd return the same object every time and trigger golang concurrent r/w map panic
@@ -1299,6 +1300,7 @@ func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
 	ckptMgr.pipeline = mainPipeline
 
+	// TODO NEIL: fix this next changeset
 	mergeCkptArgsJson, err := os.ReadFile("./unitTestdata/globalMergeCkpt.json")
 	assert.Nil(err)
 	mergeCkptArgs := &MergeCkptArgs{}

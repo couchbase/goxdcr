@@ -1463,6 +1463,8 @@ func (c *CollectionNamespaceMapping) SnappyCompress() ([]byte, error) {
 	return snappy.Encode(nil, uncompressedBytes), nil
 }
 
+var errorColNsMappingWrongType = fmt.Errorf("unable to unmarshal to CollectionNamespaceMapping")
+
 func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	if c == nil {
 		return fmt.Errorf("CollectionNamespaceMapping is nil when calling UnmarshalJSON")
@@ -1472,7 +1474,7 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 
 	err := json.Unmarshal(b, metaObj)
 	if err != nil {
-		return err
+		return errorColNsMappingWrongType
 	}
 
 	if (*c) == nil {
@@ -1881,73 +1883,6 @@ type CollectionNamespaceMappingsDiffPair struct {
 	CorrespondingSrcManifestId uint64
 }
 
-type CompressedMappings struct {
-	NsMappingRecords CompressedShaMappingList `json:"NsMappingRecords"`
-
-	// internal id of repl spec - for detection of repl spec deletion and recreation event
-	SpecInternalId string `json:"specInternalId"`
-
-	//revision number
-	revision interface{}
-}
-
-type GlobalTimestampCompressedDoc CompressedMappings
-
-func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, error) {
-	if g == nil {
-		return nil, fmt.Errorf("Calling ToShaMap() on a nil GlobalTimestampCompresedDoc")
-	}
-
-	errorMap := make(base.ErrorMap)
-	shaMap := make(ShaToGlobalTimestampMap)
-	for _, oneRecord := range g.NsMappingRecords {
-		if oneRecord == nil {
-			continue
-		}
-
-		serializedBytes, err := snappy.Decode(nil, oneRecord.CompressedMapping)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
-			continue
-		}
-
-		var serializedMap map[string]interface{}
-		err = json.Unmarshal(serializedBytes, &serializedMap)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling data failed %v", err)
-			continue
-		}
-
-		actualMap := make(GlobalTimestamp)
-		err = actualMap.LoadUnmarshalled(serializedMap)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
-			continue
-		}
-		// Sanity check
-		checkSha, err := actualMap.Sha256()
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
-			continue
-		}
-		checkShaString := fmt.Sprintf("%x", checkSha[:])
-		if checkShaString != oneRecord.Sha256Digest {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("SHA validation mismatch %v", checkShaString)
-			continue
-		}
-
-		shaMap[oneRecord.Sha256Digest] = &actualMap
-	}
-
-	var err error
-	if len(errorMap) > 0 {
-		errStr := base.FlattenErrorMap(errorMap)
-		err = fmt.Errorf(errStr)
-	}
-	return shaMap, err
-
-}
-
 type CollectionNsMappingsDoc CompressedMappings
 
 func (b *CollectionNsMappingsDoc) Size() int {
@@ -2008,43 +1943,15 @@ func (b *CollectionNsMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error
 // Will overwrite the existing records with the incoming map
 func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap) error {
 	if b == nil {
-		return base.ErrorInvalidInput
+		return base.ErrorNilPtr
 	}
-
-	errorMap := make(base.ErrorMap)
-	b.NsMappingRecords = b.NsMappingRecords[:0]
-
-	for sha, colNsMap := range shaMap {
-		if colNsMap == nil {
-			continue
-		}
-		compressedMapping, err := colNsMap.ToSnappyCompressed()
-		if err != nil {
-			errorMap[sha] = err
-			continue
-		}
-
-		oneRecord := &CompressedShaMapping{compressedMapping, sha}
-		b.NsMappingRecords.SortedInsert(oneRecord)
-	}
-
-	if len(errorMap) > 0 {
-		return fmt.Errorf("Error LoadingShaMap - sha -> err: %v", base.FlattenErrorMap(errorMap))
-	} else {
-		return nil
-	}
+	// MUST cast as a pointer otherwise the LoadShaMap below will be done on a copy
+	compressedMapPtr := (*CompressedMappings)(b)
+	return compressedMapPtr.LoadShaMap(shaMap.ToSnappyCompressableMap())
 }
 
 func (b *CollectionNsMappingsDoc) SameAs(other *CollectionNsMappingsDoc) bool {
-	if b == nil && other != nil {
-		return false
-	} else if b != nil && other == nil {
-		return false
-	} else if b == nil && other == nil {
-		return true
-	}
-
-	return b.SpecInternalId == other.SpecInternalId && b.NsMappingRecords.SameAs(other.NsMappingRecords)
+	return (*CompressedMappings)(b).SameAs((*CompressedMappings)(other))
 }
 
 type ShaToCollectionNamespaceMap map[string]*CollectionNamespaceMapping
@@ -2061,6 +1968,19 @@ func (s *ShaToCollectionNamespaceMap) Clone() (newMap ShaToCollectionNamespaceMa
 		newMap[k] = &clonedVal
 	}
 	return
+}
+
+func (s *ShaToCollectionNamespaceMap) ToSnappyCompressableMap() map[string]SnappyCompressableVal {
+	if s == nil {
+		return nil
+	}
+
+	retMap := make(map[string]SnappyCompressableVal)
+	for k, v := range *s {
+		retMap[k] = v
+	}
+
+	return retMap
 }
 
 func (s *ShaToCollectionNamespaceMap) String() string {

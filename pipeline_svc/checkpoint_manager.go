@@ -731,7 +731,8 @@ func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16, tgtVbList
 		ckptToEnhance.GlobalCounters = make(metadata.GlobalTargetCounters)
 
 		for _, tgtVb := range tgtVbList {
-			ckptToEnhance.GlobalTimestamp[tgtVb] = &metadata.GlobalVBTimestamp{}
+			gts := ckptToEnhance.GlobalTimestamp
+			gts.InitializeVb(tgtVb)
 			ckptToEnhance.GlobalCounters[tgtVb] = &metadata.TargetPerVBCounters{}
 		}
 	}
@@ -1023,7 +1024,7 @@ func (ckmgr *CheckpointManager) updateCurrentGlobalVBOpaque(vbno, targetVbno uin
 		obj.lock.Lock()
 		defer obj.lock.Unlock()
 		record := obj.ckpt
-		record.GlobalTimestamp[targetVbno].Target_vb_opaque = vbOpaque
+		record.GlobalTimestamp.SetTargetOpaque(targetVbno, vbOpaque)
 	} else {
 		err := fmt.Errorf("%v %v Trying to update vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 		ckmgr.handleGeneralError(err)
@@ -1957,6 +1958,15 @@ func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
 	}
 }
 
+func (ckmgr *CheckpointManager) CommitGlobalTimestampDedupMaps() {
+	// Let the checkpoint manager itself upsert
+	// If router updated ckptmgr's brokenmap during the checkpointing process, this call will ensure that all the necessary brokenmaps are persisted
+	err := ckmgr.checkpoints_svc.UpsertGlobalTimestamps(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
+	if err != nil {
+		ckmgr.logger.Errorf("Unable to persist Global timestamp dedup map: %v", err)
+	}
+}
+
 // public API. performs one checkpoint operation on request
 func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	ckmgr.logger.Infof("Start one time checkpointing for replication")
@@ -2017,6 +2027,9 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	//wait for all the getter done, then gather result
 	worker_wait_grp.Wait()
 	ckmgr.CommitBrokenMappingUpdates()
+	if ckmgr.isVariableVBMode() {
+		ckmgr.CommitGlobalTimestampDedupMaps()
+	}
 	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
@@ -2074,6 +2087,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	if ckmgr.collectionEnabled() {
 		ckmgr.CommitBrokenMappingUpdates()
 		ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
+	}
+
+	if ckmgr.isVariableVBMode() {
+		ckmgr.CommitGlobalTimestampDedupMaps()
 	}
 
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
@@ -2327,6 +2344,14 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 		err = nil
 	} else {
 		ckmgr.markBpCkptStored(vbno)
+		if ckmgr.isVariableVBMode() {
+			err = ckmgr.checkpoints_svc.PreUpsertGlobalTs(ckmgr.pipeline.FullTopic(),
+				ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalTimestamp)
+			if err != nil {
+				ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global timestamp %v",
+					vbno, err)
+			}
+		}
 	}
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
@@ -3602,6 +3627,7 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocsAndCkpts(specId 
 		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadShaMap err: %v", err)
 		return err
 	}
+	// TODO MB-63804: need to do global timestamp
 	return ckmgr.checkpoints_svc.UpsertAndReloadCheckpointCompleteSet(specId, curNodeMappingDoc, ckptDocs, specInternalId)
 }
 
