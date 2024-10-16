@@ -9,6 +9,7 @@
 package metadata
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -63,6 +64,7 @@ const (
 	GetDocsCasChangedCnt               string = "get_docs_cas_changed_cnt"
 	GlobalTimestampStr                 string = "global_timestamp"
 	GlobalTargetCountersStr            string = "global_target_counters"
+	GlobalTimestampMapSha              string = "globalTimestampMapSha256"
 )
 
 // SourceVBTimestamp defines the necessary items to start or resume a source DCP stream in a checkpoint context
@@ -241,8 +243,33 @@ func (t *TargetVBTimestamp) Clone() TargetVBTimestamp {
 	return *clonedVal
 }
 
+type ShaToGlobalTimestampMap map[string]*GlobalTimestamp
+
 // Also needs to inplement VBOpaque
 type GlobalTimestamp map[uint16]*GlobalVBTimestamp
+
+func (g *GlobalTimestamp) Sha256() (result [sha256.Size]byte, err error) {
+	if g == nil {
+		err = fmt.Errorf("Calling Sha256() on a nil GlobalTimestamp")
+		return
+	}
+
+	marshalledBytes, err := json.Marshal(g)
+	if err != nil {
+		return
+	}
+
+	result = sha256.Sum256(marshalledBytes)
+	return
+}
+
+func (g *GlobalTimestamp) ToSnappyCompressed() ([]byte, error) {
+	marshalledJson, err := json.Marshal(g)
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(nil, marshalledJson), nil
+}
 
 func (g *GlobalTimestamp) CloneGlobalTimestamp() GlobalTimestamp {
 	if g == nil {
@@ -590,8 +617,9 @@ type CheckpointRecord struct {
 	TargetPerVBCounters
 
 	// Global checkpoints will utilize multiple TargetVBTimestamp and TargetVBCounters
-	GlobalTimestamp GlobalTimestamp      `json:"global_timestamp"`
-	GlobalCounters  GlobalTargetCounters `json:"global_target_counters"`
+	GlobalTimestamp       GlobalTimestamp      `json:"global_timestamp,omitempty"`
+	GlobalCounters        GlobalTargetCounters `json:"global_target_counters,omitempty"`
+	GlobalTimestampSha256 string               `json:"globalTimestampMapSha256,omitempty"`
 }
 
 // Generally speaking, brokenMapping should move in tandem in a global checkpoint
@@ -750,6 +778,22 @@ func (c *CheckpointRecord) GetShaOnlyMap() ShaToCollectionNamespaceMap {
 				retMap[oneGlobalTs.BrokenMappingSha256] = nil
 			}
 		}
+	}
+	return retMap
+}
+
+func (c *CheckpointRecord) GetGlobalTsMap() ShaToGlobalTimestampMap {
+	if c == nil {
+		return nil
+	}
+
+	retMap := make(ShaToGlobalTimestampMap)
+	if c.IsTraditional() {
+		return retMap
+	}
+
+	if c.GlobalTimestampSha256 != "" {
+		retMap[c.GlobalTimestampSha256] = nil
 	}
 	return retMap
 }
@@ -1162,6 +1206,20 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 	}
 }
 
+func (ckptRecord *CheckpointRecord) LoadGlobalTsMapping(allShasToGts ShaToGlobalTimestampMap) error {
+	if ckptRecord == nil {
+		return fmt.Errorf("nil ckptRecord")
+	}
+
+	if ckptRecord.GlobalTimestampSha256 != "" {
+		globalTs, exists := allShasToGts[ckptRecord.GlobalTimestampSha256]
+		if exists && globalTs != nil {
+			ckptRecord.GlobalTimestamp = *globalTs
+		}
+	}
+	return nil
+}
+
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	var fieldMap map[string]interface{}
 	err := json.Unmarshal(data, &fieldMap)
@@ -1381,6 +1439,12 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("ckptRecord.GlobalCOunters.LoadUnmarshalled %v", err)
 		}
 	}
+
+	globalTimestampSha, ok := fieldMap[GlobalTimestampMapSha]
+	if ok {
+		ckptRecord.GlobalTimestampSha256 = globalTimestampSha.(string)
+	}
+
 	return nil
 }
 
@@ -2319,6 +2383,8 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 	if err != nil {
 		return err
 	}
+
+	// NEIL TODO snappyDecompress
 
 	if len(brokenMap) > 0 {
 		records := c.GetCheckpointRecords()

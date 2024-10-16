@@ -23,7 +23,6 @@ import (
 
 type ShaRefCounterService struct {
 	metadataSvc service_def.MetadataSvc
-	replSpecSvc service_def.ReplicationSpecSvc
 	utils       utilities.UtilsIface
 
 	// Map of replicationId -> map of sha's -> refCnts
@@ -37,14 +36,13 @@ type ShaRefCounterService struct {
 	logger *log.CommonLogger
 }
 
-func NewShaRefCounterService(metakvDocKeyGetter func(string) string, metadataSvc service_def.MetadataSvc, logger *log.CommonLogger, replicationSpecSvc service_def.ReplicationSpecSvc, utils utilities.UtilsIface) (*ShaRefCounterService, error) {
+func NewShaRefCounterService(metakvDocKeyGetter func(string) string, metadataSvc service_def.MetadataSvc, logger *log.CommonLogger, utils utilities.UtilsIface) (*ShaRefCounterService, error) {
 	refSvc := &ShaRefCounterService{
 		topicMaps:          make(map[string]*MapShaRefCounter),
 		topicGcDisabledSet: make(map[string]bool),
 		metakvDocKeyGetter: metakvDocKeyGetter,
 		metadataSvc:        metadataSvc,
 		logger:             logger,
-		replSpecSvc:        replicationSpecSvc,
 		utils:              utils,
 	}
 
@@ -52,6 +50,7 @@ func NewShaRefCounterService(metakvDocKeyGetter func(string) string, metadataSvc
 }
 
 var emptyS2CNsMap = make(metadata.ShaToCollectionNamespaceMap)
+var emptyGlobalTsMap = make(metadata.ShaToGlobalTimestampMap)
 
 func (s *ShaRefCounterService) GetShaNamespaceMap(topic string) (metadata.ShaToCollectionNamespaceMap, error) {
 	s.topicMapMtx.RLock()
@@ -61,6 +60,16 @@ func (s *ShaRefCounterService) GetShaNamespaceMap(topic string) (metadata.ShaToC
 		return emptyS2CNsMap, base.ErrorInvalidInput
 	}
 	return counter.GetShaNamespaceMap(), nil
+}
+
+func (s *ShaRefCounterService) GetShaGlobalTsMap(topic string) (metadata.ShaToGlobalTimestampMap, error) {
+	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
+	counter, exists := s.topicMaps[topic]
+	if !exists {
+		return emptyGlobalTsMap, base.ErrorInvalidInput
+	}
+	return counter.GetShaGlobalTsMap(), nil
 }
 
 // Idempotent No-op if already exists
@@ -89,7 +98,7 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 }
 
 // Caller who calls initIfNotFound should ensure there is not a concurrent upsert operation somewhere else
-func (s *ShaRefCounterService) GetMappingsDoc(topic string, initIfNotFound bool) (*metadata.CollectionNsMappingsDoc, error) {
+func (s *ShaRefCounterService) GetMappingsDoc(topic string, initIfNotFound bool) (*metadata.CompressedMappings, error) {
 	s.topicMapMtx.RLock()
 	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
@@ -131,6 +140,35 @@ func (s *ShaRefCounterService) GetShaToCollectionNsMap(topic string, doc *metada
 	return compiledShaNamespaceMap, nil
 }
 
+func (s *ShaRefCounterService) GetShaToGlobalTsMap(topic string, doc *metadata.GlobalTimestampCompressedDoc) (metadata.ShaToGlobalTimestampMap, error) {
+	var emptyShaToGlobalTsMap metadata.ShaToGlobalTimestampMap
+	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
+	refCounter, ok := s.topicMaps[topic]
+
+	if !ok {
+		return emptyShaToGlobalTsMap, base.ErrorInvalidInput
+	}
+
+	var err error
+	globalTsShaMap, err := doc.ToShaMap()
+	if err != nil {
+		// Any error loading the sha to collectionNamespacemap is considered a fatal error
+		// This includes any mismatching sha256 - we cannot allow the pipeline to start
+		s.logger.Errorf("globalTsShaMap %v with error %v", topic, err)
+		return emptyShaToGlobalTsMap, err
+	}
+
+	if doc.SpecInternalId != "" {
+		err = refCounter.CheckOrSetInternalSpecId(doc.SpecInternalId)
+		if err != nil {
+			return emptyShaToGlobalTsMap, err
+		}
+	}
+
+	return globalTsShaMap, nil
+}
+
 func (s *ShaRefCounterService) GetIncrementerFunc(topic string) (service_def.IncrementerFunc, error) {
 	s.topicMapMtx.RLock()
 	counter, ok := s.topicMaps[topic]
@@ -167,7 +205,8 @@ func (s *ShaRefCounterService) GetDecrementerFunc(topic string) (service_def.Dec
 	return decrementWrapper, nil
 }
 
-func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc *metadata.CollectionNsMappingsDoc) error {
+// GCDocUsingLatestCounterInfo will take a document and remove any SHAs that do not have valid references anymore
+func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc interface{}) error {
 	if doc == nil {
 		return base.ErrorInvalidInput
 	}
@@ -184,7 +223,7 @@ func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc *me
 
 // Used to force the counters to have a certain sha map
 // This should be called at the start of loading from metakv, before any record/unrecord is used
-func (s *ShaRefCounterService) InitCounterShaToActualMappings(topic, internalSpecId string, mapping metadata.ShaToCollectionNamespaceMap) error {
+func (s *ShaRefCounterService) InitCounterShaToActualMappings(topic, internalSpecId string, mapping interface{}) error {
 	s.topicMapMtx.RLock()
 	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
@@ -297,9 +336,10 @@ type MapShaRefCounter struct {
 	lock               sync.RWMutex
 	singleUpsert       chan bool
 	finch              chan bool
-	refCnt             map[string]uint64                    // map of sha to refCnt (1/2)
-	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping (2/2)
-	needToSync         bool                                 // needs to sync refCnt to shaMap and then also persist to metakv
+	refCnt             map[string]uint64                    // map of sha to refCnt
+	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping
+	shaToGlobalTs      metadata.ShaToGlobalTimestampMap
+	needToSync         bool // needs to sync refCnt to shaMap and then also persist to metakv
 	needToSyncRevision uint64
 	internalSpecId     string
 	metadataSvc        service_def.MetadataSvc
@@ -312,6 +352,7 @@ func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc ser
 	return &MapShaRefCounter{refCnt: make(map[string]uint64),
 		id:             topic,
 		shaToMapping:   make(metadata.ShaToCollectionNamespaceMap),
+		shaToGlobalTs:  make(metadata.ShaToGlobalTimestampMap),
 		singleUpsert:   make(chan bool, 1),
 		finch:          make(chan bool, 1),
 		metadataSvc:    metadataSvc,
@@ -353,7 +394,16 @@ func (c *MapShaRefCounter) GetShaNamespaceMap() metadata.ShaToCollectionNamespac
 	return c.shaToMapping
 }
 
-func (c *MapShaRefCounter) upsertCollectionNsMappingsDoc(doc *metadata.CollectionNsMappingsDoc, addOp bool) error {
+func (c *MapShaRefCounter) GetShaGlobalTsMap() metadata.ShaToGlobalTimestampMap {
+	if c.isClosed() {
+		return nil
+	}
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.shaToGlobalTs
+}
+
+func (c *MapShaRefCounter) upsertCompressedMappingDoc(doc *metadata.CompressedMappings, addOp bool) error {
 	if c.isClosed() {
 		return nil
 	}
@@ -378,15 +428,28 @@ func (c *MapShaRefCounter) getCollectionNsMappingsDocData() ([]byte, error) {
 	return docData, err
 }
 
-func (c *MapShaRefCounter) RecordOneCount(shaString string, mapping *metadata.CollectionNamespaceMapping) {
+func (c *MapShaRefCounter) RecordOneCount(shaString string, value interface{}) {
 	if c.isClosed() {
 		return
 	}
+
+	mapping, brokenMapValOk := value.(*metadata.CollectionNamespaceMapping)
+	globalTs, globalTsOk := value.(metadata.GlobalTimestamp)
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if _, exists := c.shaToMapping[shaString]; !exists {
-		c.shaToMapping[shaString] = mapping
-		c.setNeedToSyncNoLock(true)
+	if brokenMapValOk {
+		if _, exists := c.shaToMapping[shaString]; !exists {
+			c.shaToMapping[shaString] = mapping
+			c.setNeedToSyncNoLock(true)
+		}
+	} else if globalTsOk {
+		if _, exists := c.shaToGlobalTs[shaString]; !exists {
+			c.shaToGlobalTs[shaString] = &globalTs
+			c.setNeedToSyncNoLock(true)
+		}
+	} else {
+		panic(fmt.Sprintf("coding bug type is %T", value))
 	}
 	c.refCnt[shaString]++
 }
@@ -405,10 +468,14 @@ func (c *MapShaRefCounter) UnrecordOneCount(shaString string) {
 	}
 }
 
-func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappingsDoc) error {
+func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc interface{}) error {
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
+
+	nsMappingDoc, nsMappingDocType := doc.(*metadata.CollectionNsMappingsDoc)
+	globalTsDoc, globalTsDocType := doc.(*metadata.GlobalTimestampCompressedDoc)
+
 	c.lock.RLock()
 	upsertCh := c.singleUpsert
 	needToSyncRev := c.needToSyncRevision
@@ -421,37 +488,47 @@ func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappin
 		defer func() {
 			upsertCh <- true
 		}()
-		var updatedCompressedList metadata.CompressedColNamespaceMappingList
 
-		for _, oneCompressedMapping := range doc.NsMappingRecords {
-			c.lock.RLock()
-			count, exists := c.refCnt[oneCompressedMapping.Sha256Digest]
-			c.lock.RUnlock()
-			if exists && count > 0 {
-				updatedCompressedList = append(updatedCompressedList, oneCompressedMapping)
-			}
+		if nsMappingDocType {
+			compressedMapping := (*metadata.CompressedMappings)(nsMappingDoc)
+			c.gcUsingCompressedMappingDoc(compressedMapping, needToSyncRev)
+		} else if globalTsDocType {
+			compressedMapping := (*metadata.CompressedMappings)(globalTsDoc)
+			c.gcUsingCompressedMappingDoc(compressedMapping, needToSyncRev)
 		}
 
-		if len(updatedCompressedList) < len(doc.NsMappingRecords) {
-			doc.NsMappingRecords = updatedCompressedList
-			err := c.upsertCollectionNsMappingsDoc(doc, false /*new*/)
-			if err == nil {
-				c.lock.Lock()
-				if c.needToSyncRevision == needToSyncRev {
-					c.setNeedToSyncNoLock(false)
-				}
-				c.lock.Unlock()
-			}
-		}
-
-		// Nothing uploaded
-		return nil
+		return fmt.Errorf("unhandled Type: %T", doc)
 	default:
 		return UnableToUpsertErr(c.id)
 	}
 }
 
-func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string, mapping metadata.ShaToCollectionNamespaceMap) error {
+func (c *MapShaRefCounter) gcUsingCompressedMappingDoc(nsMappingDoc *metadata.CompressedMappings, needToSyncRev uint64) {
+	var updatedCompressedList metadata.CompressedShaMappingList
+
+	for _, oneCompressedMapping := range nsMappingDoc.NsMappingRecords {
+		c.lock.RLock()
+		count, exists := c.refCnt[oneCompressedMapping.Sha256Digest]
+		c.lock.RUnlock()
+		if exists && count > 0 {
+			updatedCompressedList = append(updatedCompressedList, oneCompressedMapping)
+		}
+	}
+
+	if len(updatedCompressedList) < len(nsMappingDoc.NsMappingRecords) {
+		nsMappingDoc.NsMappingRecords = updatedCompressedList
+		err := c.upsertCompressedMappingDoc(nsMappingDoc, false /*new*/)
+		if err == nil {
+			c.lock.Lock()
+			if c.needToSyncRevision == needToSyncRev {
+				c.setNeedToSyncNoLock(false)
+			}
+			c.lock.Unlock()
+		}
+	}
+}
+
+func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string, mapping interface{}) error {
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
@@ -462,7 +539,17 @@ func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string,
 		return fmt.Errorf("Replication %v mismatch internalId %v vs %v", topic, c.internalSpecId, internalSpecId)
 	}
 
-	c.shaToMapping = mapping
+	shaToCollectionNsMap, shaToCollectionOK := mapping.(metadata.ShaToCollectionNamespaceMap)
+	shaToGlobalTs, shaToGlobalTsOK := mapping.(metadata.ShaToGlobalTimestampMap)
+
+	if shaToCollectionOK {
+		c.shaToMapping = shaToCollectionNsMap
+	} else if shaToGlobalTsOK {
+		c.shaToGlobalTs = shaToGlobalTs
+	} else {
+		panic(fmt.Sprintf("incorrect type: %T", mapping))
+	}
+
 	c.internalSpecId = internalSpecId
 	return nil
 }
@@ -500,18 +587,18 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metad
 	return c.upsertMapping(internalSpecId, false)
 }
 
-func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.CollectionNsMappingsDoc, error) {
+func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.CompressedMappings, error) {
 	if c.isClosed() {
 		return nil, mapShaRefCounterStopped
 	}
 	docData, err := c.getCollectionNsMappingsDocData()
-	docReturn := &metadata.CollectionNsMappingsDoc{}
+	docReturn := &metadata.CompressedMappings{}
 
 	if err != nil && err == service_def.MetadataNotFoundErr {
 		if initIfNotFound {
 			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc with internalID %v", c.id, c.internalSpecId)
 			docReturn.SpecInternalId = c.internalSpecId
-			err = c.upsertCollectionNsMappingsDoc(docReturn, true /*addOp*/)
+			err = c.upsertCompressedMappingDoc(docReturn, true /*addOp*/)
 			return docReturn, err
 		} else {
 			err = fmt.Errorf("GetMappingsDoc was requested for %v but was not found", c.id)
@@ -529,15 +616,17 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 	}
 
 	if docReturn.SpecInternalId != c.internalSpecId {
+		// Log a warning, and expect the upper layer to know what to do about it
 		c.logger.Warnf("Retrieved an out of date mapping doc with internal ID %v with current known ID %v",
 			docReturn.SpecInternalId, c.internalSpecId)
 		if initIfNotFound {
-			emptyDoc := &metadata.CollectionNsMappingsDoc{}
+			emptyDoc := &metadata.CompressedMappings{}
 			emptyDoc.SpecInternalId = c.internalSpecId
 			c.logger.Infof("GetMappingsDoc %v re-initialized a new mappingsDoc with internalId %v", c.id, c.internalSpecId)
-			err = c.upsertCollectionNsMappingsDoc(emptyDoc, true /*addOp*/)
+			err = c.upsertCompressedMappingDoc(emptyDoc, true /*addOp*/)
+			return emptyDoc, err
 		}
-		return nil, service_def.MetadataNotFoundErr
+		return nil, err
 	}
 
 	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc", c.id)
@@ -622,22 +711,23 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 		c.lock.Unlock()
 
 		// Perform RMW
-		collectionNsMappingsDoc, err := c.GetMappingsDoc(false /*initIfNotFound*/)
+		mappingDoc, err := c.GetMappingsDoc(false /*initIfNotFound*/)
 		if err != nil {
 			return err
 		}
-		if collectionNsMappingsDoc.SpecInternalId == "" {
-			collectionNsMappingsDoc.SpecInternalId = specInternalId
-		} else if specInternalId != "" && collectionNsMappingsDoc.SpecInternalId != specInternalId {
-			err = fmt.Errorf("Mismatching internalId in metakv %v vs %v", collectionNsMappingsDoc.SpecInternalId, specInternalId)
+		if mappingDoc.SpecInternalId == "" {
+			mappingDoc.SpecInternalId = specInternalId
+		} else if specInternalId != "" && mappingDoc.SpecInternalId != specInternalId {
+			err = fmt.Errorf("Mismatching internalId in metakv %v vs %v", mappingDoc.SpecInternalId, specInternalId)
 			return err
 		}
 
+		collectionNsMappingsDoc := (*metadata.CollectionNsMappingsDoc)(mappingDoc)
 		err = collectionNsMappingsDoc.LoadShaMap(clonedMapping)
 		if err != nil {
 			return err
 		}
-		err = c.upsertCollectionNsMappingsDoc(collectionNsMappingsDoc, false /*new*/)
+		err = c.upsertCompressedMappingDoc(mappingDoc, false /*new*/)
 		return err
 	default:
 		return fmt.Errorf("Error upserting broken mapping for %v as an operation is happening already", c.id)

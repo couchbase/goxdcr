@@ -29,6 +29,7 @@ const (
 	CheckpointsCatalogKeyPrefix = "ckpt"
 	CheckpointsKeyPrefix        = CheckpointsCatalogKeyPrefix
 	BrokenMappingKey            = "brokenMappings"
+	GlobalTimestampKey          = "globalTs"
 )
 
 // Used to keep track of brokenmapping SHA and the count of checkpoint records referring to it
@@ -85,17 +86,23 @@ type CheckpointsService struct {
 
 	replicationSpecSvc   service_def.ReplicationSpecSvc
 	brokenMapRefCountSvc *ShaRefCounterService
+	globalTsRefCountSvc  *ShaRefCounterService
 }
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface, replicationSpecService service_def.ReplicationSpecSvc) (*CheckpointsService, error) {
 	logger := log.NewLogger("CheckpointSvc", logger_ctx)
-	shaRefSvc, err := NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger, replicationSpecService, utils)
+	shaRefSvc, err := NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger, utils)
+	if err != nil {
+		return nil, err
+	}
+	globalTsRefCntSvc, err := NewShaRefCounterService(getGlobalTimestampDocKey, metadata_svc, logger, utils)
 	if err != nil {
 		return nil, err
 	}
 	ckptSvc := &CheckpointsService{metadata_svc: metadata_svc,
 		logger:                     logger,
 		brokenMapRefCountSvc:       shaRefSvc,
+		globalTsRefCountSvc:        globalTsRefCntSvc,
 		cachedSpecs:                make(map[string]*metadata.ReplicationSpecification),
 		ckptCaches:                 map[string]CheckpointsServiceCache{},
 		cachedBackfillSpecs:        make(map[string]*metadata.BackfillReplicationSpec),
@@ -134,8 +141,9 @@ func (ckpt_svc *CheckpointsService) checkpointsDocInternal(replicationId string,
 
 	// Should exist because checkpoint manager must finish loading before allowing ckpt operations
 	shaMap, _ := ckpt_svc.brokenMapRefCountSvc.GetShaNamespaceMap(replicationId)
+	globalTsShaMap, _ := ckpt_svc.globalTsRefCountSvc.GetShaGlobalTsMap(replicationId)
 
-	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev, shaMap)
+	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev, shaMap, globalTsShaMap)
 	if err == service_def.MetadataNotFoundErr {
 		ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v",
 			replicationId, vbno, key)
@@ -150,6 +158,10 @@ func (ckpt_svc *CheckpointsService) getCheckpointCatalogKey(replicationId string
 // Get a unique key to access metakv for brokenMappings
 func getCollectionNsMappingsDocKey(replicationId string) string {
 	return fmt.Sprintf("%v", CheckpointsKeyPrefix+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter+BrokenMappingKey)
+}
+
+func getGlobalTimestampDocKey(replicationId string) string {
+	return fmt.Sprintf("%v", CheckpointsKeyPrefix+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter+GlobalTimestampKey)
 }
 
 // Get a unique key to access metakv for checkpoints
@@ -169,6 +181,10 @@ func (ckpt_svc *CheckpointsService) decodeVbnoFromCkptDocKey(ckptDocKey string) 
 
 func (ckpt_svc *CheckpointsService) isBrokenMappingDoc(ckptDocKey string) bool {
 	return strings.Contains(ckptDocKey, BrokenMappingKey)
+}
+
+func (ckpt_svc *CheckpointsService) isGlobalTsDoc(ckptDocKey string) bool {
+	return strings.Contains(ckptDocKey, GlobalTimestampKey)
 }
 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
@@ -510,7 +526,8 @@ func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId str
 		return emptyMap, nil, nil, false, err
 	}
 
-	shaToNamespaceMap, err := ckpt_svc.brokenMapRefCountSvc.GetShaToCollectionNsMap(replicationId, mappingsDoc)
+	collectionNsMappingDoc := (*metadata.CollectionNsMappingsDoc)(mappingsDoc)
+	shaToNamespaceMap, err := ckpt_svc.brokenMapRefCountSvc.GetShaToCollectionNsMap(replicationId, collectionNsMappingDoc)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
 		return emptyMap, nil, nil, false, err
@@ -522,7 +539,37 @@ func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId str
 		return emptyMap, nil, nil, false, err
 	}
 
-	return shaToNamespaceMap, mappingsDoc, incrementerFunc, alreadyExists, nil
+	return shaToNamespaceMap, collectionNsMappingDoc, incrementerFunc, alreadyExists, nil
+}
+
+func (ckpt_svc *CheckpointsService) loadGlobalTsMappingsInternal(replicationId string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, service_def.IncrementerFunc, bool, error) {
+	shaMap, err := ckpt_svc.globalTsRefCountSvc.GetShaNamespaceMap(replicationId)
+	if err != nil {
+		var emptyMap metadata.ShaToGlobalTimestampMap
+		return emptyMap, nil, nil, false, err
+	}
+	alreadyExists := len(shaMap) > 0
+
+	mappingsDoc, err := ckpt_svc.globalTsRefCountSvc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
+	if err != nil {
+		var emptyMap metadata.ShaToGlobalTimestampMap
+		return emptyMap, nil, nil, false, err
+	}
+
+	gtsCompressedDoc := (*metadata.GlobalTimestampCompressedDoc)(mappingsDoc)
+	shaToNamespaceMap, err := ckpt_svc.globalTsRefCountSvc.GetShaToGlobalTsMap(replicationId, gtsCompressedDoc)
+	if err != nil {
+		var emptyMap metadata.ShaToGlobalTimestampMap
+		return emptyMap, nil, nil, false, err
+	}
+
+	incrementerFunc, err := ckpt_svc.globalTsRefCountSvc.GetIncrementerFunc(replicationId)
+	if err != nil {
+		var emptyMap metadata.ShaToGlobalTimestampMap
+		return emptyMap, nil, nil, false, err
+	}
+
+	return shaToNamespaceMap, gtsCompressedDoc, incrementerFunc, alreadyExists, nil
 }
 
 // When each vb does checkpointing and adds a new checkpoint record
@@ -569,6 +616,7 @@ func (ckpt_svc *CheckpointsService) getCache(replicationId string) (CheckpointsS
 }
 
 // When brokenMappingsNeeded is true, the ckpts will have mappings populated, which takes more work
+// GlobalTimestamp "mapping" will also piggy-back off of the same exclusive access control
 func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error) {
 	checkpointsDocs := make(map[uint16]*metadata.CheckpointsDoc)
 
@@ -602,14 +650,26 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 		return nil, err
 	}
 
+	var ckptSvcCntIsPopulated bool
+
 	var shaToBrokenMapping metadata.ShaToCollectionNamespaceMap
 	var CollectionNsMappingsDoc *metadata.CollectionNsMappingsDoc
 	var refCounterRecorder service_def.IncrementerFunc
-	var ckptSvcCntIsPopulated bool
+
+	var shaToGlobalTs metadata.ShaToGlobalTimestampMap
+	var globalTsDoc *metadata.GlobalTimestampCompressedDoc
+	var globalTsRecorder service_def.IncrementerFunc
+
 	if brokenMappingsNeeded {
 		shaToBrokenMapping, CollectionNsMappingsDoc, refCounterRecorder, ckptSvcCntIsPopulated, err = ckpt_svc.loadBrokenMappingsInternal(replicationId)
 		if err != nil {
 			ckpt_svc.logger.Errorf("Error when getting brokenMapping for %v - %v", replicationId, err)
+			return nil, err
+		}
+
+		shaToGlobalTs, globalTsDoc, globalTsRecorder, _, err = ckpt_svc.loadGlobalTsMappingsInternal(replicationId)
+		if err != nil {
+			ckpt_svc.logger.Errorf("Error when getting GlobalTs for %v - %v", replicationId, err)
 			return nil, err
 		}
 	}
@@ -627,7 +687,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 
 	for _, ckpt_entry := range ckpt_entries {
 		if ckpt_entry != nil {
-			if ckpt_svc.isBrokenMappingDoc(ckpt_entry.Key) {
+			if ckpt_svc.isBrokenMappingDoc(ckpt_entry.Key) || ckpt_svc.isGlobalTsDoc(ckpt_entry.Key) {
 				continue
 			}
 
@@ -636,7 +696,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 				return nil, err
 			}
 
-			ckpt_doc, err := ckpt_svc.constructCheckpointDoc(ckpt_entry.Value, ckpt_entry.Rev, shaToBrokenMapping)
+			ckpt_doc, err := ckpt_svc.constructCheckpointDoc(ckpt_entry.Value, ckpt_entry.Rev, shaToBrokenMapping, shaToGlobalTs)
 			if err != nil {
 				if err == service_def.MetadataNotFoundErr {
 					ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replicationId: %v vbno: %v and key: %v",
@@ -649,6 +709,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 				checkpointsDocs[vbno] = ckpt_doc
 				if brokenMappingsNeeded && !ckptSvcCntIsPopulated {
 					ckpt_svc.registerCkptDocBrokenMappings(ckpt_doc, refCounterRecorder)
+					ckpt_svc.registerGlobalTimestamps(ckpt_doc, globalTsRecorder)
 				}
 			}
 		}
@@ -661,9 +722,21 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 			return checkpointsDocs, err
 		}
 
+		err = ckpt_svc.globalTsRefCountSvc.GCDocUsingLatestCounterInfo(replicationId, globalTsDoc)
+		if err != nil {
+			ckpt_svc.logger.Errorf("Unable to GC globalTs cache - %v", err)
+			return checkpointsDocs, err
+		}
+
 		shaToBrokenMapping, _, _, _, err = ckpt_svc.loadBrokenMappingsInternal(replicationId)
 		if err != nil {
 			ckpt_svc.logger.Errorf("Unable to refresh brokenmapping cache - %v", err)
+			return checkpointsDocs, err
+		}
+
+		shaToGlobalTs, _, _, _, err = ckpt_svc.loadGlobalTsMappingsInternal(replicationId)
+		if err != nil {
+			ckpt_svc.logger.Errorf("Unable to refresh globalTimestamp cache - %v", err)
 			return checkpointsDocs, err
 		}
 
@@ -672,6 +745,13 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 			ckpt_svc.logger.Infof("Loaded brokenMap: %v", shaToBrokenMapping)
 		} else {
 			ckpt_svc.logger.Warnf("Error %v trying init sha counter to mapping: %v", err, shaToBrokenMapping)
+		}
+
+		err = ckpt_svc.globalTsRefCountSvc.InitCounterShaToActualMappings(replicationId, CollectionNsMappingsDoc.SpecInternalId, shaToGlobalTs)
+		if err == nil {
+			ckpt_svc.logger.Infof("Loaded globalTs: %v", shaToGlobalTs)
+		} else {
+			ckpt_svc.logger.Warnf("Error %v trying init sha counter to globalTs: %v", err, shaToGlobalTs)
 		}
 
 		// BrokenMappingsNeeded means the checkpoints themselves have brokenMaps inside them and is valid for caching
@@ -707,7 +787,20 @@ func (ckpt_svc *CheckpointsService) registerCkptDocBrokenMappings(ckpt_doc *meta
 	}
 }
 
-func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev interface{}, shaToBrokenMapping metadata.ShaToCollectionNamespaceMap) (*metadata.CheckpointsDoc, error) {
+func (ckpt_svc *CheckpointsService) registerGlobalTimestamps(ckpt_doc *metadata.CheckpointsDoc, recorder service_def.IncrementerFunc) {
+	if ckpt_doc == nil || recorder == nil || ckpt_doc.IsTraditional() {
+		return
+	}
+	for _, record := range ckpt_doc.Checkpoint_records {
+		if record == nil || record.GlobalTimestampSha256 == "" {
+			continue
+		}
+
+		recorder(record.GlobalTimestampSha256, record.GlobalTimestamp)
+	}
+}
+
+func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev interface{}, shaToBrokenMapping metadata.ShaToCollectionNamespaceMap, shaToGtsMapping metadata.ShaToGlobalTimestampMap) (*metadata.CheckpointsDoc, error) {
 	// The only time content is empty is when this is a fresh XDCR system and no checkpoints has been registered yet
 	if len(content) > 0 {
 		ckpt_doc := &metadata.CheckpointsDoc{}
@@ -717,6 +810,12 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 		}
 		if len(shaToBrokenMapping) > 0 {
 			err := ckpt_svc.populateActualMapping(ckpt_doc, shaToBrokenMapping)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(shaToGtsMapping) > 0 {
+			err := ckpt_svc.populateGlobalTsMapping(ckpt_doc, shaToGtsMapping)
 			if err != nil {
 				return nil, err
 			}
@@ -761,6 +860,44 @@ func (ckpt_svc *CheckpointsService) populateActualMapping(doc *metadata.Checkpoi
 	}
 	if len(errMap) > 0 {
 		return fmt.Errorf("populateActualMapping for doc internal ID %v Unable to find shas %v",
+			doc.SpecInternalId, base.FlattenErrorMap(errMap))
+	}
+	return nil
+}
+
+func (ckpt_svc *CheckpointsService) populateGlobalTsMapping(doc *metadata.CheckpointsDoc, shaToGtsMapping metadata.ShaToGlobalTimestampMap) error {
+	if doc == nil {
+		return nil
+	}
+
+	errMap := make(base.ErrorMap)
+	for _, record := range doc.Checkpoint_records {
+		if record == nil {
+			continue
+		}
+
+		shaMapToFill := record.GetGlobalTsMap()
+
+		if len(shaMapToFill) == 0 {
+			continue
+		}
+
+		for oneShaToFill, _ := range shaMapToFill {
+			mapping, exists := shaToGtsMapping[oneShaToFill]
+			if !exists {
+				errMap[oneShaToFill] = base.ErrorNotFound
+				continue
+			}
+			shaMapToFill[oneShaToFill] = mapping
+		}
+
+		err := record.LoadGlobalTsMapping(shaMapToFill)
+		if err != nil {
+			errMap[fmt.Sprintf("populateGlobalTsMapping traditional? %v for record created at %v loadMapping %v", record.IsTraditional(), record.CreationTime, shaMapToFill)] = err
+		}
+	}
+	if len(errMap) > 0 {
+		return fmt.Errorf("populateGlobalTsMapping for doc internal ID %v Unable to find shas %v",
 			doc.SpecInternalId, base.FlattenErrorMap(errMap))
 	}
 	return nil
@@ -855,6 +992,14 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		if cleanupErr != nil {
 			ckpt_svc.logger.Errorf("DelCheckpointsDoc for %v brokenmapping had error: %v - manual clean up may be required", backfillId, cleanupErr)
 		}
+		cleanupErr = ckpt_svc.globalTsRefCountSvc.CleanupMapping(oldSpec.Id, ckpt_svc.utils)
+		if cleanupErr != nil {
+			ckpt_svc.logger.Errorf("DelGlobalTsMapping for %v had error: %v - manual clean up may be required", oldSpec.Id, cleanupErr)
+		}
+		cleanupErr = ckpt_svc.globalTsRefCountSvc.CleanupMapping(backfillId, ckpt_svc.utils)
+		if cleanupErr != nil {
+			ckpt_svc.logger.Errorf("DelGlobalTsMapping for %v had error: %v - manual clean up may be required", backfillId, cleanupErr)
+		}
 	} else {
 		if oldSpec == nil && newSpec != nil {
 			backfillId := common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)
@@ -867,6 +1012,8 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 
 			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
 			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(backfillId, newSpec.InternalId)
+			ckpt_svc.globalTsRefCountSvc.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
+			ckpt_svc.globalTsRefCountSvc.InitTopicShaCounterWithInternalId(backfillId, newSpec.InternalId)
 		}
 		ckpt_svc.specsMtx.Lock()
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
@@ -1109,20 +1256,39 @@ func (ckpt_svc *CheckpointsService) initWithSpecs() error {
 		ckpt_svc.cachedSpecs[specId] = spec
 		ckpt_svc.stopTheWorldMtx[specId] = &sync.RWMutex{}
 		ckpt_svc.initCheckpointsDocsSerializeMapNoLock(specId)
-		alreadyExists := ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
-		if alreadyExists {
-			// Odd error - shouldn't happen
-			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", specId, spec.InternalId)
-		}
-		backfillSpecId := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
-		alreadyExists = ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
-		if alreadyExists {
-			// Odd error - shouldn't happen
-			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", backfillSpecId, spec.InternalId)
-		}
+		ckpt_svc.initBrokenMapRefCounter(specId, spec)
+		ckpt_svc.initGlobalTsCounter(specId, spec)
 	}
 
 	return nil
+}
+
+func (ckpt_svc *CheckpointsService) initBrokenMapRefCounter(specId string, spec *metadata.ReplicationSpecification) {
+	alreadyExists := ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
+	if alreadyExists {
+		// Odd error - shouldn't happen
+		ckpt_svc.logger.Warnf("BrokenMapRefCounter with spec %v internal %v already exists", specId, spec.InternalId)
+	}
+	backfillSpecId := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
+	alreadyExists = ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
+	if alreadyExists {
+		// Odd error - shouldn't happen
+		ckpt_svc.logger.Warnf("BrokenMapRefCounter with spec %v internal %v already exists", backfillSpecId, spec.InternalId)
+	}
+}
+
+func (ckpt_svc *CheckpointsService) initGlobalTsCounter(specId string, spec *metadata.ReplicationSpecification) {
+	alreadyExists := ckpt_svc.globalTsRefCountSvc.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
+	if alreadyExists {
+		// Odd error - shouldn't happen
+		ckpt_svc.logger.Warnf("GlobalTimestampCounter with spec %v internal %v already exists", specId, spec.InternalId)
+	}
+	backfillSpecId := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
+	alreadyExists = ckpt_svc.globalTsRefCountSvc.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
+	if alreadyExists {
+		// Odd error - shouldn't happen
+		ckpt_svc.logger.Warnf("GlobalTimestampCounter with spec %v internal %v already exists", backfillSpecId, spec.InternalId)
+	}
 }
 
 func (ckpt_svc *CheckpointsService) initCheckpointsDocsSerializeMapNoLock(specId string) {
