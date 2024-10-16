@@ -520,6 +520,73 @@ func (_c *CheckpointsService_GetVbnosFromCheckpointDocs_Call) RunAndReturn(run f
 	return _c
 }
 
+// LoadAllShaMappings provides a mock function with given fields: replicationId
+func (_m *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error) {
+	ret := _m.Called(replicationId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadAllShaMappings")
+	}
+
+	var r0 *metadata.CollectionNsMappingsDoc
+	var r1 *metadata.GlobalTimestampCompressedDoc
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)); ok {
+		return rf(replicationId)
+	}
+	if rf, ok := ret.Get(0).(func(string) *metadata.CollectionNsMappingsDoc); ok {
+		r0 = rf(replicationId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionNsMappingsDoc)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) *metadata.GlobalTimestampCompressedDoc); ok {
+		r1 = rf(replicationId)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*metadata.GlobalTimestampCompressedDoc)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(replicationId)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// CheckpointsService_LoadAllShaMappings_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadAllShaMappings'
+type CheckpointsService_LoadAllShaMappings_Call struct {
+	*mock.Call
+}
+
+// LoadAllShaMappings is a helper method to define mock.On call
+//   - replicationId string
+func (_e *CheckpointsService_Expecter) LoadAllShaMappings(replicationId interface{}) *CheckpointsService_LoadAllShaMappings_Call {
+	return &CheckpointsService_LoadAllShaMappings_Call{Call: _e.mock.On("LoadAllShaMappings", replicationId)}
+}
+
+func (_c *CheckpointsService_LoadAllShaMappings_Call) Run(run func(replicationId string)) *CheckpointsService_LoadAllShaMappings_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *CheckpointsService_LoadAllShaMappings_Call) Return(_a0 *metadata.CollectionNsMappingsDoc, _a1 *metadata.GlobalTimestampCompressedDoc, _a2 error) *CheckpointsService_LoadAllShaMappings_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *CheckpointsService_LoadAllShaMappings_Call) RunAndReturn(run func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)) *CheckpointsService_LoadAllShaMappings_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadBrokenMappings provides a mock function with given fields: replicationId
 func (_m *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
 	ret := _m.Called(replicationId)
@@ -647,6 +714,54 @@ func (_c *CheckpointsService_PreUpsertBrokenMapping_Call) Return(_a0 error) *Che
 }
 
 func (_c *CheckpointsService_PreUpsertBrokenMapping_Call) RunAndReturn(run func(string, string, *metadata.CollectionNamespaceMapping) error) *CheckpointsService_PreUpsertBrokenMapping_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PreUpsertGlobalTs provides a mock function with given fields: replicationId, specInternalId, globalTs
+func (_m *CheckpointsService) PreUpsertGlobalTs(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp) error {
+	ret := _m.Called(replicationId, specInternalId, globalTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PreUpsertGlobalTs")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, *metadata.GlobalTimestamp) error); ok {
+		r0 = rf(replicationId, specInternalId, globalTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// CheckpointsService_PreUpsertGlobalTs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PreUpsertGlobalTs'
+type CheckpointsService_PreUpsertGlobalTs_Call struct {
+	*mock.Call
+}
+
+// PreUpsertGlobalTs is a helper method to define mock.On call
+//   - replicationId string
+//   - specInternalId string
+//   - globalTs *metadata.GlobalTimestamp
+func (_e *CheckpointsService_Expecter) PreUpsertGlobalTs(replicationId interface{}, specInternalId interface{}, globalTs interface{}) *CheckpointsService_PreUpsertGlobalTs_Call {
+	return &CheckpointsService_PreUpsertGlobalTs_Call{Call: _e.mock.On("PreUpsertGlobalTs", replicationId, specInternalId, globalTs)}
+}
+
+func (_c *CheckpointsService_PreUpsertGlobalTs_Call) Run(run func(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp)) *CheckpointsService_PreUpsertGlobalTs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(*metadata.GlobalTimestamp))
+	})
+	return _c
+}
+
+func (_c *CheckpointsService_PreUpsertGlobalTs_Call) Return(_a0 error) *CheckpointsService_PreUpsertGlobalTs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *CheckpointsService_PreUpsertGlobalTs_Call) RunAndReturn(run func(string, string, *metadata.GlobalTimestamp) error) *CheckpointsService_PreUpsertGlobalTs_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -898,6 +1013,53 @@ func (_c *CheckpointsService_UpsertCheckpointsDone_Call) Return(_a0 error) *Chec
 }
 
 func (_c *CheckpointsService_UpsertCheckpointsDone_Call) RunAndReturn(run func(string, string) error) *CheckpointsService_UpsertCheckpointsDone_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpsertGlobalTimestamps provides a mock function with given fields: replicationId, specInternalId
+func (_m *CheckpointsService) UpsertGlobalTimestamps(replicationId string, specInternalId string) error {
+	ret := _m.Called(replicationId, specInternalId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertGlobalTimestamps")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(replicationId, specInternalId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// CheckpointsService_UpsertGlobalTimestamps_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpsertGlobalTimestamps'
+type CheckpointsService_UpsertGlobalTimestamps_Call struct {
+	*mock.Call
+}
+
+// UpsertGlobalTimestamps is a helper method to define mock.On call
+//   - replicationId string
+//   - specInternalId string
+func (_e *CheckpointsService_Expecter) UpsertGlobalTimestamps(replicationId interface{}, specInternalId interface{}) *CheckpointsService_UpsertGlobalTimestamps_Call {
+	return &CheckpointsService_UpsertGlobalTimestamps_Call{Call: _e.mock.On("UpsertGlobalTimestamps", replicationId, specInternalId)}
+}
+
+func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) Run(run func(replicationId string, specInternalId string)) *CheckpointsService_UpsertGlobalTimestamps_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) Return(_a0 error) *CheckpointsService_UpsertGlobalTimestamps_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) RunAndReturn(run func(string, string) error) *CheckpointsService_UpsertGlobalTimestamps_Call {
 	_c.Call.Return(run)
 	return _c
 }

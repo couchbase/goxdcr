@@ -121,6 +121,7 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		// replicationIdPlusExtra can be either
 		// 1. 63a5f325205fe7f610a7ec19570054da/B1/B2/backfillMappings - backfill mappings
 		// 2. 63a5f325205fe7f610a7ec19570054da/B1/B2/spec - actual backfill replication spec
+		// 3. 63a5f325205fe7f610a7ec19570054da/B1/B2/globalTs - deduped global timestamps
 		// The replicationId should be:
 		// 63a5f325205fe7f610a7ec19570054da/B1/B2
 		var replicationId string

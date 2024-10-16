@@ -61,6 +61,9 @@ func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerCont
 	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
 	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Del"])
 	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Add"])
+	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
+	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), mock.Anything).Return(opMap["Del"])
+	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), mock.Anything).Return(opMap["Add"])
 
 	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey)).Run(func(args mock.Arguments) {
 		timeInUint := time.Now().UnixMicro()
@@ -470,7 +473,8 @@ func TestCkptSvcLoadGlobalTimestamp(t *testing.T) {
 	assert.Len(vb12Docs.Checkpoint_records, 1)
 
 	record := vb12Docs.Checkpoint_records[0]
-	assert.Len(record.GlobalTimestamp, 2)
-	assert.Equal(uint64(1), record.GlobalTimestamp[0].Target_Seqno)
-	assert.Equal(uint64(2), record.GlobalTimestamp[1].Target_Seqno)
+	gtsCheck := record.GlobalTimestamp
+	assert.Len(gts, 2)
+	assert.Equal(uint64(1), gtsCheck[0].Target_Seqno)
+	assert.Equal(uint64(2), gtsCheck[1].Target_Seqno)
 }
