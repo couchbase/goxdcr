@@ -488,8 +488,8 @@ func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	assert.Nil(err)
 	assert.True(validate1.IsSame(*validate2))
 
-	oneMapping := &CompressedColNamespaceMapping{nil, "dummySha"}
-	var oneList CompressedColNamespaceMappingList
+	oneMapping := &CompressedShaMapping{nil, "dummySha"}
+	var oneList CompressedShaMappingList
 	oneList = append(oneList, oneMapping)
 
 	brokenMappingDoc := &CollectionNsMappingsDoc{oneList, "dummySpec", nil}
@@ -994,12 +994,12 @@ func TestCollectionNsMappingsDocMarshallerWithMigration(t *testing.T) {
 	compressedMap, err := newUpsertingMap.ToSnappyCompressed()
 	assert.Nil(err)
 
-	mappingRecord := CompressedColNamespaceMapping{
+	mappingRecord := CompressedShaMapping{
 		CompressedMapping: compressedMap,
 		Sha256Digest:      fmt.Sprintf("%x", shaForNewUpsertMap[:]),
 	}
 
-	var mappingRecords CompressedColNamespaceMappingList
+	var mappingRecords CompressedShaMappingList
 	mappingRecords.SortedInsert(&mappingRecord)
 	mappingDoc := &CollectionNsMappingsDoc{
 		NsMappingRecords: mappingRecords,

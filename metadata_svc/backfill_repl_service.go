@@ -71,7 +71,7 @@ type BackfillReplicationService struct {
 
 func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc service_def.MetadataSvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface, replSpecSvc service_def.ReplicationSpecSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, bucketTopologySvc service_def.BucketTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
-	shaRefSvc, err := NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger, replSpecSvc, utilsIn)
+	shaRefSvc, err := NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger, utilsIn)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
-		shaMapping, err := b.GetShaToCollectionNsMap(backfillSpec.Id, mappingsDoc)
+		shaMapping, err := b.GetShaToCollectionNsMap(backfillSpec.Id, (*metadata.CollectionNsMappingsDoc)(mappingsDoc))
 		if err != nil {
 			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
 			b.appendUnrecoverableBackfillSpec(backfillSpec)
@@ -428,7 +428,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 	if err != nil {
 		return err
 	}
-	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, mappingsDoc)
+	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, (*metadata.CollectionNsMappingsDoc)(mappingsDoc))
 	if err != nil {
 		b.logger.Errorf("persising backfill mapping for %v has err %v", err)
 		return err

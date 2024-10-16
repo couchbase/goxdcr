@@ -28,7 +28,7 @@ func TestShaRefCounter_cleanup_deadlock(t *testing.T) {
 	internalId := "internal-id-123"
 
 	nsmap := &metadata.CollectionNsMappingsDoc{
-		NsMappingRecords: []*metadata.CompressedColNamespaceMapping{
+		NsMappingRecords: []*metadata.CompressedShaMapping{
 			{
 				CompressedMapping: make([]byte, 10),
 				Sha256Digest:      "abcd",
