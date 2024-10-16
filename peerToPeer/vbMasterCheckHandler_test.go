@@ -42,11 +42,12 @@ func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.Checkp
 func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec, utils *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, spec *metadata.ReplicationSpecification) {
 	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
 	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
-	ckptSvc.On("LoadBrokenMappings", replId).Return(nil, nsMappingDoc, nil, false, nil)
+	globalTsDoc := &metadata.GlobalTimestampCompressedDoc{}
+	ckptSvc.On("LoadAllShaMappings", replId).Return(nsMappingDoc, globalTsDoc, nil)
 
 	// For backfill, just return the same thing
 	ckptSvc.On("CheckpointsDocs", common.ComposeFullTopic(replId, common.BackfillPipeline), mock.Anything).Return(ckptData, nil)
-	ckptSvc.On("LoadBrokenMappings", common.ComposeFullTopic(replId, common.BackfillPipeline)).Return(nil, nsMappingDoc, nil, false, nil)
+	ckptSvc.On("LoadAllShaMappings", common.ComposeFullTopic(replId, common.BackfillPipeline)).Return(nsMappingDoc, globalTsDoc, nil)
 
 	notificationCh := make(chan service_def2.SourceNotification, 1)
 	bucketTopologySvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(notificationCh, nil)
