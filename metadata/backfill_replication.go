@@ -1635,12 +1635,13 @@ func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (
 		return
 	}
 	if len(b.requestedCollections_) == 0 {
-		err = fmt.Errorf("No collections requested")
+		err = fmt.Errorf("no collections requested")
 		return
 	}
 	errMap := make(base.ErrorMap)
 	seqnoEnd = b.Timestamps.EndingTimestamp.Seqno
 	var filterCollectionList []uint32
+	collectionIdDedupMap := make(map[uint32]bool)
 	for _, requestedCollection := range b.requestedCollections_ {
 		for sourceNamespace, _ := range requestedCollection {
 			var scopeName string = sourceNamespace.ScopeName
@@ -1656,11 +1657,16 @@ func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (
 				errMap[fmt.Sprintf("Manifest %v looking up %v:%v", latestSrcManifest.Uid(), sourceNamespace.ScopeName, sourceNamespace.CollectionName)] = err
 				continue
 			}
-			filterCollectionList = append(filterCollectionList, cid)
+			// KV expects to receive the Collection Filter in a deduplicated format
+			collectionIdDedupMap[cid] = true
 		}
 	}
 	if len(errMap) > 0 {
 		err = fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	filterCollectionList = make([]uint32, 0, len(collectionIdDedupMap))
+	for cid := range collectionIdDedupMap {
+		filterCollectionList = append(filterCollectionList, cid)
 	}
 	filter = &mcc.CollectionsFilter{
 		UseManifestUid:  b.Timestamps.StartingTimestamp.Seqno > 0,

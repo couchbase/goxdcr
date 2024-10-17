@@ -11,6 +11,10 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -713,5 +717,83 @@ func TestMergeTasksIntoSpecWithNilTask(t *testing.T) {
 	testSpec.MergeNewTasks(NewVBTasksMapWithMTasks(newVbTaskMap), false /*skipFirst*/)
 	for _, task := range testSpec.VBTasksMap.VBTasksMap[0].List {
 		assert.NotNil(task)
+	}
+}
+
+func TestDuplicateCIDs_ToDcpNozzleTask(t *testing.T) {
+	assert := assert.New(t)
+	testDir := "testData/"
+	provisionedFile := testDir + "provisionedManifest.json"
+	data, err := os.ReadFile(provisionedFile)
+	assert.Nil(err)
+	var testManifest CollectionsManifest
+	err = testManifest.LoadBytes(data)
+	assert.Nil(err)
+	type fields struct {
+		requestedCollections_ []CollectionNamespaceMapping
+	}
+	col1 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
+	col2 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col2"}
+	col3 := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col1"}
+	col4 := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col2"}
+	col5 := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col3"}
+
+	map1 := CollectionNamespaceMapping{
+		&SourceNamespace{CollectionNamespace: col1}: CollectionNamespaceList{},
+		&SourceNamespace{CollectionNamespace: col2}: CollectionNamespaceList{},
+		&SourceNamespace{CollectionNamespace: col3}: CollectionNamespaceList{},
+	}
+	map2 := CollectionNamespaceMapping{
+		&SourceNamespace{CollectionNamespace: col2}: CollectionNamespaceList{},
+		&SourceNamespace{CollectionNamespace: col3}: CollectionNamespaceList{},
+		&SourceNamespace{CollectionNamespace: col4}: CollectionNamespaceList{},
+		&SourceNamespace{CollectionNamespace: col5}: CollectionNamespaceList{},
+	}
+	testTimeStamps := &BackfillVBTimestamps{StartingTimestamp: &base.VBTimestamp{}, EndingTimestamp: &base.VBTimestamp{}}
+
+	tests := []struct {
+		name       string
+		fields     fields
+		wantFilter []uint32
+		wantErr    bool
+	}{
+		{
+			name:       "Test1 - Without Duplicate Collection IDs",
+			fields:     fields{requestedCollections_: []CollectionNamespaceMapping{map1}},
+			wantFilter: []uint32{8, 9, 10},
+			wantErr:    false,
+		},
+		{
+			name:       "Test2 - Without Duplicate Collection IDs",
+			fields:     fields{requestedCollections_: []CollectionNamespaceMapping{map2}},
+			wantFilter: []uint32{9, 10, 11, 12},
+			wantErr:    false,
+		},
+		{
+			name:       "Test3 - With Duplicate Collection IDs",
+			fields:     fields{requestedCollections_: []CollectionNamespaceMapping{map1, map2}},
+			wantFilter: []uint32{8, 9, 10, 11, 12},
+			wantErr:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &BackfillTask{
+				Timestamps:            testTimeStamps,
+				mutex:                 &sync.RWMutex{},
+				requestedCollections_: tt.fields.requestedCollections_,
+			}
+			_, gotFilter, err := b.ToDcpNozzleTask(&testManifest)
+			sort.Slice(gotFilter.CollectionsList, func(i, j int) bool {
+				return gotFilter.CollectionsList[i] < gotFilter.CollectionsList[j]
+			})
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BackfillTask.ToDcpNozzleTask() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(gotFilter.CollectionsList, tt.wantFilter) {
+				t.Errorf("BackfillTask.ToDcpNozzleTask() gotFilter = %v, want %v", gotFilter.CollectionsList, tt.wantFilter)
+			}
+		})
 	}
 }
