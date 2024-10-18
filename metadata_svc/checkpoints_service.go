@@ -491,6 +491,9 @@ func (ckpt_svc *CheckpointsService) upsertCheckpointsDoc(replicationId string, c
 		}
 
 		for _, ckptRecord := range ckptDoc.Checkpoint_records {
+			if ckptRecord == nil {
+				continue
+			}
 			err = ckpt_svc.RecordMappings(replicationId, ckptRecord, nil)
 			if err != nil {
 				errMap[fmt.Sprintf("vb %v recordMapping", vbno)] = err

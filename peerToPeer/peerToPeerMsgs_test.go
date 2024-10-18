@@ -14,8 +14,10 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -171,14 +173,77 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestVBMasterRespGlobalPayloadMap =================")
 	assert := assert.New(t)
 
-	// File to be sent from a node with global checkpoint
-	file := "./unitTestData/bucketVBMGlobalPayload.json"
-	vbMasterPayload := &VBMasterCheckResp{}
-	data, err := ioutil.ReadFile(file)
-	err = vbMasterPayload.DeSerialize(data)
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	s1c1, err := base.NewCollectionNamespaceFromString("S1.c1")
+	assert.Nil(err)
+	brokenMap.AddSingleMapping(&s1c1, &s1c1)
+	shaSlice, err := brokenMap.Sha256()
+	assert.Nil(err)
+	brokenMapSha := fmt.Sprintf("%x", shaSlice[:])
+
+	brokenMapShaToColNsMap := make(metadata.ShaToCollectionNamespaceMap)
+	brokenMapShaToColNsMap[brokenMapSha] = &brokenMap
+	colNsMappingDoc := &metadata.CollectionNsMappingsDoc{}
+	assert.Nil(colNsMappingDoc.LoadShaMap(brokenMapShaToColNsMap))
+
+	vbs := []uint16{0, 1}
+	notMyVBs, globalCkptDocMap := GenerateNotMyVBsPayload(vbs, brokenMapSha) // VBsCkptsDocMap type
+
+	_, _, err = globalCkptDocMap.SnappyCompress()
 	assert.Nil(err)
 
-	payloadMap, _ := vbMasterPayload.GetReponse()
+	// We need CompressedMappings of all global timestamp shas
+	dedupShaBytesMap := make(map[string][]byte)
+	for _, oneCkptDoc := range globalCkptDocMap {
+		for _, record := range oneCkptDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+			assert.False(record.IsTraditional())
+			gtsCompressedBytes, err := record.GlobalTimestamp.ToSnappyCompressed()
+			assert.Nil(err)
+
+			chkSha, err := record.GlobalTimestamp.Sha256()
+			assert.Nil(err)
+			gtsBytesChkStr := fmt.Sprintf("%x", chkSha)
+			assert.Equal(record.GlobalTimestampSha256, gtsBytesChkStr)
+
+			gtsMarshalled, err := json.Marshal(record.GlobalTimestamp)
+			assert.Nil(err)
+			checkBytes, err := snappy.Decode(nil, gtsCompressedBytes)
+			assert.Nil(err)
+			assert.True(reflect.DeepEqual(gtsMarshalled, checkBytes))
+
+			// To double check
+			assert.NotEqual("", record.GlobalTimestampSha256)
+			chkGts := &metadata.GlobalTimestamp{}
+			err = chkGts.SnappyDecompress(gtsCompressedBytes)
+			assert.Nil(err)
+
+			assert.True(chkGts.SameAs(&record.GlobalTimestamp))
+			dedupShaBytesMap[record.GlobalTimestampSha256] = gtsCompressedBytes
+		}
+	}
+	var compressedMappingDoc metadata.CompressedMappings
+	for shaStr, snappyBytes := range dedupShaBytesMap {
+		compressedMappingDoc.NsMappingRecords = append(compressedMappingDoc.NsMappingRecords, &metadata.CompressedShaMapping{
+			CompressedMapping: snappyBytes,
+			Sha256Digest:      shaStr,
+		})
+	}
+
+	gtsCompressedDoc := (*metadata.GlobalTimestampCompressedDoc)(&compressedMappingDoc)
+
+	vbMasterpayload := GenerateVBMasterPayload(&notMyVBs, colNsMappingDoc, gtsCompressedDoc)
+	vbMasterCheckResp := &VBMasterCheckResp{
+		ReplicationPayload: ReplicationPayload{
+			payload: &BucketVBMPayloadType{
+				"B0": vbMasterpayload,
+			},
+		},
+	}
+
+	payloadMap, unlockFunc := vbMasterCheckResp.GetReponse()
 	assert.NotNil(payloadMap)
 	var b0Found bool
 	for k, _ := range *payloadMap {
@@ -186,10 +251,10 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 			b0Found = true
 		}
 	}
+	unlockFunc()
 	assert.True(b0Found)
 	payload := (*payloadMap)["B0"]
 	assert.NotNil(payload)
-
 	assert.NotNil(payload.GlobalTimestampDoc)
 
 	oneNodeVbsCkptMap, err := payload.GetAllCheckpoints(common.MainPipeline)
@@ -208,9 +273,6 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 			if record == nil {
 				continue
 			}
-			//if record.GlobalTimestampSha256 != "" {
-			//	fmt.Printf("NEIL DEBUG found %v\n", record.GlobalTimestampSha256)
-			//}
 			for _, gts := range record.GlobalTimestamp {
 				if gts.BrokenMappingSha256 != "" {
 					brokenMapShaFound = true
@@ -220,10 +282,8 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 		}
 	}
 	assert.True(brokenMapShaFound)
-
-	brokenMap := payload.GetBrokenMappingDoc()
-	assert.NotNil(brokenMap)
-	assert.True(brokenMap.SpecInternalId != "")
+	brokenMapChk := vbMasterpayload.GetBrokenMappingDoc()
+	assert.NotNil(brokenMapChk)
 }
 
 func TestManifestLoadTest(t *testing.T) {

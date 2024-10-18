@@ -116,7 +116,7 @@ function runOneRebalanceCycle {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P with brokenmap and failing a node out (128VB edition)"
+	echo "Running P2P with brokenmap and failing a node out (128VB -> 1024VB edition)"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
