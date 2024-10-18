@@ -12,7 +12,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -1809,6 +1811,9 @@ func UnmarshalTargetVBOpaque(data interface{}) (TargetVBOpaque, error) {
 			return nil, TargetVBOpaqueUnmarshalError(data)
 		}
 
+		// Note that if the UUID is > Maxuint32, it could be subjected to loss of precision
+		// by doing this type of conversion.
+		// We technically haven't seen a CBSE yet... but it could be an issue potentially...
 		target_vb_uuid_float, ok := target_vb_uuid.(float64)
 		if ok {
 			return &TargetVBUuid{uint64(target_vb_uuid_float)}, nil
@@ -2132,8 +2137,10 @@ func (v *VBsCkptsDocMap) SameAs(other VBsCkptsDocMap) bool {
 }
 
 // Outputs:
-// 1. Compressed map of ckpts
-// 2. A deduped map of brokenMapSha -> snappy compressed broken map referred by all ckpts in the docs
+//  1. Compressed map of ckpts
+//  2. A deduped map consisted of elements of:
+//     a. brokenMapSha -> snappy compressed broken map referred by all ckpts in the docs
+//     b. globalTimestampSha -> snappy compressed global timestamp
 func (v *VBsCkptsDocMap) SnappyCompress() (VBsCkptsDocSnappyMap, ShaMappingCompressedMap, error) {
 	if v == nil {
 		return nil, nil, base.ErrorNilPtr
@@ -2594,9 +2601,17 @@ func (c *CheckpointsDoc) LoadGlobalTimestampFromShaMap(globalTsShaMap ShaToGloba
 			gts, found := globalTsShaMap[record.GlobalTimestampSha256]
 			if !found {
 				errMap[fmt.Sprintf("Global timestamp sha %v", record.GlobalTimestampSha256)] = base.ErrorNotFound
+				continue
 			}
 			record.GlobalTimestamp = *gts
 		}
+	}
+	if len(errMap) > 0 {
+		var debugKeys []string
+		for k, _ := range globalTsShaMap {
+			debugKeys = append(debugKeys, k)
+		}
+		errMap["globalTsShaMap has the following shas:"] = fmt.Errorf(strings.Join(debugKeys, " "))
 	}
 	return errMap
 }
@@ -2678,4 +2693,42 @@ func (g *GlobalTimestampCompressedDoc) LoadShaMap(shaMap ShaToGlobalTimestampMap
 	// MUST cast as a pointer otherwise the LoadShaMap below will be done on a copy
 	compressedMapPtr := (*CompressedMappings)(g)
 	return compressedMapPtr.LoadShaMap(shaMap.ToSnappyCompressableMap())
+}
+
+// For unit test
+func GenerateGlobalVBsCkptDocMap(vbsList []uint16, brokenMappingShaToInsert string) VBsCkptsDocMap {
+	retMap := make(VBsCkptsDocMap)
+	for _, vb := range vbsList {
+		oneGts := GlobalTimestamp{}
+		for i := 0; i < base.NumberOfVbs; i++ {
+			oneGts[uint16(i)] = &GlobalVBTimestamp{
+				TargetVBTimestamp{
+					Target_vb_opaque: &TargetVBUuid{
+						// Note that if the UUID is > Maxuint32, it could be subjected to loss of precision
+						// by doing this type of conversion.
+						// We technically haven't seen a CBSE yet... but it could be an issue potentially...
+						// Do the same for all uint64's
+						Target_vb_uuid: uint64(rand.Uint32()),
+					},
+					Target_Seqno:        uint64(rand.Uint32()),
+					BrokenMappingSha256: brokenMappingShaToInsert,
+				},
+			}
+		}
+
+		oneRecord := &CheckpointRecord{
+			CreationTime: uint64(rand.Uint32()),
+			SourceVBTimestamp: SourceVBTimestamp{
+				Seqno:         uint64(rand.Uint32()),
+				Failover_uuid: rand.Uint64(),
+			},
+			GlobalTimestamp: oneGts,
+		}
+		oneRecord.PopulateGlobalTimestampSha()
+		oneDoc := &CheckpointsDoc{
+			Checkpoint_records: CheckpointRecordsList{oneRecord},
+		}
+		retMap[vb] = oneDoc
+	}
+	return retMap
 }

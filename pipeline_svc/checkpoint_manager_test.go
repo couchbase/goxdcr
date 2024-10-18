@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1274,9 +1273,7 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 
 }
 
-// TODO NEIL: the unmarshal function somehow doesn't work properly so the test cannot be run
-// However, p2p test itself passes so that we know the code path is covered
-func Disabled_TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
+func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 	fmt.Println("============== Test case start: TestCkptmgrStopTheWorldMergeGlobal =================")
 	defer fmt.Println("============== Test case end: TestCkptmgrStopTheWorldMergeGlobal =================")
 	assert := assert.New(t)
@@ -1302,10 +1299,7 @@ func Disabled_TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
 	ckptMgr.pipeline = mainPipeline
 
-	mergeCkptArgsJson, err := os.ReadFile("./unitTestdata/globalMergeCkpt.json")
-	assert.Nil(err)
-	mergeCkptArgs := &MergeCkptArgs{}
-	err = json.Unmarshal(mergeCkptArgsJson, mergeCkptArgs)
+	mergeCkptArgs := generateMergeCkptArgs()
 	assert.Nil(err)
 	assert.NotEqual(0, len(mergeCkptArgs.PipelinesCkptDocs))
 	assert.NotEqual(0, len(mergeCkptArgs.BrokenMappingShaMap))
@@ -1329,7 +1323,7 @@ func Disabled_TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 	}
 	assert.NotEqual(0, recordWithBrokenmapSha)
 
-	setupStopTheWorldCkptSvcMock(ckptSvc, true, assert, recordWithBrokenmapSha)
+	setupStopTheWorldCkptSvcMock(ckptSvc, true, assert, recordWithBrokenmapSha, mergeCkptArgs.BrokenMappingShaMap, mergeCkptArgs.GlobalTimestampShaMap)
 
 	getter := func() *MergeCkptArgs {
 		return mergeCkptArgs
@@ -1338,13 +1332,14 @@ func Disabled_TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 
 }
 
-// This is used specific for globalMergeCkpt.json
-func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alreadyExist bool, assert *assert.Assertions, brokenMapCntExpected int) {
+// This is used specific for randomly generated global ckpt
+func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alreadyExist bool, assert *assert.Assertions,
+	brokenMapCntExpected int, brokenMapShaMap metadata.ShaToCollectionNamespaceMap, gtsShaMap metadata.ShaToGlobalTimestampMap) {
 	dummyIncrfunc := service_def_real.IncrementerFunc(func(string, interface{}) {})
 	mappingDoc := &metadata.CollectionNsMappingsDoc{}
 	emptyShaMap := make(metadata.ShaToCollectionNamespaceMap)
 	ckptSvc.On("LoadBrokenMappings", mock.Anything).Return(emptyShaMap, mappingDoc, dummyIncrfunc, alreadyExist, nil)
-	ckptSvc.On("UpsertAndReloadCheckpointCompleteSet", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	ckptSvc.On("UpsertAndReloadCheckpointCompleteSet", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		var recordWithBrokenmapSha int
 		specId := args.Get(0).(string)
 		if strings.Contains(specId, "backfill") {
@@ -1369,5 +1364,75 @@ func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alrea
 
 		checkMappingDoc := args.Get(1).(*metadata.CollectionNsMappingsDoc)
 		assert.Len(checkMappingDoc.NsMappingRecords, 1)
+
+		checkGtsDoc := args.Get(4).(*metadata.GlobalTimestampCompressedDoc)
+		assert.Len(checkGtsDoc.NsMappingRecords, 2) // 2 from doing random generate
 	}).Return(nil)
+
+	dummyGtsCompresesdDoc := &metadata.GlobalTimestampCompressedDoc{}
+	ckptSvc.On("LoadGlobalTimestampMapping", mock.Anything).Return(gtsShaMap, dummyGtsCompresesdDoc, dummyIncrfunc, false, nil)
+}
+
+func generatePipelinesGlobalCkptDocs(brokenMapShaKeyToInsert string) (VBsCkptsDocMaps, metadata.ShaToGlobalTimestampMap) {
+	oneDocMap := metadata.GenerateGlobalVBsCkptDocMap([]uint16{0, 1}, brokenMapShaKeyToInsert)
+	var list VBsCkptsDocMaps = VBsCkptsDocMaps{oneDocMap}
+
+	gtsShaMap := make(metadata.ShaToGlobalTimestampMap)
+	for _, checkpointDoc := range oneDocMap {
+		for _, oneRecord := range checkpointDoc.Checkpoint_records {
+			if oneRecord == nil {
+				continue
+			}
+
+			if oneRecord.GlobalTimestampSha256 != "" {
+				gtsShaMap[oneRecord.GlobalTimestampSha256] = &oneRecord.GlobalTimestamp
+			}
+		}
+	}
+	return list, gtsShaMap
+}
+
+func generateBrokenMap() metadata.ShaToCollectionNamespaceMap {
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	s1C1, err := base.NewCollectionNamespaceFromString("S1.col1")
+	if err != nil {
+		panic(err.Error())
+	}
+	s1C2, err := base.NewCollectionNamespaceFromString("S1.col2")
+	if err != nil {
+		panic(err.Error())
+	}
+	brokenMap.AddSingleMapping(&s1C1, &s1C2)
+	shaBytes, err := brokenMap.Sha256()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	brokenMappingSha := make(metadata.ShaToCollectionNamespaceMap)
+	brokenMappingSha[fmt.Sprintf("%x", shaBytes[:])] = &brokenMap
+
+	return brokenMappingSha
+}
+
+func generateMergeCkptArgs() *MergeCkptArgs {
+	var brokenMapShaKey string
+	brokenMapSha := generateBrokenMap()
+	for k, _ := range brokenMapSha {
+		brokenMapShaKey = k
+	}
+
+	vbsCkptDocMaps, gtsShaMap := generatePipelinesGlobalCkptDocs(brokenMapShaKey)
+
+	retVal := &MergeCkptArgs{
+		PipelinesCkptDocs:       vbsCkptDocMaps,
+		BrokenMappingShaMap:     brokenMapSha,
+		GlobalTimestampShaMap:   gtsShaMap,
+		BrokenMapSpecInternalId: "",
+		SrcManifests:            nil,
+		TgtManifests:            nil,
+		SrcFailoverLogs:         nil,
+		TgtFailoverLogs:         nil,
+		PushRespChs:             nil,
+	}
+	return retVal
 }

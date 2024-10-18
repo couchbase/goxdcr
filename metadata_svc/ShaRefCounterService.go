@@ -512,12 +512,13 @@ func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc interface{}) error {
 		} else if globalTsDocType {
 			compressedMapping := (*metadata.CompressedMappings)(globalTsDoc)
 			c.gcUsingCompressedMappingDoc(compressedMapping, needToSyncRev)
+		} else {
+			return fmt.Errorf("GCDocUsingLatestInfo unhandled Type: %T", doc)
 		}
-
-		return fmt.Errorf("unhandled Type: %T", doc)
 	default:
 		return UnableToUpsertErr(c.id)
 	}
+	return nil
 }
 
 func (c *MapShaRefCounter) gcUsingCompressedMappingDoc(nsMappingDoc *metadata.CompressedMappings, needToSyncRev uint64) {

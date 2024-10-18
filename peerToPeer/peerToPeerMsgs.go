@@ -1581,7 +1581,6 @@ func (v *VBsPayload) PostDecompressInit() error {
 				if record == nil {
 					continue
 				}
-				fmt.Printf("NEIL DEBUG sha: %v\n", record.GlobalTimestampSha256)
 			}
 		}
 
@@ -2350,4 +2349,27 @@ func (s *SourceHeartbeatResp) Serialize() ([]byte, error) {
 
 func (s *SourceHeartbeatResp) DeSerialize(stream []byte) error {
 	return json.Unmarshal(stream, s)
+}
+
+// For unit test
+func GenerateNotMyVBsPayload(vbsList []uint16, brokenMapShaToInsert string) (VBsPayload, metadata.VBsCkptsDocMap) {
+	notMyVBs := make(VBsPayload)
+
+	vbToGlobalTs := metadata.GenerateGlobalVBsCkptDocMap(vbsList, brokenMapShaToInsert)
+
+	for _, vb := range vbsList {
+		notMyVBs[vb] = &Payload{
+			CheckpointsDoc: vbToGlobalTs[vb],
+		}
+	}
+
+	return notMyVBs, vbToGlobalTs
+}
+
+func GenerateVBMasterPayload(notMyVBsPayload *VBsPayload, brokenMappingDoc *metadata.CollectionNsMappingsDoc, gtsDoc *metadata.GlobalTimestampCompressedDoc) *VBMasterPayload {
+	return &VBMasterPayload{
+		NotMyVBs:           notMyVBsPayload,
+		BrokenMappingDoc:   brokenMappingDoc,
+		GlobalTimestampDoc: gtsDoc,
+	}
 }
