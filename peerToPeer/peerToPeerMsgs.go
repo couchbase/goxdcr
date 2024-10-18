@@ -10,6 +10,7 @@ package peerToPeer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -1272,32 +1273,41 @@ func (p *VBMasterPayload) RegisterPushVBs(pushVBs []uint16) {
 	}
 }
 
-func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) map[uint16]*metadata.CheckpointsDoc {
+func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (map[uint16]*metadata.CheckpointsDoc, error) {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	retMap := make(map[uint16]*metadata.CheckpointsDoc)
 
 	if p.NotMyVBs != nil {
 		for vb, payload := range *p.NotMyVBs {
-			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	if p.ConflictingVBs != nil {
 		for vb, payload := range *p.ConflictingVBs {
-			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	if p.PushVBs != nil {
 		for vb, payload := range *p.PushVBs {
-			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	return retMap
+	return retMap, nil
 }
 
-func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16) {
+func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16, gtsDoc *metadata.GlobalTimestampCompressedDoc) error {
 	switch pipelineType {
 	case common.MainPipeline:
 		if payload.CheckpointsDoc != nil {
@@ -1308,8 +1318,25 @@ func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType,
 			retMap[vb] = payload.BackfillCkptDoc
 		}
 	default:
-		panic("Not supported type")
+		return fmt.Errorf("incorrect type: %T", pipelineType)
 	}
+
+	if gtsDoc != nil {
+		errMap := make(base.ErrorMap)
+		globalTsShaMap, err := gtsDoc.ToShaMap()
+		if err != nil {
+			return err
+		}
+		for _, ckptDoc := range retMap {
+			oneErrMap := ckptDoc.LoadGlobalTimestampFromShaMap(globalTsShaMap)
+			base.MergeErrorMaps(errMap, oneErrMap, false)
+		}
+
+		if len(errMap) > 0 {
+			return errors.New(base.FlattenErrorMap(errMap))
+		}
+	}
+	return nil
 }
 
 func (p *VBMasterPayload) GetAllManifests() (srcManifests, tgtManifests *metadata.ManifestsCache) {
@@ -1547,6 +1574,15 @@ func (v *VBsPayload) PostDecompressInit() error {
 	for _, payload := range *v {
 		if payload == nil || payload.BackfillTsks == nil {
 			continue
+		}
+
+		if payload.CheckpointsDoc != nil {
+			for _, record := range payload.CheckpointsDoc.Checkpoint_records {
+				if record == nil {
+					continue
+				}
+				fmt.Printf("NEIL DEBUG sha: %v\n", record.GlobalTimestampSha256)
+			}
 		}
 
 		payload.BackfillTsks.PostUnmarshalInit()

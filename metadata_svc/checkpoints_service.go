@@ -551,6 +551,21 @@ func (ckpt_svc *CheckpointsService) LoadAllShaMappings(replicationId string) (*m
 	return collectionNsMappingDoc, globalTimestampDoc, nil
 }
 
+func (ckpt_svc *CheckpointsService) LoadGlobalTimestampMapping(replicationId string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, service_def.IncrementerFunc, bool, error) {
+	accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
+	if err != nil {
+		ckpt_svc.logger.Errorf("Unable to get access token for replId %v due to err %v", replicationId, err)
+		return nil, nil, nil, false, err
+	}
+	// Get the actual go-ahead
+	<-accessTokenCh
+	// Once gotten it, will need to return it once done
+	defer func() {
+		accessTokenCh <- true
+	}()
+	return ckpt_svc.loadGlobalTsMappingsInternal(replicationId)
+}
+
 func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
 	accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
 	if err != nil {
@@ -1396,7 +1411,7 @@ func (ckpt_svc *CheckpointsService) getStopTheWorldMtx(replId string) *sync.RWMu
 	}
 }
 
-func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string, gtsDoc *metadata.GlobalTimestampCompressedDoc) error {
 	err := ckpt_svc.validateSpecIsValid(replicationId, internalId)
 	if err != nil {
 		return err
@@ -1409,15 +1424,21 @@ func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replica
 	stopFunc()
 
 	// This step will take the set of {ckptDocs, brokenMaps} and use it as the gold standard for ref counting
-	stopFunc2 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.reInitUsingMergedMappingDoc", base.DiagCkptMergeThreshold)
+	stopFunc2 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.brokenMap.reInitUsingMergedMappingDoc", base.DiagCkptMergeThreshold)
 	reInitErr := ckpt_svc.brokenMapRefCountSvc.reInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDocs, internalId)
 	stopFunc2()
 	if reInitErr != nil {
 		mtx.Unlock()
-		return fmt.Errorf("%v - reInitUsingMergedMappingDoc error: %v", replicationId, reInitErr)
+		return fmt.Errorf("%v - brokenMap.reInitUsingMergedMappingDoc error: %v", replicationId, reInitErr)
 	}
 
-	// TODO MB-63804: need to reinit global timestamp ref counter
+	stopFuncGts := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.globalTs.reInitUsingMergedMappingDoc", base.DiagCkptMergeThreshold)
+	reInitErr = ckpt_svc.globalTsRefCountSvc.reInitUsingMergedMappingDoc(replicationId, gtsDoc, ckptDocs, internalId)
+	stopFuncGts()
+	if reInitErr != nil {
+		mtx.Unlock()
+		return fmt.Errorf("%v - globalTs.reInitUsingMergedMappingDoc error: %v", replicationId, reInitErr)
+	}
 
 	// Once mapping is committed, invalidate the cache and write the ckpts
 	stopFunc3 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.upsertCheckpointsDoc", base.DiagCkptMergeThreshold)

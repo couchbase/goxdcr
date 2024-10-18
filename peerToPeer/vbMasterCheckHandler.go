@@ -16,7 +16,6 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-
 	"reflect"
 	"sync"
 	"time"
