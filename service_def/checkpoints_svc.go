@@ -35,9 +35,11 @@ type CheckpointsService interface {
 	GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 
 	LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, IncrementerFunc, bool, error)
-	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error
+	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gtsMappingDoc *metadata.GlobalTimestampCompressedDoc) error
 	DisableRefCntDecrement(topic string)
 	EnableRefCntDecrement(topic string)
+
+	LoadGlobalTimestampMapping(replicationId string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, IncrementerFunc, bool, error)
 
 	LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)
 }

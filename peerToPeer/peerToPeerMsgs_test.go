@@ -123,7 +123,8 @@ func TestVBMasterCheckResp(t *testing.T) {
 
 	payload, unlockFunc := newResp.GetReponse()
 	assert.NotNil((*payload)[bucketName])
-	ckptDocsValidate := (*payload)[bucketName].GetAllCheckpoints(common.MainPipeline)
+	ckptDocsValidate, err := (*payload)[bucketName].GetAllCheckpoints(common.MainPipeline)
+	assert.Nil(err)
 	for _, vb := range vbList {
 		assert.Equal(specInternalId, ckptDocsValidate[vb].SpecInternalId)
 	}
@@ -156,7 +157,8 @@ func TestVBMasterPayloadMap(t *testing.T) {
 	err = json.Unmarshal(data, &vbMasterPayload)
 	assert.Nil(err)
 
-	ckpts := vbMasterPayload.GetAllCheckpoints(common.MainPipeline)
+	ckpts, err := vbMasterPayload.GetAllCheckpoints(common.MainPipeline)
+	assert.Nil(err)
 	assert.NotEqual(0, len(ckpts))
 	for _, ckptDoc := range ckpts {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
@@ -187,7 +189,11 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 	assert.True(b0Found)
 	payload := (*payloadMap)["B0"]
 	assert.NotNil(payload)
-	oneNodeVbsCkptMap := payload.GetAllCheckpoints(common.MainPipeline)
+
+	assert.NotNil(payload.GlobalTimestampDoc)
+
+	oneNodeVbsCkptMap, err := payload.GetAllCheckpoints(common.MainPipeline)
+	assert.Nil(err)
 	assert.NotEqual(0, len(oneNodeVbsCkptMap))
 
 	var brokenMapShaFound bool
@@ -202,6 +208,9 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 			if record == nil {
 				continue
 			}
+			//if record.GlobalTimestampSha256 != "" {
+			//	fmt.Printf("NEIL DEBUG found %v\n", record.GlobalTimestampSha256)
+			//}
 			for _, gts := range record.GlobalTimestamp {
 				if gts.BrokenMappingSha256 != "" {
 					brokenMapShaFound = true
