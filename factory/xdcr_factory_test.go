@@ -25,7 +25,8 @@ func TestFactoryParseVBMasterResp(t *testing.T) {
 	respMap := make(map[string]*peerToPeer.VBMasterCheckResp)
 
 	payloadType := make(peerToPeer.BucketVBMPayloadType)
-	notMyVbs := make(peerToPeer.VBsPayload)
+	notMyVbs, _ := peerToPeer.GenerateNotMyVBsPayload(sourceVBs, "")
+
 	payloadType[srcBucketName] = &peerToPeer.VBMasterPayload{
 		OverallPayloadErr: "",
 		NotMyVBs:          &notMyVbs,
