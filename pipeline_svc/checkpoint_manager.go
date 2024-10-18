@@ -911,7 +911,7 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 			}
 		}
 	default:
-		panic(fmt.Sprintf("Unhandled type %v", ckmgr.pipeline.Type().String()))
+		panic(fmt.Sprintf("unhandled type %v", ckmgr.pipeline.Type().String()))
 	}
 
 	if !specExists {
@@ -2954,7 +2954,7 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 		return ckmgr.mergePeerNodesPeriodicPush(periodicPush)
 	}
 
-	return fmt.Errorf("Unhandled type: %v", reflect.TypeOf(genericResponse))
+	return fmt.Errorf("mergePeerNodesCkptInfo unhandled type: %v", reflect.TypeOf(genericResponse))
 }
 
 type nodeVbCkptMap map[string]metadata.VBsCkptsDocMap
