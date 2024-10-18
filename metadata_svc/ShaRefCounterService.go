@@ -305,7 +305,7 @@ func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.Util
 }
 
 // After this call, the ref count should be synchronized
-func (s *ShaRefCounterService) reInitUsingMergedMappingDoc(topic string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+func (s *ShaRefCounterService) reInitUsingMergedMappingDoc(topic string, incomingDoc interface{}, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	s.topicMapMtx.RLock()
 	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
@@ -314,7 +314,7 @@ func (s *ShaRefCounterService) reInitUsingMergedMappingDoc(topic string, brokenM
 		return base.ErrorInvalidInput
 	}
 
-	return counter.ReInitUsingMergedMappingDoc(brokenMappingDoc, ckptDocs, internalId)
+	return counter.ReInitUsingMergedMappingDoc(incomingDoc, ckptDocs, internalId)
 }
 
 func (s *ShaRefCounterService) DisableRefCntDecrement(topic string) {
@@ -867,14 +867,33 @@ func (c *MapShaRefCounter) isClosed() bool {
 }
 
 // Used only when doing a complete overwrite after major merge operations
-func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptsDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+// ReInitUsingMergedMappingDoc is used to:
+// 1. Ensure that for every {sha -> element} pair, the internal ref counter has the corresponding element
+// 2. Using the ckptsDocs, perform ref counting to ensure that each SHA element has the proper reference count
+func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(incomingDoc interface{}, ckptsDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
-	if brokenMappingDoc == nil {
-		return base.ErrorNilPtr
+
+	brokenMappingDoc, isBrokenMapDoc := incomingDoc.(*metadata.CollectionNsMappingsDoc)
+	gtsDoc, isGlobalTs := incomingDoc.(*metadata.GlobalTimestampCompressedDoc)
+
+	if isBrokenMapDoc {
+		if brokenMappingDoc == nil {
+			return base.ErrorNilPtr
+		}
+		return c.reinitUsingMergedMappingDocBrokenMap(internalId, brokenMappingDoc, ckptsDocs)
+	} else if isGlobalTs {
+		if gtsDoc == nil {
+			return base.ErrorNilPtr
+		}
+		return c.reinitUsingMergedMappingDocGts(internalId, gtsDoc, ckptsDocs)
 	}
 
+	return fmt.Errorf("invalid type: %T", incomingDoc)
+}
+
+func (c *MapShaRefCounter) reinitUsingMergedMappingDocBrokenMap(internalId string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptsDocs map[uint16]*metadata.CheckpointsDoc) error {
 	newShaMap, err := brokenMappingDoc.ToShaMap()
 	if err != nil {
 		return err
@@ -907,4 +926,37 @@ func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadat
 	// Since this path is called when no other ckpt operation is occuring (or when decrementing is not possible),
 	// take the opportunity to clean up
 	return c.upsertMapping(internalId, true)
+}
+
+func (c *MapShaRefCounter) reinitUsingMergedMappingDocGts(internalId string, gtsDoc *metadata.GlobalTimestampCompressedDoc, ckptsDocs map[uint16]*metadata.CheckpointsDoc) error {
+	newShaMap, err := gtsDoc.ToShaMap()
+	if err != nil {
+		return err
+	}
+
+	c.lock.Lock()
+	c.refCnt = make(map[string]uint64)
+	c.shaToGlobalTs = make(metadata.ShaToGlobalTimestampMap)
+
+	for sha, mapping := range newShaMap {
+		c.shaToGlobalTs[sha] = mapping
+	}
+
+	for _, ckptDoc := range ckptsDocs {
+		if ckptDoc == nil {
+			continue
+		}
+		for _, ckptRecord := range ckptDoc.Checkpoint_records {
+			if ckptRecord == nil || ckptRecord.IsTraditional() || ckptRecord.GlobalTimestampSha256 == "" {
+				continue
+			}
+			c.refCnt[ckptRecord.GlobalTimestampSha256]++
+		}
+	}
+	c.setNeedToSyncNoLock(true)
+	c.lock.Unlock()
+
+	// Since this path is called when no other ckpt operation is occuring (or when decrementing is not possible),
+	// take the opportunity to clean up
+	return c.upsertGts(internalId, true)
 }
