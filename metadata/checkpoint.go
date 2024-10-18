@@ -245,6 +245,20 @@ func (t *TargetVBTimestamp) Clone() TargetVBTimestamp {
 
 type ShaToGlobalTimestampMap map[string]*GlobalTimestamp
 
+func (s *ShaToGlobalTimestampMap) Load(other ShaToGlobalTimestampMap) {
+	if s == nil {
+		return
+	}
+
+	for k, v := range other {
+		_, exists := (*s)[k]
+		if !exists {
+			gts := v.CloneGlobalTimestamp()
+			(*s)[k] = &gts
+		}
+	}
+}
+
 func (s *ShaToGlobalTimestampMap) Clone() ShaToGlobalTimestampMap {
 	if s == nil {
 		return nil
@@ -2560,6 +2574,17 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 	if err != nil {
 		return err
 	}
+	errMap2 := c.LoadGlobalTimestampFromShaMap(globalTsShaMap)
+
+	base.MergeErrorMaps(errMap, errMap2, false)
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return nil
+}
+
+func (c *CheckpointsDoc) LoadGlobalTimestampFromShaMap(globalTsShaMap ShaToGlobalTimestampMap) base.ErrorMap {
+	errMap := make(base.ErrorMap)
 	if len(globalTsShaMap) > 0 {
 		for _, record := range c.GetCheckpointRecords() {
 			if record == nil || record.IsTraditional() || record.GlobalTimestampSha256 == "" {
@@ -2573,11 +2598,7 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 			record.GlobalTimestamp = *gts
 		}
 	}
-
-	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
-	}
-	return nil
+	return errMap
 }
 
 func (c *CheckpointsDoc) IsTraditional() bool {
@@ -2648,4 +2669,13 @@ func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, erro
 	}
 	return shaMap, err
 
+}
+
+func (g *GlobalTimestampCompressedDoc) LoadShaMap(shaMap ShaToGlobalTimestampMap) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+	// MUST cast as a pointer otherwise the LoadShaMap below will be done on a copy
+	compressedMapPtr := (*CompressedMappings)(g)
+	return compressedMapPtr.LoadShaMap(shaMap.ToSnappyCompressableMap())
 }

@@ -419,6 +419,7 @@ func (m *VBsCkptsDocMaps) Merge(ckpts VBsCkptsDocMaps) {
 type MergeCkptArgs struct {
 	PipelinesCkptDocs       VBsCkptsDocMaps
 	BrokenMappingShaMap     metadata.ShaToCollectionNamespaceMap
+	GlobalTimestampShaMap   metadata.ShaToGlobalTimestampMap
 	BrokenMapSpecInternalId string
 	SrcManifests            *metadata.ManifestsCache
 	TgtManifests            *metadata.ManifestsCache
@@ -2975,6 +2976,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	combinedTgtManifests := make(metadata.ManifestsCache)
 	var combinedBrokenMapping []*metadata.CollectionNsMappingsDoc
 	combinedBrokenMappingSpecInternalId := make(map[string]string)
+	var combinedGlobalTimestampDocs []*metadata.GlobalTimestampCompressedDoc
 
 	warnMap := make(base.ErrorMap)
 	nodeVbMainCkptsMap := make(nodeVbCkptMap)
@@ -2994,7 +2996,10 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			continue
 		}
 
-		oneNodeVbsCkptMap := payload.GetAllCheckpoints(common.MainPipeline)
+		oneNodeVbsCkptMap, err := payload.GetAllCheckpoints(common.MainPipeline)
+		if err != nil {
+			return err
+		}
 		if len(oneNodeVbsCkptMap) > 0 {
 			for _, ckptDoc := range oneNodeVbsCkptMap {
 				for _, ckptRecord := range ckptDoc.Checkpoint_records {
@@ -3007,7 +3012,10 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
 			nodeVbMainCkptsMap[node] = oneNodeVbsCkptMap
 		}
-		oneNodeVbsBackfillCkptMap := payload.GetAllCheckpoints(common.BackfillPipeline)
+		oneNodeVbsBackfillCkptMap, err := payload.GetAllCheckpoints(common.BackfillPipeline)
+		if err != nil {
+			return err
+		}
 		if len(oneNodeVbsBackfillCkptMap) > 0 {
 			for _, ckptDoc := range oneNodeVbsBackfillCkptMap {
 				for _, ckptRecord := range ckptDoc.Checkpoint_records {
@@ -3029,6 +3037,10 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		if brokenMap != nil && brokenMap.SpecInternalId != "" {
 			combinedBrokenMapping = append(combinedBrokenMapping, brokenMap)
 			combinedBrokenMappingSpecInternalId[node] = brokenMap.SpecInternalId
+		}
+
+		if payload.GlobalTimestampDoc != nil {
+			combinedGlobalTimestampDocs = append(combinedGlobalTimestampDocs, payload.GlobalTimestampDoc)
 		}
 		unlockFunc()
 	}
@@ -3076,10 +3088,20 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		return err
 	}
 
+	combinedGlobalTsShaMap := make(metadata.ShaToGlobalTimestampMap)
+	for _, oneGtsShaDoc := range combinedGlobalTimestampDocs {
+		shaMap, err := oneGtsShaDoc.ToShaMap()
+		if err != nil {
+			return err
+		}
+		combinedGlobalTsShaMap.Load(shaMap)
+	}
+
 	getterFunc := func() *MergeCkptArgs {
 		return &MergeCkptArgs{
 			PipelinesCkptDocs:       filteredMaps,
 			BrokenMappingShaMap:     combinedShaMap,
+			GlobalTimestampShaMap:   combinedGlobalTsShaMap,
 			BrokenMapSpecInternalId: brokenMapSpecInternalId,
 			SrcManifests:            &combinedSrcManifests,
 			TgtManifests:            &combinedTgtManifests,
@@ -3131,6 +3153,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 	}
 	pipelinesCkptDocs := ckptArgs.PipelinesCkptDocs
 	brokenMappingShaMap := ckptArgs.BrokenMappingShaMap
+	globalTimestampShaMap := ckptArgs.GlobalTimestampShaMap
 	brokenMapSpecInternalId := ckptArgs.BrokenMapSpecInternalId
 	srcManifests := ckptArgs.SrcManifests
 	tgtManifests := ckptArgs.TgtManifests
@@ -3138,7 +3161,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 	tgtFailoverLogs := ckptArgs.TgtFailoverLogs
 	respChs := ckptArgs.PushRespChs
 
-	err := ckmgr.mergeFinalCkpts(pipelinesCkptDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
+	err := ckmgr.mergeFinalCkpts(pipelinesCkptDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId, globalTimestampShaMap)
 	if err != nil {
 		ckmgr.logger.Errorf("megeFinalCkpts error %v", err)
 		respToGcCh(respChs, err, ckmgr.finish_ch)
@@ -3475,7 +3498,10 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 // for merging both types of ckpts
 // When pushing, either one or both are potentially running, but only backfill pipeline's ckptMgr may perform ckpt
 // while this is happening
-func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkptsDocMap, srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog, combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string) error {
+func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkptsDocMap,
+	srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog,
+	combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string,
+	combinedGtsShaMapFromPeers metadata.ShaToGlobalTimestampMap) error {
 
 	genSpec := ckmgr.pipeline.Specification()
 	if genSpec == nil {
@@ -3494,6 +3520,18 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 		// Copy before passing to go-routines
 		i := iRaw
 		filteredMap := filteredMapRaw
+
+		if len(combinedGtsShaMapFromPeers) > 0 {
+			for _, ckptDoc := range filteredMap {
+				if ckptDoc == nil {
+					continue
+				}
+				errMap := ckptDoc.LoadGlobalTimestampFromShaMap(combinedGtsShaMapFromPeers)
+				if len(errMap) > 0 {
+					return errors.New(base.FlattenErrorMap(errMap))
+				}
+			}
+		}
 
 		switch i {
 		case int(common.MainPipeline):
@@ -3523,7 +3561,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 			}
 
 			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
-			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
+			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs, combinedGtsShaMapFromPeers)
 			if err != nil {
 				errList[i] = err
 			}
@@ -3599,12 +3637,23 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 	}
 }
 
-func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocsAndCkpts(specId string, peersShaMap metadata.ShaToCollectionNamespaceMap, specInternalId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
+func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocsAndCkpts(specId string,
+	peersShaMap metadata.ShaToCollectionNamespaceMap, specInternalId string,
+	ckptDocs map[uint16]*metadata.CheckpointsDoc, peerGtsShaMap metadata.ShaToGlobalTimestampMap) error {
 	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts", base.DiagInternalThreshold)
 	defer stopFunc()
 	curNodeShaMap, curNodeMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadBrokenMappings(specId)
 	if err != nil {
 		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadBrokenMappings err: %v", err)
+		return err
+	}
+
+	curNodeGtsMap, curNodeGtsMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadGlobalTimestampMapping(specId)
+	if err != nil {
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadGlobalTimestamp err: %v", err)
+		return err
+	} else if curNodeGtsMappingDoc == nil {
+		err = fmt.Errorf("curNodeGtsMappingDoc returned is nil")
 		return err
 	}
 
@@ -3615,20 +3664,35 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocsAndCkpts(specId 
 			curNodeShaMap[peerSha] = peerMapping
 		}
 	}
-
 	if curNodeMappingDoc == nil {
 		curNodeMappingDoc = &metadata.CollectionNsMappingsDoc{
 			SpecInternalId: specInternalId,
 		}
 	}
-
 	err = curNodeMappingDoc.LoadShaMap(curNodeShaMap)
 	if err != nil {
-		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadShaMap err: %v", err)
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts curNodeMappingDoc.LoadShaMap err: %v", err)
 		return err
 	}
-	// TODO MB-63804: need to do global timestamp
-	return ckmgr.checkpoints_svc.UpsertAndReloadCheckpointCompleteSet(specId, curNodeMappingDoc, ckptDocs, specInternalId)
+
+	// Do the same for global timestamp
+	for peerSha, peerGtsMapping := range peerGtsShaMap {
+		_, exists := curNodeGtsMap[peerSha]
+		if !exists {
+			curNodeGtsMap[peerSha] = peerGtsMapping
+		}
+	}
+	curNodeGtsMappingDoc = &metadata.GlobalTimestampCompressedDoc{
+		SpecInternalId: specInternalId,
+	}
+	err = curNodeGtsMappingDoc.LoadShaMap(curNodeGtsMap)
+	if err != nil {
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts curNodeGtsMappingDoc.LoadShaMap err: %v", err)
+		return err
+	}
+
+	// TODO MB-63804: need to do global counters
+	return ckmgr.checkpoints_svc.UpsertAndReloadCheckpointCompleteSet(specId, curNodeMappingDoc, ckptDocs, specInternalId, curNodeGtsMappingDoc)
 }
 
 func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peerToPeer.ReplicationPayload) error {
@@ -3680,8 +3744,14 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	}
 
 	var combinedBrokenMapping []*metadata.CollectionNsMappingsDoc
-	mainCkptDocs := payload.GetAllCheckpoints(common.MainPipeline)
-	backfillCkptDocs := payload.GetAllCheckpoints(common.BackfillPipeline)
+	mainCkptDocs, err := payload.GetAllCheckpoints(common.MainPipeline)
+	if err != nil {
+		return err
+	}
+	backfillCkptDocs, err := payload.GetAllCheckpoints(common.BackfillPipeline)
+	if err != nil {
+		return err
+	}
 	if mainCkptDocs == nil && backfillCkptDocs == nil {
 		unlockFunc()
 		err := fmt.Errorf("periodic push payload for %v has both nil main and backfill ckpt docs", periodicPayload.ReplicationSpecId)
