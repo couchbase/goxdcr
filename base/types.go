@@ -3036,3 +3036,11 @@ type ConnectionErrMapType map[string]map[string][]string
 
 type PortType int
 type ExternalMgmtHostAndPortGetter func(map[string]interface{}, bool) (string, int, error)
+
+// represents the status of backfill spec updates
+type BackfillSpecUpdateStatus uint32
+
+const (
+	BackfillSpecUpdateComplete   BackfillSpecUpdateStatus = iota //indicates that there are no pending metaKV ops
+	BackfillSpecUpdateInProgress BackfillSpecUpdateStatus = iota //indicates the presence of a pending metaKV op
+)

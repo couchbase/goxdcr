@@ -9,10 +9,11 @@
 package service_def
 
 import (
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
-	"sync"
 )
 
 type BackfillMgrIface interface {
@@ -28,6 +29,10 @@ type BackfillMgrIface interface {
 	GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 	GetLastSuccessfulSourceManifestId(specId string) (uint64, error)
 	SetLastSuccessfulSourceManifestId(specId string, manifestId uint64, dcpRollbackScenario bool, finCh chan bool) error
+
+	//To get/set backfillSpec update status
+	GetBackfillSpecUpdateStatus(specId string) (base.BackfillSpecUpdateStatus, error)
+	SetBackfillSpecUpdateStatus(specId string, status base.BackfillSpecUpdateStatus)
 }
 
 type BackfillMgrComponentListenerGetter interface {
