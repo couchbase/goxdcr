@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -82,6 +83,10 @@ type BackfillMgr struct {
 
 	retrySpecRemovalCh chan string
 	retryTimerPeriod   time.Duration
+
+	// To track the update status of backfill spec
+	backfillSpecUpdateStatusMtx sync.RWMutex
+	backfillSpecUpdateStatusMap map[string]*uint32
 }
 
 type replSpecHandler struct {
@@ -275,6 +280,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		retrySpecRemovalCh:                make(chan string, 5),
 		retryTimerPeriod:                  10 * time.Second,
 		bucketTopologySvc:                 bucketTopologySvc,
+		backfillSpecUpdateStatusMap:       make(map[string]*uint32),
 	}
 
 	return backfillMgr
@@ -437,6 +443,14 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return b.getLastHandledSourceManifestId(replId)
 	}
 
+	getSpecUpdateStatus := func() (base.BackfillSpecUpdateStatus, error) {
+		return b.GetBackfillSpecUpdateStatus(replId)
+	}
+
+	setSpecUpdateStatus := func(status base.BackfillSpecUpdateStatus) {
+		b.SetBackfillSpecUpdateStatus(replId, status)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -446,9 +460,20 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter,
 		base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc,
-		specCheckFunc, b.bucketTopologySvc, getCompleteReq, b.replSpecSvc, getLastCachedSrcManifestId)
+		specCheckFunc, b.bucketTopologySvc, getCompleteReq, b.replSpecSvc, getLastCachedSrcManifestId, getSpecUpdateStatus, setSpecUpdateStatus)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
+
+	// Add an entry to backfillSpecUpdateStatusMap, to track the update status of the backfill spec
+	b.backfillSpecUpdateStatusMtx.Lock()
+	defer b.backfillSpecUpdateStatusMtx.Unlock()
+	if _, exists := b.backfillSpecUpdateStatusMap[replId]; exists {
+		// should never happen
+		b.logger.Errorf("Status object for replication ID %s already exists in the status map", replId)
+	} else {
+		status := uint32(base.BackfillSpecUpdateComplete) // default value
+		b.backfillSpecUpdateStatusMap[replId] = &status
+	}
 
 	b.logger.Infof("Starting backfill request handler for spec %v internalId %v", replId, internalId)
 	return reqHandler.Start()
@@ -470,6 +495,19 @@ func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) er
 	stopFunc()
 	delete(b.specToReqHandlerMap, replId)
 	return nil
+}
+
+// remove the entry from backfillSpecStatusMap
+func (b *BackfillMgr) deleteBackfillUpdateStatus(replId string) {
+	b.backfillSpecUpdateStatusMtx.Lock()
+	defer b.backfillSpecUpdateStatusMtx.Unlock()
+	_, ok := b.backfillSpecUpdateStatusMap[replId]
+	if !ok {
+		// should never happen
+		b.logger.Errorf("Status object for replication ID %s does not exist in the status map", replId)
+		return
+	}
+	delete(b.backfillSpecUpdateStatusMap, replId)
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
@@ -640,6 +678,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		b.cacheMtx.Unlock()
 
 		err := b.deleteBackfillRequestHandler(oldSpec.Id, oldSpec.InternalId)
+		b.deleteBackfillUpdateStatus(oldSpec.Id) // delete the status object
 		if err == base.ErrorNotFound {
 			// No need to del checkpointdocs
 			return nil
@@ -1717,6 +1756,35 @@ func (b *BackfillMgr) SetLastSuccessfulSourceManifestId(specId string, manifestI
 		panic("timeout trying to resume set source manifestID. May result in data loss")
 	}
 	return err
+}
+
+func (b *BackfillMgr) GetBackfillSpecUpdateStatus(specId string) (base.BackfillSpecUpdateStatus, error) {
+	b.backfillSpecUpdateStatusMtx.RLock()
+	status, exists := b.backfillSpecUpdateStatusMap[specId]
+	b.backfillSpecUpdateStatusMtx.RUnlock()
+	if !exists {
+		return 0, fmt.Errorf("status not found for specID %s", specId)
+	}
+	return base.BackfillSpecUpdateStatus(*status), nil
+
+}
+
+func (b *BackfillMgr) SetBackfillSpecUpdateStatus(specId string, status base.BackfillSpecUpdateStatus) {
+	b.backfillSpecUpdateStatusMtx.RLock()
+	ptr, exists := b.backfillSpecUpdateStatusMap[specId]
+	b.backfillSpecUpdateStatusMtx.RUnlock()
+	if !exists {
+		b.logger.Errorf("failed to update status for backfill spec %s. err=Status object not found", specId)
+		return
+	}
+	switch status {
+	case base.BackfillSpecUpdateComplete:
+		atomic.CompareAndSwapUint32(ptr, uint32(base.BackfillSpecUpdateInProgress), uint32(status))
+	case base.BackfillSpecUpdateInProgress:
+		atomic.CompareAndSwapUint32(ptr, uint32(base.BackfillSpecUpdateComplete), uint32(status))
+	default:
+		b.logger.Errorf("failed to update status for backfill spec %s. err=Invalid status %v", specId, status)
+	}
 }
 
 func (b *BackfillMgr) runRetryMonitor() {

@@ -354,6 +354,9 @@ func (v *VBTasksMapType) GetLock() *sync.RWMutex {
 }
 
 func (v *VBTasksMapType) ContainsAtLeastOneTaskForVBs(vbs []uint16) bool {
+	if v == nil {
+		return false
+	}
 	sortedVBs := base.SortUint16List(vbs)
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
@@ -370,6 +373,9 @@ func (v *VBTasksMapType) ContainsAtLeastOneTaskForVBs(vbs []uint16) bool {
 }
 
 func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {
+	if v == nil {
+		return false
+	}
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 	for _, tasks := range v.VBTasksMap {
@@ -384,6 +390,9 @@ func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {
 // The main use-case is to print to the logs
 func (v *VBTasksMapType) CompactTaskMap() (ret map[uint16][][2]uint64) {
 	ret = map[uint16][][2]uint64{}
+	if v == nil {
+		return ret
+	}
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 
@@ -650,6 +659,9 @@ func (v *VBTasksMapType) GetTopTasksOnlyClone() *VBTasksMapType {
 // so this method will create a copy of the task and change the soure
 // namespace to from the default collection
 func (v *VBTasksMapType) ExportAsMigration() *VBTasksMapType {
+	if v == nil {
+		return nil
+	}
 	convertedMap := NewVBTasksMap()
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
@@ -778,6 +790,9 @@ func (v *VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
 }
 
 func (v *VBTasksMapType) PostUnmarshalInit() {
+	if v == nil {
+		return
+	}
 	if v.mutex == nil {
 		v.mutex = &sync.RWMutex{}
 	}
@@ -795,6 +810,9 @@ func (v *VBTasksMapType) PostUnmarshalInit() {
 
 // Does not clone task - should pre-clone
 func (v *VBTasksMapType) FilterBasedOnVBs(vbsList []uint16) *VBTasksMapType {
+	if v == nil {
+		return nil
+	}
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 
@@ -816,6 +834,9 @@ func (v *VBTasksMapType) FilterBasedOnVBs(vbsList []uint16) *VBTasksMapType {
 }
 
 func (v *VBTasksMapType) Contains(vbTasksMap *VBTasksMapType) bool {
+	if v == nil {
+		return false
+	}
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 	for vb, newTasks := range vbTasksMap.VBTasksMap {
@@ -835,6 +856,9 @@ func (v *VBTasksMapType) Contains(vbTasksMap *VBTasksMapType) bool {
 }
 
 func (v *VBTasksMapType) GetVBs() (retList []uint16) {
+	if v == nil {
+		return
+	}
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 

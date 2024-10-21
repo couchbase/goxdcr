@@ -36,6 +36,8 @@ var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no 
 var ErrorCAPIReplicationDeprecated = errors.New("CAPI replication is now deprecated. The pipeline will be paused. Please edit the replication via REST and change the replication type to XMEM")
 var ErrorBackfillSpecHasNoVBTasks = errors.New("backfill spec VBTasksMap is empty")
 var ErrorNoKVService = errors.New("this node does not have KV service")
+var ErrorBackfillSpecUpdatePending = errors.New("backfill spec update is still pending")
+var ErrorBackfillSpecUpdateStatusNotFound = errors.New("backfill spec update status object not found")
 
 var default_failure_restart_interval = 10
 
@@ -995,6 +997,15 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 		return errMap
 	}
 
+	specUpdateStatus, err := pipelineMgr.getBackfillMgr().GetBackfillSpecUpdateStatus(topic)
+	if err != nil {
+		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecUpdateStatusNotFound
+		return errMap
+	}
+	if specUpdateStatus == base.BackfillSpecUpdateInProgress {
+		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecUpdatePending
+		return errMap
+	}
 	// Before construction, check to ensure there are actually tasks to run
 	backfillSpecRO, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
 	if backfillSpecRO == nil || err != nil {
@@ -1838,6 +1849,8 @@ func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, 
 		} else if len(retErrMap) == 1 && retErrMap.HasError(base.ErrorNoBackfillNeeded) {
 			logger.Infof("Replication %v backfill pipeline is not starting because backfill tasks have all been done", pipelineName)
 		} else if len(retErrMap) == 1 && retErrMap.HasError(ReplicationStatusNotFound) {
+			logger.Infof("Replication %v backfill pipeline is not starting spec is deleted", pipelineName)
+		} else if len(retErrMap) == 1 && retErrMap.HasError(ErrorBackfillSpecUpdateStatusNotFound) {
 			logger.Infof("Replication %v backfill pipeline is not starting spec is deleted", pipelineName)
 		} else {
 			successful = false
