@@ -26,6 +26,62 @@ func (_m *BackfillMgrIface) EXPECT() *BackfillMgrIface_Expecter {
 	return &BackfillMgrIface_Expecter{mock: &_m.Mock}
 }
 
+// GetBackfillSpecUpdateStatus provides a mock function with given fields: specId
+func (_m *BackfillMgrIface) GetBackfillSpecUpdateStatus(specId string) (base.BackfillSpecUpdateStatus, error) {
+	ret := _m.Called(specId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBackfillSpecUpdateStatus")
+	}
+
+	var r0 base.BackfillSpecUpdateStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (base.BackfillSpecUpdateStatus, error)); ok {
+		return rf(specId)
+	}
+	if rf, ok := ret.Get(0).(func(string) base.BackfillSpecUpdateStatus); ok {
+		r0 = rf(specId)
+	} else {
+		r0 = ret.Get(0).(base.BackfillSpecUpdateStatus)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(specId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// BackfillMgrIface_GetBackfillSpecUpdateStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBackfillSpecUpdateStatus'
+type BackfillMgrIface_GetBackfillSpecUpdateStatus_Call struct {
+	*mock.Call
+}
+
+// GetBackfillSpecUpdateStatus is a helper method to define mock.On call
+//   - specId string
+func (_e *BackfillMgrIface_Expecter) GetBackfillSpecUpdateStatus(specId interface{}) *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call {
+	return &BackfillMgrIface_GetBackfillSpecUpdateStatus_Call{Call: _e.mock.On("GetBackfillSpecUpdateStatus", specId)}
+}
+
+func (_c *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call) Run(run func(specId string)) *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call) Return(_a0 base.BackfillSpecUpdateStatus, _a1 error) *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call) RunAndReturn(run func(string) (base.BackfillSpecUpdateStatus, error)) *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetExplicitMappingChangeHandler provides a mock function with given fields: specId, internalSpecId, oldSettings, newSettings
 func (_m *BackfillMgrIface) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	ret := _m.Called(specId, internalSpecId, oldSettings, newSettings)
@@ -299,6 +355,40 @@ func (_c *BackfillMgrIface_ReplicationSpecChangeCallback_Call) Return(_a0 error)
 }
 
 func (_c *BackfillMgrIface_ReplicationSpecChangeCallback_Call) RunAndReturn(run func(string, interface{}, interface{}, *sync.WaitGroup) error) *BackfillMgrIface_ReplicationSpecChangeCallback_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetBackfillSpecUpdateStatus provides a mock function with given fields: specId, status
+func (_m *BackfillMgrIface) SetBackfillSpecUpdateStatus(specId string, status base.BackfillSpecUpdateStatus) {
+	_m.Called(specId, status)
+}
+
+// BackfillMgrIface_SetBackfillSpecUpdateStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBackfillSpecUpdateStatus'
+type BackfillMgrIface_SetBackfillSpecUpdateStatus_Call struct {
+	*mock.Call
+}
+
+// SetBackfillSpecUpdateStatus is a helper method to define mock.On call
+//   - specId string
+//   - status base.BackfillSpecUpdateStatus
+func (_e *BackfillMgrIface_Expecter) SetBackfillSpecUpdateStatus(specId interface{}, status interface{}) *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call {
+	return &BackfillMgrIface_SetBackfillSpecUpdateStatus_Call{Call: _e.mock.On("SetBackfillSpecUpdateStatus", specId, status)}
+}
+
+func (_c *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call) Run(run func(specId string, status base.BackfillSpecUpdateStatus)) *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(base.BackfillSpecUpdateStatus))
+	})
+	return _c
+}
+
+func (_c *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call) Return() *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call) RunAndReturn(run func(string, base.BackfillSpecUpdateStatus)) *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

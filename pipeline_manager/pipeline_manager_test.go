@@ -13,6 +13,7 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+
 	"github.com/couchbase/goxdcr/base"
 	commonReal "github.com/couchbase/goxdcr/common"
 	common "github.com/couchbase/goxdcr/common/mocks"
@@ -22,10 +23,12 @@ import (
 	replicationStatus "github.com/couchbase/goxdcr/pipeline"
 	replicationStatusMock "github.com/couchbase/goxdcr/pipeline/mocks"
 	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
+	service_def_real "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+
 	//	http "net/http"
 	//	_ "net/http/pprof"
 	"sync/atomic"
@@ -86,10 +89,15 @@ func setupBoilerPlate() (*log.CommonLogger,
 	checkPointsSvc := &service_def.CheckpointsService{}
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	backfillMgrIface := &service_def.BackfillMgrIface{}
+	getBackfillMgr := func() service_def_real.BackfillMgrIface {
+		return backfillMgrIface
+	}
+	backfillMgrIface.On("GetBackfillSpecUpdateStatus", mock.Anything).Return(base.BackfillSpecUpdateComplete, nil)
 
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
-	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil, nil)
+	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil, getBackfillMgr)
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"

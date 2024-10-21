@@ -104,6 +104,10 @@ type BackfillRequestHandler struct {
 
 	runWaitGrp sync.WaitGroup
 	isKVNode   bool
+
+	//specUpdate status cb
+	getSpecUpdateStatus func() (base.BackfillSpecUpdateStatus, error)
+	setSpecUpdateStatus func(base.BackfillSpecUpdateStatus)
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -122,7 +126,7 @@ type ReqAndResp struct {
 
 var backfillReqHandlerCounter uint32
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter func(throughSeqnoErr error) (map[uint16]uint64, error), restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error)) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter func(throughSeqnoErr error) (map[uint16]uint64, error), restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error), getSpecUpdateStatus func() (base.BackfillSpecUpdateStatus, error), setSpecUpdateStatus func(base.BackfillSpecUpdateStatus)) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -147,6 +151,8 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		lastPullMergedMap:            map[string]*metadata.VBTasksMapType{},
 		lastPushMergedMap:            map[string]*metadata.VBTasksMapType{},
 		getLatestSrcManifestId:       getLatestSrcManifestId,
+		getSpecUpdateStatus:          getSpecUpdateStatus,
+		setSpecUpdateStatus:          setSpecUpdateStatus,
 	}
 }
 
@@ -330,6 +336,7 @@ func (b *BackfillRequestHandler) run() {
 			select {
 			case persistType := <-b.persistenceNeededCh:
 				err := b.metaKvOp(persistType)
+				b.setSpecUpdateStatus(base.BackfillSpecUpdateComplete)
 				newTime := time.Now().Add(b.persistInterval)
 				coolDownTime = &newTime
 				if err != nil && persistType != DelOp {
@@ -639,6 +646,7 @@ func (b *BackfillRequestHandler) figureOutIfCkptExists(reqRO metadata.Collection
 			b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, reqRO, seqnosMap)
 		}
 	} else {
+		shouldSkipFirst = false // The first task can be considered for merging if this node is not responsible for any of the spec vbs
 		if reqRO != nil && seqnosMap != nil {
 			b.logNewBackfillMsg(reqRO, seqnosMap)
 		}
@@ -655,6 +663,10 @@ func (b *BackfillRequestHandler) logNewBackfillMsg(req metadata.CollectionNamesp
 
 func (b *BackfillRequestHandler) requestPersistence(op PersistType, resp chan error) error {
 	var err error
+
+	// set update in progress
+	b.setSpecUpdateStatus(base.BackfillSpecUpdateInProgress)
+
 	if op == AddOp || op == SetOp {
 		select {
 		case b.persistenceNeededCh <- op:
@@ -682,6 +694,7 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType, resp chan er
 		// hasn't been returned yet
 		err = b.metaKvOp(op)
 		resp <- err
+		b.setSpecUpdateStatus(base.BackfillSpecUpdateComplete)
 	}
 	return err
 }
@@ -785,7 +798,11 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 
 	if backfillDone {
 		// This notifier will kick off another pipeline ... so only do it after persistent has finished
-		b.vbsDoneNotifier(hasMoreTasks)
+		var startNewTask bool
+		if b.cachedBackfillSpec != nil {
+			startNewTask = b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(b.getVBsClone(true))
+		}
+		b.vbsDoneNotifier(startNewTask)
 	}
 	return err
 }
