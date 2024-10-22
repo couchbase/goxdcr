@@ -533,9 +533,19 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
 	}
 	for _, spec := range backfillSpecs {
+		vblist, err := rm.backfillReplSvc.GetMyVBs(spec.ReplicationSpec())
+		if err != nil {
+			rm.logger.Debugf("failed to fetch responsible vbs for spec %s. err=%v", spec.Id, err)
+		} else {
+			if !spec.VBTasksMap.ContainsAtLeastOneTaskForVBs(vblist) {
+				// There's no active backfill pipeline if the spec has no responsible Vbs. Hence skip the spec
+				continue
+			}
+		}
 		genSpec := metadata.GenericSpecification(spec)
 		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
 	}
+	rm.RemoveAnyStaleMapValues()
 
 	specReplStatsMap := rm.collectReplStats()
 
@@ -1070,6 +1080,23 @@ func (rm *ResourceManager) addReplToOngoingReplMap(replId string) {
 	defer rm.mapLock.Unlock()
 	rm.ongoingReplMap[replId] = true
 	rm.logger.Infof("Set ongoing flag for %v\nongoingReplMap=%v\n", replId, rm.ongoingReplMap)
+}
+
+func (rm *ResourceManager) RemoveAnyStaleMapValues() {
+	rm.mapLock.Lock()
+	defer rm.mapLock.Unlock()
+	for key := range rm.ongoingReplMap {
+		_, exists := rm.managedResourceOnceSpecMap[key]
+		if !exists {
+			delete(rm.ongoingReplMap, key)
+		}
+	}
+	for key := range rm.replDcpPriorityMap {
+		_, exists := rm.managedResourceOnceSpecMap[key]
+		if !exists {
+			delete(rm.replDcpPriorityMap, key)
+		}
+	}
 }
 
 func (rm *ResourceManager) applySettingsToPipeline(spec metadata.GenericSpecification, settings map[string]interface{}) error {
