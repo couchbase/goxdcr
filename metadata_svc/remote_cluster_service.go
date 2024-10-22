@@ -577,7 +577,7 @@ func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext,
 	return rctx, nil, nil
 }
 
-func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, result error) {
+func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, result *error) {
 	agent.refreshMtx.Lock()
 	if rctx != nil {
 		switch agent.refreshAbortState {
@@ -594,7 +594,7 @@ func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, res
 	}
 
 	for _, ch := range agent.refreshResult {
-		ch <- result
+		ch <- *result
 		close(ch)
 	}
 
@@ -974,9 +974,10 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	}
 
 	// At this point, everything below can only be executed by a single refresh context
-	defer agent.cleanupRefreshContext(rctx, err)
+	defer agent.cleanupRefreshContext(rctx, &err)
 
-	useExternal, err := rctx.getAddressPreference()
+	var useExternal bool
+	useExternal, err = rctx.getAddressPreference()
 	if err != nil {
 		// Do not allow refresh to continue - wait until next refresh cycle to try again
 		return err
@@ -994,18 +995,20 @@ func (agent *RemoteClusterAgent) Refresh() error {
 			hostnamePair = rctx.cachedRefNodesList[rctx.index]
 		}
 
-		err := rctx.setHostNamesAndConnStr(hostnamePair)
+		err = rctx.setHostNamesAndConnStr(hostnamePair)
 		if err != nil {
 			return err
 		}
 
-		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
+		var nodeList []interface{}
+		nodeList, err = rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
 		if err != nil {
 			if err == UUIDMismatchError {
 				if rctx.hostName == rctx.refOrig.HostName() && len(rctx.cachedRefNodesList) == 1 {
 					// If this is the only node to be checked AND this is the bootstrap node
 					// then there's nothing to do now as there is no more nodes in the list to walk
-					return BootStrapNodeHasMovedError
+					err = BootStrapNodeHasMovedError
+					return err
 				}
 			} else if err == RefreshAborted {
 				return err
@@ -1039,7 +1042,8 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	if !rctx.atLeastOneValid {
 		errMsg := fmt.Sprintf("Failed to refresh remote cluster reference %v since none of the nodes in target node list is accessible. node list = %v\n", rctx.refCache.Id(), rctx.cachedRefNodesList)
 		agent.logger.Error(errMsg)
-		return ErrorRefreshUnreachable
+		err = ErrorRefreshUnreachable
+		return err
 	}
 
 	// If there's anything that needs to be persisted to agent, update it
