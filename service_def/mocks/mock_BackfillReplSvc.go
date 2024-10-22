@@ -243,6 +243,64 @@ func (_c *BackfillReplSvc_DelBackfillReplSpec_Call) RunAndReturn(run func(string
 	return _c
 }
 
+// GetMyVBs provides a mock function with given fields: replSpec
+func (_m *BackfillReplSvc) GetMyVBs(replSpec *metadata.ReplicationSpecification) ([]uint16, error) {
+	ret := _m.Called(replSpec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMyVBs")
+	}
+
+	var r0 []uint16
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) ([]uint16, error)); ok {
+		return rf(replSpec)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) []uint16); ok {
+		r0 = rf(replSpec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) error); ok {
+		r1 = rf(replSpec)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// BackfillReplSvc_GetMyVBs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMyVBs'
+type BackfillReplSvc_GetMyVBs_Call struct {
+	*mock.Call
+}
+
+// GetMyVBs is a helper method to define mock.On call
+//   - replSpec *metadata.ReplicationSpecification
+func (_e *BackfillReplSvc_Expecter) GetMyVBs(replSpec interface{}) *BackfillReplSvc_GetMyVBs_Call {
+	return &BackfillReplSvc_GetMyVBs_Call{Call: _e.mock.On("GetMyVBs", replSpec)}
+}
+
+func (_c *BackfillReplSvc_GetMyVBs_Call) Run(run func(replSpec *metadata.ReplicationSpecification)) *BackfillReplSvc_GetMyVBs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSpecification))
+	})
+	return _c
+}
+
+func (_c *BackfillReplSvc_GetMyVBs_Call) Return(_a0 []uint16, _a1 error) *BackfillReplSvc_GetMyVBs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *BackfillReplSvc_GetMyVBs_Call) RunAndReturn(run func(*metadata.ReplicationSpecification) ([]uint16, error)) *BackfillReplSvc_GetMyVBs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal, wg
 func (_m *BackfillReplSvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)

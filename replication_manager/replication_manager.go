@@ -77,9 +77,8 @@ type replicationManager struct {
 	supervisor.GenericSupervisor
 	// Single instance of pipeline_mgr here instead of using a global
 	pipelineMgr pipeline_manager.PipelineMgrIface
-
+	// resource manager service
 	resourceMgr resource_manager.ResourceMgrIface
-
 	//replication specification service handle
 	repl_spec_svc service_def.ReplicationSpecSvc
 	//remote cluster service handle
