@@ -9,9 +9,10 @@
 package service_def
 
 import (
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
-	"sync"
 )
 
 type BackfillReplSvc interface {
@@ -28,4 +29,7 @@ type BackfillReplSvc interface {
 
 	// In case of backfill mapping corruption, the backfillCallback is needed to capture a wide net of backfill
 	SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error
+
+	//Returns the vbs owned by 'this' node
+	GetMyVBs(replSpec *metadata.ReplicationSpecification) ([]uint16, error)
 }
