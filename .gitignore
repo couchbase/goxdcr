@@ -39,3 +39,14 @@ tools/testScripts/vagrant/*.deb
 tools/testScripts/vagrant/.vagrant
 tools/testScripts/vagrant/data
 
+build/
+
+# binaries
+/xtest
+
+# logs
+log
+*.log
+
+#vscode
+.vscode

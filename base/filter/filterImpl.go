@@ -30,6 +30,7 @@ const (
 	FilteredOnTxnsXattr         base.FilteringStatusType = iota
 	FilteredOnUserDefinedFilter base.FilteringStatusType = iota
 	FilteredOnMobileRecord      base.FilteringStatusType = iota
+	FilteredOnConflictLogRecord base.FilteringStatusType = iota
 	FilteredOnOthers            base.FilteringStatusType = iota // could be filtered because of error, binary doc, expiry, deletion etc which do not need to be explicitly distinguished
 )
 
@@ -164,7 +165,7 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		filter.slicesToBeReleasedBuf = filter.slicesToBeReleasedBuf[:0]
 	}()
 
-	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified, filterStatus := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
+	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified, filterStatus := filter.filterNecessarySystemXattrsRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
 	if err != nil || !needToReplicate {
 		return false, err, errDesc, totalFailedDpCnt, filterStatus
 	}
@@ -216,6 +217,10 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *mcc.UprEvent) (n
 	return true
 }
 
+// The system xattrs of interest for filtering are:
+// 1. transaction xattrs.
+// 2. conflict logging xattrs.
+// Check and process the presence of such xattrs.
 // Returns:
 //  1. needToReplicate bool - Whether or not the mutation should be allowed to continue through the pipeline
 //  2. body []byte - body slice (will be stripped of SDK transaction metadata if non-legacy mode)
@@ -224,8 +229,8 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *mcc.UprEvent) (n
 //  5. errDesc string - If err is not nil, additional description
 //  6. failedDpCnt int64 - Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
 //  7. If body has been modified due to stripping the transactional xattr
-//  8. Status of txn based filtering - not filtered based on txns, not filtered because of error, not filtered because it is an ATR document,
-//     not filtered because of txt xattrs, not filtered because of client txn records
+//  8. Status of system xattr based filtering - not filtered based on txns, not filtered because of error, not filtered because it is an ATR document,
+//     not filtered because of txt xattrs, not filtered because of client txn records, filtered because of conflict logging xattr.
 //
 // Note that body in 2 is not nil only in the following scenario:
 // (1). uprEvent is compressed
@@ -235,7 +240,7 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *mcc.UprEvent) (n
 // In this scenario body is a newly allocated byte slice, which holds the decompressed document body,
 // and also contains extra bytes to accommodate key, so that it can be reused by advanced filtering later.
 // In other scenarios body is nil and endBodyPos is -1
-func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool, base.FilteringStatusType) {
+func (filter *FilterImpl) filterNecessarySystemXattrsRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool, base.FilteringStatusType) {
 	if base.Equals(uprEvent.Key, base.TransactionClientRecordKey) {
 		// filter out transaction client records
 		return false, nil, 0, nil, "", 0, false, FilteredOnTxnClientRecord
@@ -255,10 +260,15 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEven
 	// Whether we will need to filter on body later
 	needToFilterBody := filter.hasFilterExpression && (filter.flags&base.FilterFlagKeyOnly == 0)
 
-	// For UPR_MUTATION with xattrs, continue to filter based on whether transaction xattrs are present
-	hasTransXattrs, body, endBodyPos, err, errDesc, failedDpCnt, uncompressedUprValue := filter.utils.CheckForTransactionXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
+	// check for the presence of system xattrs which are required for filtering
+	// i.e. transaction and conflict logging xattrs
+	hasTransXattr, hasConflictLoggingXattr, body, endBodyPos, err, errDesc, failedDpCnt, uncompressedUprValue := filter.utils.CheckForNecessarySystemXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
 	if err != nil {
 		return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
+	}
+	if hasConflictLoggingXattr {
+		// it is a conflict log records, do not replicate
+		return false, body, endBodyPos, nil, "", failedDpCnt, false, FilteredOnConflictLogRecord
 	}
 
 	var bodyHasBeenModified bool
@@ -266,11 +276,11 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEven
 	passedFilter := true
 	if filter.ShouldSkipUncommittedTxn() {
 		// if mutation has transaction xattrs, do not replicate it
-		passedFilter = !hasTransXattrs
+		passedFilter = !hasTransXattr
 		if !passedFilter {
 			filterStatus = FilteredOnTxnsXattr
 		}
-	} else if hasTransXattrs {
+	} else if hasTransXattr {
 		// Strip out transaction xattributes
 		newBodySlice, err := filter.dp.GetByteSlice(uint64(len(uncompressedUprValue)))
 		if err != nil {

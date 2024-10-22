@@ -6,7 +6,7 @@
 // will be governed by the Apache License, Version 2.0, included in the file
 // licenses/APL2.txt.
 
-package service_def
+package throttlerSvc
 
 // Keys for configurable service settings
 const HighTokensKey = "HighTokens"

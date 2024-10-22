@@ -8,12 +8,14 @@
 
 package common
 
-//Nozzle models the openning that data streaming out of the source system
-//and the outlet where the data flowing into the target system.
+import "github.com/couchbase/goxdcr/v8/conflictlog"
+
+// Nozzle models the openning that data streaming out of the source system
+// and the outlet where the data flowing into the target system.
 //
-//Nozzle can be opened or closed. An closed nozzle will not allow data flow through
+// Nozzle can be opened or closed. An closed nozzle will not allow data flow through
 //
-//Each nozzle is a goroutine
+// Each nozzle is a goroutine
 type Nozzle interface {
 	Part
 
@@ -43,4 +45,6 @@ type OutNozzle interface {
 	SetUpstreamObjRecycler(func(interface{}))
 
 	SetUpstreamErrReporter(func(interface{}))
+
+	SetConflictLoggerGetter(conflictlog.LoggerGetter)
 }

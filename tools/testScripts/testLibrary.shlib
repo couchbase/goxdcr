@@ -262,8 +262,8 @@ function waitForChangesLeft0 {
 		sleep 10
 	done
 
-	echo "changes_left never went to zero"
-	return 0
+	echo "changes_left never went to zero for $1.$2 -> $3.$4"
+	exit 1
 }
 
 function checkNonNegativeChangesLeft {
@@ -1865,6 +1865,14 @@ function validatePrometheusStatsCasPoisonNon0 {
 	local targetBucket=$3
 
 	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_docs_cas_poisoned_total"
+}
+
+function validatePrometheusStatsDocsFilteredNon0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_docs_filtered_total"
 }
 
 # use cbc-pillowfight to create a large bucket

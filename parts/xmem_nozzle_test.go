@@ -37,6 +37,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/generator"
 	"github.com/couchbase/goxdcr/v8/common/mocks"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/crMeta"
 	"github.com/couchbase/goxdcr/v8/hlv"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -94,7 +95,8 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 
 	// local cluster run has KV port starting at 12000
-	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil, "")
+	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil, "", "")
+	xmemNozzle.SetConflictLoggerGetter(func() conflictlog.Logger { return nil })
 
 	// settings map
 	settingsMap := make(map[string]interface{})

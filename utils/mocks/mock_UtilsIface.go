@@ -435,22 +435,23 @@ func (_c *UtilsIface_BucketValidationInfo_Call) RunAndReturn(run func(string, st
 	return _c
 }
 
-// CheckForTransactionXattrsInUprEvent provides a mock function with given fields: uprEvent, dp, slicesToBeReleased, needToFilterBody
-func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64, []byte) {
+// CheckForNecessarySystemXattrsInUprEvent provides a mock function with given fields: uprEvent, dp, slicesToBeReleased, needToFilterBody
+func (_m *UtilsIface) CheckForNecessarySystemXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, bool, []byte, int, error, string, int64, []byte) {
 	ret := _m.Called(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CheckForTransactionXattrsInUprEvent")
+		panic("no return value specified for CheckForNecessarySystemXattrsInUprEvent")
 	}
 
 	var r0 bool
-	var r1 []byte
-	var r2 int
-	var r3 error
-	var r4 string
-	var r5 int64
-	var r6 []byte
-	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) (bool, []byte, int, error, string, int64, []byte)); ok {
+	var r1 bool
+	var r2 []byte
+	var r3 int
+	var r4 error
+	var r5 string
+	var r6 int64
+	var r7 []byte
+	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) (bool, bool, []byte, int, error, string, int64, []byte)); ok {
 		return rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	}
 	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) bool); ok {
@@ -459,76 +460,82 @@ func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.Up
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
+	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) bool); ok {
 		r1 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]byte)
-		}
+		r1 = ret.Get(1).(bool)
 	}
 
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int); ok {
+	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
 		r2 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
-		r2 = ret.Get(2).(int)
-	}
-
-	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) error); ok {
-		r3 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
-	} else {
-		r3 = ret.Error(3)
-	}
-
-	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) string); ok {
-		r4 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
-	} else {
-		r4 = ret.Get(4).(string)
-	}
-
-	if rf, ok := ret.Get(5).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int64); ok {
-		r5 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
-	} else {
-		r5 = ret.Get(5).(int64)
-	}
-
-	if rf, ok := ret.Get(6).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
-		r6 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
-	} else {
-		if ret.Get(6) != nil {
-			r6 = ret.Get(6).([]byte)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]byte)
 		}
 	}
 
-	return r0, r1, r2, r3, r4, r5, r6
+	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int); ok {
+		r3 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		r3 = ret.Get(3).(int)
+	}
+
+	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) error); ok {
+		r4 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		r4 = ret.Error(4)
+	}
+
+	if rf, ok := ret.Get(5).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) string); ok {
+		r5 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		r5 = ret.Get(5).(string)
+	}
+
+	if rf, ok := ret.Get(6).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int64); ok {
+		r6 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		r6 = ret.Get(6).(int64)
+	}
+
+	if rf, ok := ret.Get(7).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
+		r7 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		if ret.Get(7) != nil {
+			r7 = ret.Get(7).([]byte)
+		}
+	}
+
+	return r0, r1, r2, r3, r4, r5, r6, r7
 }
 
-// UtilsIface_CheckForTransactionXattrsInUprEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckForTransactionXattrsInUprEvent'
-type UtilsIface_CheckForTransactionXattrsInUprEvent_Call struct {
+// UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckForNecessarySystemXattrsInUprEvent'
+type UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call struct {
 	*mock.Call
 }
 
-// CheckForTransactionXattrsInUprEvent is a helper method to define mock.On call
+// CheckForNecessarySystemXattrsInUprEvent is a helper method to define mock.On call
 //   - uprEvent *memcached.UprEvent
 //   - dp base.DataPool
 //   - slicesToBeReleased *[][]byte
 //   - needToFilterBody bool
-func (_e *UtilsIface_Expecter) CheckForTransactionXattrsInUprEvent(uprEvent interface{}, dp interface{}, slicesToBeReleased interface{}, needToFilterBody interface{}) *UtilsIface_CheckForTransactionXattrsInUprEvent_Call {
-	return &UtilsIface_CheckForTransactionXattrsInUprEvent_Call{Call: _e.mock.On("CheckForTransactionXattrsInUprEvent", uprEvent, dp, slicesToBeReleased, needToFilterBody)}
+func (_e *UtilsIface_Expecter) CheckForNecessarySystemXattrsInUprEvent(uprEvent interface{}, dp interface{}, slicesToBeReleased interface{}, needToFilterBody interface{}) *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call {
+	return &UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call{Call: _e.mock.On("CheckForNecessarySystemXattrsInUprEvent", uprEvent, dp, slicesToBeReleased, needToFilterBody)}
 }
 
-func (_c *UtilsIface_CheckForTransactionXattrsInUprEvent_Call) Run(run func(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool)) *UtilsIface_CheckForTransactionXattrsInUprEvent_Call {
+func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) Run(run func(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool)) *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*memcached.UprEvent), args[1].(base.DataPool), args[2].(*[][]byte), args[3].(bool))
 	})
 	return _c
 }
 
-func (_c *UtilsIface_CheckForTransactionXattrsInUprEvent_Call) Return(hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte) *UtilsIface_CheckForTransactionXattrsInUprEvent_Call {
-	_c.Call.Return(hasTxnXattrs, body, endBodyPos, err, additionalErrDesc, totalFailedCnt, uncompressedUprValue)
+func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) Return(hasTxnXattr bool, hasConflictLoggingXattr bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte) *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call {
+	_c.Call.Return(hasTxnXattr, hasConflictLoggingXattr, body, endBodyPos, err, additionalErrDesc, totalFailedCnt, uncompressedUprValue)
 	return _c
 }
 
-func (_c *UtilsIface_CheckForTransactionXattrsInUprEvent_Call) RunAndReturn(run func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) (bool, []byte, int, error, string, int64, []byte)) *UtilsIface_CheckForTransactionXattrsInUprEvent_Call {
+func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) RunAndReturn(run func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) (bool, bool, []byte, int, error, string, int64, []byte)) *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }

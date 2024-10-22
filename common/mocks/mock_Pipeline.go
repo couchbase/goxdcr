@@ -6,6 +6,8 @@ import (
 	base "github.com/couchbase/goxdcr/v8/base"
 	common "github.com/couchbase/goxdcr/v8/common"
 
+	conflictlog "github.com/couchbase/goxdcr/v8/conflictlog"
+
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
 
 	mock "github.com/stretchr/testify/mock"
@@ -22,6 +24,53 @@ type Pipeline_Expecter struct {
 
 func (_m *Pipeline) EXPECT() *Pipeline_Expecter {
 	return &Pipeline_Expecter{mock: &_m.Mock}
+}
+
+// ConflictLogger provides a mock function with given fields:
+func (_m *Pipeline) ConflictLogger() conflictlog.Logger {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConflictLogger")
+	}
+
+	var r0 conflictlog.Logger
+	if rf, ok := ret.Get(0).(func() conflictlog.Logger); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(conflictlog.Logger)
+		}
+	}
+
+	return r0
+}
+
+// Pipeline_ConflictLogger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ConflictLogger'
+type Pipeline_ConflictLogger_Call struct {
+	*mock.Call
+}
+
+// ConflictLogger is a helper method to define mock.On call
+func (_e *Pipeline_Expecter) ConflictLogger() *Pipeline_ConflictLogger_Call {
+	return &Pipeline_ConflictLogger_Call{Call: _e.mock.On("ConflictLogger")}
+}
+
+func (_c *Pipeline_ConflictLogger_Call) Run(run func()) *Pipeline_ConflictLogger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Pipeline_ConflictLogger_Call) Return(_a0 conflictlog.Logger) *Pipeline_ConflictLogger_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Pipeline_ConflictLogger_Call) RunAndReturn(run func() conflictlog.Logger) *Pipeline_ConflictLogger_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // FullTopic provides a mock function with given fields:

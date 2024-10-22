@@ -903,7 +903,7 @@ func TestTransactionFilterWithPureArray(t *testing.T) {
 
 	fakedp := base.NewFakeDataPool()
 	slicesToBeReleasedBuf := make([][]byte, 0, 2)
-	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
+	_, _, _, _, err, errDesc, _, _ := testUtils.CheckForNecessarySystemXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
 	assert.Nil(err)
 	assert.Equal("", errDesc)
 	fmt.Println("============== Test case end: TestTransactionFilterWithPureArray =================")
@@ -928,7 +928,7 @@ func TestTransactionFilterWithInvalidJSON(t *testing.T) {
 	out = append(out, '-')
 	uprEvent.UprEvent.Value = snappy.Encode(nil, out)
 
-	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
+	_, _, _, _, err, errDesc, _, _ := testUtils.CheckForNecessarySystemXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
 	assert.NotNil(err)
 	assert.True(strings.Contains(errDesc, filter.InvalidJSONMsg))
 }

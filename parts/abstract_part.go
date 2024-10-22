@@ -11,17 +11,18 @@ package parts
 import (
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	common "github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
-	"sync"
 )
 
-//This is the error message any part goroutine would throw when it finds out
-//the part is already requested to stop and it is left as orphan. The caller
-//see this error message, it should stop itself and exit
+// This is the error message any part goroutine would throw when it finds out
+// the part is already requested to stop and it is left as orphan. The caller
+// see this error message, it should stop itself and exit
 var PartStoppedError = errors.New("Part is stopping or already stopped, exit")
 
 var PartAlreadyStartedError = errors.New("Part has already been started before")

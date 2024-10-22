@@ -26,6 +26,7 @@ import (
 	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/v8/adminport"
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/gen_server"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -37,7 +38,7 @@ import (
 	_ "net/http/pprof"
 )
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath, base.XDCRSourceClustersPath, base.XDCRClusterToClusterPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath, base.XDCRSourceClustersPath, base.XDCRClusterToClusterPath, "xdcr/conflictlog"}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger(base.AdminPortKey, log.GetOrCreateContext(base.AdminPortKey))
@@ -246,6 +247,9 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetSourceClustersRequest(request)
 	case base.XDCRClusterToClusterPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doPostClusterToClusterRequest(request)
+	// TODO: [TEMP] remove doChangeConflictLogSetting
+	case "xdcr/conflictlog" + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doChangeConflictLogSetting(request)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -1488,4 +1492,77 @@ func (adminport *Adminport) doPostClusterToClusterRequest(request *http.Request)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())
+}
+
+// TODO: [TEMP] remove doChangeConflictLogSetting
+func (adminport *Adminport) doChangeConflictLogSetting(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doChangeConflictConnectionType\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	errorsMap := make(map[string]error)
+	if err := request.ParseForm(); err != nil {
+		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return EncodeObjectIntoResponse(errorsMap)
+	}
+
+	logger_ap.Infof("changing conflict logging defaults = %v", request.Form)
+	for key, valArr := range request.Form {
+		switch key {
+		case "skipTlsVerify":
+			val := valArr[0]
+			tlsVerify := false
+			if val == "true" {
+				tlsVerify = true
+			}
+
+			m, err := conflictlog.GetManager()
+			if err != nil {
+				errorsMap["error_skipTlsVerify"] = err
+				return EncodeObjectIntoResponse(errorsMap)
+			}
+			m.SetSkipTlsVerify(tlsVerify)
+		case "workerCount":
+			workerCnt := valArr[0]
+			i, err := strconv.Atoi(workerCnt)
+			if err != nil {
+				errorsMap[fmt.Sprintf("error_workerCnt=%s", workerCnt)] = err
+				return EncodeObjectIntoResponse(errorsMap)
+			}
+			logger_ap.Infof("changing worker count = %s => %v", workerCnt, i)
+			conflictlog.DefaultLoggerWorkerCount = i
+		case "queueLen":
+			queueLen := valArr[0]
+			i, err := strconv.Atoi(queueLen)
+			if err != nil {
+				errorsMap[fmt.Sprintf("error_queueLen=%s", queueLen)] = err
+				return EncodeObjectIntoResponse(errorsMap)
+			}
+			logger_ap.Infof("changing queueLen = %s => %v", queueLen, i)
+			conflictlog.DefaultLogCapacity = i
+		case "connLimit":
+			connLimit := valArr[0]
+			i, err := strconv.Atoi(connLimit)
+			if err != nil {
+				errorsMap[fmt.Sprintf("error_connLimit=%s", connLimit)] = err
+				return EncodeObjectIntoResponse(errorsMap)
+			}
+
+			m, err := conflictlog.GetManager()
+			if err != nil {
+				errorsMap["error_ManagerConnLimit"] = err
+				return EncodeObjectIntoResponse(errorsMap)
+			}
+
+			logger_ap.Infof("changing connLimit = %s => %v", connLimit, i)
+			m.SetConnLimit(i)
+		default:
+			continue
+		}
+	}
+
+	return NewEmptyArrayResponse()
 }

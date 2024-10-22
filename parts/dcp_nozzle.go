@@ -377,6 +377,10 @@ type DcpNozzle struct {
 
 	nonOKVbStreamEnds    map[uint16]bool
 	nonOKVbStreamEndsMtx sync.Mutex
+
+	// vbno -> vbuuid mapping
+	vbuuidMap    map[uint16]uint64
+	vbuuidMapMtx sync.RWMutex
 }
 
 func NewDcpNozzle(id string,
@@ -422,6 +426,7 @@ func NewDcpNozzle(id string,
 		backfillTaskStreamCloseSent:    make(map[uint16]*uint32),
 		backfillTaskStreamEndReceived:  make(map[uint16]*uint32),
 		nonOKVbStreamEnds:              make(map[uint16]bool),
+		vbuuidMap:                      make(map[uint16]uint64),
 	}
 
 	// Allow one caller the ability to execute
@@ -1068,8 +1073,16 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
+
+						vbuuid, _, err := m.FailoverLog.Latest()
+						if err != nil {
+							dcp.Logger().Warnf("%v error getting latest failover log for vb=%v is not supposed to be opened, err=%v", dcp.Id(), vbno, err)
+						}
+						dcp.vbuuidMapMtx.Lock()
+						dcp.vbuuidMap[vbno] = vbuuid
+						dcp.vbuuidMapMtx.Unlock()
 					} else {
-						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened\n", dcp.Id(), vbno)
+						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened", dcp.Id(), vbno)
 						dcp.handleGeneralError(err)
 						return err
 					}
@@ -1329,6 +1342,14 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	if collectionDNE {
 		wrappedEvent.Flags.SetCollectionDNE()
 	}
+
+	dcp.vbuuidMapMtx.RLock()
+	vbuuid, ok := dcp.vbuuidMap[m.VBucket]
+	dcp.vbuuidMapMtx.RUnlock()
+	if ok {
+		m.VBuuid = vbuuid
+	}
+
 	return wrappedEvent, nil
 }
 

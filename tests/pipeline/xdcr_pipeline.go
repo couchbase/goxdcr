@@ -12,24 +12,21 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
-	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
-	"github.com/couchbase/goxdcr/v8/parts"
-	"github.com/couchbase/goxdcr/v8/pipeline_manager"
 	"github.com/couchbase/goxdcr/v8/replication_manager"
 	"github.com/couchbase/goxdcr/v8/service_impl"
-	testcommon "github.com/couchbase/goxdcr/v8/tests/common"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"net/http"
-	"os"
-	"time"
-)
 
-import _ "net/http/pprof"
-import _ "expvar"
+	_ "net/http/pprof"
+
+	_ "expvar"
+)
 
 const (
 	NUM_SOURCE_CONN = 2

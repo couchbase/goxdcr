@@ -25,10 +25,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/crMeta"
 	"github.com/couchbase/goxdcr/v8/hlv"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -86,7 +88,7 @@ var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
 
 var ErrorFatalError = errors.New("received connection fatal error")
 
-type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error)
+type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
@@ -724,10 +726,8 @@ type XmemNozzle struct {
 	connType base.ConnType
 
 	topic                      string
-	last_ready_batch           int32
 	last_ten_batches_size      []uint32
 	last_ten_batches_size_lock sync.RWMutex
-	last_batch_id              int32
 
 	// whether lww conflict resolution mode has been enabled
 	source_cr_mode base.ConflictResolutionMode
@@ -777,6 +777,9 @@ type XmemNozzle struct {
 	importMutationEventId     int64
 
 	mcRequestPool *base.MCRequestPool
+
+	// getter to fetch pipeline level conflict logger
+	conflictLogger conflictlog.LoggerGetter
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -787,7 +790,9 @@ func getMcStatusFromGuardrailIdx(idx int) mc.Status {
 	return mc.Status(int(mc.BUCKET_RESIDENT_RATIO_TOO_LOW) + idx)
 }
 
-func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int, connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string) *XmemNozzle {
+func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int,
+	connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode,
+	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string, sourceHostname string) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
@@ -832,7 +837,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-	//set conflict resolver
+	// set conflict resolver
 	xmem.conflict_resolver = xmem.getConflictDetector(xmem.source_cr_mode)
 
 	xmem.config.connectStr = connectString
@@ -841,6 +846,8 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 	xmem.config.password = password
 	xmem.config.connPoolNamePrefix = connPoolNamePrefix
 	xmem.config.connPoolSize = connPoolConnSize
+	xmem.config.sourceHostname = sourceHostname
+	xmem.config.targetHostname = base.GetHostName(connectString)
 
 	return xmem
 }
@@ -1130,7 +1137,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			}
 
 			// batchGet may use getMeta or subdoc_multi_lookup to get the results.
-			noRepMap, conflictMap, sendLookup_map, _, err := xmem.batchGet(batch.getMetaMap)
+			noRepMap, conflictMap, sendLookupMap, conflictLookupMap, err := xmem.batchGet(batch.getMetaMap)
 			if err != nil {
 				if err == PartStoppedError {
 					goto done
@@ -1138,35 +1145,50 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				xmem.handleGeneralError(err)
 			}
 			if len(conflictMap) > 0 {
-				if xmem.source_cr_mode != base.CRMode_Custom {
-					panic(fmt.Sprintf("cr_mode=%v, conflict_map: %v", xmem.source_cr_mode, conflictMap))
-				}
-				// For all the keys with conflict, we will fetch the document metadata and body.
-				// With the new metadata, we do conflict detection again in case anything changed.
-				noRepMap2, _, sendLookupMap2, mergeLookupMap, err := xmem.batchGet(conflictMap)
-				if err != nil {
-					if err == PartStoppedError {
-						goto done
-					}
-					xmem.handleGeneralError(err)
-				}
-				// Update the maps with the second round lookup and conflict detection results
-				// Can't loop through conflictMap because it is all deleted after batchGet returns.
-				for k, v := range noRepMap2 {
-					noRepMap[k] = v
-				}
-				for k, v := range sendLookupMap2.responses {
-					err := sendLookup_map.registerLookup(k, v)
+				if !xmem.isCCR() {
+					// For all the keys with conflict, we will fetch the document xattrs and body.
+					// for conflict logging.
+					noRepMap2, conflictLookupMap2, err := xmem.batchGetBodyAndXattrs(conflictMap, conflictLookupMap)
 					if err != nil {
-						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for conflict map, err=%v", base.UdTagBegin, k, base.UdTagEnd, err)
+						if err == PartStoppedError {
+							goto done
+						}
+						xmem.handleGeneralError(err)
 					}
-					// Anything to be sent should not be in noRepMap
-					delete(noRepMap, k)
+					// Update the maps with the second round lookup.
+					for k, v := range noRepMap2 {
+						noRepMap[k] = v
+					}
+
+					batch.conflictLookupMap = conflictLookupMap2
+				} else {
+					// For all the keys with conflict, we will fetch the document metadata and body.
+					// With the new metadata, we do conflict detection again in case anything changed.
+					noRepMap2, _, sendLookupMap2, conflictLookupMap2, err := xmem.batchGet(conflictMap)
+					if err != nil {
+						if err == PartStoppedError {
+							goto done
+						}
+						xmem.handleGeneralError(err)
+					}
+					// Update the maps with the second round lookup and conflict detection results
+					// Can't loop through conflictMap because it is all deleted after batchGet returns.
+					for k, v := range noRepMap2 {
+						noRepMap[k] = v
+					}
+					for k, v := range sendLookupMap2.responses {
+						err := sendLookupMap.registerLookup(k, v)
+						if err != nil {
+							xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for conflict map, err=%v", base.UdTagBegin, k, base.UdTagEnd, err)
+						}
+						// Anything to be sent should not be in noRepMap
+						delete(noRepMap, k)
+					}
+					batch.conflictLookupMap = conflictLookupMap2
 				}
-				batch.mergeLookupMap = mergeLookupMap
 			}
 			batch.noRepMap = noRepMap
-			batch.sendLookupMap = sendLookup_map
+			batch.sendLookupMap = sendLookupMap
 
 			err = xmem.processBatch(batch)
 			if err != nil {
@@ -1293,6 +1315,40 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			xmem.checkSendDelayInjection()
 
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
+
+			// check if conflict logging needs to be done for this item
+			logConflicts := xmem.conflictLoggingEnabled()
+			if logConflicts && !xmem.isCCR() {
+				resp, err := batch.conflictLookupMap.deregisterLookup(item.UniqueKey)
+				if err == nil {
+					err = xmem.log(item, resp)
+					if err != nil {
+						// warn and continue to replicate
+						if err == conflictlog.ErrQueueFull || err == conflictlog.ErrLoggerClosed {
+							// SUMUKH TODO - can spam, good to update it to a counter.
+
+							// xmem.Logger().Warnf("%v Conflict logging queue full, could not log for key=%v%s%v",
+							// 	xmem.Id(),
+							// 	base.UdTagBegin, item.Req.Key, base.UdTagEnd,
+							// )
+						} else {
+							xmem.Logger().Warnf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, specs=%v, err=%v",
+								xmem.Id(),
+								base.UdTagBegin, item.Req.Key, base.UdTagEnd,
+								base.UdTagBegin, item.Req, base.UdTagEnd,
+								base.UdTagBegin, item.Req.Body, base.UdTagEnd,
+								resp.Resp.Opcode,
+								base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
+								resp.Specs, err,
+							)
+						}
+					}
+					// The log() function performs a clone of necessary information to log,
+					// safe to recycle.
+					respToGc[resp.Resp] = true
+				}
+			}
+
 			needSendStatus, err := needSend(item, batch, xmem.Logger())
 			if err != nil {
 				return err
@@ -1347,14 +1403,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						return err
 					}
 
-					for oneResp := range respToGc {
-						if batch.sendLookupMap.canRecycle(oneResp) &&
-							batch.mergeLookupMap.canRecycle(oneResp) {
-							oneResp.Recycle()
-							delete(respToGc, oneResp)
-						}
-					}
-
 					batch_replicated_count = 0
 					for _, dpSlice := range reqs_bytes {
 						xmem.dataPool.PutByteSlice(dpSlice)
@@ -1365,7 +1413,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			case NotSendMerge:
 				// Call conflictMgr to resolve conflict
 				atomic.AddUint64(&xmem.counter_to_resolve, 1)
-				lookupResp, err := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				lookupResp, err := batch.conflictLookupMap.deregisterLookup(item.UniqueKey)
 				if err != nil {
 					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for NotSendMerge, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
 				}
@@ -1381,7 +1429,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 			case NotSendSetback:
 				atomic.AddUint64(&xmem.counter_to_setback, 1)
-				lookupResp, err := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				lookupResp, err := batch.conflictLookupMap.deregisterLookup(item.UniqueKey)
 				if err != nil {
 					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for NotSendMerge, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
 				}
@@ -1393,6 +1441,14 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				if err != nil {
 					return err
 				}
+			case RetryTargetCasChanged:
+				go func() {
+					additionalInfo := SentCasChangedEventAdditional{
+						Opcode: item.Req.Opcode,
+					}
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, nil, additionalInfo))
+					xmem.retryAfterCasLockingFailure(item)
+				}()
 			case RetryTargetLocked:
 				atomic.AddUint64(&xmem.counter_locked, 1)
 				go xmem.retryAfterCasLockingFailure(item)
@@ -1514,7 +1570,7 @@ func (xmem *XmemNozzle) getConflictDetector(source_cr_mode base.ConflictResoluti
 	switch source_cr_mode {
 	case base.CRMode_Custom:
 		xmem.Logger().Infof("Use DetectConflictWithHLV for conflict resolution.")
-		ret = crMeta.DetectConflictWithHLV
+		ret = crMeta.ResolveConflictByHlv
 	case base.CRMode_RevId:
 		xmem.Logger().Infof("Use ResolveConflictByRevSeq for conflict resolution.")
 		ret = crMeta.ResolveConflictByRevSeq
@@ -1610,10 +1666,10 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 
 				if !isNetTimeoutError(err) && err != PartStoppedError {
 					logger.Errorf("%v batchGet received fatal error and had to abort. Expected %v responses, got %v responses. err=%v", xmem.Id(), count, len(respMap), err)
-					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
+					logger.Infof("%v Expected=%v, Received=%v%v%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				} else {
 					logger.Errorf("%v batchGet timed out. Expected %v responses, got %v responses", xmem.Id(), count, len(respMap))
-					logger.Infof("%v Expected=%v, Received=%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
+					logger.Infof("%v Expected=%v, Received=%v%v%v\n", xmem.Id(), opaque_keySeqno_map.CloneAndRedact(), base.UdTagBegin, respMap, base.UdTagEnd)
 				}
 				return
 			} else {
@@ -1623,10 +1679,10 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 					//success
 					key, ok1 := keySeqno[0].(string)
 					seqno, ok2 := keySeqno[1].(uint64)
-					vbno, ok2 := keySeqno[2].(uint16)
-					start_time, ok3 := keySeqno[3].(time.Time)
-					manifestId, ok4 := keySeqno[4].(uint64)
-					if ok1 && ok2 && ok3 && ok4 {
+					vbno, ok3 := keySeqno[2].(uint16)
+					start_time, ok4 := keySeqno[3].(time.Time)
+					manifestId, ok5 := keySeqno[4].(uint64)
+					if ok1 && ok2 && ok3 && ok4 && ok5 {
 						specs := getSpecMap[key]
 						respMap[key] = &base.SubdocLookupResponse{Specs: specs, Resp: response}
 
@@ -1661,8 +1717,8 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 								xmem.client_for_getMeta.IncrementBackOffFactor()
 							} else {
 								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
-									base.UdTagBegin, response, base.UdTagEnd)
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%s%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+									base.UdTagBegin, response, base.UdTagEnd, base.UdTagBegin, specs, base.UdTagEnd)
 								err = fmt.Errorf("error response with status %v from memcached", response.Status)
 								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 								// no need to wait further since connection has been reset
@@ -1710,8 +1766,13 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCReque
 	return newReq
 }
 
-// For each document in the getMap, this routine will compose subdoc_get or getMeta, and send the requests
-func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int) (respMap map[string]*base.SubdocLookupResponse, err error) {
+// For each document in the getMap, this routine will compose subdoc_get or getMeta, and send the requests.
+// Optional: getLookupMap - if non-empty:
+// 1. subdoc_lookup is implied.
+// 2. getLookupMap should have XTOC reponse.
+// 2a. If getLookupMap has XTOC response, then the specs for subdoc_lookup will be document body + all the xattrs.
+// 2b. If getLookupMap doesn't have XTOC response, then the specs for subdoc_lookup will be just document body.
+func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int, getLookupMap *responseLookup) (respMap map[string]*base.SubdocLookupResponse, err error) {
 	// if input size is 0, then we are done
 	if len(getMap) == 0 {
 		return nil, nil
@@ -1744,16 +1805,46 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	var getWrappedReqToRecycle []*base.WrappedMCRequest
 
 	//de-dupe and prepare the packages
-	for _, originalReq := range getMap {
+	for uniqKey, originalReq := range getMap {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%q%v, req=%v%v%v, getMetaMap=%v%v%v", xmem.Id(),
+			xmem.Logger().Errorf("%v received empty docKey. key= %v%q%v, req=%v%v%v, getMetaMap=%v%v%v", xmem.Id(),
 				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, getMap, base.UdTagEnd)
 			return respMap, errors.New(xmem.Id() + " received empty docKey.")
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			getWrappedReq, getSpec := xmem.composeRequestForGet(originalReq, opaque)
+
+			// check if caller expects cas locking and to get xattrs through xtoc
+			var cas uint64
+			var specs base.SubdocLookupPathSpecs
+			resp, err := getLookupMap.getLookup(uniqKey)
+			if err == nil {
+				cas = resp.Resp.Cas
+
+				xattrsSpecs, ok := getSpecMap[docKey]
+				if ok {
+					specs = xattrsSpecs
+				} else {
+					// only compute if not computed for this doc key before
+					// if any error in computation, just use the body spec.
+					xtoc, err := resp.ResponseForAPath(base.XattributeToc)
+					if err != nil {
+						xmem.Logger().Warnf("Error getting xattr specs for key= %v%q%v, req=%v%v%v", xmem.Id(),
+							base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd)
+						specs = base.SubdocLookupPathSpecs{base.BodySpec}
+					} else {
+						specs, err = getBodyAndXattrSpecs(xtoc)
+						if err != nil {
+							xmem.Logger().Warnf("Error getting xattr specs for key= %v%q%v, req=%v%v%v, getMetaMap=%v%v%v", xmem.Id(),
+								base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, getMap, base.UdTagEnd)
+							specs = base.SubdocLookupPathSpecs{base.BodySpec}
+						}
+					}
+				}
+			}
+
+			getWrappedReq, getSpec := xmem.composeRequestForGet(originalReq, opaque, specs, cas)
 			getWrappedReqToRecycle = append(getWrappedReqToRecycle, getWrappedReq)
 			req := getWrappedReq.Req
 			if getSpec != nil {
@@ -1838,6 +1929,269 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	return
 }
 
+func (xmem *XmemNozzle) SetConflictLoggerGetter(loggerGetter conflictlog.LoggerGetter) {
+	xmem.conflictLogger = loggerGetter
+}
+
+func getBodyAndXattrSpecs(xtoc []byte) (base.SubdocLookupPathSpecs, error) {
+	var specs base.SubdocLookupPathSpecs
+	var len int
+
+	xi, err := base.NewXTOCIterator(xtoc)
+	if err != nil {
+		return nil, fmt.Errorf("error initialising new xtoc iterator, xtoc=%v, err=%v", xtoc, err)
+	}
+
+	len, err = xi.Len()
+	if err != nil {
+		return nil, fmt.Errorf("error getting xtoc len, xtoc=%v, err=%v", xtoc, err)
+	}
+
+	specs = make(base.SubdocLookupPathSpecs, 0, len+1)
+
+	for xi.HasNext() {
+		xattrKey, err := xi.Next()
+		if err != nil {
+			return nil, fmt.Errorf("error getting xtoc next, xtoc=%v, err=%v", xtoc, err)
+		}
+
+		spec := base.SubdocLookupPathSpec{
+			Opcode: gomemcached.SUBDOC_GET,
+			Flags:  gomemcached.SUBDOC_FLAG_XATTR_PATH,
+			Path:   xattrKey,
+		}
+		specs = append(specs, spec)
+	}
+
+	specs = append(specs, base.BodySpec)
+
+	return specs, nil
+}
+
+func (xmem *XmemNozzle) conflictLoggingEnabled() bool {
+	return xmem.conflictLogger() != nil
+}
+
+// logs the source and target document involved in the conflict and their metadata.
+func (xmem *XmemNozzle) log(req *base.WrappedMCRequest, resp *base.SubdocLookupResponse) error {
+	var err error
+
+	/* get source document information. */
+
+	if err := xmem.uncompressBody(req); err != nil {
+		return fmt.Errorf("error decompressing source body, err=%v", err)
+	}
+
+	sourceDoc := base.DecodeSetMetaReq(req)
+	var sourceBodyClone []byte
+	var sourceHlvClone, sourceSyncClone, sourceMouClone string
+
+	sourceDocDatatype := sourceDoc.DataType & (^base.SnappyDataType)
+
+	// source mutation from dcp already has all the xattrs.
+	// just need to add conflict record xattr.
+	sourceBodyClone, sourceDocDatatype, err = conflictlog.InsertConflictXattrToBody(req.Req.Body, sourceDocDatatype)
+	if err != nil {
+		return fmt.Errorf("error inserting conflict xattr to source body, err=%v", err)
+	}
+
+	if base.HasXattr(req.Req.DataType) {
+		body := req.Req.Body
+		sourceXattrIter, err := base.NewXattrIterator(body)
+		if err != nil {
+			return fmt.Errorf("error getting new xattr iterator for source doc body, err=%v", err)
+		}
+
+		for sourceXattrIter.HasNext() {
+			key, value, err := sourceXattrIter.Next()
+			if err != nil {
+				return fmt.Errorf("error getting next from iterator for source doc body, err=%v", err)
+			}
+			if req.HLVModeOptions.SendHlv && base.Equals(key, base.XATTR_HLV) {
+				sourceHlvClone = string(value)
+			} else if req.HLVModeOptions.PreserveSync {
+				if base.Equals(key, base.XATTR_MOBILE) {
+					sourceSyncClone = string(value)
+				} else if base.Equals(key, base.XATTR_MOU) {
+					sourceMouClone = string(value)
+				}
+			}
+		}
+	}
+
+	/* get target document information. */
+
+	targetDoc, err := base.DecodeSubDocResp(req.Req.Key, resp)
+	if err != nil {
+		return fmt.Errorf("error decoding target document response, err=%v", err)
+	}
+
+	targetDocDatatype := targetDoc.DataType & (^base.SnappyDataType)
+
+	var targetBodyClone []byte
+	var targetHlvClone, targetSyncClone, targetMouClone string
+	targetBody, err := resp.FindTargetBodyWithoutXattr()
+	if err != nil {
+		err = fmt.Errorf("error getting target body, err=%v", err)
+		return err
+	}
+
+	// For target document, we need to insert all the xattrs one by one from the response to the document body.
+	// Then add the conflict logging xattr.
+	xattrTotalSize := conflictlog.MaxBodyIncrease
+	for _, spec := range resp.Specs {
+		if len(spec.Path) > 0 {
+			xattr, err := resp.ResponseForAPath(string(spec.Path))
+			if err != nil {
+				return fmt.Errorf("error getting target xattr, path=%s, err=%v", spec.Path, err)
+			}
+			xattrTotalSize += (4 + 2 + len(spec.Path) + len(xattr))
+		}
+	}
+
+	newTargetMaxBodyLen := len(targetBody) + xattrTotalSize
+	// TODO - Use datapool.
+	newbody := make([]byte, newTargetMaxBodyLen)
+
+	xattrComposer := base.NewXattrComposer(newbody)
+
+	err = xattrComposer.WriteKV(base.ConflictLoggingXattrKeyBytes, base.ConflictLoggingXattrValBytes)
+	if err != nil {
+		return fmt.Errorf("error inserting KV, K=%s, V=%s, err=%v", base.ConflictLoggingXattrKeyBytes, base.ConflictLoggingXattrValBytes, err)
+	}
+
+	for _, spec := range resp.Specs {
+		if len(spec.Path) > 0 {
+			path := string(spec.Path)
+
+			xattr, err := resp.ResponseForAPath(path)
+			if err != nil {
+				return fmt.Errorf("error getting target xattr, path=%s, err=%v", path, err)
+			}
+
+			if path == base.XATTR_HLV {
+				targetHlvClone = string(xattr)
+			} else if path == base.XATTR_MOBILE {
+				targetSyncClone = string(xattr)
+			} else if path == base.XATTR_MOU {
+				targetMouClone = string(xattr)
+			}
+
+			err = xattrComposer.WriteKV(spec.Path, xattr)
+			if err != nil {
+				return fmt.Errorf("error inserting target xattr KV, K=%s, V=%s, err=%v", path, xattr, err)
+			}
+		}
+	}
+
+	var atLeastOneXattr bool
+	targetBodyClone, atLeastOneXattr = xattrComposer.FinishAndAppendDocValue(targetBody, req.Req, resp)
+
+	if atLeastOneXattr {
+		targetDocDatatype = targetDocDatatype | base.PROTOCOL_BINARY_DATATYPE_XATTR
+	} else {
+		// odd - shouldn't happen.
+		targetDocDatatype = targetDocDatatype & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
+	}
+
+	req.SrcColNamespaceMtx.RLock()
+	srcScopeName := req.SrcColNamespace.ScopeName
+	srcCollectionName := req.SrcColNamespace.CollectionName
+	req.SrcColNamespaceMtx.RUnlock()
+
+	req.TgtColNamespaceMtx.RLock()
+	tgtScopeName := req.TgtColNamespace.ScopeName
+	tgtCollectionName := req.TgtColNamespace.CollectionName
+	req.TgtColNamespaceMtx.RUnlock()
+
+	// Generate a conflict record from above information.
+	conflictRecord := conflictlog.ConflictRecord{
+		Timestamp: time.Now().Format(conflictlog.TimestampFormat),
+		DocId:     string(req.Req.Key),
+		Source: conflictlog.DocInfo{
+			Scope:       srcScopeName,
+			Collection:  srcCollectionName,
+			BucketUUID:  xmem.sourceBucketUuid,
+			ClusterUUID: xmem.sourceClusterUuid,
+			NodeId:      xmem.config.sourceHostname,
+			Expiry:      sourceDoc.Expiry,
+			Flags:       sourceDoc.Flags,
+			Cas:         sourceDoc.Cas,
+			RevSeqno:    sourceDoc.RevSeq,
+			IsDeleted:   sourceDoc.Deletion,
+			Xattrs: conflictlog.Xattrs{
+				Hlv:  sourceHlvClone,
+				Sync: sourceSyncClone,
+				Mou:  sourceMouClone,
+			},
+			Body:     sourceBodyClone,
+			Datatype: sourceDocDatatype,
+			VBNo:     req.Req.VBucket,
+			VBUUID:   sourceDoc.VbUUID,
+			Seqno:    sourceDoc.Seqno,
+		},
+		Target: conflictlog.DocInfo{
+			Scope:       tgtScopeName,
+			Collection:  tgtCollectionName,
+			BucketUUID:  xmem.targetBucketUuid,
+			ClusterUUID: xmem.targetClusterUuid,
+			NodeId:      xmem.config.targetHostname,
+			Expiry:      targetDoc.Expiry,
+			Flags:       targetDoc.Flags,
+			Cas:         targetDoc.Cas,
+			RevSeqno:    targetDoc.RevSeq,
+			IsDeleted:   targetDoc.Deletion,
+			Xattrs: conflictlog.Xattrs{
+				Hlv:  targetHlvClone,
+				Sync: targetSyncClone,
+				Mou:  targetMouClone,
+			},
+			Body:     targetBodyClone,
+			Datatype: targetDocDatatype,
+			VBNo:     req.Req.VBucket,
+			VBUUID:   targetDoc.VbUUID,
+			Seqno:    targetDoc.Seqno,
+		},
+		Datatype: base.JSONDataType,
+	}
+
+	conflictLogger := xmem.conflictLogger()
+
+	if conflictLogger != nil {
+		loggerWait, err := conflictLogger.Log(&conflictRecord)
+		if err != nil {
+			return err
+		} else {
+			req.HLVModeOptions.ConflictLoggerWait = loggerWait
+		}
+	}
+
+	return nil
+}
+
+// conflicts are only logged when:
+// 1. required settings are on: ECCV on and conflictLogging on.
+// 2. sourceDoc.Cas >= max_cas (doc on source was updated after ECCV was turned on)
+// 3. targetDoc.Cas >= max_cas (doc on target was updated after ECCV was turned on)
+// where max_cas is the max_cas of the doc's vb when ECCV was turned on in this cluster.
+func (xmem *XmemNozzle) shouldLogConflicts(source *base.WrappedMCRequest, target *base.SubdocLookupResponse) bool {
+	if !xmem.getCrossClusterVers() || !source.HLVModeOptions.ConflictLoggingEnabled ||
+		xmem.config.vbHlvMaxCas == nil || target.Resp == nil {
+		// required settings are not enabled
+		return false
+	}
+
+	vbMaxCas, ok := xmem.config.vbHlvMaxCas[source.Req.VBucket]
+	if !ok {
+		// this path should not be hit
+		return false
+	}
+
+	// The document should be updated atleast once,
+	// both on source and target after ECCV was turned on.
+	return source.HLVModeOptions.ActualCas >= vbMaxCas && target.Resp.Cas >= vbMaxCas
+}
+
 // This routine will call either getMeta or subdoc_multi_lookup based on the specs set for the batch and the mutation,
 // and return all the result in the result_map
 // Input:
@@ -1846,14 +2200,14 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 // - noRepMap: the documents we don't need to send to target
 // - sendLookupMap: the response for documents we need to send to target. These are not in noRepMap.
 // - conflictMap: These documents have conflict. These are also in noRepMap with corresponding NeedSendStatus
-// - mergeLookupMap: The response for the documents in conflict_map
+// - conflictLookupMap: The response for the documents in conflict_map
 func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[string]NeedSendStatus,
-	conflictMap base.McRequestMap, sendLookupMap, mergeLookupMap *responseLookup, err error) {
+	conflictMap base.McRequestMap, sendLookupMap, conflictLookupMap *responseLookup, err error) {
 
 	noRep_map = make(map[string]NeedSendStatus)
 	conflictMap = make(base.McRequestMap)
 	sendLookupMap = NewResponseLookup()
-	mergeLookupMap = NewResponseLookup()
+	conflictLookupMap = NewResponseLookup()
 	var respMap map[string]*base.SubdocLookupResponse
 	var hasTmpErr bool
 
@@ -1863,7 +2217,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 	defer func() {
 		for resp := range respToGc {
 			if sendLookupMap.canRecycle(resp) &&
-				mergeLookupMap.canRecycle(resp) {
+				conflictLookupMap.canRecycle(resp) {
 				resp.Recycle()
 			}
 		}
@@ -1879,7 +2233,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 			return nil, nil, nil, nil, err
 		}
 		hasTmpErr = false
-		respMap, err = xmem.sendBatchGetRequest(get_map, xmem.config.maxRetry)
+		respMap, err = xmem.sendBatchGetRequest(get_map, xmem.config.maxRetry, nil)
 		if err != nil {
 			// Log the error. We will retry maxRetry times.
 			xmem.Logger().Errorf("sentBatchGetRequest returned error '%v'. Retry number %v", err, i)
@@ -1909,41 +2263,72 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 				respToGc[resp.Resp] = true
 			} else if base.IsSuccessGetResponse(resp.Resp) {
-				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
+				logConflicts := xmem.shouldLogConflicts(wrappedReq, resp)
+
+				CDResult, CRResult, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, logConflicts, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
 					continue
 				}
-				switch res {
-				case base.SendToTarget:
+
+				if !xmem.isCCR() && logConflicts && CDResult.IsConflict() {
+					conflictMap[uniqueKey] = wrappedReq
+					err := conflictLookupMap.registerLookup(uniqueKey, resp)
+					if err != nil {
+						// warn and continue to replicate
+						if err == conflictlog.ErrQueueFull || err == conflictlog.ErrLoggerClosed {
+							// SUMUKH TODO - can spam, good to update it to a counter.
+							// xmem.Logger().Warnf("%v Conflict logging queue full or closed, could not log for key=%v%s%v",
+							// 	xmem.Id(),
+							// 	base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd,
+							// )
+						} else {
+							xmem.Logger().Warnf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, specs=%v, err=%v",
+								xmem.Id(),
+								base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd,
+								base.UdTagBegin, wrappedReq.Req, base.UdTagEnd,
+								base.UdTagBegin, wrappedReq.Req.Body, base.UdTagEnd,
+								resp.Resp.Opcode,
+								base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
+								resp.Specs, err,
+							)
+						}
+					}
+				}
+
+				switch CRResult {
+				case crMeta.CRSendToTarget:
 					// Import mutations sent will be counted when we send since we will get a more accurate count then.
 					// If target document does not exist, we only parse for importCas (_mou.cas) at send time.
 					err := sendLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for SendToTarget response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
 					}
-				case base.Skip:
+				case crMeta.CRSkip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-					respToGc[resp.Resp] = true
-				case base.Merge:
+					if xmem.isCCR() || !logConflicts || !CDResult.IsConflict() {
+						// can only recycle if the response is not used for conflict logging
+						respToGc[resp.Resp] = true
+					}
+				case crMeta.CRMerge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
-					err := mergeLookupMap.registerLookup(uniqueKey, resp)
+					err := conflictLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for Merge response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
 					}
 					// TODO: recycle response after merge
-				case base.SetBackToSource:
+				case crMeta.CRSetBackToSource:
 					noRep_map[uniqueKey] = NotSendSetback
 					conflictMap[uniqueKey] = wrappedReq
-					err := mergeLookupMap.registerLookup(uniqueKey, resp)
+					err := conflictLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for SetBackToSource response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
 					}
 					// TODO: recycle response after merge
 				default:
-					panic(fmt.Sprintf("Unexpcted conflict result %v", res))
+					panic(fmt.Sprintf("Unexpcted conflict result %v", CRResult))
 				}
 				delete(get_map, uniqueKey)
 			} else if opcode, _ := xmem.opcodeAndSpecsForGetOp(wrappedReq); opcode == base.GET_WITH_META {
@@ -1973,13 +2358,96 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 	return
 }
 
+// This routine always call subdoc_multi_lookup to get the target docs' body and all the xattrs,
+// and return all the result in the newLookupMap
+// Input:
+// - getMap: the documents we want to fetch from target. When this call returns, getMap will be empty
+// - getLookupMap: this function needs to input the lookup results for the set of documents in getMap, which has the XTOC and cas values of the documents.
+// Output:
+// - noRepMap: the documents whose cas changed from the last lookup in getLookupMap
+// - newLookupMap: the response for documents from getMap. These are not in noRepMap and will contain document body and xattrs of the documents.
+func (xmem *XmemNozzle) batchGetBodyAndXattrs(getMap base.McRequestMap, getLookupMap *responseLookup) (noRepMap map[string]NeedSendStatus,
+	newLookupMap *responseLookup, err error) {
+
+	noRepMap = make(map[string]NeedSendStatus)
+	newLookupMap = NewResponseLookup()
+	var respMap map[string]*base.SubdocLookupResponse
+	var hasTmpErr bool
+
+	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
+		if len(getMap) == 0 {
+			// Got all result
+			return
+		}
+		err = xmem.validateRunningState()
+		if err != nil {
+			return nil, nil, err
+		}
+		hasTmpErr = false
+		respMap, err = xmem.sendBatchGetRequest(getMap, xmem.config.maxRetry, getLookupMap)
+		if err != nil {
+			// Log the error. We will retry maxRetry times.
+			xmem.Logger().Errorf("batchGetBodyAndXattrs returned error '%v'. Retry number %v", err, i)
+		}
+		// Process the response the handler received
+		for uniqueKey, wrappedReq := range getMap {
+			key := string(wrappedReq.Req.Key)
+			resp, ok := respMap[key]
+			if !ok || resp == nil {
+				if err == nil {
+					xmem.Logger().Errorf("batchGetBodyAndXattrs received nil response for unique-key %v%s%v even with no errors", base.UdTagBegin, uniqueKey, base.UdTagEnd)
+				}
+				continue
+			}
+
+			if resp.Resp.Status == mc.KEY_ENOENT || resp.Resp.Status == mc.KEY_EEXISTS {
+				// target cas changed
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("%v doc %v%q%v is locked on the target in batchGetBodyAndXattrs, opcode=%v, cas=%v, status=%v. will need to retry", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Resp.Opcode, resp.Resp.Cas, resp.Resp.Status)
+				}
+				noRepMap[uniqueKey] = RetryTargetCasChanged
+				delete(getMap, uniqueKey)
+				resp.Resp.Recycle()
+			} else if base.IsDocLocked(resp.Resp) {
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("%v doc %v%q%v is locked on the target in batchGetBodyAndXattrs, opcode=%v, cas=%v, status=%v. will need to retry", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Resp.Opcode, resp.Resp.Cas, resp.Resp.Status)
+				}
+				noRepMap[uniqueKey] = RetryTargetLocked
+				delete(getMap, uniqueKey)
+				resp.Resp.Recycle()
+			} else if base.IsSuccessGetResponse(resp.Resp) {
+				err := newLookupMap.registerLookup(uniqueKey, resp)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for conflict map in batchGetBodyAndXattrs, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+				}
+				delete(getMap, uniqueKey)
+			} else {
+				if base.IsTemporaryMCError(resp.Resp.Status) {
+					hasTmpErr = true
+				}
+
+				if resp.Resp != nil {
+					xmem.Logger().Errorf("batchGetBodyAndXattrs received %v for key %v%q%v", xmem.PrintResponseStatusError(resp.Resp.Status), base.UdTagBegin, key, base.UdTagEnd)
+				} else {
+					xmem.Logger().Errorf("batchGetBodyAndXattrs received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
+				}
+				resp.Resp.Recycle()
+			}
+		}
+	}
+	if len(getMap) > 0 {
+		err = fmt.Errorf("failed to get body + XATTRs from target for %v documents after %v retries", len(getMap), xmem.config.maxRetry)
+	}
+	return
+}
+
 func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest) (mc.CommandCode, base.SubdocLookupPathSpecs) {
 	incomingReq := wrappedReq.Req
 	getSpecWithHlv := wrappedReq.GetMetaSpecWithHlv
 	getSpecWithoutHlv := wrappedReq.GetMetaSpecWithoutHlv
 	getBodySpec := wrappedReq.GetBodySpec
 	var getSpecs base.SubdocLookupPathSpecs
-	if xmem.source_cr_mode == base.CRMode_Custom {
+	if xmem.isCCR() {
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
@@ -2002,20 +2470,23 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 	return mc.SUBDOC_MULTI_LOOKUP, getSpecs
 }
 
-func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32) (*base.WrappedMCRequest, []base.SubdocLookupPathSpec) {
+func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32, specs base.SubdocLookupPathSpecs, cas uint64) (*base.WrappedMCRequest, []base.SubdocLookupPathSpec) {
+	if len(specs) > 0 {
+		return xmem.composeRequestForSubdocGet(specs, wrappedReq, opaque, cas), specs
+	}
 	opcode, specs := xmem.opcodeAndSpecsForGetOp(wrappedReq)
 	switch opcode {
 	case base.GET_WITH_META:
 		return xmem.composeRequestForGetMeta(wrappedReq, opaque), nil
 	case mc.SUBDOC_MULTI_LOOKUP:
-		return xmem.composeRequestForSubdocGet(specs, wrappedReq, opaque), specs
+		return xmem.composeRequestForSubdocGet(specs, wrappedReq, opaque, 0), specs
 	default:
 		panic(fmt.Sprintf("Unknown opcode %v. Need to implement", opcode))
 	}
 }
 
 // Request to get _xdcr or _vv XATTR. If document body is included, it must be the last path
-func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSpecs, wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
+func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSpecs, wrappedReq *base.WrappedMCRequest, opaque uint32, cas uint64) *base.WrappedMCRequest {
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 
@@ -2044,6 +2515,7 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSp
 		}
 	}
 
+	req.Cas = cas
 	req.VBucket = wrappedReq.Req.VBucket
 	req.Key = wrappedReq.Req.Key
 	req.Opaque = opaque
@@ -2155,7 +2627,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.PreserveSync {
 		needToUpdateSysXattrs = true
-	} else if xmem.source_cr_mode == base.CRMode_Custom {
+	} else if xmem.isCCR() {
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.SendHlv {
 		maxCas := xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket]
@@ -2257,7 +2729,11 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	if updateHLV {
 		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
 		if err != nil {
-			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForMetaOp, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, sourceMeta=%s in updateSystemXattrForTarget, err=%v",
+				base.UdTagBegin, req.Key, base.UdTagEnd,
+				base.UdTagBegin, req, base.UdTagEnd,
+				base.UdTagBegin, req.Body, base.UdTagEnd,
+				sourceDocMeta, err)
 			return err
 		}
 
@@ -2434,7 +2910,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 
 // If the change is from targetCluster, we don't need to send it
 func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, error) {
-	if xmem.source_cr_mode != base.CRMode_Custom {
+	if !xmem.isCCR() {
 		return false, nil
 	}
 
@@ -2633,13 +3109,17 @@ func (xmem *XmemNozzle) initNewBatch() {
 	atomic.StoreUint32(&xmem.cur_batch_count, 0)
 	// For the current batch, getMeta, conflict detection algorithm, and setMeta depend on
 	// CRR, HLV, and mobile
-	isCCR := xmem.source_cr_mode == base.CRMode_Custom
+	isCCR := xmem.isCCR()
 	crossClusterVers := xmem.getCrossClusterVers()
 	isMobile := xmem.getMobileCompatible() != base.MobileCompatibilityOff
+	conflictLoggingEnabled := xmem.conflictLoggingEnabled()
 
+	// continue with the same behaviour during the entire lifecycle
+	// for all the requests of this batch.
 	xmem.batch.isCCR = isCCR
 	xmem.batch.isMobile = isMobile
 	xmem.batch.crossClusterVer = crossClusterVers
+	xmem.batch.conflictLoggingEnabled = conflictLoggingEnabled
 
 	subdocSpecOpt := base.SubdocSpecOption{}
 	if isMobile {
@@ -2653,8 +3133,9 @@ func (xmem *XmemNozzle) initNewBatch() {
 		subdocSpecOpt.IncludeImportCas = crossClusterVers
 		subdocSpecOpt.IncludeHlv = true // CCR needs target HLV for CR, crossClusterVers needs cvCas
 		subdocSpecOpt.IncludeVXattr = true
+		subdocSpecOpt.ConfictLoggingEnabled = conflictLoggingEnabled
 		xmem.batch.getMetaSpecWithHlv = base.ComposeSpecForSubdocGet(subdocSpecOpt)
-		// This is only needed for CCR
+		// This is needed for CCR.
 		subdocSpecOpt.IncludeBody = true
 		xmem.batch.getBodySpec = base.ComposeSpecForSubdocGet(subdocSpecOpt)
 	}
@@ -2688,6 +3169,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	if err != nil {
 		return err
 	}
+
 	err = xmem.initializeCompressionSettings(settings)
 	if err != nil {
 		return err
@@ -2826,7 +3308,11 @@ func (xmem *XmemNozzle) nonOptimisticCROnly(req *base.WrappedMCRequest) bool {
 
 	return xmem.getMobileCompatible() != base.MobileCompatibilityOff ||
 		(xmem.getCrossClusterVers() && req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
-		xmem.source_cr_mode == base.CRMode_Custom
+		xmem.isCCR()
+}
+
+func (xmem *XmemNozzle) isCCR() bool {
+	return xmem.source_cr_mode == base.CRMode_Custom
 }
 
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {
@@ -3064,6 +3550,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				resp_wait_time = time.Since(*sent_time)
 				manifestId = wrappedReq.GetManifestId()
 
+				// before moving the throughseqno forward,
+				// wait for it's conflict logging to be done
+				wrappedReq.WaitForConflictLogging(xmem.finish_ch, xmem.Logger())
+
 				isExpirySet := false
 				if wrappedReq.IsSubdocOp() {
 					isExpirySet = (len(req.Extras) > 1)
@@ -3162,6 +3652,7 @@ func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) 
 	}
 	req.Req.Cas = binary.BigEndian.Uint64(req.Req.Extras[16:24])
 	req.Req.Opaque = 0
+	req.HLVModeOptions.ConflictLoggerWait = nil
 	// Don't free the slices from datapool since that's the mutation body.
 	req.RetryCRCount++
 	err := xmem.accumuBatch(req)
@@ -3641,7 +4132,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v unknownStatusRec=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -3653,7 +4144,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
 			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta), atomic.LoadUint64(&xmem.counterNumSubdocGet),
 			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
-			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus))
+			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus), xmem.conflictLoggingEnabled())
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}

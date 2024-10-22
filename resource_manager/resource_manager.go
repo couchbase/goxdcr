@@ -25,6 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/parts"
 	"github.com/couchbase/goxdcr/v8/pipeline_manager"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/rcrowley/go-metrics"
 )
@@ -179,7 +180,7 @@ type ResourceManager struct {
 	remote_cluster_svc     service_def.RemoteClusterSvc
 	checkpoint_svc         service_def.CheckpointsService
 	uilog_svc              service_def.UILogSvc
-	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
+	throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc
 	logger                 *log.CommonLogger
 	utils                  utilities.UtilsIface
 	waitGrp                sync.WaitGroup
@@ -242,7 +243,7 @@ type ResourceManager struct {
 type ResourceMgrIface interface {
 	Start() error
 	Stop() error
-	GetThroughputThrottler() service_def.ThroughputThrottlerSvc
+	GetThroughputThrottler() throttlerSvc.ThroughputThrottlerSvc
 	IsReplHighPriority(replId string, priority base.PriorityType) bool
 	HandlePipelineDeletion(replId string)
 	HandleGoMaxProcsChange(goMaxProcs int)
@@ -250,7 +251,7 @@ type ResourceMgrIface interface {
 
 func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	uilog_svc service_def.UILogSvc, throughput_throttler_svc throttlerSvc.ThroughputThrottlerSvc,
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) ResourceMgrIface {
 
 	resourceMgrRetVar := &ResourceManager{
@@ -339,7 +340,7 @@ func (rm *ResourceManager) Stop() error {
 	return err
 }
 
-func (rm *ResourceManager) GetThroughputThrottler() service_def.ThroughputThrottlerSvc {
+func (rm *ResourceManager) GetThroughputThrottler() throttlerSvc.ThroughputThrottlerSvc {
 	return rm.throughputThrottlerSvc
 }
 
@@ -952,15 +953,15 @@ func (rm *ResourceManager) setThrottlerActions(previousState, state *State) {
 	settings := rm.constructSettings(state, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit)
 	errMap := rm.throughputThrottlerSvc.UpdateSettings(settings)
 	if len(errMap) > 0 {
-		if err, ok := errMap[service_def.HighTokensKey]; ok {
+		if err, ok := errMap[throttlerSvc.HighTokensKey]; ok {
 			rm.logger.Warnf("Error setting tokens for high priority replications to %v. err=%v", state.highTokens, err)
 			state.highTokens = previousHighTokens
 		}
-		if err, ok := errMap[service_def.MaxReassignableHighTokensKey]; ok {
+		if err, ok := errMap[throttlerSvc.MaxReassignableHighTokensKey]; ok {
 			rm.logger.Warnf("Error setting max reassignable tokens for high priority replications to %v. err=%v", state.maxReassignableTokens, err)
 			state.maxReassignableTokens = previousMaxReassignableTokens
 		}
-		if err, ok := errMap[service_def.LowTokensKey]; ok {
+		if err, ok := errMap[throttlerSvc.LowTokensKey]; ok {
 			rm.logger.Warnf("Error setting tokens for low priority replications to %v. err=%v", state.throughputLimit, err)
 			state.throughputLimit = previousThroughputLimit
 		}
@@ -972,22 +973,22 @@ func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, p
 	settings := make(map[string]interface{})
 
 	if state.highTokens != previousHighTokens {
-		settings[service_def.HighTokensKey] = state.highTokens
+		settings[throttlerSvc.HighTokensKey] = state.highTokens
 	}
 
 	if state.maxReassignableTokens != previousMaxReassignableTokens {
-		settings[service_def.MaxReassignableHighTokensKey] = state.maxReassignableTokens
+		settings[throttlerSvc.MaxReassignableHighTokensKey] = state.maxReassignableTokens
 	}
 
 	if state.throughputLimit != previousThroughputLimit {
-		settings[service_def.LowTokensKey] = state.throughputLimit
+		settings[throttlerSvc.LowTokensKey] = state.throughputLimit
 	}
 
 	switch state.throttlerCalibrationAction {
 	case ThrottlerCalibrationActionEnable:
-		settings[service_def.NeedToCalibrateKey] = true
+		settings[throttlerSvc.NeedToCalibrateKey] = true
 	case ThrottlerCalibrationActionDisable:
-		settings[service_def.NeedToCalibrateKey] = false
+		settings[throttlerSvc.NeedToCalibrateKey] = false
 	default:
 		// no op
 	}

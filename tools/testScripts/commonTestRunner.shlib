@@ -47,6 +47,7 @@ function man() {
 	echo "-r <testcaseNo> OR --run=<testcaseNo>             : Run a specific testcase. Note: Cannot be used with -f."
 	echo "-f <testcaseNo> OR --from=<testcaseNo>            : Run all testcases >= <testcaseNo>. Note: Cannot be used with -r."
 	echo "-c <crMode> OR --cr=<crMode>                      : Run all the tests to be run once again, but with the provided value conflict resolution mode as an override. Note: <crMode> can only be lww or seqno."
+	echo "-e OR --eccv                                      : Run all the tests to be run once again, but with enableCrossClusterVersioning turned on as an override."
 	echo "-m OR --mobile                                    : Run all the tests to be run once again, but with mobile and enableCrossClusterVersioning turned on as an override."
 	echo "-o OR --override                                  : Run all the tests once with the overriden settings only. Note: Can be used only if there is a -m or a -c."
 	echo "-x <path/to/xdcrDifferBin> "
@@ -62,6 +63,7 @@ from=""
 fromTestCaseNumber=""
 crMode=""
 mobileMode=0
+eccv=0
 overrideMode=0
 xdcrDifferDir=""
 mobileImportSimDir=""
@@ -75,6 +77,7 @@ testsToRun=$tests
 
 OVERRIDE_MOBILE=0
 OVERRIDE_CRMODE=""
+OVERRIDE_ECCV=0
 
 optspec="homf:r:c:x:-:"
 while getopts "$optspec" optchar; do
@@ -86,6 +89,9 @@ while getopts "$optspec" optchar; do
 			;;
 		mobile)
 			mobileMode=1
+			;;
+		eccv)
+			eccv=1
 			;;
 		cr=*)
 			crMode=${OPTARG#*=}
@@ -115,6 +121,9 @@ while getopts "$optspec" optchar; do
 		;;
 	o)
 		overrideMode=1
+		;;
+	e)
+		eccv=1
 		;;
 	m)
 		mobileMode=1
@@ -188,8 +197,8 @@ if [ "$crMode" != "" ] && [ "$crMode" != "lww" ] && [ "$crMode" != "seqno" ]; th
 	exit 1
 fi
 
-if (($overrideMode == 1)) && [ "$crMode" == "" ] && (($mobileMode == 0)); then
-	echo "ERRO: -o OR --override needs -c or -m or both to be in use."
+if (($overrideMode == 1)) && [ "$crMode" == "" ] && (($mobileMode == 0)) && (($eccv == 0)); then
+	echo "ERRO: -o OR --override needs -c or -m or -e or all to be in use."
 	man $0
 	exit 1
 fi
@@ -228,9 +237,9 @@ if [[ -z "$testCaseNumber" ]]; then
 			runTestCase
 		fi
 
-		if [ "$crMode" != "" ] || (($mobileMode != 0)); then
+		if [ "$crMode" != "" ] || (($mobileMode != 0)) || (($eccv != 0)); then
 			echo ""
-			echo "INFO: Re-running test - ${testCasesDirectory:-}/$testcase - but with crMode=$crMode and mobileMode=$mobileMode"
+			echo "INFO: Re-running test - ${testCasesDirectory:-}/$testcase - but with crMode=$crMode and mobileMode=$mobileMode and eccv=$eccv"
 			if [[ "$testcase" =~ _idle_ ]]; then
 				# test cases with _idle_ in the filename means they take too long for the whole suite
 				# and should be run on an individual basis only
@@ -239,12 +248,14 @@ if [[ -z "$testCaseNumber" ]]; then
 
 			OVERRIDE_CRMODE=$crMode
 			OVERRIDE_MOBILE=$mobileMode
+			OVERRIDE_ECCV=$eccv
 
 			date
 			runTestCase
 
 			OVERRIDE_CRMODE=""
 			OVERRIDE_MOBILE=0
+			OVERRIDE_ECCV=0
 		fi
 	done
 else
@@ -262,12 +273,13 @@ else
 		runTestCase
 	fi
 
-	if [ "$crMode" != "" ] || (($mobileMode != 0)); then
+	if [ "$crMode" != "" ] || (($mobileMode != 0)) || (($eccv != 0)); then
 		echo ""
-		echo "INFO: Re-running test - $testCase - with crMode=$crMode and mobileMode=$mobileMode"
+		echo "INFO: Re-running test - $testCase - with crMode=$crMode and mobileMode=$mobileMode and eccv=$eccv"
 
 		OVERRIDE_CRMODE=$crMode
 		OVERRIDE_MOBILE=$mobileMode
+		OVERRIDE_ECCV=$eccv
 
 		. $testCase
 		date
@@ -275,6 +287,7 @@ else
 
 		OVERRIDE_CRMODE=""
 		OVERRIDE_MOBILE=0
+		OVERRIDE_ECCV=0
 	fi
 fi
 

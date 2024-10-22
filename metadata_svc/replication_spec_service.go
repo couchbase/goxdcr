@@ -709,6 +709,32 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		return nil
 	}
 	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
+
+	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.ConflictLoggingKey])
+	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
+		// Conflict logging is on. Make sure source bucket enableCrossClusterVersioning is true.
+		connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
+		if err != nil {
+			return err
+		}
+		username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
+		if err != nil {
+			service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
+			return err
+		}
+		bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+		if err != nil {
+			return err
+		}
+		crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+		if err != nil {
+			return err
+		}
+		if !crossClusterVer {
+			return fmt.Errorf("conflictLogging must be {} when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+		}
+	}
+
 	return nil
 }
 func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {
@@ -763,6 +789,19 @@ func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMa
 			}
 		}
 	}
+
+	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.ConflictLoggingKey])
+	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
+		// Conflict logging is on. Make sure target bucket enableCrossClusterVersioning is true.
+		crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+		if err != nil {
+			return err
+		}
+		if !crossClusterVer {
+			return fmt.Errorf("conflictLogging must be {} when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+		}
+	}
+
 	return nil
 }
 

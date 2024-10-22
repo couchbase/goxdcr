@@ -182,7 +182,7 @@ func NewEmptyRemoteVBReplicationStatus(vbno uint16) *RemoteVBReplicationStatus {
 	return &RemoteVBReplicationStatus{VBNo: vbno}
 }
 
-//abstract capi apis needed for xdcr
+// abstract capi apis needed for xdcr
 type CAPIService interface {
 	//call at the beginning of the replication to determin the startpoint
 	//PrePrelicate (_pre_replicate)

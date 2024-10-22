@@ -6,20 +6,21 @@
 // will be governed by the Apache License, Version 2.0, included in the file
 // licenses/APL2.txt.
 
-package service_impl
+package throttlerSvcImpl
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/v8/base"
-	"github.com/couchbase/goxdcr/v8/log"
-	"github.com/couchbase/goxdcr/v8/service_def"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 )
 
-//ThroughputThrottler limits throughput of replication
+// ThroughputThrottler limits throughput of replication
 type ThroughputThrottler struct {
 	id string
 
@@ -260,31 +261,31 @@ func (throttler *ThroughputThrottler) Id() string {
 
 func (throttler *ThroughputThrottler) UpdateSettings(settings map[string]interface{}) map[string]error {
 	errMap := make(map[string]error)
-	highTokens, ok := settings[service_def.HighTokensKey]
+	highTokens, ok := settings[throttlerSvc.HighTokensKey]
 	if ok {
 		err := throttler.setHighTokens(highTokens.(int64))
 		if err != nil {
-			errMap[service_def.HighTokensKey] = err
+			errMap[throttlerSvc.HighTokensKey] = err
 		}
 	}
 
-	maxReassignableHighTokens, ok := settings[service_def.MaxReassignableHighTokensKey]
+	maxReassignableHighTokens, ok := settings[throttlerSvc.MaxReassignableHighTokensKey]
 	if ok {
 		err := throttler.setMaxReassignableHighTokens(maxReassignableHighTokens.(int64))
 		if err != nil {
-			errMap[service_def.MaxReassignableHighTokensKey] = err
+			errMap[throttlerSvc.MaxReassignableHighTokensKey] = err
 		}
 	}
 
-	lowTokens, ok := settings[service_def.LowTokensKey]
+	lowTokens, ok := settings[throttlerSvc.LowTokensKey]
 	if ok {
 		err := throttler.setLowTokens(lowTokens.(int64))
 		if err != nil {
-			errMap[service_def.LowTokensKey] = err
+			errMap[throttlerSvc.LowTokensKey] = err
 		}
 	}
 
-	needToCalibrate, ok := settings[service_def.NeedToCalibrateKey]
+	needToCalibrate, ok := settings[throttlerSvc.NeedToCalibrateKey]
 	if ok {
 		throttler.needToCalibrate.Set(needToCalibrate.(bool))
 	}

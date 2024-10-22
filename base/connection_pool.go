@@ -15,14 +15,15 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/v8/log"
 	"math"
 	"net"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 const (
@@ -275,9 +276,7 @@ func (p *sslOverMemConnPool) ConnType() ConnType {
 	return SSLOverMem
 }
 
-//
 // Release connection back to the pool
-//
 func (p *connPool) Release(client mcc.ClientIface) {
 	//reset connection deadlines
 	conn := client.Hijack()
@@ -320,9 +319,7 @@ func (p *connPool) doesCASMatch(cas uint32) bool {
 	return false
 }
 
-//
 // Release all connections in the connection pool.
-//
 func (p *connPool) ReleaseConnections(cas uint32) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -567,7 +564,7 @@ func encodeSSLHandShakeMsg(bytes []byte) []byte {
 	return ret
 }
 
-//return the singleton ConnPoolMgr
+// return the singleton ConnPoolMgr
 func ConnPoolMgr() *connPoolMgr {
 	_connPoolMgr.once.Do(func() {
 		_connPoolMgr.conn_pools_map = make(map[string]ConnPool)

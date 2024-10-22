@@ -1,0 +1,88 @@
+{
+    "name": "conflictLogLoadTest",
+    "logLevel": "Info",
+    "debugPort": 7171,
+    "memcachedAddr": "127.0.0.1:12000",
+
+    "clientCertFile": "/Users/sudeepjathar/cb/clog/ns_server/data/n_0/config/certs/client_chain.pem",
+    "clientKeyFile":  "/Users/sudeepjathar/cb/clog/ns_server/data/n_0/config/certs/client_pkey.pem",
+    "clusterCAFile":  "/Users/sudeepjathar/cb/clog/ns_server/data/n_0/config/certs/ca.pem",
+
+    "encryptionLevelStrict": true,
+
+    "throttlerTest": {
+        "itemsToProcess": 150,
+        "limit": 50,
+        "workerCount": 100
+    },
+
+    "cbauthTest": {
+        "addrList": [
+            "localhost:12000",
+            "localhost:11998",
+            "localhost:19000"
+        ]
+    },
+
+    "conflictLogLoadTest": {
+        "connLimit": 10,
+        "iopsLimit": 100000,
+
+        "loggers": {
+            "logger-1": {
+                "docLoadCount": 10000,
+                "xmemCount": 1,
+                "batchCount": 100,
+
+                "logQueue": 100,
+                "workerCount": 10,
+                "setMetaTimeout": 7000,
+                "getPoolTimeout": 2000,
+
+                "docSizeRange": [50, 100],
+                "target": {
+                    "bucket": "B1",
+                    "ns": {
+                        "ScopeName": "S1",
+                        "CollectionName": "C1"
+                    }
+                }
+            },
+            "logger-2": {
+                "docLoadCount": 1000,
+                "xmemCount": 5,
+                "batchCount": 10,
+
+                "logQueue": 1000,
+                "workerCount": 10,
+                "setMetaTimeout": 7000,
+                "getPoolTimeout": 2000,
+
+                "docSizeRange": [100, 200],
+                "target": {
+                    "bucket": "B1",
+                    "ns": {
+                        "ScopeName": "S1",
+                        "CollectionName": "C1"
+                    }
+                }
+            }
+        }
+    },
+
+    "gocbcoreTest": {
+        "addr": "127.0.0.1:12000",
+        "target": {
+            "bucket": "B1",
+            "scope": "S1",
+            "collection": "C1"
+        },
+
+        "count": 10,
+        "key": "abc-1",
+        "doc": {
+            "id": "abc-1",
+            "name": "Tony Stark"
+        }
+    }
+}

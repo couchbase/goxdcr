@@ -37,11 +37,12 @@ type HELOFeatures struct {
 	CompressionType base.CompressionType
 	Xerror          bool
 	Collections     bool
+	DataType        bool
 }
 
 func (h *HELOFeatures) String() string {
-	return fmt.Sprintf("Enabled features: Xattribute: %v CompressionType: %v Xerror: %v Collections: %v",
-		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections)
+	return fmt.Sprintf("Enabled features: Xattribute: %v CompressionType: %v Xerror: %v Collections: %v DataType: %v",
+		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections, h.DataType)
 }
 
 type UtilsIface interface {

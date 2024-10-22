@@ -55,17 +55,19 @@ const (
 	HLV_ENABLE         = "hlvEnable"
 	HLV_MAX_CAS        = "hlv_vb_max_cas"
 	MOBILE_COMPATBILE  = base.MobileCompatibleKey
+	CONFLICT_LOGGING   = base.ConflictLoggingKey
 )
 
 type NeedSendStatus int
 
 const (
-	Send              NeedSendStatus = iota
-	NotSendFailedCR   NeedSendStatus = iota
-	NotSendMerge      NeedSendStatus = iota
-	NotSendSetback    NeedSendStatus = iota
-	RetryTargetLocked NeedSendStatus = iota
-	NotSendOther      NeedSendStatus = iota
+	Send                  NeedSendStatus = iota
+	NotSendFailedCR       NeedSendStatus = iota
+	NotSendMerge          NeedSendStatus = iota
+	NotSendSetback        NeedSendStatus = iota
+	RetryTargetLocked     NeedSendStatus = iota
+	RetryTargetCasChanged NeedSendStatus = iota
+	NotSendOther          NeedSendStatus = iota
 )
 
 /*
@@ -97,6 +99,8 @@ type baseConfig struct {
 	connectStr          string
 	username            string
 	password            string
+	sourceHostname      string
+	targetHostname      string
 	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
 	crossClusterVers    bool   // Whether to send HLV when bucket is not custom CR
 	vbHlvMaxCas         map[uint16]uint64
@@ -215,20 +219,21 @@ type dataBatch struct {
 	noRepMap map[string]NeedSendStatus
 	// For CCR, noRepMap value may be Not_Send_Merge or Not_Send_Setback. For these, the target document lookup
 	// response is stored in here.
-	mergeLookupMap *responseLookup
+	conflictLookupMap *responseLookup
 	// If mobile is on, for document winning conflict resolution, we need to preserve target _sync XATTR. The lookup for these are stored in here
 	sendLookupMap *responseLookup
 
 	// XMEM config may change but only affect the next batch
-	// At the beginning of each batch we will check the config to decide the getMeta/getSubdoc and setMeta behavior
+	// At the beginning of each batch we will check the config to decide the getMeta/getSubdoc, setMeta and conflict logging behavior.
 	// Note that these are only needed for CCR and mobile currently. The specs will be nil otherwise. If nil, getMeta will be used.
 	// These are "templated" and references in each wrapped MCRequest will be created to refer to them
-	getMetaSpecWithoutHlv []base.SubdocLookupPathSpec
-	getMetaSpecWithHlv    []base.SubdocLookupPathSpec
-	getBodySpec           []base.SubdocLookupPathSpec // This one will get document body in addition to document metadata. Used for CCR only
-	isCCR                 bool
-	isMobile              bool
-	crossClusterVer       bool
+	getMetaSpecWithoutHlv  []base.SubdocLookupPathSpec
+	getMetaSpecWithHlv     []base.SubdocLookupPathSpec
+	getBodySpec            []base.SubdocLookupPathSpec // This one will get document body in addition to document metadata. Used for CCR only
+	isCCR                  bool
+	isMobile               bool
+	crossClusterVer        bool
+	conflictLoggingEnabled bool
 
 	curCount          uint32
 	curSize           uint32
@@ -287,6 +292,23 @@ func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.SubdocLo
 	return response, nil
 }
 
+// returns the response
+func (lookup *responseLookup) getLookup(uniqueKey string) (*base.SubdocLookupResponse, error) {
+	if lookup == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	response, ok := lookup.responses[uniqueKey]
+	if !ok {
+		return nil, base.ErrorNilPtr
+	}
+	if response == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	return response, nil
+}
+
 // only recycle if the response referenced by noone responseLookup
 func (lookup *responseLookup) canRecycle(resp *mc.MCResponse) bool {
 	if lookup == nil {
@@ -308,7 +330,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		capacity_size:     cap_size,
 		getMetaMap:        make(base.McRequestMap),
 		noRepMap:          nil,
-		mergeLookupMap:    nil,
+		conflictLookupMap: nil,
 		sendLookupMap:     nil,
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
@@ -321,12 +343,12 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 	var isFull bool = true
 
 	if req != nil && req.Req != nil {
-		// When this batch is established,
-		// it establishes these specs and settings so store it to be used in case of mutation retries
+		// When this batch is established, it establishes these specs and conflict logging behavior
+		// so store it to be used in case of mutation retries
 		req.GetMetaSpecWithoutHlv = b.getMetaSpecWithoutHlv
 		req.GetMetaSpecWithHlv = b.getMetaSpecWithHlv
 		req.GetBodySpec = b.getBodySpec
-		req.SetHLVModeOptions(b.isMobile, b.isCCR, b.crossClusterVer)
+		req.SetHLVModeOptions(b.isMobile, b.isCCR, b.crossClusterVer, b.conflictLoggingEnabled)
 
 		size := req.Req.Size()
 

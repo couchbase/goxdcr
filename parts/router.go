@@ -28,6 +28,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -46,6 +47,7 @@ var ForceCollectionDisableKey = "ForceCollectionDisable"
 var BackfillPersistErrKey = "Backfill Persist Callback Error"
 var CkptMgrBrokenMappingErrKey = "Checkpoint Manager routing update Callback Error"
 var MobileCompatible = base.MobileCompatibleKey
+var ConflictLogging = base.ConflictLoggingKey
 
 // A function used by the router to raise routing updates to other services that need to know
 type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error
@@ -126,7 +128,7 @@ type Router struct {
 	stopped         uint32
 	finCh           chan bool
 
-	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
+	throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc
 	// whether the current replication is a high priority replication
 	// when Priority or Ongoing setting is changed, this field will be updated through UpdateSettings() call
 	isHighReplication *base.AtomicBooleanType
@@ -505,7 +507,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *base.WrappedUprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *base.WrappedUprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, targetManifest *metadata.CollectionsManifest, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -556,6 +558,8 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		err = fmt.Errorf("received nil latest target manifest")
 		return
 	}
+
+	targetManifest = latestTargetManifest
 
 	if !isImplicitMapping {
 		err = c.handleExplicitMappingUpdate(latestSourceManifest, latestTargetManifest)
@@ -1383,7 +1387,7 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.C
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error), eventsProducer common.PipelineEventsProducer) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error), eventsProducer common.PipelineEventsProducer) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, exprFound := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -1603,6 +1607,7 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	}
 
 	wrapped_req.Seqno = event.Seqno
+	wrapped_req.VbUUID = event.VBuuid
 	wrapped_req.Start_time = time.Now()
 
 	// this means implicit routing only for now
@@ -1802,12 +1807,16 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 	var migrationColIdNamespaceMap map[uint32]*base.CollectionNamespace
 
 	collectionMode := router.collectionModes.Get()
+	var targetManifest *metadata.CollectionsManifest
 	if collectionMode.IsImplicitMapping() &&
 		(mcRequest.GetSourceCollectionNamespace() == nil || mcRequest.GetSourceCollectionNamespace().IsDefault()) {
 		colIds = append(colIds, 0)
+		mcRequest.TgtColNamespaceMtx.Lock()
+		mcRequest.TgtColNamespace = &base.DefaultCollectionNamespace
+		mcRequest.TgtColNamespaceMtx.Unlock()
 	} else {
 		var backfillPersistHadErr bool
-		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, origUprEvent)
+		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, targetManifest, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, origUprEvent)
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward
@@ -1841,7 +1850,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 		}
 	}
 
-	err = router.prepareMcRequest(colIds, mcRequest, origUprEvent, migrationColIdNamespaceMap)
+	err = router.prepareMcRequest(colIds, mcRequest, origUprEvent, migrationColIdNamespaceMap, targetManifest)
 	if err != nil {
 		return err
 	}
@@ -1853,7 +1862,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 // Sets up the unique Key
 // If a request is meant to replicate to >1 target collections, prepare the sibling requests as well
 // and notify throughSeqnoTracker svc that there are sibling requests coming for this given source seqno
-func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMCRequest, origUprEvent *base.WrappedUprEvent, migrationNamespaceMap map[uint32]*base.CollectionNamespace) error {
+func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMCRequest, origUprEvent *base.WrappedUprEvent, migrationNamespaceMap map[uint32]*base.CollectionNamespace, targetManifest *metadata.CollectionsManifest) error {
 	var err error
 	var syncCh chan bool = nil
 	numCols := len(colIds)
@@ -1890,7 +1899,7 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 		reqToProcess.ColInfo.ColIDPrefixedKeyLen = totalLen
 		reqToProcess.ColInfo.ColIDPrefixedKey, err = router.dataPool.GetByteSlice(uint64(totalLen))
 		if err != nil {
-			reqToProcess.ColInfo.ColIDPrefixedKey = make([]byte, totalLen, totalLen)
+			reqToProcess.ColInfo.ColIDPrefixedKey = make([]byte, totalLen)
 			err = nil
 		} else {
 			reqToProcess.ColInfo.ColIDPrefixedKey = reqToProcess.ColInfo.ColIDPrefixedKey[:0]
@@ -1906,6 +1915,18 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 			reqToProcess.ColInfo.TargetNamespace = migrationNamespaceMap[colId]
 		}
 		reqToProcess.ColInfoMtx.Unlock()
+
+		if targetManifest != nil {
+			scopeName, collectionName, err := targetManifest.GetScopeAndCollectionName(colId)
+			if err == nil {
+				reqToProcess.TgtColNamespaceMtx.Lock()
+				reqToProcess.TgtColNamespace = &base.CollectionNamespace{
+					ScopeName:      scopeName,
+					CollectionName: collectionName,
+				}
+				reqToProcess.TgtColNamespaceMtx.Unlock()
+			}
+		}
 	}
 	if numCols > 1 {
 		firstReq.Cloned = true
@@ -2085,6 +2106,9 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq.SrcColNamespaceMtx.Lock()
 	newReq.SrcColNamespace = nil
 	newReq.SrcColNamespaceMtx.Unlock()
+	newReq.TgtColNamespaceMtx.Lock()
+	newReq.TgtColNamespace = nil
+	newReq.TgtColNamespaceMtx.Unlock()
 	newReq.Cloned = false
 	return newReq, nil
 }

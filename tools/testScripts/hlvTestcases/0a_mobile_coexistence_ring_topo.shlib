@@ -1,4 +1,4 @@
-# Copyright 2023-Present Couchbase, Inc.
+# Copyright 2024-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -11,7 +11,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3")
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
 insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
@@ -142,7 +142,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Mobile coexistence test case on ring topology passed"
 	echo "============================================================================"
-	cleanupBuckets
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
+	cleanupBuckets
 }

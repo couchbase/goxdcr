@@ -17,7 +17,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/peerToPeer"
+	"github.com/couchbase/goxdcr/v8/service_impl/throttlerSvcImpl"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher"
 
 	base "github.com/couchbase/goxdcr/v8/base"
@@ -259,6 +261,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		conflictlog.InitManager(log.DefaultLoggerContext, utils, top_svc, securitySvc)
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -274,7 +278,7 @@ func main() {
 			eventlog_svc,
 			processSetting_svc,
 			internalSettings_svc,
-			service_impl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey)),
+			throttlerSvcImpl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey)),
 			resolver_svc,
 			utils,
 			collectionsManifestService,

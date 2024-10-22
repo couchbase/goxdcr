@@ -72,6 +72,7 @@ DIRS_WITH_UT=(
 backfill_manager
 base
 base/filter
+conflictlog
 crMeta
 factory
 hlv

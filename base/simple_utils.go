@@ -1246,13 +1246,36 @@ func Uint64ToBase64(u64 uint64) []byte {
 	return encoded
 }
 
+func InvalidHexStringError(hexVal []byte, littleEndian bool) error {
+	return fmt.Errorf("input hex string %s (littleEndian? %v) is too short or incorrect. Leading 0x is expected", hexVal, littleEndian)
+}
+
+// This routine expect prefix 0x since this is included in KV macro expansion.
+// Should be of even length.
+func HexBigEndianToUint64(hexBE []byte) (uint64, error) {
+	if len(hexBE) <= 2 {
+		return 0, InvalidHexStringError(hexBE, false)
+	}
+	if hexBE[0] != '0' || hexBE[1] != 'x' {
+		return 0, InvalidHexStringError(hexBE, false)
+	}
+
+	decoded := make([]byte, MaxHexDecodedLength)
+	_, err := hex.Decode(decoded, hexBE[2:])
+	if err != nil {
+		return 0, err
+	}
+	res := binary.BigEndian.Uint64(decoded)
+	return res, nil
+}
+
 // This routine expect prefix 0x since this is included in KV macro expansion.
 func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
 	if len(hexLE) <= 2 {
-		return 0, fmt.Errorf("hex input value %s is too short. Leading 0x is expected", hexLE)
+		return 0, InvalidHexStringError(hexLE, true)
 	}
 	if hexLE[0] != '0' || hexLE[1] != 'x' {
-		return 0, fmt.Errorf("incorrect hex little endian input %s", hexLE)
+		return 0, InvalidHexStringError(hexLE, true)
 	}
 
 	return HexLittleEndianToUint64WO0x(hexLE[2:])
@@ -1938,14 +1961,31 @@ func ValidateAndConvertStringToJsonType(value string) (map[string]interface{}, e
 }
 
 func FindSourceBodyWithoutXattr(req *mc.MCRequest) []byte {
-	if req.DataType&mcc.XattrDataType == 0 {
-		return req.Body
+	return FindDocBodyWithoutXattr(req.Body, req.DataType)
+}
+
+func FindDocBodyWithoutXattr(body []byte, datatype uint8) []byte {
+	if datatype&mcc.XattrDataType == 0 {
+		return body
 	}
-	xattrLen := binary.BigEndian.Uint32(req.Body[0:4])
-	return req.Body[4+xattrLen:]
+	xattrLen := binary.BigEndian.Uint32(body[0:4])
+	return body[4+xattrLen:]
 }
 
 type SubdocLookupPathSpecs []SubdocLookupPathSpec
+
+func (ss *SubdocLookupPathSpecs) String() string {
+	if ss == nil {
+		return ""
+	}
+	var s strings.Builder
+	for _, oneSpec := range *ss {
+		s.WriteString(oneSpec.String())
+		s.WriteString(" |")
+	}
+
+	return s.String()
+}
 
 func (ss *SubdocLookupPathSpecs) Size() int {
 	var totalSize int
@@ -1970,6 +2010,9 @@ func (spec *SubdocLookupPathSpec) Size() int {
 }
 
 func (spec *SubdocLookupPathSpec) String() string {
+	if spec == nil {
+		return "<nil>"
+	}
 	return fmt.Sprintf("Opcode:%v,flags:%v,path:%s", spec.Opcode, spec.Flags, spec.Path)
 }
 
@@ -2166,12 +2209,14 @@ func DecodeSetMetaReq(wrappedReq *WrappedMCRequest) DocumentMetadata {
 	ret.Cas = req.Cas
 	ret.Deletion = (wrappedReq.GetMemcachedCommand() == DELETE_WITH_META)
 	ret.DataType = req.DataType
+	ret.Seqno = wrappedReq.Seqno
+	ret.VbUUID = wrappedReq.VbUUID
 
 	return ret
 }
 
 func DecodeGetMetaResp(key []byte, resp *mc.MCResponse, xattrEnabled bool) (DocumentMetadata, error) {
-	ret := DocumentMetadata{}
+	ret := DocumentMetadata{} // Seqno and Vbuuid will be not be set.
 	ret.Key = key
 	extras := resp.Extras
 	ret.Deletion = (binary.BigEndian.Uint32(extras[0:4]) != 0)
@@ -2181,7 +2226,7 @@ func DecodeGetMetaResp(key []byte, resp *mc.MCResponse, xattrEnabled bool) (Docu
 	ret.Cas = resp.Cas
 	if xattrEnabled {
 		if len(extras) < 20 {
-			return ret, fmt.Errorf("Received unexpected getMeta response, which does not include data type in extras. extras=%v", extras)
+			return ret, fmt.Errorf("received unexpected getMeta response, which does not include data type in extras. extras=%v", extras)
 		}
 		ret.DataType = extras[20]
 	} else {
@@ -2200,12 +2245,8 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 	pos := 0
 	docMeta := DocumentMetadata{
 		Key:      key,
-		RevSeq:   0,
 		Cas:      resp.Cas,
-		Flags:    0,
-		Expiry:   0,
 		Deletion: IsDeletedSubdocLookupResponse(resp),
-		DataType: 0,
 	}
 	for i := 0; i < len(specs); i++ {
 		spec := specs[i]
@@ -2246,6 +2287,16 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 			case VXATTR_FLAGS:
 				if flag, err := strconv.ParseUint(value, 10, 32); err == nil {
 					docMeta.Flags = uint32(flag)
+				}
+			case VXATTR_SEQNO:
+				// 64 bits hex string with 0x prefix
+				if seqno, err := HexBigEndianToUint64(body[pos+1 : pos+xattrlen-1]); err == nil {
+					docMeta.Seqno = seqno
+				}
+			case VXATTR_VBUUID:
+				// 64 bits hex string with 0x prefix
+				if vbuuid, err := HexBigEndianToUint64(body[pos+1 : pos+xattrlen-1]); err == nil {
+					docMeta.VbUUID = vbuuid
 				}
 			}
 		}
@@ -2378,4 +2429,30 @@ func CheckIfHostnameIsAlternate(externalInfoGetter ExternalMgmtHostAndPortGetter
 	}
 
 	return false, nil
+}
+
+// ParseReplicationId parses the replication id string into its components
+func ParseReplicationId(id string) (targetUUID string, sourceBucket string, targetBucket string, err error) {
+	parts := strings.Split(id, KeyPartsDelimiter)
+	if len(parts) != 3 {
+		err = fmt.Errorf("Invalid replication id: %v", id)
+		return
+	}
+
+	targetUUID = parts[0]
+	sourceBucket = parts[1]
+	targetBucket = parts[2]
+	return
+}
+
+// given "[scope].[collection]", the string will be split to "[scope]" and "[collection]"
+func SeparateScopeCollection(scopeCol string) (scope string, collection string) {
+	scopeColArr := strings.Split(scopeCol, ".")
+	if len(scopeColArr) > 0 {
+		scope = scopeColArr[0]
+	}
+	if len(scopeColArr) > 1 {
+		collection = scopeColArr[1]
+	}
+	return
 }

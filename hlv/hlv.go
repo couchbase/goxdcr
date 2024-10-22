@@ -19,30 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 )
 
-type ConflictDetectionResult uint32
-
-const (
-	Win      ConflictDetectionResult = iota
-	Lose     ConflictDetectionResult = iota
-	Conflict ConflictDetectionResult = iota
-	Equal    ConflictDetectionResult = iota
-	Error    ConflictDetectionResult = iota
-)
-
-func (cr ConflictDetectionResult) String() string {
-	switch cr {
-	case Win:
-		return "Win"
-	case Lose:
-		return "Lose"
-	case Conflict:
-		return "Conflict"
-	case Equal:
-		return "Equal"
-	}
-	return "Unknown"
-}
-
 // the values of this type are base64 encoded strings and without any prefix like s_
 type DocumentSourceId string
 
@@ -247,23 +223,7 @@ func (h *HLV) GetCvVer() uint64 {
 	return h.cv.version
 }
 
-func (h *HLV) DetectConflict(other *HLV) (ConflictDetectionResult, error) {
-	if h == nil || other == nil {
-		return Error, fmt.Errorf("cannot detect conflict with nil HLV")
-	}
-	c1 := h.contain(other)
-	c2 := other.contain(h)
-	if c1 && c2 {
-		return Equal, nil
-	} else if c1 {
-		return Win, nil
-	} else if c2 {
-		return Lose, nil
-	}
-	return Conflict, nil
-}
-
-func (h *HLV) contain(other *HLV) bool {
+func (h *HLV) Contains(other *HLV) bool {
 	if other == nil {
 		return true
 	}
@@ -274,7 +234,7 @@ func (h *HLV) contain(other *HLV) bool {
 	if len(other.mv) > 0 {
 		// For merged document, as long as it contains each version in the merge, then it contains the whole
 		for k, v := range other.mv {
-			if h.containVersion(k, v) == false {
+			if !h.containVersion(k, v) {
 				return false
 			}
 		}
@@ -367,7 +327,7 @@ func (h *HLV) String() string {
 	if h == nil {
 		return ""
 	}
-	return fmt.Sprintf("{cvCAS: %v, cv: {%v,%v}, pv: %v, mv: %v}", h.cvCAS, h.cv.source, h.cv.version, h.pv, h.mv)
+	return fmt.Sprintf("{cvCAS:%v,cv:{%v,%v},pv:%v,mv:%v}", h.cvCAS, h.cv.source, h.cv.version, h.pv, h.mv)
 }
 
 // Max bytes required when formatting the PV and MV array to XATTR

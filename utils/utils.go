@@ -719,6 +719,10 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 		clientFeatureSet = append(clientFeatureSet, mcc.FeatureCollections)
 	}
 
+	if requestedFeatures.DataType {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureDataType)
+	}
+
 	client.SetConnName(userAgent)
 	response, err := client.EnableFeatures(clientFeatureSet)
 
@@ -757,7 +761,7 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			}
 			pos += 2
 		}
-		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%v", userAgent, respondedFeatures)
+		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%#v", userAgent, respondedFeatures)
 	}
 	return
 }

@@ -5,6 +5,7 @@ package mocks
 import (
 	common "github.com/couchbase/goxdcr/v8/common"
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
+	conflictlog "github.com/couchbase/goxdcr/v8/conflictlog"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -498,6 +499,39 @@ func (_c *OutNozzle_ResponsibleVBs_Call) Return(_a0 []uint16) *OutNozzle_Respons
 }
 
 func (_c *OutNozzle_ResponsibleVBs_Call) RunAndReturn(run func() []uint16) *OutNozzle_ResponsibleVBs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetConflictLoggerGetter provides a mock function with given fields: _a0
+func (_m *OutNozzle) SetConflictLoggerGetter(_a0 conflictlog.LoggerGetter) {
+	_m.Called(_a0)
+}
+
+// OutNozzle_SetConflictLoggerGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConflictLoggerGetter'
+type OutNozzle_SetConflictLoggerGetter_Call struct {
+	*mock.Call
+}
+
+// SetConflictLoggerGetter is a helper method to define mock.On call
+//   - _a0 conflictlog.LoggerGetter
+func (_e *OutNozzle_Expecter) SetConflictLoggerGetter(_a0 interface{}) *OutNozzle_SetConflictLoggerGetter_Call {
+	return &OutNozzle_SetConflictLoggerGetter_Call{Call: _e.mock.On("SetConflictLoggerGetter", _a0)}
+}
+
+func (_c *OutNozzle_SetConflictLoggerGetter_Call) Run(run func(_a0 conflictlog.LoggerGetter)) *OutNozzle_SetConflictLoggerGetter_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(conflictlog.LoggerGetter))
+	})
+	return _c
+}
+
+func (_c *OutNozzle_SetConflictLoggerGetter_Call) Return() *OutNozzle_SetConflictLoggerGetter_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *OutNozzle_SetConflictLoggerGetter_Call) RunAndReturn(run func(conflictlog.LoggerGetter)) *OutNozzle_SetConflictLoggerGetter_Call {
 	_c.Call.Return(run)
 	return _c
 }

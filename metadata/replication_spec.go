@@ -64,6 +64,14 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		Settings:          DefaultReplicationSettings()}, nil
 }
 
+func (spec *ReplicationSpecification) UniqueId() string {
+	if spec == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s-%s", spec.Id, spec.InternalId)
+}
+
 func (spec *ReplicationSpecification) GetReplicationSpec() *ReplicationSpecification {
 	return spec
 }

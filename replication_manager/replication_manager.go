@@ -38,6 +38,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/pipeline_svc"
 	"github.com/couchbase/goxdcr/v8/resource_manager"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/supervisor"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
@@ -149,7 +150,7 @@ func StartReplicationManager(sourceKVHost string,
 	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	throughput_throttler_svc throttlerSvc.ThroughputThrottlerSvc,
 	resolver_svc service_def.ResolverSvcIface,
 	utilitiesIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
@@ -488,7 +489,7 @@ func (rm *replicationManager) init(
 	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	throughput_throttler_svc throttlerSvc.ThroughputThrottlerSvc,
 	resolverSvc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
 	backfillReplSvc service_def.BackfillReplSvc,

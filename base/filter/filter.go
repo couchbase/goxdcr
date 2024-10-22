@@ -33,7 +33,8 @@ type Filter interface {
 type FilterUtils interface {
 	// uncompressedUprValue is either the original uprValue OR if snappy compressed, the uncompressed value
 	// The data slice will be recycled automatically later
-	CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
+	// The system xattrs of interest are (1) txn xattr (2) conflict logging xattr.
+	CheckForNecessarySystemXattrsInUprEvent(uprEvent *mcc.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattr bool, hasConflictLoggingXattr bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
 	ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64)
 	NewDataPool() base.DataPool
 }

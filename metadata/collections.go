@@ -2131,7 +2131,7 @@ func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMapping
 	if err != nil {
 		return CollectionsMappingRulesType{}, err
 	}
-	if res == false {
+	if !res {
 		return CollectionsMappingRulesType{}, base.ErrorJSONReEncodeFailed
 	}
 

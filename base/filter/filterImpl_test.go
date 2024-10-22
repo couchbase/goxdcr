@@ -420,7 +420,7 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	assert.Equal(status, NotFiltered)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterNecessarySystemXattrsRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.NotNil(body)
 	assert.True(endPos <= len(body))
@@ -863,7 +863,7 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(txnUprEvent)
 
-	needToReplicate, _, _, _, _, _, _, status := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _, status := legacyFilter.filterNecessarySystemXattrsRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
 	assert.Equal(status, FilteredOnATRDocument)
 
@@ -872,7 +872,7 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(txFilter)
 
-	needToReplicate, _, _, _, _, _, _, status = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _, status = legacyFilter.filterNecessarySystemXattrsRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.Equal(status, FilteredOnATRDocument)
 	assert.False(needToReplicate)
 }
@@ -976,6 +976,35 @@ func TestMobileFiltering(t *testing.T) {
 	assert.False(result)
 	assert.Nil(err)
 	assert.Equal(status, FilteredOnMobileRecord)
+}
+
+func TestConflictLoggingDocsFiltering(t *testing.T) {
+	fmt.Println("============== Test case start: TestConflictLoggingDocsFiltering =================")
+	defer fmt.Println("============== Test case end: TestConflictLoggingDocsFiltering =================")
+	assert := assert.New(t)
+
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \"TestDocKey\")", realUtil, 0, base.MobileCompatibilityActive)
+	assert.Nil(err)
+
+	// doc with conflict logging xattr
+	uprFile := "./testInternalData/uprWithConflictXattr.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(uprFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+	assert.Equal(status, FilteredOnConflictLogRecord)
+
+	// no conflict logging xattr - matches the filter expression
+	uprFile = "./testInternalData/uprXattrCompress.json"
+	uprEvent, err = base.RetrieveUprJsonAndConvert(uprFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	result, err, _, _, status = filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 }
 
 func TestTxnXattrOnlyWithKeyAndBodyFilter(t *testing.T) {
@@ -1088,7 +1117,7 @@ func TestNonTxnXattrWithKeyAndBodyFilter(t *testing.T) {
 	assert.Equal(status, NotFiltered)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterNecessarySystemXattrsRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.Nil(body)
 	assert.True(endPos <= len(body))
@@ -1176,7 +1205,7 @@ func TestMixedXattrWithKeyAndBodyFilter(t *testing.T) {
 	assert.Equal(status, NotFiltered)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterNecessarySystemXattrsRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.NotNil(body)
 	assert.True(endPos <= len(body))
