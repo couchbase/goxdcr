@@ -126,7 +126,7 @@ func ParseConflictLogTarget(m map[string]interface{}) (t ConflictLogTarget, err 
 		return
 	}
 
-	bucketObj, ok := m[CLBucketKey]
+	bucketObj, ok := m[CLogBucketKey]
 	if ok {
 		ok, s := ParseString(bucketObj)
 		if ok {
@@ -137,7 +137,7 @@ func ParseConflictLogTarget(m map[string]interface{}) (t ConflictLogTarget, err 
 		}
 	}
 
-	collectionObj, ok := m[CLCollectionKey]
+	collectionObj, ok := m[CLogCollectionKey]
 	if ok {
 		ok, s := ParseString(collectionObj)
 		if ok {
@@ -179,7 +179,7 @@ func ParseConflictLogRules(j ConflictLoggingMappingInput) (rules *ConflictLogRul
 		Mapping: map[CollectionNamespace]ConflictLogTarget{},
 	}
 
-	loggingRulesObj, ok := j[CLLoggingRulesKey]
+	loggingRulesObj, ok := j[CLogLoggingRulesKey]
 	if !ok || loggingRulesObj == nil {
 		return
 	}

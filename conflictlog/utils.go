@@ -5,12 +5,13 @@ import (
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 type LoggerGetter func() Logger
 
 // returns a logger only if non-null rules are parsed without any errors.
-func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, logger_ctx *log.LoggerContext, logger *log.CommonLogger) (Logger, error) {
+func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, settings *metadata.ReplicationSettings, logger_ctx *log.LoggerContext, logger *log.CommonLogger) (Logger, error) {
 	if conflictLoggingMap == nil {
 		return nil, fmt.Errorf("nil conflictLoggingMap")
 	}
@@ -44,8 +45,13 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 		fileLogger,
 		replId,
 		WithMapper(NewConflictMapper(logger)),
-		WithCapacity(1000), // SUMUKH TODO - make the default size configurable.
 		WithRules(rules),
+		WithCapacity(settings.GetCLogQueueCapacity()),
+		WithWorkerCount(settings.GetCLogWorkerCount()),
+		WithSetMetaTimeout(settings.GetCLogSetMetaTimeout()),
+		WithPoolGetTimeout(settings.GetCLogPoolGetTimeout()),
+		WithNetworkRetryInterval(settings.GetCLogNetworkRetryInterval()),
+		WithNetworkRetryCount(settings.GetCLogNetworkRetryCount()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error getting a new conflict logger for %v. err=%v", conflictLoggingMap, err)
@@ -86,6 +92,9 @@ func UpdateLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, 
 
 	err = exisitingLogger.UpdateRules(rules)
 	if err != nil {
+		if err == ErrNoChange {
+			return nil
+		}
 		return fmt.Errorf("error updating %s rules, err=%v", rules, err)
 	}
 

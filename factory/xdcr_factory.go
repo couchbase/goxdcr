@@ -337,7 +337,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	progress_recorder(common.ProgressNozzlesWired)
 
 	conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
-	conflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), logger_ctx, xdcrf.logger)
+	conflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger)
 	if err != nil && err != conflictlog.ErrConflictLoggingIsOff {
 		xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
 		return nil, nil, err
@@ -903,9 +903,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 	if ok {
 		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
 	}
-	conflictLoggingMap, ok := settings[metadata.ConflictLoggingKey]
+
+	conflictLoggingMap, ok := settings[metadata.CLogKey]
 	if ok {
-		xmemSettings[parts.ConflictLogging] = conflictLoggingMap
+		xmemSettings[parts.CLogging] = conflictLoggingMap
 	}
 
 	return xmemSettings
@@ -1168,7 +1169,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xmemSettings[base.VersionPruningWindowHrsKey] = val
 	}
 
-	xmemSettings[base.ConflictLoggingKey] = metadata.GetSettingFromSettingsMap(settings, metadata.ConflictLoggingKey, base.ConflictLoggingOff)
+	xmemSettings[base.CLogKey] = metadata.GetSettingFromSettingsMap(settings, metadata.CLogKey, base.ConflictLoggingOff)
 
 	return xmemSettings, nil
 }

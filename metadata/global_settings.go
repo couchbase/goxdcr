@@ -13,13 +13,13 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
 var GoGCDefaultValue = 100
-var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLoggerContext)
 
 /*
  *  global_setting will contain all the process level configuration that could be applied to all the
@@ -27,41 +27,50 @@ var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLogg
  */
 
 const (
-	GoMaxProcsKey              = "gomaxprocs"
-	GoGCKey                    = "gogc"
-	GenericServicesLogLevelKey = "genericServicesLogLevel"
-
 	DefaultGlobalSettingsKey = "GlobalSettings"
 	GlobalConfigurationKey   = "GlobalConfiguration"
+
+	// different global settings.
+	GoMaxProcsKey               = "gomaxprocs"
+	GoGCKey                     = "gogc"
+	GenericServicesLogLevelKey  = "genericServicesLogLevel"
+	CLogConnPoolLimitKey        = "CLogConnPoolLimit"
+	CLogConnPoolGCIntervalKey   = "CLogConnPoolGCInterval"
+	CLogConnPoolReapIntervalKey = "CLogConnPoolReapInterval"
 )
-
-var GoMaxProcsConfig = &SettingsConfig{base.DefaultGoMaxProcs, &Range{1, 10000}}
-
-// -1 indicates that GC is disabled completely
-// note, 0 is not a valid value for GOGC, which will be checked separately from the range check
-var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
 var genericServices = []string{base.UtilsKey, base.SecuritySvcKey, base.TopoSvcKey, base.MetadataSvcKey,
 	base.IntSettSvcKey, base.AuditSvcKey, base.GlobalSettSvcKey, base.RemClusterSvcKey, base.ReplSpecSvcKey,
 	base.CheckpointSvcKey, base.MigrationSvcKey, base.ReplSettSvcKey, base.BucketTopologySvcKey, base.ManifestServiceKey,
 	base.CollectionsManifestSvcKey, base.BackfillReplSvcKey, base.P2PManagerKey, base.CapiSvcKey, base.TpThrottlerSvcKey,
 	base.GenericSupervisorKey, base.XDCRFactoryKey, base.PipelineMgrKey, base.ResourceMgrKey, base.BackfillMgrKey,
-	base.DefaultKey, base.AdminPortKey, base.HttpServerKey, base.MsgUtilsKey}
+	base.DefaultKey, base.AdminPortKey, base.HttpServerKey, base.MsgUtilsKey, base.CLogManagerKey}
 
 type ServiceToLogLevelMapType map[string]string
 
 var genericServicesLogLevelDefaultVal = ServiceToLogLevelMapType{}
-var genericServicesLogLevelConfig = &SettingsConfig{genericServicesLogLevelDefaultVal, nil}
 
 func init() {
 	// initialize the map with a default value of 'Info' for each generic service
 	genericServicesLogLevelDefaultVal.Initialize()
 }
 
+// -1 indicates that GC is disabled completely
+// note, 0 is not a valid value for GOGC, which will be checked separately from the range check
+var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
+var GoMaxProcsConfig = &SettingsConfig{base.DefaultGoMaxProcs, &Range{1, 10000}}
+var genericServicesLogLevelConfig = &SettingsConfig{genericServicesLogLevelDefaultVal, nil}
+var CLogConnPoolLimitConfig = &SettingsConfig{base.DefaultCLogPoolConnLimit, &Range{1, 1000}}
+var CLogConnPoolGCIntervalConfig = &SettingsConfig{base.DefaultCLogConnPoolGCIntervalMs, &Range{0, 86400000 /* 24 hours */}}
+var CLogConnPoolReapIntervalConfig = &SettingsConfig{base.DefaultCLogConnPoolReapIntervalMs, &Range{0, 86400000 /* 24 hours */}}
+
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
-	GoMaxProcsKey:              GoMaxProcsConfig,
-	GoGCKey:                    GoGCConfig,
-	GenericServicesLogLevelKey: genericServicesLogLevelConfig,
+	GoMaxProcsKey:               GoMaxProcsConfig,
+	GoGCKey:                     GoGCConfig,
+	GenericServicesLogLevelKey:  genericServicesLogLevelConfig,
+	CLogConnPoolLimitKey:        CLogConnPoolLimitConfig,
+	CLogConnPoolGCIntervalKey:   CLogConnPoolGCIntervalConfig,
+	CLogConnPoolReapIntervalKey: CLogConnPoolReapIntervalConfig,
 }
 
 // Adding values in this struct is deprecated - use GlobalSettings.Settings.Values instead
@@ -241,4 +250,36 @@ func (serviceToLogLevelMap ServiceToLogLevelMapType) SameAs(otherRaw interface{}
 		}
 	}
 	return true
+}
+
+// get the value for the specified key
+// if value is not found in Values map, return default value
+func (s *GlobalSettings) GetSettingValueOrDefaultValue(key string) (interface{}, error) {
+	settingConfig, ok := s.configMapRetriever()[key]
+	if !ok {
+		return nil, fmt.Errorf("%v is not a valid global replication setting", key)
+	}
+
+	value, ok := s.Values[key]
+	if !ok {
+		// use default value if not found in Values map
+		return settingConfig.defaultValue, nil
+	}
+
+	return value, nil
+}
+
+func (s *GlobalSettings) GetCLogPoolConnLimit() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogConnPoolLimitKey)
+	return val.(int)
+}
+
+func (s *GlobalSettings) GetCLogPoolGCInterval() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogConnPoolGCIntervalKey)
+	return time.Duration(val.(int)) * time.Millisecond
+}
+
+func (s *GlobalSettings) GetCLogPoolReapInterval() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogConnPoolReapIntervalKey)
+	return time.Duration(val.(int)) * time.Millisecond
 }

@@ -21,11 +21,24 @@ type Logger interface {
 	Log(c *ConflictRecord) (base.ConflictLoggerHandle, error)
 
 	// UpdateWorkerCount changes the underlying log worker count
-	UpdateWorkerCount(count int)
+	UpdateWorkerCount(count int) error
 
 	// UpdateRules allow updates to the the rules which map
 	// the conflict to the target conflict bucket
 	UpdateRules(*base.ConflictLogRules) error
+
+	// UpdateQueueCapcity changes the underlying queue capcity.
+	// The update only happens through this function when cap > exisiting queue capacity.
+	// If newCap < oldCap, an error will be returned.
+	// The pipeline is expected to restart when newCap < oldCap.
+	UpdateQueueCapcity(newCap int) error
+
+	// the following updates are assumed to happen on a not so regular basis.
+	// The updates are not protected under any locks.
+	UpdateNWRetryCount(cnt int)
+	UpdateNWRetryInterval(t time.Duration)
+	UpdateSetMetaTimeout(t time.Duration)
+	UpdateGetFromPoolTimeout(t time.Duration)
 
 	// Closes the logger. Hence forth the logger will error out
 	Close() error
@@ -41,7 +54,10 @@ type LoggerOptions struct {
 	networkRetryInterval time.Duration
 	poolGetTimeout       time.Duration
 	setMetaTimeout       time.Duration
-	skipTlsVerify        bool
+
+	// this is off by default and only present for
+	// local testing changeable through internal setting.
+	skipTlsVerify bool
 }
 
 func (l *LoggerOptions) String() string {

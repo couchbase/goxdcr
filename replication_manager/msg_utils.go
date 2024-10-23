@@ -106,8 +106,14 @@ const (
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
 	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
-	ConflictLoggingKey                = base.ConflictLoggingKey
 	GenericServicesLogLevelKey        = metadata.GenericServicesLogLevelKey
+	CLogKey                           = base.CLogKey
+	CLogSetMetaTimeoutKey             = base.CLogSetMetaTimeout
+	CLogPoolGetTimeoutKey             = base.CLogPoolGetTimeout
+	CLogNetworkRetryCountKey          = base.CLogNetworkRetryCount
+	CLogNetworkRetryIntervalKey       = base.CLogNetworkRetryInterval
+	CLogWorkerCountKey                = base.CLogWorkerCount
+	CLogQueueCapacityKey              = base.CLogQueueCapacity
 )
 
 // constants for parsing create/change/view replication response
@@ -240,8 +246,14 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
 	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
 	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
-	ConflictLoggingKey:                metadata.ConflictLoggingKey,
 	GenericServicesLogLevelKey:        metadata.GenericServicesLogLevelKey,
+	CLogKey:                           metadata.CLogKey,
+	CLogSetMetaTimeoutKey:             metadata.CLogSetMetaTimeoutKey,
+	CLogPoolGetTimeoutKey:             metadata.CLogPoolGetTimeoutKey,
+	CLogNetworkRetryCountKey:          metadata.CLogNetworkRetryCountKey,
+	CLogNetworkRetryIntervalKey:       metadata.CLogNetworkRetryIntervalKey,
+	CLogWorkerCountKey:                metadata.CLogWorkerCountKey,
+	CLogQueueCapacityKey:              metadata.CLogQueueCapacityKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -306,8 +318,14 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
 	metadata.CASDriftThresholdSecsKey:             CasDriftThresholdSecsKey,
 	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
-	metadata.ConflictLoggingKey:                   ConflictLoggingKey,
 	metadata.GenericServicesLogLevelKey:           GenericServicesLogLevelKey,
+	metadata.CLogKey:                              CLogKey,
+	metadata.CLogSetMetaTimeoutKey:                CLogSetMetaTimeoutKey,
+	metadata.CLogPoolGetTimeoutKey:                CLogPoolGetTimeoutKey,
+	metadata.CLogNetworkRetryCountKey:             CLogNetworkRetryCountKey,
+	metadata.CLogNetworkRetryIntervalKey:          CLogNetworkRetryIntervalKey,
+	metadata.CLogWorkerCountKey:                   CLogWorkerCountKey,
+	metadata.CLogQueueCapacityKey:                 CLogQueueCapacityKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

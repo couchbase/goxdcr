@@ -55,7 +55,6 @@ const (
 	HLV_ENABLE         = "hlvEnable"
 	HLV_MAX_CAS        = "hlv_vb_max_cas"
 	MOBILE_COMPATBILE  = base.MobileCompatibleKey
-	CONFLICT_LOGGING   = base.ConflictLoggingKey
 )
 
 type NeedSendStatus int

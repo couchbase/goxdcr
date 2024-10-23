@@ -115,7 +115,14 @@ const (
 	CASDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 
-	ConflictLoggingKey = base.ConflictLoggingKey
+	// conflict logging settings and configurables
+	CLogKey                     = base.CLogKey
+	CLogSetMetaTimeoutKey       = base.CLogSetMetaTimeout
+	CLogPoolGetTimeoutKey       = base.CLogPoolGetTimeout
+	CLogNetworkRetryCountKey    = base.CLogNetworkRetryCount
+	CLogNetworkRetryIntervalKey = base.CLogNetworkRetryInterval
+	CLogWorkerCountKey          = base.CLogWorkerCount
+	CLogQueueCapacityKey        = base.CLogQueueCapacity
 )
 
 // keys to facilitate redaction of replication settings map
@@ -160,7 +167,7 @@ var MultiValueMap map[string]string = map[string]string{
 }
 
 // settings that require validation
-var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey}
+var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey}
 
 var MaxBatchCount = 10000
 
@@ -247,7 +254,14 @@ var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFre
 var CasDriftThresholdSecsConfig = &SettingsConfig{100, &Range{0, math.MaxInt}}
 var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
-var ConflictLoggingConfig = &SettingsConfig{base.ConflictLoggingOff, nil}
+// conflict logging replication settings
+var ConflictLoggingConfig = &SettingsConfig{base.ConflictLoggingOff, nil}                                                       // feature on/off and conflict logging bucket and namespace mapping
+var CLogSetMetaTimeoutMsConfig = &SettingsConfig{base.DefaultCLogSetMetaTimeoutMs, &Range{0, 600000 /* 10 mins */}}             // network write timeout for a single conflict record
+var CLogPoolGetTimeoutMsConfig = &SettingsConfig{base.DefaultCLogPoolGetTimeoutMs, &Range{0, 600000 /* 10 mins */}}             // timeout to get connection obj from global connection pool
+var CLogNetworkRetryCountConfig = &SettingsConfig{base.DefaultCLogNetworkRetryCount, &Range{0, 100}}                            // number of retries after a non-fatal conflict record write failure
+var CLogNetworkRetryIntervalMsConfig = &SettingsConfig{base.DefaultCLogNetworkRetryIntervalMs, &Range{0, 600000 /* 10 mins */}} // sleep duration after a non-fatal conflict record write failure
+var CLogWorkerCountConfig = &SettingsConfig{base.DefaultCLogWorkerCount, &Range{1, 1000}}                                       // number of go-routines performing conflict logging writes accross nozzles for a pipeline
+var CLogQueueCapacityConfig = &SettingsConfig{base.DefaultCLogQueueCapacity, &Range{1, 6000}}                                   // conflict logging queue capacity accross nozzles for a pipeline
 
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
@@ -304,7 +318,13 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	TargetTopologyLogFreqKey:             TargetTopologyLogFrequencyConfig,
 	CASDriftThresholdSecsKey:             CasDriftThresholdSecsConfig,
 	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
-	ConflictLoggingKey:                   ConflictLoggingConfig,
+	CLogKey:                              ConflictLoggingConfig,
+	CLogSetMetaTimeoutKey:                CLogSetMetaTimeoutMsConfig,
+	CLogPoolGetTimeoutKey:                CLogPoolGetTimeoutMsConfig,
+	CLogNetworkRetryCountKey:             CLogNetworkRetryCountConfig,
+	CLogNetworkRetryIntervalKey:          CLogNetworkRetryIntervalMsConfig,
+	CLogWorkerCountKey:                   CLogWorkerCountConfig,
+	CLogQueueCapacityKey:                 CLogQueueCapacityConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1128,7 +1148,7 @@ func (s *ReplicationSettings) GetPreCheckCasDriftThreshold() uint32 {
 
 // returns base.ConflictLoggingOff on invalid type and values.
 func (s *ReplicationSettings) GetConflictLoggingMapping() base.ConflictLoggingMappingInput {
-	val, _ := s.GetSettingValueOrDefaultValue(ConflictLoggingKey)
+	val, _ := s.GetSettingValueOrDefaultValue(CLogKey)
 	if val == nil {
 		return base.ConflictLoggingOff
 	}
@@ -1338,7 +1358,7 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if err != nil {
 			return
 		}
-	case ConflictLoggingKey:
+	case CLogKey:
 		if convertedValue, err = base.ValidateAndConvertJsonMapToConflictLoggingMapping(value); err != nil {
 			return
 		}
@@ -1418,3 +1438,48 @@ func GetP2PTimeoutFromSettings(settings ReplicationSettingsMap) time.Duration {
 }
 
 const P2PDynamicWaitDurationKey = "P2PDynamicWaitDuration"
+
+func (s *ReplicationSettings) GetCLogSetMetaTimeout() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogSetMetaTimeoutKey)
+	msInt := val.(int)
+	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetCLogPoolGetTimeout() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogPoolGetTimeoutKey)
+	msInt := val.(int)
+	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetCLogNetworkRetryCount() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogNetworkRetryCountKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCLogNetworkRetryInterval() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogNetworkRetryIntervalKey)
+	msInt := val.(int)
+	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetCLogWorkerCount() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogWorkerCountKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCLogQueueCapacity() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogQueueCapacityKey)
+	return val.(int)
+}
+
+// need to reconstruct pipeline if:
+// 1. conflict logging is turned on in the new settings and was not turned on before. OR
+// 2. conflict logging is turned off in the new settings and was turned on before. OR
+// 3. conflict logging queue capacity was changed and the new settings still has conflict logger on.
+//   - if old capacity > new capacity, we need to restart pipeline. Otherwise some conflicts will be dropped.
+//   - if new capacity <= new capacity, we can live update pipeline.
+func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *ReplicationSettings) bool {
+	return (old.GetConflictLoggingMapping().Disabled() && !new.GetConflictLoggingMapping().Disabled()) ||
+		(!old.GetConflictLoggingMapping().Disabled() && new.GetConflictLoggingMapping().Disabled()) ||
+		(!new.GetConflictLoggingMapping().Disabled() && (old.GetCLogQueueCapacity() > new.GetCLogQueueCapacity()))
+}

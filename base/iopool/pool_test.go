@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,10 @@ func TestPool_EmptyPool(t *testing.T) {
 		}, nil
 	}
 
-	pool := NewConnPool(logger, 10, newConnFn)
+	pool := NewConnPool(logger, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newConnFn)
 	pool.UpdateGCInterval(1 * time.Second)
 	pool.UpdateReapInterval(2 * time.Second)
 
@@ -55,7 +59,10 @@ func TestPool_GC(t *testing.T) {
 		}, nil
 	}
 
-	pool := NewConnPool(logger, 10, newConnFn)
+	pool := NewConnPool(logger, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newConnFn)
 	pool.UpdateGCInterval(1 * time.Second)
 	pool.UpdateReapInterval(3 * time.Second)
 

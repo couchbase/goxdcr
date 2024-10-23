@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -94,7 +96,11 @@ func main() {
 
 	utils := utils.NewUtilities()
 
-	conflictlog.InitManager(log.DefaultLoggerContext, utils, addrGetter, xsvc.SecuritySvc)
+	conflictlog.InitManager(log.DefaultLoggerContext, utils, addrGetter, xsvc.SecuritySvc,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		base.DefaultCLogPoolConnLimit,
+	)
 
 	switch name {
 	case "conflictLogLoadTest":

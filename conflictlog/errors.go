@@ -16,4 +16,5 @@ var (
 	ErrConnPoolGetTimeout    error = errors.New("conflict logging pool get timedout")
 	ErrSetMetaTimeout        error = errors.New("conflict logging SetMeta timedout")
 	ErrConflictLoggingIsOff  error = errors.New("conflict logging is off")
+	ErrNoChange              error = errors.New("no change in setting value")
 )

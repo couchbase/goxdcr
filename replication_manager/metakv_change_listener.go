@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/pipeline_svc"
 
 	"github.com/couchbase/cbauth/metakv"
@@ -454,6 +455,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	modesChanged := oldSettings.NeedToRestartPipelineDueToCollectionModeChanges(newSettings)
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
+	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -463,7 +465,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
-		modesChanged || rulesChanged || mobileModeChanged
+		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged
 }
 
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
@@ -507,7 +509,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
-		!oldSettings.GetConflictLoggingMapping().SameAs(newSettings.GetConflictLoggingMapping()) {
+		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
@@ -769,6 +771,7 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		oldGoGCValue := debug.SetGCPercent(newSetting.GoGC)
 		pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
 	}
+
 	if newSetting.Settings != nil {
 		// represents a map containing the logLevel for individual services
 		val, ok := newSetting.Settings.Values[metadata.GenericServicesLogLevelKey]
@@ -804,7 +807,54 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 				}
 			}
 		}
+
+		// change conflict logger global settings if needed.
+		var cLogPoolConnLimit int = -1
+		var cLogPoolGCInterval int = -1
+		var cLogPoolReapInterval int = -1
+		cLogConnLimitVal, ok := newSetting.Settings.Values[metadata.CLogConnPoolLimitKey]
+		if ok {
+			cLogPoolConnLimit, ok = cLogConnLimitVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of clog connLimit %T, cLogConnLimitVal=%v", cLogConnLimitVal, cLogConnLimitVal)
+			}
+		}
+
+		cLogPoolGCIntervalVal, ok := newSetting.Settings.Values[metadata.CLogConnPoolGCIntervalKey]
+		if ok {
+			cLogPoolGCInterval = cLogPoolGCIntervalVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of clog gcInterval %T, cLogPoolGCIntervalVal=%v", cLogPoolGCIntervalVal, cLogPoolGCIntervalVal)
+			}
+		}
+
+		cLogPoolReapIntervalVal, ok := newSetting.Settings.Values[metadata.CLogConnPoolReapIntervalKey]
+		if ok {
+			cLogPoolReapInterval = cLogPoolReapIntervalVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of clog reapInterval %T, cLogPoolReapIntervalVal=%v", cLogPoolReapIntervalVal, cLogPoolReapIntervalVal)
+			}
+		}
+
+		cLogMgr, err := conflictlog.GetManager()
+		if err != nil || cLogMgr == nil {
+			return fmt.Errorf("error getting cLog manager for global settings update, err=%v", err)
+		}
+
+		if cLogPoolConnLimit > 0 {
+			cLogMgr.SetConnLimit(cLogPoolConnLimit)
+		}
+
+		cLogConnPool := cLogMgr.ConnPool()
+		if cLogPoolGCInterval >= 0 {
+			cLogConnPool.UpdateGCInterval(time.Duration(cLogPoolGCInterval) * time.Millisecond)
+		}
+
+		if cLogPoolReapInterval >= 0 {
+			cLogConnPool.UpdateReapInterval(time.Duration(cLogPoolReapInterval) * time.Millisecond)
+		}
 	}
+
 	return nil
 }
 

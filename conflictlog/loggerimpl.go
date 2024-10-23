@@ -36,8 +36,8 @@ type loggerImpl struct {
 	// opts are the logger options
 	opts LoggerOptions
 
-	// mu is the logger level lock
-	mu sync.Mutex
+	// rwMtx is the logger level RW lock
+	rwMtx sync.RWMutex
 
 	// throttlerSvc is the IOPS throttler
 	throttlerSvc throttlerSvc.ThroughputThrottlerSvc
@@ -68,13 +68,13 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	// set the defaults
 	options := LoggerOptions{
 		rules:                nil,
-		logQueueCap:          DefaultLogCapacity,
-		workerCount:          DefaultLoggerWorkerCount,
 		mapper:               NewConflictMapper(logger),
-		networkRetryCount:    DefaultNetworkRetryCount,
-		networkRetryInterval: DefaultNetworkRetryInterval,
-		poolGetTimeout:       DefaultPoolGetTimeout,
-		setMetaTimeout:       DefaultSetMetaTimeout,
+		logQueueCap:          base.DefaultCLogQueueCapacity,
+		workerCount:          base.DefaultCLogWorkerCount,
+		networkRetryCount:    base.DefaultCLogNetworkRetryCount,
+		networkRetryInterval: time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
+		poolGetTimeout:       time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
+		setMetaTimeout:       time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
 	}
 
 	// override the defaults
@@ -93,7 +93,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		rulesLock:        sync.RWMutex{},
 		connPool:         connPool,
 		opts:             options,
-		mu:               sync.Mutex{},
+		rwMtx:            sync.RWMutex{},
 		throttlerSvc:     throttlerSvc,
 		logReqCh:         make(chan logRequest, options.logQueueCap),
 		finch:            make(chan bool, 1),
@@ -119,6 +119,9 @@ func (l *loggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 		conflictRec: c,
 		ackCh:       ackCh,
 	}
+
+	l.rwMtx.RLock()
+	defer l.rwMtx.RUnlock()
 
 	select {
 	case <-l.finch:
@@ -166,7 +169,7 @@ func (l *loggerImpl) Close() (err error) {
 		return nil
 	}
 
-	l.mu.Lock()
+	l.rwMtx.Lock()
 
 	// check for closed channel as multiple threads could have attempted it
 	if l.isClosed() {
@@ -185,7 +188,7 @@ func (l *loggerImpl) Close() (err error) {
 	// handle inflight log requests (both in the channel and in workers)
 	close(l.logReqCh)
 
-	defer l.mu.Unlock()
+	defer l.rwMtx.Unlock()
 
 	l.wg.Wait()
 	l.logger.Infof("closing of conflict logger done id=%d replId=%s", l.id, l.replId)
@@ -198,15 +201,23 @@ func (l *loggerImpl) startWorker() {
 	go l.worker()
 }
 
-func (l *loggerImpl) UpdateWorkerCount(newCount int) {
-	l.logger.Infof("changing conflict logger worker count replId=%s old=%d new=%d", l.replId, l.opts.workerCount, newCount)
+func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if newCount <= 0 || newCount == l.opts.workerCount {
+	if l.isClosed() {
 		return
 	}
+
+	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
+
+	if newCount <= 0 || newCount == l.opts.workerCount {
+		err = ErrNoChange
+		return
+	}
+
+	l.logger.Infof("changing conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
+	defer l.logger.Infof("done changing conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
 
 	if newCount > l.opts.workerCount {
 		for i := 0; i < (newCount - l.opts.workerCount); i++ {
@@ -219,28 +230,37 @@ func (l *loggerImpl) UpdateWorkerCount(newCount int) {
 	}
 
 	l.opts.workerCount = newCount
-	l.logger.Infof("changing conflict logger worker count done replId=%s", l.replId)
+	return
 }
 
 // r should be non-nil
 func (l *loggerImpl) UpdateRules(r *base.ConflictLogRules) (err error) {
+	l.rulesLock.Lock()
+	defer l.rulesLock.Unlock()
+
+	if l.isClosed() {
+		return
+	}
+
+	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d", l.replId, l.opts.rules, r)
 	if r == nil {
 		err = ErrEmptyRules
 		return
 	}
-
-	l.logger.Infof("conflict logger got request to update rules id=%d replId=%s %v", l.id, l.replId, r)
 
 	err = r.Validate()
 	if err != nil {
 		return
 	}
 
-	l.rulesLock.Lock()
-	l.opts.rules = r
-	l.rulesLock.Unlock()
+	if l.opts.rules.SameAs(r) {
+		err = ErrNoChange
+		return
+	}
 
-	l.logger.Infof("conflict logger rules updated id=%d replId=%s", l.id, l.replId)
+	l.opts.rules = r
+
+	l.logger.Infof("conflict logger rules=%v updated id=%d replId=%s", r, l.id, l.replId)
 	return
 }
 
@@ -250,7 +270,7 @@ func (l *loggerImpl) worker() {
 	for {
 		select {
 		case <-l.shutdownWorkerCh:
-			l.logger.Infof("shutting down conflict log worker replId=%s", l.replId)
+			l.logger.Infof("shutting down conflict log worker replId=%s, id=%v", l.replId, l.id)
 			return
 		case req := <-l.logReqCh:
 			// nil implies that logReqCh might be closed
@@ -438,4 +458,118 @@ func (h logReqHandle) Wait(finch chan bool) (err error) {
 	}
 
 	return
+}
+
+// newCap should be greater than or equal to existing queue capacity
+func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
+	if l.isClosed() {
+		return ErrLoggerClosed
+	}
+
+	// acquire the lock so that no more writes to the channel happens.
+	// read from channel by the workers can still happen, so we shut down the workers temporarily.
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
+
+	l.logger.Debugf("going to change conflict logger queue capacity replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCap, l.id)
+
+	if l.logReqCh == nil {
+		err = fmt.Errorf("nil queue")
+		return
+	}
+
+	if l.opts.logQueueCap == newCap {
+		err = ErrNoChange
+		return
+	}
+
+	if newCap < l.opts.logQueueCap {
+		// pipeline should have restarted, fatal error
+		err = fmt.Errorf("newCap=%v < oldCap=%v, need to restart pipeline", newCap, l.opts.logQueueCap)
+		return
+	}
+
+	l.logger.Infof("changing conflict logger queue capacity replId=%s old=%d new=%d id=%v", l.replId, l.opts.logQueueCap, newCap, l.id)
+	defer l.logger.Infof("done changing conflict logger queue capacity replId=%s cap=%d id=%v", l.replId, l.opts.logQueueCap, l.id)
+
+	// temporarily make sure there is no one reading from the queue.
+	for i := 0; i < l.opts.workerCount; i++ {
+		l.shutdownWorkerCh <- true
+	}
+	l.wg.Wait()
+
+	defer func() {
+		// bring back the workers
+		for i := 0; i < l.opts.workerCount; i++ {
+			l.startWorker()
+		}
+	}()
+
+	newQueue := make(chan logRequest, newCap)
+	oldQueue := l.logReqCh
+
+	length := len(oldQueue)
+	for i := 0; i < length; i++ {
+		select {
+		case req, ok := <-oldQueue:
+			if !ok || req.conflictRec == nil {
+				// someone else closed the channel.
+				// unlikely that we will come here because we are under the lock.
+				continue
+			}
+			newQueue <- req
+		default:
+			// the code should not reach here,
+			// but have a bail out path just in case.
+		}
+	}
+	close(oldQueue)
+	l.logReqCh = newQueue
+	l.opts.logQueueCap = newCap
+
+	return
+}
+
+func (l *loggerImpl) UpdateNWRetryCount(cnt int) {
+	if l.isClosed() {
+		return
+	}
+
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
+
+	l.opts.networkRetryCount = cnt
+}
+
+func (l *loggerImpl) UpdateNWRetryInterval(t time.Duration) {
+	if l.isClosed() {
+		return
+	}
+
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
+
+	l.opts.networkRetryInterval = t
+}
+
+func (l *loggerImpl) UpdateSetMetaTimeout(t time.Duration) {
+	if l.isClosed() {
+		return
+	}
+
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
+
+	l.opts.setMetaTimeout = t
+}
+
+func (l *loggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
+	if l.isClosed() {
+		return
+	}
+
+	l.rwMtx.Lock()
+	defer l.rwMtx.Unlock()
+
+	l.opts.poolGetTimeout = t
 }

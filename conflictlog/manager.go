@@ -2,7 +2,9 @@ package conflictlog
 
 import (
 	"io"
+	"time"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
@@ -20,7 +22,6 @@ type Manager interface {
 	ConnPool() iopool.ConnPool
 	SetConnLimit(limit int)
 	SetIOPSLimit(limit int64)
-	SetSkipTlsVerify(bool)
 }
 
 type SecurityInfo interface {
@@ -47,10 +48,12 @@ func GetManager() (Manager, error) {
 }
 
 // InitManager intializes global conflict manager
-func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrGetter MemcachedAddrGetter, securityInfo SecurityInfo) {
+func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrGetter MemcachedAddrGetter, securityInfo SecurityInfo,
+	poolGCInterval, poolReapInterval time.Duration, connLimit int) {
+
 	logger := log.NewLogger(ConflictManagerLoggerName, loggerCtx)
 
-	logger.Info("intializing conflict manager")
+	logger.Infof("intializing conflict manager with connLimit=%v", connLimit)
 
 	throttlerSvc := throttlerSvcImpl.NewThroughputThrottlerSvc(loggerCtx)
 	throttlerSvc.Start()
@@ -61,11 +64,12 @@ func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrG
 		securityInfo:   securityInfo,
 		utils:          utils,
 		manifestCache:  newManifestCache(),
-		connLimit:      DefaultPoolConnLimit,
+		connLimit:      connLimit,
 		throttlerSvc:   throttlerSvc,
 	}
 
-	impl.setConnPool()
+	impl.setConnPool(poolGCInterval, poolReapInterval)
+
 	manager = impl
 }
 
@@ -79,14 +83,12 @@ type managerImpl struct {
 	manifestCache  *ManifestCache
 	throttlerSvc   throttlerSvc.ThroughputThrottlerSvc
 
-	// connLimit max number of connections
+	// connLimit is the max number of connections
 	connLimit int
-
-	skipTlsVerify bool
 }
 
 func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, opts ...LoggerOpt) (l Logger, err error) {
-	opts = append(opts, WithSkipTlsVerify(m.skipTlsVerify))
+	opts = append(opts, WithSkipTlsVerify(base.CLogSkipTlsVerify))
 	l, err = newLoggerImpl(logger, replId, m.utils, m.throttlerSvc, m.connPool, opts...)
 	return
 }
@@ -96,11 +98,6 @@ func (m *managerImpl) SetConnLimit(limit int) {
 	m.connPool.SetLimit(limit)
 }
 
-func (m *managerImpl) SetSkipTlsVerify(v bool) {
-	m.logger.Infof("setting tls skip verify=%v", v)
-	m.skipTlsVerify = v
-}
-
 func (m *managerImpl) SetIOPSLimit(limit int64) {
 	m.logger.Infof("setting IOPS limit = %d", limit)
 	m.throttlerSvc.UpdateSettings(map[string]interface{}{
@@ -108,10 +105,10 @@ func (m *managerImpl) SetIOPSLimit(limit int64) {
 	})
 }
 
-func (m *managerImpl) setConnPool() {
+func (m *managerImpl) setConnPool(gcInterval, reapInterval time.Duration) {
 	m.logger.Infof("creating conflict manager gomemcached connection pool, connLimit=%v", m.connLimit)
 
-	m.connPool = iopool.NewConnPool(m.logger, m.connLimit, m.newMemcachedConn)
+	m.connPool = iopool.NewConnPool(m.logger, m.connLimit, gcInterval, reapInterval, m.newMemcachedConn)
 }
 
 func (m *managerImpl) ConnPool() iopool.ConnPool {
@@ -133,6 +130,6 @@ func (m *managerImpl) newMemcachedConn(bucketName string) (conn io.Closer, err e
 		return
 	}
 
-	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, m.skipTlsVerify)
+	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, base.CLogSkipTlsVerify)
 	return
 }

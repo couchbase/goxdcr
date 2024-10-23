@@ -3362,7 +3362,12 @@ func EqualMaps(clm1, clm2 map[string]interface{}, recognisedKeys map[string]refl
 }
 
 // returns a boolean to indicate invalid type.
+// returns ConflictLoggingOff on invalid type or invalid input.
 func ParseConflictLoggingInputType(in interface{}) (ConflictLoggingMappingInput, bool) {
+	if in == nil {
+		return ConflictLoggingOff, false
+	}
+
 	var out ConflictLoggingMappingInput
 	var ok bool
 	out, ok = in.(ConflictLoggingMappingInput)
@@ -3380,12 +3385,12 @@ func ParseConflictLoggingInputType(in interface{}) (ConflictLoggingMappingInput,
 
 func (clm ConflictLoggingMappingInput) Disabled() bool {
 	if clm == nil {
-		// this is not a valid value
-		return false
+		// this is not a valid value. Mark as disabled.
+		return true
 	}
 
 	// check explicitly for "disabled" key first.
-	disabledVal, ok := clm[CLDisabledKey]
+	disabledVal, ok := clm[CLogDisabledKey]
 	if ok {
 		disabled, ok := disabledVal.(bool)
 		if ok {
@@ -3406,8 +3411,8 @@ func (clm ConflictLoggingMappingInput) SameAs(other interface{}) bool {
 
 	otherClm, ok := ParseConflictLoggingInputType(other)
 	if !ok {
-		// not of valid type
-		return false
+		// not of valid type. Consider as off.
+		otherClm = ConflictLoggingOff
 	}
 
 	return clm.Same(otherClm)
@@ -3429,14 +3434,14 @@ func (clm ConflictLoggingMappingInput) Same(otherClm ConflictLoggingMappingInput
 		return len(otherClm) == 0
 	}
 
-	same := EqualMaps(clm, otherClm, SimpleConflictLoggingKeys)
+	same := EqualMaps(clm, otherClm, SimpleCLogKeys)
 	if !same {
 		return false
 	}
 
 	// special logging rules - optional.
-	loggingRules1, ok1 := clm[CLLoggingRulesKey]
-	loggingRules2, ok2 := otherClm[CLLoggingRulesKey]
+	loggingRules1, ok1 := clm[CLogLoggingRulesKey]
+	loggingRules2, ok2 := otherClm[CLogLoggingRulesKey]
 	if ok1 != ok2 {
 		return false
 	}
@@ -3474,7 +3479,7 @@ func ValidateAndConvertJsonMapToConflictLoggingMapping(value string) (ConflictLo
 		return nil, fmt.Errorf("null or nil conflict logging mapping not accepted")
 	}
 
-	// Check for duplicated keys
+	// check for duplicated keys
 	res, err := JsonStringReEncodeTest(value)
 	if err != nil {
 		return nil, err
@@ -3483,18 +3488,24 @@ func ValidateAndConvertJsonMapToConflictLoggingMapping(value string) (ConflictLo
 		return nil, ErrorJSONReEncodeFailed
 	}
 
+	// json validation
 	jsonMap, err := ValidateAndConvertStringToJsonType(value)
 	if err != nil {
 		return nil, err
 	}
 
-	conflictLoggingMap := ConflictLoggingMappingInput(jsonMap)
+	// explicit type check
+	conflictLoggingMap, typeCheck := ParseConflictLoggingInputType(jsonMap)
+	if !typeCheck {
+		if jsonMap == nil {
+			// null is not a acceptable input by design.
+			return nil, fmt.Errorf("null conflict logging map not allowed. Use {} or {\"disabled\":true} for disabling the feature")
+		}
 
-	if conflictLoggingMap == nil {
-		// null is not a acceptable input by design.
-		return nil, fmt.Errorf("null conflict logging map not allowed. Use {} or {\"disabled\":true} for disabling the feature")
+		return nil, fmt.Errorf("expected non-nil json object, but invalid type was input as conflict logging map. Use {} or {\"disabled\":true} for disabling the feature")
 	}
 
+	// rules parsing check
 	enabled := !conflictLoggingMap.Disabled()
 	if enabled {
 		// validate if input is syntactically and semantically valid

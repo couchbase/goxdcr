@@ -1280,7 +1280,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
 	srcHeartbeatEnabled bool, srcHeartbeatIgnoreIncoming bool,
 	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
-	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int) {
+	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
+	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1445,6 +1446,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	SrcHeartbeatSkipCapellaTarget = srcHeartbeatSkipCapellaTarget
 	SrcHeartbeatMinInterval = srcHeartbeatMinInterval
 	SrcHeartbeatMaxIntervalFactor = srcHeartbeatMaxIntervalFactor
+	RMTokenDistribution = rmTokenDistribution
+	CLogSkipTlsVerify = cLogSkipTlsVerify
+	CLogResourceManagerBoost = cLogRMBoost
 }
 
 // XDCR Dev hidden replication settings
@@ -1530,33 +1534,58 @@ var (
 )
 
 // Conflict logging replication setting and associated keys
-// It will look like the following:
+// The feature setting will look like the following:
 //
 //	"conflictLogging": {
-//				"bucket": "bucketname"
-//				"collection": "[scope].[collection]"
-//				"loggingRules": { ... }
-//		}
+//		"bucket": "bucketname",
+//		"collection": "[scope].[collection]",
+//		"loggingRules": { ... },
+//		"disabled": [true|false]
+//	}
 const (
-	ConflictLoggingKey string = "conflictLogging"
-	CLBucketKey        string = "bucket"
-	CLCollectionKey    string = "collection"
-	CLLoggingRulesKey  string = "loggingRules"
-	CLDisabledKey      string = "disabled"
+	CLogKey                  string = "conflictLogging"
+	CLogBucketKey            string = "bucket"
+	CLogCollectionKey        string = "collection"
+	CLogLoggingRulesKey      string = "loggingRules"
+	CLogDisabledKey          string = "disabled"
+	CLogSetMetaTimeout       string = "CLogSetTimeout"
+	CLogPoolGetTimeout       string = "CLogPoolGetTimeout"
+	CLogNetworkRetryCount    string = "CLogNetworkRetryCount"
+	CLogNetworkRetryInterval string = "CLogNetworkRetryInterval"
+	CLogWorkerCount          string = "CLogWorkerCount"
+	CLogQueueCapacity        string = "CLogQueueCapacity"
 )
 
 // simple keys inside conflict logging mapping. It excludes loggingRules key.
-var SimpleConflictLoggingKeys map[string]reflect.Kind = map[string]reflect.Kind{
-	CLBucketKey:     reflect.String,
-	CLCollectionKey: reflect.String,
-	CLDisabledKey:   reflect.Bool,
+var SimpleCLogKeys map[string]reflect.Kind = map[string]reflect.Kind{
+	CLogBucketKey:     reflect.String,
+	CLogCollectionKey: reflect.String,
+	CLogDisabledKey:   reflect.Bool,
 }
 
 // simple keys inside loggingRules mapping.
 var SimpleConflictLoggingRulesKeys map[string]reflect.Kind = map[string]reflect.Kind{
-	CLBucketKey:     reflect.String,
-	CLCollectionKey: reflect.String,
+	CLogBucketKey:     reflect.String,
+	CLogCollectionKey: reflect.String,
 }
+
+const (
+	// conflict logger default consts
+	DefaultCLogSetMetaTimeoutMs       int = 5000 // in milliseconds
+	DefaultCLogPoolGetTimeoutMs       int = 5000 // in milliseconds
+	DefaultCLogNetworkRetryCount      int = 5
+	DefaultCLogNetworkRetryIntervalMs int = 2000 // in milliseconds
+	DefaultCLogWorkerCount            int = 3
+	DefaultCLogQueueCapacity          int = 5
+
+	// conflict logger's Connection Pool consts
+	// maximum number of connection objects for a given bucket in the pool
+	DefaultCLogPoolConnLimit = 10
+	// DefaultPoolGCInterval is the GC frequency for connection pool
+	DefaultCLogConnPoolGCIntervalMs = 60000 // in milliseconds
+	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
+	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
+)
 
 // Required for conflict resolution
 const (
@@ -1822,6 +1851,7 @@ const (
 	AdminPortKey              = "AdminPort"
 	HttpServerKey             = "HttpServer"
 	MsgUtilsKey               = "MessageUtils"
+	CLogManagerKey            = "CLogManager"
 )
 
 // This is exposed as an internal setting (which triggers process restart which is necessary),
@@ -1866,3 +1896,14 @@ const (
 func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequency
 	return time.Duration(SrcHeartbeatMaxIntervalFactor) * SrcHeartbeatMinInterval
 }
+
+// The default resource manager token distribution ratio:
+// 89 for high priority replications,
+// 9 for low priority replications,
+// 3 for all the conflict loggers in the system.
+var RMTokenDistribution string = "89:9:3"
+
+// Used for internal testing with self-signed certs.
+// Exposed as an internal setting.
+var CLogSkipTlsVerify bool
+var CLogResourceManagerBoost int

@@ -294,6 +294,12 @@ const (
 	SrcHeartbeatSkipCapellaTargetKey = "SrcHeartbeatSkipCapellaTarget"
 	SrcHeartbeatMinIntervalKey       = "SrcHeartbeatMinInterval"
 	SrcHeartbeatMaxIntervalFactorKey = "SrcHeartbeatMaxIntervalFactor"
+
+	RMTokenDistributionKey = "RMTokenDistribution"
+
+	// conflict logging related internal settings
+	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
+	CLogResourceManagerBoostKey = "CLogResourceManagerBoost"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -429,6 +435,9 @@ var SrcHeartbeatSkipIntraClusterConfig = &SettingsConfig{base.SrcHeartbeatSkipIn
 var SrcHeartbeatSkipCapellaTargetConfig = &SettingsConfig{base.SrcHeartbeatSkipCapellaTarget, nil}
 var SrcHeartbeatMinIntervalConfig = &SettingsConfig{int(base.SrcHeartbeatMinInterval / time.Second), &Range{10, 3600 /* 1 hour */}}
 var SrcHeartbeatMaxIntervalFactorConfig = &SettingsConfig{base.SrcHeartbeatMaxIntervalFactor, &Range{1, 100}}
+var RMTokenDistributionConfig = &SettingsConfig{base.RMTokenDistribution, nil}
+var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
+var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -564,6 +573,9 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	SrcHeartbeatSkipIntraClusterKey:               SrcHeartbeatSkipIntraClusterConfig,
 	SrcHeartbeatMinIntervalKey:                    SrcHeartbeatMinIntervalConfig,
 	SrcHeartbeatMaxIntervalFactorKey:              SrcHeartbeatMaxIntervalFactorConfig,
+	RMTokenDistributionKey:                        RMTokenDistributionConfig,
+	CLogSkipTlsVerifyKey:                          CLogSkipTlsVerifyConfig,
+	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

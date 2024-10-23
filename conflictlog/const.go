@@ -1,8 +1,6 @@
 package conflictlog
 
 import (
-	"time"
-
 	"github.com/couchbase/goxdcr/v8/base"
 )
 
@@ -11,21 +9,9 @@ const (
 	ConflictManagerLoggerName        = "conflictMgr"
 	ConflictLoggerName        string = "conflictLogger"
 	MemcachedConnUserAgent           = "conflictLog"
-	DefaultPoolConnLimit             = 10
 
 	// Logger consts
-	DefaultSetMetaTimeout       = 5 * time.Second
-	DefaultGetTimeout           = 5 * time.Second
-	DefaultPoolGetTimeout       = 5 * time.Second
-	DefaultNetworkRetryCount    = 5
-	DefaultNetworkRetryInterval = 5 * time.Second
-	LoggerShutdownChCap         = 10
-
-	// ConnPool consts
-	// DefaultPoolGCInterval is the GC frequency for connection pool
-	DefaultPoolGCInterval = 60 * time.Second
-	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
-	DefaultPoolReapInterval = 120 * time.Second
+	LoggerShutdownChCap = 10
 
 	// ConflictRecord consts
 	SourcePrefix    string = "src"
@@ -37,10 +23,4 @@ const (
 		4 /* _xdcr_conflict xattr size */ +
 		len(base.ConflictLoggingXattrKey) +
 		len(base.ConflictLoggingXattrVal) + 2 /* null terminators one each after key and value */
-)
-
-// [TEMP] - SUMUKH TODO - can move to const when actually implemented.
-var (
-	DefaultLoggerWorkerCount = 3
-	DefaultLogCapacity       = 5
 )

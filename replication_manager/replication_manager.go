@@ -365,6 +365,9 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.SrcHeartbeatSkipCapellaTargetKey].(bool),
 		time.Duration(internal_settings.Values[metadata.SrcHeartbeatMinIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.SrcHeartbeatMaxIntervalFactorKey].(int),
+		internal_settings.Values[metadata.RMTokenDistributionKey].(string),
+		internal_settings.Values[metadata.CLogSkipTlsVerifyKey].(bool),
+		internal_settings.Values[metadata.CLogResourceManagerBoostKey].(int),
 	)
 }
 
@@ -630,14 +633,14 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId, ips *se
 	return nil
 }
 
-// update the  replication settings and XDCR process setting
+// update the replication settings and XDCR process setting
 func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (map[string]error, error) {
 	logger_rm.Infof("UpdateDefaultSettings called with settings=%v\n", settings)
 
 	// Validate process setting keys
 	globalSettingsMap := metadata.ValidateGlobalSettingsKey(settings)
 	if len(globalSettingsMap) > 0 {
-		//First update XDCR Process specific setting
+		// First update XDCR Process specific setting
 		errorMap, err := GlobalSettingsService().UpdateGlobalSettings(globalSettingsMap)
 		if len(errorMap) > 0 || err != nil {
 			return errorMap, err
@@ -647,10 +650,10 @@ func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId 
 		logger_rm.Infof("Did not update global settings since there are no real changes\n")
 	}
 
-	//validate replication settings
+	// validate replication settings
 	replicationSettingMap := metadata.ValidateReplicationSettingsKey(settings)
 	if len(replicationSettingMap) > 0 {
-		//Now update default replication setting
+		// Now update default replication setting
 		changedSettingsMap, errorMap, err := ReplicationSettingsService().UpdateDefaultReplicationSettings(replicationSettingMap)
 		if len(errorMap) > 0 || err != nil {
 			return errorMap, err
@@ -707,6 +710,18 @@ func CheckIfRemoteValidationRequired(justValidate bool, oldSettings, newSettings
 			return true
 		}
 	}
+
+	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(newSettings[metadata.CLogKey])
+	if conflictLoggingMapExists {
+		oldConflictLoggingMap, oldConflictLoggingMapExists := base.ParseConflictLoggingInputType(oldSettings[metadata.CLogKey])
+		if !oldConflictLoggingMapExists {
+			oldConflictLoggingMap = base.ConflictLoggingOff
+		}
+		if !conflictLoggingMap.Disabled() && !conflictLoggingMap.SameAs(oldConflictLoggingMap) {
+			return true
+		}
+	}
+
 	// in future, if there are any other settings that require remote validation can go here
 	return false
 }

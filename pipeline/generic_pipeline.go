@@ -146,7 +146,8 @@ type GenericPipeline struct {
 
 	prometheusStatusUpdater PrometheusStatusUpdater
 
-	// Conflict logger for the pipeline
+	// Conflict logger for the pipeline.
+	// nil indicates that the feature is Off.
 	conflictLogger    conflictlog.Logger
 	conflictLoggerMtx sync.RWMutex
 }
@@ -1117,6 +1118,12 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 	// update settings in pipeline itself
 	genericPipeline.updatePipelineSettings(settings)
 
+	// update conflict logging settings if any
+	err := genericPipeline.updateConflictLoggingSettings(settings)
+	if err != nil {
+		return err
+	}
+
 	// update settings on parts and services in pipeline
 	if genericPipeline.partUpdateSetting_constructor != nil {
 		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
@@ -1171,80 +1178,147 @@ func (genericPipeline *GenericPipeline) updatePipelineSettings(settings metadata
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBSettings(settings)
 	genericPipeline.updateTopologyProgress(settings)
-	genericPipeline.updateConflictLoggingRules(settings)
 }
 
-func (genericPipeline *GenericPipeline) updateConflictLoggingRules(settings metadata.ReplicationSettingsMap) {
-	conflictLoggingIn, ok := settings[base.ConflictLoggingKey]
-	if !ok {
-		// just didn't have this setting as update - no need to warn.
-		return
-	}
-
-	conflictLoggingMap, ok := base.ParseConflictLoggingInputType(conflictLoggingIn)
-	if !ok {
-		// wrong type
-		genericPipeline.logger.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
-			conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
-		return
-	}
-
-	if conflictLoggingMap == nil {
-		// nil is not an accepted value, should not reach here.
-		genericPipeline.logger.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
-			conflictLoggingIn)
-		return
-	}
-
-	conflictLoggingEnabled := !conflictLoggingMap.Disabled()
-	spec := genericPipeline.spec.GetReplicationSpec()
-
+// The following conflict logging settings update should result in a restart of pipeline,
+// and which cannot be handled on a live basis by this function:
+// 1. conflict logging mapping change (i.e. On/Enabled -> Off/Disabled change)
+// 2. conflict logging mapping change (i.e Off/Disabled -> On/Enabled change)
+// 3. conflict logging queue capacity decrease (i.e. newCap < oldCap).
+func (genericPipeline *GenericPipeline) updateConflictLoggingSettings(settings metadata.ReplicationSettingsMap) error {
 	genericPipeline.conflictLoggerMtx.Lock()
 	defer genericPipeline.conflictLoggerMtx.Unlock()
 
 	// the conflict logger instance will be nil
 	// if conflict logging feature is off right now for this pipeline.
-	conflictLoggingIsOff := genericPipeline.conflictLogger == nil
+	conflictLogger := genericPipeline.conflictLogger
+	conflictLoggingIsOn := conflictLogger != nil
 
-	// Option 1: conflict logging needs to be enabled
-	if conflictLoggingEnabled {
-		if conflictLoggingIsOff {
-			// Option 1a: conflict logging needs to be enabled, but it is off right now.
-			newConflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), genericPipeline.logger.LoggerContext(), genericPipeline.logger)
-			if err != nil {
-				genericPipeline.logger.Errorf("error creating a conflict logger for new rules, ignoring input %v and continuing with old rules. err=%v", conflictLoggingMap, err)
-				return
+	// change of conflict logging rules if needed
+	var conflictLoggingMap base.ConflictLoggingMappingInput
+	var conflictLoggingMapExists bool
+	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
+	if conflictLoggingMapExists {
+		conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
+		if !conflictLoggingMapExists {
+			// wrong type
+			err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
+				conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
+			genericPipeline.logger.Errorf(err.Error())
+			return err
+		}
+
+		if conflictLoggingMap == nil {
+			// nil is not an accepted value, should not reach here.
+			err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
+				conflictLoggingIn)
+			genericPipeline.logger.Errorf(err.Error())
+			return err
+		}
+	}
+
+	// validate if we can perform live pipeline update or not.
+	if conflictLoggingIsOn {
+		if conflictLoggingMap.Disabled() {
+			// conflict logging is on in the pipeline right now
+			// and the setting update was to turn it off. The pipeline should have restarted.
+			err := fmt.Errorf("conflict map respresents Off as input. Ignoring %v for the update because pipeline should have restarted",
+				conflictLoggingIn)
+			genericPipeline.logger.Errorf(err.Error())
+			return err
+		}
+	} else {
+		if !conflictLoggingMap.Disabled() {
+			// conflict logging is off in the pipeline right now
+			// and the setting update was to turn it on. The pipeline should have restarted.
+			err := fmt.Errorf("conflict map respresents On as input. Ignoring %v for the update because pipeline should have restarted",
+				conflictLoggingIn)
+			genericPipeline.logger.Errorf(err.Error())
+			return err
+		}
+
+		// No need of settings update.
+		// Conflict logging is Off and will remain off.
+		return nil
+	}
+
+	spec := genericPipeline.spec.GetReplicationSpec()
+
+	// update logger queue capacity if needed
+	loggerQueueCap, ok := settings[base.CLogQueueCapacity]
+	if ok {
+		cnt, ok := loggerQueueCap.(int)
+		if ok && cnt != 0 {
+			err := conflictLogger.UpdateQueueCapcity(cnt)
+			if err != nil && err != conflictlog.ErrNoChange {
+				genericPipeline.logger.Errorf("error updating queue capacity to %v", cnt)
+				return err
 			}
-			genericPipeline.conflictLogger = newConflictLogger
-			return
 		}
+	}
 
-		// Option 1b: conflict logging needs to be enabled, but it is on right now.
-		err := conflictlog.UpdateLoggerWithRules(conflictLoggingMap, genericPipeline.conflictLogger, spec.UniqueId(), genericPipeline.logger)
+	// update logger setMeta timeout if needed
+	setMetaTimeoutMs, ok := settings[base.CLogSetMetaTimeout]
+	if ok {
+		t, ok := setMetaTimeoutMs.(int)
+		if ok {
+			conflictLogger.UpdateSetMetaTimeout(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update logger getPool timeout if needed
+	getPoolTimeoutMs, ok := settings[base.CLogPoolGetTimeout]
+	if ok {
+		t, ok := getPoolTimeoutMs.(int)
+		if ok {
+			conflictLogger.UpdateGetFromPoolTimeout(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update network retry interval if needed
+	nwRetryIntervalMs, ok := settings[base.CLogNetworkRetryInterval]
+	if ok {
+		t, ok := nwRetryIntervalMs.(int)
+		if ok {
+			conflictLogger.UpdateNWRetryInterval(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update network retry count if needed
+	nwRetryCount, ok := settings[base.CLogNetworkRetryCount]
+	if ok {
+		cnt, ok := nwRetryCount.(int)
+		if ok {
+			conflictLogger.UpdateNWRetryCount(cnt)
+		}
+	}
+
+	// update logger worker count if needed
+	workerCount, ok := settings[base.CLogWorkerCount]
+	if ok {
+		cnt, ok := workerCount.(int)
+		if ok && cnt != 0 {
+			err := conflictLogger.UpdateWorkerCount(cnt)
+			if err != nil && err != conflictlog.ErrNoChange {
+				genericPipeline.logger.Errorf("error updating worker count to %v", cnt)
+				return err
+			}
+		}
+	}
+
+	// change of conflict logging rules if needed
+	if conflictLoggingMapExists {
+		// conflict logging is on and its settings needs to be updated.
+		err := conflictlog.UpdateLoggerWithRules(conflictLoggingMap, conflictLogger, spec.UniqueId(), genericPipeline.logger)
 		if err != nil {
-			genericPipeline.logger.Errorf("error updating existing conflict logging rules, ignoring %v and continuing with old rules. err=%v",
+			err := fmt.Errorf("error updating existing conflict logging rules, ignoring %v and continuing with old rules. err=%v",
 				conflictLoggingMap, err)
-			return
+			genericPipeline.logger.Errorf(err.Error())
+			return err
 		}
-		return
 	}
 
-	// Option 2: conflict logging is to be disabled.
-	if conflictLoggingIsOff {
-		// Option 2a: conflict logging needs to be disabled, but is already disabled right now.
-		genericPipeline.logger.Infof("conflict logger already disabled and will remain disabled with input %v", conflictLoggingMap)
-		return
-	}
-
-	// Option 2b: conflict logging is on right now and is to be disabled.
-	err := genericPipeline.conflictLogger.Close()
-	if err != nil {
-		genericPipeline.logger.Errorf("error closing conflict logger with input %v, err=%v", conflictLoggingMap, err)
-		return
-	}
-
-	genericPipeline.conflictLogger = nil
-	genericPipeline.logger.Infof("closed conflict logger with input %v", conflictLoggingMap)
+	return nil
 }
 
 func (genericPipeline *GenericPipeline) closeConflictLogger() error {
@@ -1254,6 +1328,7 @@ func (genericPipeline *GenericPipeline) closeConflictLogger() error {
 
 	if genericPipeline.conflictLogger != nil {
 		err = genericPipeline.conflictLogger.Close()
+		genericPipeline.conflictLogger = nil
 	}
 
 	return err

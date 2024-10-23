@@ -1,6 +1,7 @@
 package conflictlog
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -9,10 +10,9 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/utils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-var fakeConnectionSleep time.Duration
 
 type fakeConnection struct {
 	sleep *time.Duration
@@ -45,12 +45,15 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 
 	var fakeConnectionSleep time.Duration
 
-	pool := iopool.NewConnPool(nil, 10, func(bucketName string) (io.Closer, error) {
-		return &fakeConnection{
-			sleep: &fakeConnectionSleep,
-			id:    NewConnId(),
-		}, nil
-	})
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		func(bucketName string) (io.Closer, error) {
+			return &fakeConnection{
+				sleep: &fakeConnectionSleep,
+				id:    NewConnId(),
+			}, nil
+		})
 
 	fakeConnectionSleep = 1 * time.Second
 
@@ -87,14 +90,216 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 	wg.Wait()
 }
 
+// the workers will be shutdown to test the number of workers.
+// so the caller should expect 0 workers in the loggers after this routine exits.
+func testNumWorkers(t *testing.T, l *loggerImpl, num int) {
+	assert.Equal(t, l.opts.workerCount, num)
+
+	for i := 0; i < num; i++ {
+		select {
+		case l.shutdownWorkerCh <- true:
+			time.Sleep(time.Second)
+			if len(l.shutdownWorkerCh) > 0 {
+				assert.FailNow(t, fmt.Sprintf("lesser workers than %v", num))
+			}
+		default:
+			assert.FailNow(t, fmt.Sprintf("lesser workers than %v", num))
+		}
+	}
+
+	select {
+	case l.shutdownWorkerCh <- true:
+		time.Sleep(time.Second)
+		if len(l.shutdownWorkerCh) == 0 {
+			assert.FailNow(t, fmt.Sprintf("more workers than %v", num))
+		}
+	default:
+	}
+
+}
+
 func TestLoggerImpl_basicClose(t *testing.T) {
 	utils := utils.NewUtilities()
 
-	pool := iopool.NewConnPool(nil, 10, newFakeConnection)
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newFakeConnection)
 
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool)
 	require.Nil(t, err)
 
 	l.Close()
 	l.Close()
+}
+
+func TestLoggerImpl_UpdateWorker(t *testing.T) {
+	utils := utils.NewUtilities()
+
+	var fakeConnectionSleep time.Duration
+
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		func(bucketName string) (io.Closer, error) {
+			return &fakeConnection{
+				sleep: &fakeConnectionSleep,
+				id:    NewConnId(),
+			}, nil
+		})
+
+	fakeConnectionSleep = 1 * time.Second
+
+	// 1. update with same value
+	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
+	assert.Nil(t, err)
+
+	// same as before
+	err = l.UpdateWorkerCount(2)
+	assert.Equal(t, err, ErrNoChange)
+	testNumWorkers(t, l, 2)
+	assert.Nil(t, l.Close())
+
+	// 2. update with a higher value
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
+	assert.Nil(t, err)
+
+	// more than before
+	err = l.UpdateWorkerCount(4)
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.workerCount, 4)
+	testNumWorkers(t, l, 4)
+	assert.Nil(t, l.Close())
+
+	// 3. update with a lower value
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(3))
+	assert.Nil(t, err)
+
+	// less than before
+	err = l.UpdateWorkerCount(1)
+	assert.Nil(t, err)
+	testNumWorkers(t, l, 1)
+	assert.Nil(t, l.Close())
+}
+
+func TestLoggerImpl_UpdateCapacity(t *testing.T) {
+	utils := utils.NewUtilities()
+
+	var fakeConnectionSleep time.Duration
+
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		func(bucketName string) (io.Closer, error) {
+			return &fakeConnection{
+				sleep: &fakeConnectionSleep,
+				id:    NewConnId(),
+			}, nil
+		})
+
+	fakeConnectionSleep = 1 * time.Second
+
+	testCapacity := func(l *loggerImpl, num int) {
+		assert.Equal(t, l.opts.logQueueCap, num)
+		assert.Equal(t, cap(l.logReqCh), num)
+	}
+
+	// 1. update with same value
+	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.logQueueCap, 20)
+
+	// same as before
+	err = l.UpdateQueueCapcity(20)
+	assert.Equal(t, err, ErrNoChange)
+	testCapacity(l, 20)
+	assert.Nil(t, l.Close())
+
+	// 2. update with a higher value
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.logQueueCap, 20)
+
+	// more than before
+	err = l.UpdateQueueCapcity(40)
+	assert.Nil(t, err)
+	testCapacity(l, 40)
+	assert.Nil(t, l.Close())
+
+	// 3. update with a lower value
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.logQueueCap, 20)
+
+	// less than before - cannot be done
+	err = l.UpdateQueueCapcity(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, l.Close())
+
+	// 4. non-empty queue - test conflicts are not lost
+	numItems := 100000
+	readCount := 0
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(0), WithCapacity(numItems))
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.logQueueCap, numItems)
+
+	// simulate conflict writes
+	for i := 0; i < numItems; i++ {
+		l.logReqCh <- logRequest{
+			conflictRec: &ConflictRecord{},
+			// have a buffered channel because we don't have a reader of this channel.
+			// i.e. no Wait() will be called.
+			ackCh: make(chan error, 1),
+		}
+	}
+
+	finCh := make(chan bool)
+
+	// pseudo worker to test that conflicts are not lost
+	go func() {
+		for {
+			select {
+			case <-finCh:
+				return
+			case req := <-l.logReqCh:
+				if req.conflictRec == nil {
+					continue
+				}
+				readCount++
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+	}()
+
+	go func() {
+		// increase the capacity
+		err = l.UpdateQueueCapcity(numItems + 1)
+		assert.Nil(t, err)
+	}()
+
+	// sleep 2 seconds for mu to be acquired by UpdateQueueCapcity
+	// this way testCapacity will only be called after UpdateQueueCapcity is done.
+	time.Sleep(2 * time.Second)
+
+	l.rwMtx.Lock()
+	close(finCh)
+	testCapacity(l, numItems+1)
+	l.rwMtx.Unlock()
+	assert.Equal(t, len(l.logReqCh)+readCount, numItems)
+
+	// have actual workers and check if the queue is read from
+	err = l.UpdateWorkerCount(len(l.logReqCh))
+	time.Sleep(5 * time.Second)
+	assert.Equal(t, len(l.logReqCh), 0)
+	assert.Nil(t, l.Close())
+
+	// 5. test that the worker count remains the same
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(10))
+	assert.Nil(t, err)
+	assert.Equal(t, l.opts.workerCount, 10)
+
+	err = l.UpdateQueueCapcity(numItems + 1) // increase the capacity
+	testNumWorkers(t, l, 10)
+	assert.Equal(t, l.opts.workerCount, 10)
+	assert.Nil(t, l.Close())
 }

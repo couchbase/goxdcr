@@ -47,7 +47,7 @@ var ForceCollectionDisableKey = "ForceCollectionDisable"
 var BackfillPersistErrKey = "Backfill Persist Callback Error"
 var CkptMgrBrokenMappingErrKey = "Checkpoint Manager routing update Callback Error"
 var MobileCompatible = base.MobileCompatibleKey
-var ConflictLogging = base.ConflictLoggingKey
+var CLogging = base.CLogKey
 
 // A function used by the router to raise routing updates to other services that need to know
 type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error

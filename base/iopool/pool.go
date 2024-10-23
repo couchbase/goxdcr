@@ -13,14 +13,6 @@ import (
 
 var _ ConnPool = (*ConnPoolImpl)(nil)
 
-const (
-	// ConnPool consts
-	// DefaultPoolGCInterval is the GC frequency for connection pool
-	DefaultPoolGCInterval = 60 * time.Second
-	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
-	DefaultPoolReapInterval = 120 * time.Second
-)
-
 var (
 	ErrClosedConnPool     error = errors.New("use of closed connection pool")
 	ErrConnPoolGetTimeout error = errors.New("conflict logging pool get timedout")
@@ -104,9 +96,6 @@ type ConnPoolImpl struct {
 	limiter *base.Semaphore
 
 	finch chan bool
-
-	// closed when set to true indicates that pool is closed
-	closed bool
 }
 
 // connList is the list of actual objects which are pooled
@@ -165,14 +154,14 @@ func (l *connList) closeAll() {
 }
 
 // NewConnPool creates a new connection pool
-func NewConnPool(logger *log.CommonLogger, limit int, newConnFn func(bucketName string) (io.Closer, error)) *ConnPoolImpl {
+func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval time.Duration, newConnFn func(bucketName string) (io.Closer, error)) *ConnPoolImpl {
 	p := &ConnPoolImpl{
 		logger:       logger,
 		buckets:      map[string]*connList{},
 		mu:           sync.Mutex{},
 		newConnFn:    newConnFn,
-		gcTicker:     time.NewTicker(DefaultPoolGCInterval),
-		reapInterval: DefaultPoolReapInterval,
+		gcTicker:     time.NewTicker(gcInterval),
+		reapInterval: reapInterval,
 		finch:        make(chan bool, 1),
 		limiter:      base.NewSemaphore(limit),
 	}
@@ -210,10 +199,17 @@ func (pool *ConnPoolImpl) get(bucketName string) (conn io.Closer) {
 
 // UpdateGCInterval updates the new GC frequency
 func (pool *ConnPoolImpl) UpdateGCInterval(d time.Duration) {
+	if pool.isClosed() {
+		pool.logger.Infof("pool cannot be updated, it is closed")
+		return
+	}
+
 	// Negative duration will cause the timer to panic.
 	if d <= 0 {
 		return
 	}
+
+	defer pool.logger.Infof("set CLog pool GC interval to %v", d)
 
 	pool.mu.Lock()
 	pool.gcTicker = time.NewTicker(d)
@@ -230,10 +226,17 @@ func (pool *ConnPoolImpl) getGCTicker() (t *time.Ticker) {
 
 // UpdateReapInterval updates the reap interval for unused connections
 func (pool *ConnPoolImpl) UpdateReapInterval(d time.Duration) {
+	if pool.isClosed() {
+		pool.logger.Infof("pool cannot be updated, it is closed")
+		return
+	}
+
 	// Negative duration does not make any sense
 	if d <= 0 {
 		return
 	}
+
+	defer pool.logger.Infof("set CLog pool reap interval to %v", d)
 
 	pool.mu.Lock()
 	pool.reapInterval = d
@@ -244,7 +247,7 @@ func (pool *ConnPoolImpl) UpdateReapInterval(d time.Duration) {
 // one by calling newConnFn() and returns it. It is guaranteed that either
 // an error or a non-nil connection object will be returned
 func (pool *ConnPoolImpl) Get(bucketName string, timeout time.Duration) (conn io.Closer, err error) {
-	if pool.closed {
+	if pool.isClosed() {
 		err = ErrClosedConnPool
 		return
 	}
@@ -279,7 +282,7 @@ func (pool *ConnPoolImpl) Put(bucketName string, conn io.Closer, damaged bool) {
 		return
 	}
 
-	if pool.closed {
+	if pool.isClosed() {
 		conn.Close()
 	}
 
@@ -304,17 +307,25 @@ func (pool *ConnPoolImpl) Count() (n int) {
 
 // Close shutsdown the GC worker and initiates a final gc with force=true
 func (pool *ConnPoolImpl) Close() error {
-	if pool.closed {
+	if pool.isClosed() {
 		return nil
 	}
 
-	pool.closed = true
 	pool.logger.Infof("closing all connections of conflict connection pool")
 	close(pool.finch)
 
 	// use force=true to ensure all remaining connections are reaped.
 	pool.gcOnce(true)
 	return nil
+}
+
+func (pool *ConnPoolImpl) isClosed() bool {
+	select {
+	case <-pool.finch:
+		return true
+	default:
+		return false
+	}
 }
 
 // SetLimit sets the upper limit of number of active connections in the pool and

@@ -261,7 +261,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		conflictlog.InitManager(log.DefaultLoggerContext, utils, top_svc, securitySvc)
+		globalSettings, err := processSetting_svc.GetGlobalSettings()
+		if err != nil {
+			fmt.Printf("Error getting global settings. err=%v\n", err)
+			os.Exit(1)
+		}
+		conflictlog.InitManager(log.GetOrCreateContext(base.CLogManagerKey), utils, top_svc, securitySvc,
+			globalSettings.GetCLogPoolGCInterval(), globalSettings.GetCLogPoolReapInterval(), globalSettings.GetCLogPoolConnLimit())
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
