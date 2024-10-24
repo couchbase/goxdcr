@@ -113,6 +113,7 @@ type ReplicationStatusIface interface {
 	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
 	LoadLatestBrokenMap()
 	RecordBackfillProgress(progress string)
+	SetInternalId(specId string) error
 }
 
 type ReplicationStatus struct {
@@ -178,7 +179,6 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 		if pipeline != nil {
 			rs.vb_list = pipeline_utils.GetSourceVBListPerPipeline(pipeline)
 			base.SortUint16List(rs.vb_list)
-			rs.specInternalId = pipeline.Specification().GetReplicationSpec().InternalId
 		}
 	case common.BackfillPipeline:
 		rs.backfillPipeline_ = pipeline
@@ -187,6 +187,18 @@ func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {
 	}
 
 	rs.Publish(false)
+}
+
+func (rs *ReplicationStatus) SetInternalId(specId string) error {
+	spec, err := rs.spec_getter(specId)
+	if err != nil {
+		return fmt.Errorf("failed to set specInternalId. err=%v", err)
+	}
+	rs.lock.Lock()
+	rs.specInternalId = spec.InternalId
+	rs.lock.Unlock()
+	return nil
+
 }
 
 func (rs *ReplicationStatus) RemovePipeline(pipeline common.Pipeline) {
