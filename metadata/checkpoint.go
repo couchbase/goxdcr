@@ -408,6 +408,9 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 
 	tgtVBTimestampMap := make(map[uint16]*GlobalVBTimestamp)
 	for k, v := range *g {
+		if v == nil {
+			v = &GlobalVBTimestamp{}
+		}
 		tgtVBTimestampMap[k] = &GlobalVBTimestamp{
 			TargetVBTimestamp: TargetVBTimestamp{
 				Target_vb_opaque:    v.Target_vb_opaque.Clone(),
@@ -2183,6 +2186,27 @@ func (v *VBsCkptsDocMap) MergeAndReplace(incoming VBsCkptsDocMap) {
 	}
 }
 
+// Given a set of VBs and each one's individual checkpoints, deduplicate and return
+// a single compressed documented that has all the global timestamps compressed and the shas populated
+func (v *VBsCkptsDocMap) GetGlobalTimestampDoc() (*GlobalTimestampCompressedDoc, error) {
+	if v == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	_, shaMap, err := v.SnappyCompress()
+	if err != nil {
+		return nil, err
+	}
+
+	retDoc := &GlobalTimestampCompressedDoc{}
+	err = retDoc.LoadCompressedShaMap(shaMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return retDoc, nil
+}
+
 type VBsCkptsDocSnappyMap map[uint16][]byte
 
 func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompressedMap) (VBsCkptsDocMap, error) {
@@ -2410,6 +2434,19 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		retVal.Target_vb_opaque = c.Target_vb_opaque.Clone()
 	}
 	return retVal
+}
+
+func (c *CheckpointRecord) IsValidGlobalTs(targetVBs []uint16) bool {
+	if c == nil || c.IsTraditional() {
+		return false
+	}
+
+	for _, tgtVB := range targetVBs {
+		if c.GlobalTimestamp == nil || c.GlobalTimestamp[tgtVB] == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
@@ -2693,6 +2730,25 @@ func (g *GlobalTimestampCompressedDoc) LoadShaMap(shaMap ShaToGlobalTimestampMap
 	// MUST cast as a pointer otherwise the LoadShaMap below will be done on a copy
 	compressedMapPtr := (*CompressedMappings)(g)
 	return compressedMapPtr.LoadShaMap(shaMap.ToSnappyCompressableMap())
+}
+
+func (g *GlobalTimestampCompressedDoc) LoadCompressedShaMap(shaMap ShaMappingCompressedMap) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+	// MUST cast as a pointer otherwise the LoadShaMap below will be done on a copy
+	compressedMapPtr := (*CompressedMappings)(g)
+	return compressedMapPtr.LoadCompressedShaMap(shaMap)
+}
+
+func (g *GlobalTimestampCompressedDoc) UniqueAppend(other *GlobalTimestampCompressedDoc) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+	// MUST cast as a pointer otherwise the action below will be done on a copy
+	compressedMapPtr := (*CompressedMappings)(g)
+	otherPtr := (*CompressedMappings)(other)
+	return compressedMapPtr.UniqueAppend(otherPtr)
 }
 
 // For unit test

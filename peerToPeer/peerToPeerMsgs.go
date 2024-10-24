@@ -736,10 +736,36 @@ func (v *ReplicationPayload) loadCkptInternal(ckptDocs map[uint16]*metadata.Chec
 		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
 	}
 
+	var isGlobal bool
+	for _, ckptDoc := range ckptDocs {
+		if !ckptDoc.IsTraditional() {
+			isGlobal = true
+			break
+		}
+	}
+	if isGlobal {
+		vbsCkptDoc := metadata.VBsCkptsDocMap(ckptDocs)
+		globalTimestampDoc, err := vbsCkptDoc.GetGlobalTimestampDoc()
+		if err != nil {
+			return err
+		}
+
+		if payload.GlobalTimestampDoc == nil {
+			payload.GlobalTimestampDoc = globalTimestampDoc
+		} else {
+			err = payload.GlobalTimestampDoc.UniqueAppend(globalTimestampDoc)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	errMap := make(base.ErrorMap)
 	for vb, ckptDoc := range ckptDocs {
+
 		notMyVBMap := *payload.NotMyVBs
 		vbPayload, found := notMyVBMap[vb]
+
 		if found {
 			switch pipelineType {
 			case common.MainPipeline:

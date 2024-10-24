@@ -55,6 +55,48 @@ func (b *CompressedMappings) LoadShaMap(shaMap map[string]SnappyCompressableVal)
 	return nil
 }
 
+func (b *CompressedMappings) LoadCompressedShaMap(shaMap map[string][]byte) error {
+	if b == nil {
+		return base.ErrorNilPtr
+	}
+
+	errorMap := make(base.ErrorMap)
+	b.NsMappingRecords = b.NsMappingRecords[:0]
+	for sha, compressedBytes := range shaMap {
+		oneRecord := &CompressedShaMapping{compressedBytes, sha}
+		b.NsMappingRecords.SortedInsert(oneRecord)
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("Error LoadingCompressedShaMap - sha -> err: %v", base.FlattenErrorMap(errorMap))
+	}
+	return nil
+}
+
+// Append elements in "other" only if it doesn't already exist in "b"
+func (b *CompressedMappings) UniqueAppend(other *CompressedMappings) error {
+	if b == nil {
+		return base.ErrorNilPtr
+	}
+	if other == nil {
+		// Do nothing
+		return nil
+	}
+
+	bDedup := make(map[string]bool)
+	for _, oneRecord := range (*b).NsMappingRecords {
+		bDedup[oneRecord.Sha256Digest] = true
+	}
+
+	for _, oneRecord := range (*other).NsMappingRecords {
+		_, exists := bDedup[oneRecord.Sha256Digest]
+		if !exists {
+			(*b).NsMappingRecords.SortedInsert(oneRecord)
+		}
+	}
+	return nil
+}
+
 type SnappyCompressableVal interface {
 	ToSnappyCompressed() ([]byte, error)
 }
