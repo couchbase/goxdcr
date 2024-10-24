@@ -237,17 +237,6 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	err = resp.LoadGlobaltimestampDoc(globalTimestampDoc, req.SourceBucketName)
-	if err != nil {
-		h.logger.Errorf("%v (%v) - when loading global timestamp doc into response, got %v", req.ReplicationId, req.GetOpaque(), err)
-		resp.ErrorString = err.Error()
-		_, cbErr := req.CallBack(resp)
-		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
-		}
-		return
-	}
-
 	// Final Callback
 	doneProcessedTime := time.Now()
 	handlerResult, err := req.CallBack(resp)
@@ -258,8 +247,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		}
 		h.logger.Errorf("Unable to send resp %v to original req %v (%v) - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
 	} else {
-		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time: %v processing time: %v timeInQueue: %v",
-			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime), startTime.Sub(req.GetEnqueuedTime()))
+		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time: %v processing time: %v timeInQueue: %v brokenMapCnt: %v, globalTsMapCnt: %v",
+			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime), startTime.Sub(req.GetEnqueuedTime()),
+			len(brokenMappingDoc.NsMappingRecords), len(globalTimestampDoc.NsMappingRecords))
 	}
 	return
 }

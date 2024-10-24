@@ -100,14 +100,38 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 	resp := req.GenerateResponse().(*PeerVBPeriodicPushResp)
 
 	if req.PushRequests == nil {
-		resp.ErrorString = fmt.Sprintf("Received nil push request list")
+		resp.ErrorString = fmt.Sprintf("Received nil push request list from %v (opaque %v)", req.Sender, req.Opaque)
 	} else {
 		var waitGrp sync.WaitGroup
 		errMap := make(base.ErrorMap)
 		var errMapMtx sync.Mutex
 
 		var unknownCounter = 1
-		p.logger.Infof("Received peer-to-peer push requests from %v (opaque %v)", req.Sender, req.GetOpaque())
+		var mainExists bool
+		var backfillExists bool
+		var globalTimestampShasCnt int
+		for _, onePushRequest := range *req.PushRequests {
+			if onePushRequest == nil {
+				continue
+			}
+			if onePushRequest.MainReplicationExists() {
+				mainExists = true
+			}
+			if onePushRequest.BackfillReplicationExists() {
+				backfillExists = true
+			}
+			for _, oneVBMasterPayload := range *onePushRequest.payload {
+				if oneVBMasterPayload == nil {
+					continue
+				}
+				if oneVBMasterPayload.GlobalTimestampDoc != nil {
+					globalTimestampShasCnt += len(oneVBMasterPayload.GlobalTimestampDoc.NsMappingRecords)
+				}
+			}
+		}
+
+		p.logger.Infof("Received peer-to-peer push requests from %v (opaque %v): main %v backfill %v globalTsShaCnt %v",
+			req.Sender, req.GetOpaque(), mainExists, backfillExists, globalTimestampShasCnt)
 		startTime := time.Now()
 		for _, pushReqPtr := range *req.PushRequests {
 			if pushReqPtr == nil {

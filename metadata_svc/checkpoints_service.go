@@ -144,10 +144,8 @@ func (ckpt_svc *CheckpointsService) checkpointsDocInternal(replicationId string,
 	globalTsShaMap, _ := ckpt_svc.globalTsRefCountSvc.GetShaGlobalTsMap(replicationId)
 
 	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev, shaMap, globalTsShaMap)
-	if err == service_def.MetadataNotFoundErr {
-		ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v",
-			replicationId, vbno, key)
-	}
+	ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v err %v",
+		replicationId, vbno, key, err)
 	return ckpt_doc, err
 }
 
@@ -525,7 +523,12 @@ func (ckpt_svc *CheckpointsService) UpsertGlobalTimestamps(replicationId string,
 }
 
 func (ckpt_svc *CheckpointsService) PreUpsertGlobalTs(replicationId string, specInternalId string, gts *metadata.GlobalTimestamp) error {
-	return ckpt_svc.globalTsRefCountSvc.RegisterMapping(replicationId, specInternalId, gts)
+	err := ckpt_svc.globalTsRefCountSvc.RegisterMapping(replicationId, specInternalId, gts)
+	if err == errUpsertAlreadyOccurring {
+		// It'll be re-upserted later
+		err = nil
+	}
+	return err
 }
 
 func (ckpt_svc *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error) {
@@ -919,7 +922,6 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 		}
 		return ckpt_doc, nil
 	} else {
-		ckpt_svc.logger.Errorf("Unable to construct valid checkpoint due to empty checkpoint data")
 		return nil, service_def.MetadataNotFoundErr
 	}
 }
@@ -1466,10 +1468,12 @@ func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replica
 
 func (ckpt_svc *CheckpointsService) DisableRefCntDecrement(topic string) {
 	ckpt_svc.brokenMapRefCountSvc.DisableRefCntDecrement(topic)
+	ckpt_svc.globalTsRefCountSvc.DisableRefCntDecrement(topic)
 }
 
 func (ckpt_svc *CheckpointsService) EnableRefCntDecrement(topic string) {
 	ckpt_svc.brokenMapRefCountSvc.EnableRefCntDecrement(topic)
+	ckpt_svc.globalTsRefCountSvc.EnableRefCntDecrement(topic)
 }
 
 func (ckpt_svc *CheckpointsService) validateSpecIsValid(fullReplId string, internalId string) error {
