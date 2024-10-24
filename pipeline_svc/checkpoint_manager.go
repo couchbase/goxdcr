@@ -1596,7 +1596,10 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		}
 
 		if ckpt_record.Seqno <= max_seqno {
-			ckmgr.extractTargetTimestamp(vbno, &targetTimestamp, globalTargetTimestamp, ckpt_record)
+			err := ckmgr.extractTargetTimestamp(vbno, &targetTimestamp, globalTargetTimestamp, ckpt_record)
+			if err != nil {
+				continue
+			}
 		}
 		sourceDCPManifestId := ckpt_record.SourceManifestForDCP
 		sourceBackfillManifestId := ckpt_record.SourceManifestForBackfillMgr
@@ -1653,7 +1656,7 @@ func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, ta
 	}
 }
 
-func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimestamp **service_def.RemoteVBReplicationStatus, globalTimestamp map[uint16]*service_def.RemoteVBReplicationStatus, ckpt_record *metadata.CheckpointRecord) {
+func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimestamp **service_def.RemoteVBReplicationStatus, globalTimestamp map[uint16]*service_def.RemoteVBReplicationStatus, ckpt_record *metadata.CheckpointRecord) error {
 	if !ckmgr.isVariableVBMode() {
 		*targetTimestamp = &service_def.RemoteVBReplicationStatus{
 			VBOpaque: ckpt_record.Target_vb_opaque,
@@ -1665,6 +1668,10 @@ func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimest
 		}
 	} else {
 		for _, tgtVBno := range ckmgr.getMyTgtVBs() {
+			if ckpt_record.GlobalTimestamp == nil || ckpt_record.GlobalTimestamp[tgtVBno] == nil {
+				ckmgr.logger.Warnf("Global timestamp for target vb %v does not exist", vbno)
+				return base.ErrorNilPtr
+			}
 			globalTimestamp[tgtVBno] = &service_def.RemoteVBReplicationStatus{
 				VBNo:     tgtVBno,
 				VBSeqno:  ckpt_record.GlobalTimestamp[tgtVBno].Target_Seqno,
@@ -1672,6 +1679,7 @@ func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimest
 			}
 		}
 	}
+	return nil
 }
 
 /**
@@ -1685,9 +1693,17 @@ func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimest
 func (ckmgr *CheckpointManager) ckptRecordsWLock(ckptDoc *metadata.CheckpointsDoc, vbno uint16) []*checkpointRecordWithLock {
 	ret := []*checkpointRecordWithLock{}
 
+	var useInternalDoc bool = true
+	var invalidGtsCnt int
+
 	if ckptDoc != nil {
+		useInternalDoc = false // assume until proven otherwise
 		// We're not going to use the checkpoint manager's internal record, so fake locks and return
 		for _, aRecord := range ckptDoc.GetCheckpointRecords() {
+			if ckmgr.isVariableVBMode() && !aRecord.IsValidGlobalTs(ckmgr.getMyTgtVBs()) {
+				invalidGtsCnt++
+				continue
+			}
 			newLock := &sync.RWMutex{}
 			recordWLock := &checkpointRecordWithLock{
 				ckpt: aRecord,
@@ -1695,8 +1711,17 @@ func (ckmgr *CheckpointManager) ckptRecordsWLock(ckptDoc *metadata.CheckpointsDo
 			}
 			ret = append(ret, recordWLock)
 		}
-		ckmgr.logger.Infof("Found checkpoint doc for vb=%v\n", vbno)
-	} else {
+		if len(ret) > 0 {
+			ckmgr.logger.Infof("Found checkpoint doc for vb=%v\n", vbno)
+		} else {
+			useInternalDoc = true
+			if invalidGtsCnt > 0 {
+				ckmgr.logger.Warnf("Checkpoint doc for vb %v contained %v invalid global checkpoints", invalidGtsCnt)
+			}
+		}
+	}
+
+	if useInternalDoc {
 		// First time XDCR checkpoint is executing, thus why ckptDoc is nil
 		ret = append(ret, ckmgr.getCurrentCkptWLock(vbno))
 	}
@@ -2335,6 +2360,15 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 		return
 	}
 
+	if ckmgr.isVariableVBMode() {
+		err = ckmgr.checkpoints_svc.PreUpsertGlobalTs(ckmgr.pipeline.FullTopic(),
+			ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalTimestamp)
+		if err != nil {
+			ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global timestamp %v",
+				vbno, err)
+		}
+	}
+
 	size, err = ckpt_obj.updateAndPersist(ckmgr, vbno, currRecordVersion, newCkpt)
 
 	if err != nil {
@@ -2345,14 +2379,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 		err = nil
 	} else {
 		ckmgr.markBpCkptStored(vbno)
-		if ckmgr.isVariableVBMode() {
-			err = ckmgr.checkpoints_svc.PreUpsertGlobalTs(ckmgr.pipeline.FullTopic(),
-				ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalTimestamp)
-			if err != nil {
-				ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global timestamp %v",
-					vbno, err)
-			}
-		}
 	}
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
@@ -3009,7 +3035,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 				}
 			}
 			needToGetFailoverLogs = true
-			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
+			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v opaque %v", node, resp.ReplicationSpecId, resp.GetOpaque())
 			nodeVbMainCkptsMap[node] = oneNodeVbsCkptMap
 		}
 		oneNodeVbsBackfillCkptMap, err := payload.GetAllCheckpoints(common.BackfillPipeline)
@@ -3037,10 +3063,12 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		if brokenMap != nil && brokenMap.SpecInternalId != "" {
 			combinedBrokenMapping = append(combinedBrokenMapping, brokenMap)
 			combinedBrokenMappingSpecInternalId[node] = brokenMap.SpecInternalId
+			ckmgr.logger.Infof("Received peerToPeer brokenMap data (%v) from node %v replId %v opaque %v", len(brokenMap.NsMappingRecords), node, resp.ReplicationSpecId, resp.GetOpaque())
 		}
 
 		if payload.GlobalTimestampDoc != nil {
 			combinedGlobalTimestampDocs = append(combinedGlobalTimestampDocs, payload.GlobalTimestampDoc)
+			ckmgr.logger.Infof("Received peerToPeer globalTimestamp deduped data (%v) from node %v replId %v opaque %v", len(payload.GlobalTimestampDoc.NsMappingRecords), node, resp.ReplicationSpecId, resp.GetOpaque())
 		}
 		unlockFunc()
 	}
@@ -3151,6 +3179,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 	if ckptArgs == nil {
 		return nil
 	}
+
 	pipelinesCkptDocs := ckptArgs.PipelinesCkptDocs
 	brokenMappingShaMap := ckptArgs.BrokenMappingShaMap
 	globalTimestampShaMap := ckptArgs.GlobalTimestampShaMap
@@ -3788,7 +3817,7 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	}
 
 	respCh := make(chan error)
-	err = ckmgr.requestPeriodicMerge(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, respCh)
+	err = ckmgr.requestPeriodicMerge(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, respCh, payload.GlobalTimestampDoc)
 	if err != nil {
 		return err
 	}
@@ -3801,7 +3830,7 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	}
 }
 
-func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.VBsCkptsDocMap, shaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, respCh chan error) error {
+func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.VBsCkptsDocMap, shaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, respCh chan error, globalTs *metadata.GlobalTimestampCompressedDoc) error {
 	ckmgr.periodicPushDedupMtx.Lock()
 	if ckmgr.periodicPushDedupArg == nil {
 		// This means that there is no back pressure happening and this periodic push request is the first one to be merged
@@ -3816,6 +3845,16 @@ func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.V
 			TgtFailoverLogs:         nil,
 			PushRespChs:             []chan error{respCh},
 		}
+
+		if globalTs != nil {
+			globalTsShaMap, err := globalTs.ToShaMap()
+			if err != nil {
+				ckmgr.periodicPushDedupMtx.Unlock()
+				return err
+			}
+			ckmgr.periodicPushDedupArg.GlobalTimestampShaMap = globalTsShaMap
+		}
+
 	} else {
 		// This means that there is a push request already in place and haven't gotten to execute yet
 		if brokenMapSpecInternalId != "" && ckmgr.periodicPushDedupArg.BrokenMapSpecInternalId != "" &&
@@ -3832,6 +3871,18 @@ func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.V
 		ckmgr.periodicPushDedupArg.BrokenMappingShaMap.Merge(shaMap)
 		ckmgr.periodicPushDedupArg.SrcManifests.LoadIfNotExists(srcManifests)
 		ckmgr.periodicPushDedupArg.TgtManifests.LoadIfNotExists(tgtManifests)
+		if globalTs != nil {
+			incomingShaMap, err := globalTs.ToShaMap()
+			if err != nil {
+				ckmgr.periodicPushDedupMtx.Unlock()
+				return err
+			}
+			if ckmgr.periodicPushDedupArg.GlobalTimestampShaMap == nil {
+				ckmgr.periodicPushDedupArg.GlobalTimestampShaMap = incomingShaMap
+			} else {
+				ckmgr.periodicPushDedupArg.GlobalTimestampShaMap.Load(incomingShaMap)
+			}
+		}
 		ckmgr.periodicPushDedupArg.PushRespChs = append(ckmgr.periodicPushDedupArg.PushRespChs, respCh)
 	}
 	ckmgr.periodicPushDedupMtx.Unlock()
@@ -3915,6 +3966,12 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 			// the main checkpoint manager is responsible to tell the ckptService to not let the backfill
 			// ckptMgr from decrementing the ref count while the merge is taking place
 			backfillTopic := common.ComposeFullTopic(ckmgr.pipeline.Topic(), common.BackfillPipeline)
+			if ckmgr.isVariableVBMode() {
+				// Variable VB mode requires the use of global timestamp shas
+				// This means that main pipeline should follow the process of disabling ref counting
+				// to avoid situations where shas could be pre-emptively removed
+				ckmgr.checkpoints_svc.DisableRefCntDecrement(ckmgr.pipeline.Topic())
+			}
 			ckmgr.checkpoints_svc.DisableRefCntDecrement(backfillTopic)
 
 			// Once backfill ckptMgr cannot decrement the ref count, then do the merges, which ensures
@@ -3933,6 +3990,9 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 			// ckpts referring to it even though there is none)
 			// But ckptService should have a global re-count every time a periodic merge occurs, which can then
 			// do the clean up at the re-count time if counts are mismatched
+			if ckmgr.isVariableVBMode() {
+				ckmgr.checkpoints_svc.EnableRefCntDecrement(ckmgr.pipeline.Topic())
+			}
 			ckmgr.checkpoints_svc.EnableRefCntDecrement(backfillTopic)
 		}
 	}
