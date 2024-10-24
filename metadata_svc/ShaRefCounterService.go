@@ -12,13 +12,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
-
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
+	"sync"
 )
 
 type ShaRefCounterService struct {
@@ -595,7 +594,7 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mappingGeneric
 		if err != nil {
 			return err
 		}
-		return nil
+		return c.upsertGts(internalSpecId, false)
 	} else {
 		return fmt.Errorf("invalid type: %T", mappingGeneric)
 	}
@@ -634,19 +633,27 @@ func (c *MapShaRefCounter) registerCollectionMapping(mapping *metadata.Collectio
 func (c *MapShaRefCounter) registerGtsMapping(globalTs *metadata.GlobalTimestamp) error {
 	sha, err := globalTs.Sha256()
 	if err != nil {
-		return fmt.Errorf("Unable to get sha256 %v for globalTs %v", c.id, globalTs)
+		return fmt.Errorf("Unable to get sha256 %v for globalTimestamp", c.id)
 	}
 	shaString := fmt.Sprintf("%x", sha[:])
 
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.lock.RLock()
 	_, exists := c.shaToGlobalTs[shaString]
-	if !exists {
-		c.shaToGlobalTs[shaString] = globalTs
-		c.refCnt[shaString] = 1
-		c.setNeedToSyncNoLock(true)
-	} else {
-		c.refCnt[shaString]++
+	isCommitted := c.needToSync
+	c.lock.RUnlock()
+
+	if exists && isCommitted {
+		// Nothing needs to be done
+		return nil
+	} else if !exists {
+		c.lock.Lock()
+		_, exists = c.shaToGlobalTs[shaString]
+		if !exists {
+			c.shaToGlobalTs[shaString] = globalTs
+			c.refCnt[shaString] = 0
+			c.setNeedToSyncNoLock(true)
+		}
+		c.lock.Unlock()
 	}
 	return nil
 }
@@ -660,7 +667,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Compre
 
 	if err != nil && err == service_def.MetadataNotFoundErr {
 		if initIfNotFound {
-			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc with internalID %v", c.id, c.internalSpecId)
+			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc path %v with internalID %v", c.id, c.metakvOpKey, c.internalSpecId)
 			docReturn.SpecInternalId = c.internalSpecId
 			err = c.upsertCompressedMappingDoc(docReturn, true /*addOp*/)
 			return docReturn, err
@@ -686,7 +693,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Compre
 		if initIfNotFound {
 			emptyDoc := &metadata.CompressedMappings{}
 			emptyDoc.SpecInternalId = c.internalSpecId
-			c.logger.Infof("GetMappingsDoc %v re-initialized a new mappingsDoc with internalId %v", c.id, c.internalSpecId)
+			c.logger.Infof("GetMappingsDoc %v re-initialized a new mappingsDoc %v with internalId %v", c.id, c.metakvOpKey, c.internalSpecId)
 			err = c.upsertCompressedMappingDoc(emptyDoc, true /*addOp*/)
 			return emptyDoc, err
 		}
@@ -737,7 +744,6 @@ func (c *MapShaRefCounter) upsertGts(specInternalId string, cleanup bool) error 
 		clonedMapping := c.shaToGlobalTs.Clone()
 		return clonedMapping.ToSnappyCompressableMap(), nil
 	}
-
 	return c.upsertInternal(specInternalId, cleanup, c.upsertGts, getShaMapToLoad)
 }
 
@@ -745,6 +751,7 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 	getShaMapToLoad := func() (map[string]metadata.SnappyCompressableVal, error) {
 		c.lock.Lock()
 		defer c.lock.Unlock()
+
 		if c.internalSpecId == "" {
 			c.internalSpecId = specInternalId
 		} else if specInternalId != "" && c.internalSpecId != specInternalId {
@@ -774,6 +781,8 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 	}
 	return c.upsertInternal(specInternalId, cleanup, c.upsertMapping, getShaMapToLoad)
 }
+
+var errUpsertAlreadyOccurring = fmt.Errorf("Error upserting mapping as an operation is happening already")
 
 func (c *MapShaRefCounter) upsertInternal(specInternalId string, cleanup bool,
 	retryFunc func(string, bool) error,
@@ -842,7 +851,7 @@ func (c *MapShaRefCounter) upsertInternal(specInternalId string, cleanup bool,
 		err = c.upsertCompressedMappingDoc(mappingDoc, false /*new*/)
 		return err
 	default:
-		return fmt.Errorf("Error upserting mapping for %v as an operation is happening already", c.id)
+		return errUpsertAlreadyOccurring
 	}
 }
 

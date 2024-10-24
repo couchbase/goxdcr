@@ -635,10 +635,11 @@ func TestCkptMgrPeriodicMerger(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
+	var globalTsMap *metadata.GlobalTimestampCompressedDoc
 	respCh := make(chan error)
 
 	mergerCalledWg.Add(1)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
 	mergerCalledWg.Wait()
 	ckptMgr.periodicPushDedupMtx.RLock()
 	assert.Nil(ckptMgr.periodicPushDedupArg)
@@ -646,7 +647,7 @@ func TestCkptMgrPeriodicMerger(t *testing.T) {
 
 	// Try to queue one again while periodic merge is busy
 	respCh2 := make(chan error)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2, globalTsMap))
 
 	retErr := <-respCh
 	assert.Nil(retErr)
@@ -720,12 +721,13 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
+	var globalTsMap *metadata.GlobalTimestampCompressedDoc
 
 	respCh := make(chan error)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
 	// Try to queue one again while periodic merge is busy
 	respCh2 := make(chan error)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2, globalTsMap))
 
 	retErr := <-respCh
 	assert.Nil(retErr)
@@ -800,12 +802,13 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
+	var globalTsMap *metadata.GlobalTimestampCompressedDoc
 
 	respCh := make(chan error)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
 	// Try to queue one again while periodic merge is busy
 	respCh2 := make(chan error)
-	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2))
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2, globalTsMap))
 
 	// Don't read respCh and just exit
 	close(ckptMgr.finish_ch)

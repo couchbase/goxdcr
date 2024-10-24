@@ -547,3 +547,52 @@ func TestSerializingHeartbeat(t *testing.T) {
 	checkMsg := NewSourceHeartbeatReq(reqCommon)
 	assert.Nil(checkMsg.DeSerialize(seralizedByte))
 }
+
+func TestReplicationPayload_loadCkptInternalGlobal(t *testing.T) {
+	fmt.Println("============== Test case start: TestReplicationPayload_loadCkptInternalGlobal =================")
+	defer fmt.Println("============== Test case end: TestReplicationPayload_loadCkptInternalGlobal =================")
+	assert := assert.New(t)
+
+	vblist := []uint16{0}
+	bucketName := "B1"
+	req := NewVBPeriodicReplicateReq("testSpec", bucketName, vblist, "")
+	assert.NotNil(req)
+
+	vb0CkptDoc := metadata.GenerateGlobalVBsCkptDocMap(vblist, "")
+	ckptDoc := vb0CkptDoc[0]
+	assert.NotNil(ckptDoc)
+	assert.NotEqual(0, ckptDoc.Len())
+	assert.NotEqual("", ckptDoc.Checkpoint_records[0].GlobalTimestampSha256)
+	assert.NotEqual(0, len(ckptDoc.Checkpoint_records[0].GlobalTimestamp))
+
+	assert.Nil(req.LoadMainReplication(vb0CkptDoc, nil, nil))
+	payloadToCheck := (*req.payload)[bucketName]
+	assert.NotNil(payloadToCheck)
+	assert.NotNil(payloadToCheck.PushVBs)
+	assert.Len((*payloadToCheck.PushVBs), 1)
+
+	var shasInCkpt []string
+	for _, oneVbPayload := range *payloadToCheck.PushVBs {
+		for _, record := range oneVbPayload.CheckpointsDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+			if record.GlobalTimestampSha256 != "" {
+				shasInCkpt = append(shasInCkpt, record.GlobalTimestampSha256)
+				assert.NotNil(record.GlobalTimestamp)
+			}
+		}
+	}
+	assert.NotEqual(0, len(shasInCkpt))
+
+	assert.NotNil(payloadToCheck.GlobalTimestampDoc)
+	var shasInGts []string
+	for _, record := range payloadToCheck.GlobalTimestampDoc.NsMappingRecords {
+		shasInGts = append(shasInGts, record.Sha256Digest)
+		assert.NotNil(record.CompressedMapping)
+	}
+
+	assert.Equal(len(shasInGts), len(shasInCkpt))
+	missing := base.StringListsFindMissingFromFirst(shasInGts, shasInCkpt)
+	assert.Len(missing, 0)
+}

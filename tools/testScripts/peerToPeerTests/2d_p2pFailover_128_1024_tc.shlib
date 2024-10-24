@@ -203,6 +203,7 @@ function runTestCase {
 		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$CKPT_GET_ERR" 0
 	done
 
 	echo "============================================================================"
@@ -211,6 +212,9 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
 
 	# magma test cleanup
 	cleanupBucketNamePropertyMap
