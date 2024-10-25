@@ -893,7 +893,7 @@ func (c *CollectionsRouter) handleNewTgtManifestChanges(latestManifest *metadata
 	return
 }
 
-func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadata.CollectionsManifest, lastKnownManifestId uint64, removed metadata.ScopesMap, added metadata.ScopesMap) error {
+func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestTgtManifest *metadata.CollectionsManifest, lastKnownTgtManifestId uint64, removed metadata.ScopesMap, added metadata.ScopesMap) error {
 	if !c.IsRunning() {
 		return PartStoppedError
 	}
@@ -902,7 +902,7 @@ func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadat
 	var rollbackFunc func()
 	var abort bool
 	c.brokenDenyMtx.RLock()
-	if c.lastKnownTgtManifest.Uid() != lastKnownManifestId {
+	if c.lastKnownTgtManifest.Uid() != lastKnownTgtManifestId {
 		// Something changed from underneath, abort
 		c.brokenDenyMtx.RUnlock()
 		return nil
@@ -924,14 +924,27 @@ func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadat
 		}
 
 		if len(fixedMapping) > 0 {
-			abort, rollbackFunc = c.updateBrokenMapAndRoutingInfo(latestManifest, lastKnownManifestId, brokenMappingClone, fixedMapping, &routingInfo)
+			// Before raising backfill requests, need to ensure that the source bucket actually have them
+			latestSrcManifest, _, err := c.collectionsManifestSvc.GetLatestManifests(c.spec, false)
+			if err != nil {
+				return err
+			}
+			for srcNs, _ := range fixedMapping {
+				if _, foundErr := latestSrcManifest.GetCollectionId(srcNs.ScopeName, srcNs.CollectionName); foundErr != nil {
+					delete(fixedMapping, srcNs)
+				}
+			}
+		}
+
+		if len(fixedMapping) > 0 {
+			abort, rollbackFunc = c.updateBrokenMapAndRoutingInfo(latestTgtManifest, lastKnownTgtManifestId, brokenMappingClone, fixedMapping, &routingInfo)
 			if abort {
 				return nil
 			}
 		} else {
 			// No need to raise fixed mapping event but still need to bubble the latest pair of {brokenMap, targetManifestId} to checkpoint manager
 			// This is so that checkpoint manager will have the "latest" possible manifest that goes with this brokenMap when checkpointing
-			abort = c.updateJustRoutingInfo(latestManifest, lastKnownManifestId, brokenMappingClone, routingInfo)
+			abort = c.updateJustRoutingInfo(latestTgtManifest, lastKnownTgtManifestId, brokenMappingClone, routingInfo)
 			if abort {
 				return nil
 			}
