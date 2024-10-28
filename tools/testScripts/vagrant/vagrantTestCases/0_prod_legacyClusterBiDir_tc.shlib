@@ -125,7 +125,5 @@ function runLegacyCurrentBidir {
 
 function runTestCase {
 	runLegacyCurrentBidir "neo" "trinity" &&
-		runLegacyCurrentBidir "trinity" "cypher" &&
-		runLegacyCurrentBidir "cypher" "morpheus" &&
 		runLegacyCurrentBidir "trinity" "morpheus"
 }

@@ -58,7 +58,6 @@ declare -A CBServerLink=(
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-ubuntu20.04_amd64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-ubuntu20.04_amd64.deb"
 	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-ubuntu20.04_amd64.deb"
-	["cypher"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/cypher/latest/couchbase-server-enterprise_cypher-ubuntu20.04_amd64.deb"
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
