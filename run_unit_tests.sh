@@ -71,6 +71,7 @@ declare -a outputs
 DIRS_WITH_UT=(
 backfill_manager
 base
+base/conflictlog
 base/filter
 conflictlog
 crMeta

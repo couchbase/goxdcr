@@ -8,7 +8,7 @@
 
 package common
 
-import "github.com/couchbase/goxdcr/v8/conflictlog"
+import baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 
 // Nozzle models the openning that data streaming out of the source system
 // and the outlet where the data flowing into the target system.
@@ -46,5 +46,5 @@ type OutNozzle interface {
 
 	SetUpstreamErrReporter(func(interface{}))
 
-	SetConflictLoggerGetter(conflictlog.LoggerGetter)
+	SetConflictLoggerGetter(baseclog.LoggerGetter)
 }

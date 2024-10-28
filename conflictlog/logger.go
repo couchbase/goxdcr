@@ -6,47 +6,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 )
 
 // gLoggerId is the counter for all conflict loggers created
 var gLoggerId int64
 
-// Logger interface allows logging of conflicts in an abstracted manner
-type Logger interface {
-	// Id() returns the unique id for the logger
-	Id() int64
-
-	// Log writes the conflict to the conflict buccket
-	Log(c *ConflictRecord) (base.ConflictLoggerHandle, error)
-
-	// UpdateWorkerCount changes the underlying log worker count
-	UpdateWorkerCount(count int) error
-
-	// UpdateRules allow updates to the the rules which map
-	// the conflict to the target conflict bucket
-	UpdateRules(*base.ConflictLogRules) error
-
-	// UpdateQueueCapcity changes the underlying queue capcity.
-	// The update only happens through this function when cap > exisiting queue capacity.
-	// If newCap < oldCap, an error will be returned.
-	// The pipeline is expected to restart when newCap < oldCap.
-	UpdateQueueCapcity(newCap int) error
-
-	// the following updates are assumed to happen on a not so regular basis.
-	// The updates are not protected under any locks.
-	UpdateNWRetryCount(cnt int)
-	UpdateNWRetryInterval(t time.Duration)
-	UpdateSetMetaTimeout(t time.Duration)
-	UpdateGetFromPoolTimeout(t time.Duration)
-
-	// Closes the logger. Hence forth the logger will error out
-	Close() error
-}
-
 // LoggerOptions defines optional args for a logger implementation
 type LoggerOptions struct {
-	rules                *base.ConflictLogRules
+	rules                *baseclog.Rules
 	mapper               Mapper
 	logQueueCap          int
 	workerCount          int
@@ -74,7 +42,7 @@ func (l *LoggerOptions) String() string {
 	return b.String()
 }
 
-func WithRules(r *base.ConflictLogRules) LoggerOpt {
+func WithRules(r *baseclog.Rules) LoggerOpt {
 	return func(o *LoggerOptions) {
 		o.rules = r
 	}
@@ -128,7 +96,7 @@ func WithSkipTlsVerify(v bool) LoggerOpt {
 	}
 }
 
-func (o *LoggerOptions) SetRules(rules *base.ConflictLogRules) {
+func (o *LoggerOptions) SetRules(rules *baseclog.Rules) {
 	o.rules = rules
 }
 

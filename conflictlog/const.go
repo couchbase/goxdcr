@@ -6,12 +6,12 @@ import (
 
 const (
 	// Manager consts
-	ConflictManagerLoggerName        = "conflictMgr"
+	ConflictManagerLoggerName string = "conflictMgr"
 	ConflictLoggerName        string = "conflictLogger"
-	MemcachedConnUserAgent           = "conflictLog"
+	MemcachedConnUserAgent    string = "conflictLog"
 
 	// Logger consts
-	LoggerShutdownChCap = 10
+	LoggerShutdownChCap int = 10
 
 	// ConflictRecord consts
 	SourcePrefix    string = "src"

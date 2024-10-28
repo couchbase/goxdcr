@@ -3,9 +3,10 @@
 package mocks
 
 import (
+	conflictlog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	common "github.com/couchbase/goxdcr/v8/common"
+
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
-	conflictlog "github.com/couchbase/goxdcr/v8/conflictlog"
 
 	mock "github.com/stretchr/testify/mock"
 )

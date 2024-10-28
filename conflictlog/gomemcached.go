@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -191,7 +192,7 @@ func (conn *MemcachedConn) Id() int64 {
 // getCollectionId first attempts to get the collectionId from the cache (if checkCache=true). If not found then
 // it attempt to fetch it from the cluster using the same memcached connection. checkCache=false is generally used
 // when we know that the value is cache is stale and a fresh one has to be fetched.
-func (m *MemcachedConn) getCollectionId(conn mcc.ClientIface, target base.ConflictLogTarget, checkCache bool) (collId uint32, err error) {
+func (m *MemcachedConn) getCollectionId(conn mcc.ClientIface, target baseclog.Target, checkCache bool) (collId uint32, err error) {
 	var ok bool
 
 	if checkCache {
@@ -283,7 +284,7 @@ func (m *MemcachedConn) handleResponse(rsp *gomemcached.MCResponse, opaque uint3
 
 	if rsp.Status == gomemcached.UNKNOWN_COLLECTION {
 		m.logger.Debugf("got unknown_collection id=%d, body=%s", m.id, string(rsp.Body))
-		err = ErrUnknownCollection
+		err = baseclog.ErrUnknownCollection
 		return
 	}
 
@@ -293,7 +294,7 @@ func (m *MemcachedConn) handleResponse(rsp *gomemcached.MCResponse, opaque uint3
 		if err != nil {
 			return
 		}
-		err = ErrNotMyBucket
+		err = baseclog.ErrNotMyBucket
 		return
 	}
 
@@ -342,7 +343,7 @@ func (m *MemcachedConn) getConnByVB(vbno uint16, replicaNum int) (conn mcc.Clien
 	return
 }
 
-func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target base.ConflictLogTarget) (err error) {
+func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target baseclog.Target) (err error) {
 	checkCache := true
 	var collId uint32
 	vbNo := base.GetVBucketNo(key, base.NumberOfVbs)
@@ -366,10 +367,10 @@ func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target 
 		}
 
 		switch err {
-		case ErrUnknownCollection:
+		case baseclog.ErrUnknownCollection:
 			m.logger.Infof("collection not found key=%s, target=%s", key, target.String())
 			checkCache = false
-		case ErrNotMyBucket:
+		case baseclog.ErrNotMyBucket:
 		default:
 			return err
 		}

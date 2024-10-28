@@ -29,6 +29,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/crMeta"
@@ -779,7 +780,7 @@ type XmemNozzle struct {
 	mcRequestPool *base.MCRequestPool
 
 	// getter to fetch pipeline level conflict logger
-	conflictLogger conflictlog.LoggerGetter
+	conflictLogger baseclog.LoggerGetter
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -1324,7 +1325,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					err = xmem.log(item, resp)
 					if err != nil {
 						// warn and continue to replicate
-						if err == conflictlog.ErrQueueFull || err == conflictlog.ErrLoggerClosed {
+						if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerClosed {
 							// SUMUKH TODO - can spam, good to update it to a counter.
 
 							// xmem.Logger().Warnf("%v Conflict logging queue full, could not log for key=%v%s%v",
@@ -1929,7 +1930,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 	return
 }
 
-func (xmem *XmemNozzle) SetConflictLoggerGetter(loggerGetter conflictlog.LoggerGetter) {
+func (xmem *XmemNozzle) SetConflictLoggerGetter(loggerGetter baseclog.LoggerGetter) {
 	xmem.conflictLogger = loggerGetter
 }
 
@@ -2277,7 +2278,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 					err := conflictLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						// warn and continue to replicate
-						if err == conflictlog.ErrQueueFull || err == conflictlog.ErrLoggerClosed {
+						if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerClosed {
 							// SUMUKH TODO - can spam, good to update it to a counter.
 							// xmem.Logger().Warnf("%v Conflict logging queue full or closed, could not log for key=%v%s%v",
 							// 	xmem.Id(),

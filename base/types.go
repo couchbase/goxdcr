@@ -30,6 +30,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/log"
+
 	"github.com/google/uuid"
 )
 
@@ -3473,52 +3474,7 @@ func (clm ConflictLoggingMappingInput) Same(otherClm ConflictLoggingMappingInput
 	return true
 }
 
-func ValidateAndConvertJsonMapToConflictLoggingMapping(value string) (ConflictLoggingMappingInput, error) {
-	if value == "null" || value == "nil" {
-		// "nil" is not a accepted value. {} is the smallest input.
-		return nil, fmt.Errorf("null or nil conflict logging mapping not accepted")
-	}
-
-	// check for duplicated keys
-	res, err := JsonStringReEncodeTest(value)
-	if err != nil {
-		return nil, err
-	}
-	if !res {
-		return nil, ErrorJSONReEncodeFailed
-	}
-
-	// json validation
-	jsonMap, err := ValidateAndConvertStringToJsonType(value)
-	if err != nil {
-		return nil, err
-	}
-
-	// explicit type check
-	conflictLoggingMap, typeCheck := ParseConflictLoggingInputType(jsonMap)
-	if !typeCheck {
-		if jsonMap == nil {
-			// null is not a acceptable input by design.
-			return nil, fmt.Errorf("null conflict logging map not allowed. Use {} or {\"disabled\":true} for disabling the feature")
-		}
-
-		return nil, fmt.Errorf("expected non-nil json object, but invalid type was input as conflict logging map. Use {} or {\"disabled\":true} for disabling the feature")
-	}
-
-	// rules parsing check
-	enabled := !conflictLoggingMap.Disabled()
-	if enabled {
-		// validate if input is syntactically and semantically valid
-		_, err = ParseConflictLogRules(conflictLoggingMap)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing conflict logging input %v to rules, err=%v", conflictLoggingMap, err)
-		}
-	}
-
-	return conflictLoggingMap, nil
-}
-
-// Handle is returned for every conflict logging request.
+// A LoggerHandle is returned for every conflict logging request.
 // The handle allows it caller to wait on the logging to complete (or error out)
 type ConflictLoggerHandle interface {
 	// Wait allows caller to complete the conflict logging

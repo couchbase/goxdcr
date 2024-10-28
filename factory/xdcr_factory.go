@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/capi_utils"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
@@ -338,7 +339,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
 	conflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger)
-	if err != nil && err != conflictlog.ErrConflictLoggingIsOff {
+	if err != nil && err != baseclog.ErrConflictLoggingIsOff {
 		xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
 		return nil, nil, err
 	}

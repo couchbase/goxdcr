@@ -6,7 +6,7 @@ import (
 	base "github.com/couchbase/goxdcr/v8/base"
 	common "github.com/couchbase/goxdcr/v8/common"
 
-	conflictlog "github.com/couchbase/goxdcr/v8/conflictlog"
+	conflictlog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -148,7 +149,7 @@ type GenericPipeline struct {
 
 	// Conflict logger for the pipeline.
 	// nil indicates that the feature is Off.
-	conflictLogger    conflictlog.Logger
+	conflictLogger    baseclog.Logger
 	conflictLoggerMtx sync.RWMutex
 }
 
@@ -836,7 +837,7 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 	connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
-	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLogger conflictlog.Logger) *GenericPipeline {
+	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLogger baseclog.Logger) *GenericPipeline {
 
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
@@ -1198,23 +1199,26 @@ func (genericPipeline *GenericPipeline) updateConflictLoggingSettings(settings m
 	var conflictLoggingMap base.ConflictLoggingMappingInput
 	var conflictLoggingMapExists bool
 	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
-	if conflictLoggingMapExists {
-		conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
-		if !conflictLoggingMapExists {
-			// wrong type
-			err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
-				conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
-			genericPipeline.logger.Errorf(err.Error())
-			return err
-		}
+	if !conflictLoggingMapExists {
+		// no conflict logging update exists, which is fine.
+		return nil
+	}
 
-		if conflictLoggingMap == nil {
-			// nil is not an accepted value, should not reach here.
-			err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
-				conflictLoggingIn)
-			genericPipeline.logger.Errorf(err.Error())
-			return err
-		}
+	conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
+	if !conflictLoggingMapExists {
+		// wrong type
+		err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
+			conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
+		genericPipeline.logger.Errorf(err.Error())
+		return err
+	}
+
+	if conflictLoggingMap == nil {
+		// nil is not an accepted value, should not reach here.
+		err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
+			conflictLoggingIn)
+		genericPipeline.logger.Errorf(err.Error())
+		return err
 	}
 
 	// validate if we can perform live pipeline update or not.
@@ -1250,7 +1254,7 @@ func (genericPipeline *GenericPipeline) updateConflictLoggingSettings(settings m
 		cnt, ok := loggerQueueCap.(int)
 		if ok && cnt != 0 {
 			err := conflictLogger.UpdateQueueCapcity(cnt)
-			if err != nil && err != conflictlog.ErrNoChange {
+			if err != nil && err != baseclog.ErrNoChange {
 				genericPipeline.logger.Errorf("error updating queue capacity to %v", cnt)
 				return err
 			}
@@ -1299,7 +1303,7 @@ func (genericPipeline *GenericPipeline) updateConflictLoggingSettings(settings m
 		cnt, ok := workerCount.(int)
 		if ok && cnt != 0 {
 			err := conflictLogger.UpdateWorkerCount(cnt)
-			if err != nil && err != conflictlog.ErrNoChange {
+			if err != nil && err != baseclog.ErrNoChange {
 				genericPipeline.logger.Errorf("error updating worker count to %v", cnt)
 				return err
 			}
@@ -1446,7 +1450,7 @@ func (genericPipeline *GenericPipeline) GetRebalanceProgress() (string, string) 
 	return genericPipeline.sourceTopologyProgressMsg, genericPipeline.targetTopologyProgressMsg
 }
 
-func (genericPipeline *GenericPipeline) ConflictLogger() conflictlog.Logger {
+func (genericPipeline *GenericPipeline) ConflictLogger() baseclog.Logger {
 	genericPipeline.conflictLoggerMtx.RLock()
 	defer genericPipeline.conflictLoggerMtx.RUnlock()
 

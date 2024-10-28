@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
+
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/utils"
 	"github.com/stretchr/testify/assert"
@@ -33,7 +35,7 @@ func (f *fakeConnection) Close() error {
 	return nil
 }
 
-func (f *fakeConnection) SetMeta(key string, val []byte, dataType uint8, target base.ConflictLogTarget) (err error) {
+func (f *fakeConnection) SetMeta(key string, val []byte, dataType uint8, target baseclog.Target) (err error) {
 	if f.sleep != nil {
 		time.Sleep(*f.sleep)
 	}
@@ -60,8 +62,8 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
 	require.Nil(t, err)
 
-	l.UpdateRules(&base.ConflictLogRules{
-		Target: base.NewConflictLogTarget("B1", "S1", "C1"),
+	l.UpdateRules(&baseclog.Rules{
+		Target: baseclog.NewTarget("B1", "S1", "C1"),
 	})
 
 	handles := []base.ConflictLoggerHandle{}
@@ -75,7 +77,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 	l.Close()
 
 	_, err = l.Log(&ConflictRecord{})
-	require.Equal(t, ErrLoggerClosed, err)
+	require.Equal(t, baseclog.ErrLoggerClosed, err)
 	l.Close()
 
 	wg := &sync.WaitGroup{}
@@ -156,7 +158,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 
 	// same as before
 	err = l.UpdateWorkerCount(2)
-	assert.Equal(t, err, ErrNoChange)
+	assert.Equal(t, err, baseclog.ErrNoChange)
 	testNumWorkers(t, l, 2)
 	assert.Nil(t, l.Close())
 
@@ -211,7 +213,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 
 	// same as before
 	err = l.UpdateQueueCapcity(20)
-	assert.Equal(t, err, ErrNoChange)
+	assert.Equal(t, err, baseclog.ErrNoChange)
 	testCapacity(l, 20)
 	assert.Nil(t, l.Close())
 

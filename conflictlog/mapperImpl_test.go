@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,7 @@ func Test_conflictMapper_Map(t *testing.T) {
 		jsonStr string
 		// for every conflicts[i], expectedTargets[i] is the expected output of Map()
 		conflicts       []testSource
-		expectedTargets []base.ConflictLogTarget
+		expectedTargets []baseclog.Target
 	}{
 		{
 			name: "[positive] scope and collection incomplete, should default to _default",
@@ -54,11 +55,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B2", "_default", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B2", "_default", "_default"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -79,11 +80,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B2", "S2", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B2", "S2", "_default"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -104,11 +105,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B2", "S2", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B2", "S2", "C1"),
+				baseclog.NewTarget("B1", "S1", "_default"),
 			},
 		},
 		{
@@ -128,11 +129,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B2", "S2", "C1"),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B2", "S2", "C1"),
+				baseclog.NewTarget("B1", "_default", "_default"),
 			},
 		},
 		{
@@ -147,11 +148,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -167,11 +168,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -187,11 +188,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -213,11 +214,11 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("US", "Ohio"),
 				newTestSource("US", "NY"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B2", "S2", "C2"),
-				base.BlacklistConflictLogTarget(),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B2", "S2", "C2"),
+				baseclog.BlacklistTarget(),
 			},
 		},
 		{
@@ -244,15 +245,15 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("India", "Bengaluru"),
 				newTestSource("India", "_default"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B2", "S2", "C2"),
-				base.BlacklistConflictLogTarget(),
-				base.BlacklistConflictLogTarget(),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
-				base.NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B2", "S2", "C2"),
+				baseclog.BlacklistTarget(),
+				baseclog.BlacklistTarget(),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
+				baseclog.NewTarget("B1", "S1", "C1"),
 			},
 		},
 		{
@@ -279,15 +280,15 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("India", "Bengaluru"),
 				newTestSource("India", "_default"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B2", "S2", "_default"),
-				base.BlacklistConflictLogTarget(),
-				base.BlacklistConflictLogTarget(),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
-				base.NewConflictLogTarget("B1", "S1", "_default"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B2", "S2", "_default"),
+				baseclog.BlacklistTarget(),
+				baseclog.BlacklistTarget(),
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B1", "S1", "_default"),
+				baseclog.NewTarget("B1", "S1", "_default"),
 			},
 		},
 		{
@@ -312,15 +313,15 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("India", "Bengaluru"),
 				newTestSource("India", "_default"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B2", "_default", "_default"),
-				base.BlacklistConflictLogTarget(),
-				base.BlacklistConflictLogTarget(),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
-				base.NewConflictLogTarget("B1", "_default", "_default"),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B2", "_default", "_default"),
+				baseclog.BlacklistTarget(),
+				baseclog.BlacklistTarget(),
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B1", "_default", "_default"),
+				baseclog.NewTarget("B1", "_default", "_default"),
 			},
 		},
 		{
@@ -357,17 +358,17 @@ func Test_conflictMapper_Map(t *testing.T) {
 				newTestSource("rbacScope", "rbacCollection2"),
 				newTestSource("rbacScope", "rbacCollection3"),
 			},
-			expectedTargets: []base.ConflictLogTarget{
-				base.NewConflictLogTarget("bucket1", "scope2", "collection3"),
-				base.NewConflictLogTarget("bucket1", "scope2", "collection3"),
-				base.NewConflictLogTarget("bucket1", "scope2", "collection3"),
-				base.BlacklistConflictLogTarget(),
-				base.BlacklistConflictLogTarget(),
-				base.NewConflictLogTarget("bucket1", "scope2", "collection3"),
-				base.NewConflictLogTarget("customBucket", "customScope", "customCollection"),
-				base.NewConflictLogTarget("customBucket", "specialScope", "specialCollection"),
-				base.NewConflictLogTarget("bucket1", "scope2", "collection3"),
-				base.BlacklistConflictLogTarget(),
+			expectedTargets: []baseclog.Target{
+				baseclog.NewTarget("bucket1", "scope2", "collection3"),
+				baseclog.NewTarget("bucket1", "scope2", "collection3"),
+				baseclog.NewTarget("bucket1", "scope2", "collection3"),
+				baseclog.BlacklistTarget(),
+				baseclog.BlacklistTarget(),
+				baseclog.NewTarget("bucket1", "scope2", "collection3"),
+				baseclog.NewTarget("customBucket", "customScope", "customCollection"),
+				baseclog.NewTarget("customBucket", "specialScope", "specialCollection"),
+				baseclog.NewTarget("bucket1", "scope2", "collection3"),
+				baseclog.BlacklistTarget(),
 			},
 		},
 	}
@@ -378,7 +379,7 @@ func Test_conflictMapper_Map(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.jsonStr), &j)
 			require.Nil(t, err)
 
-			rules, err := base.ParseConflictLogRules(j)
+			rules, err := baseclog.ParseRules(j)
 			require.Nil(t, err)
 
 			err = rules.Validate()

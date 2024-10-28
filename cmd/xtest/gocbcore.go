@@ -5,13 +5,14 @@ import (
 	"fmt"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
 type GocbcoreTest struct {
 	Addr   string                 `json:"addr"`
-	Target base.ConflictLogTarget `json:"target"`
+	Target baseclog.Target        `json:"target"`
 	Count  int                    `json:"count"`
 	Key    string                 `json:"key"`
 	Doc    map[string]interface{} `json:"doc"`

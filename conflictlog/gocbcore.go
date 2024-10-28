@@ -10,6 +10,7 @@ import (
 	"github.com/couchbase/gocbcore/v9"
 	"github.com/couchbase/gocbcore/v9/memd"
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
@@ -106,10 +107,11 @@ func (conn *gocbCoreConn) setupAgent() (err error) {
 	}
 
 	signal := make(chan error, 1)
-	_, err = conn.agent.WaitUntilReady(time.Now().Add(base.DiagInternalThreshold), gocbcore.WaitUntilReadyOptions{}, func(wr *gocbcore.WaitUntilReadyResult, err error) {
-		conn.logger.Debugf("agent WaitUntilReady err=%v", err)
-		signal <- err
-	})
+	_, err = conn.agent.WaitUntilReady(time.Now().Add(base.DiagInternalThreshold), gocbcore.WaitUntilReadyOptions{},
+		func(wr *gocbcore.WaitUntilReadyResult, err error) {
+			conn.logger.Debugf("agent WaitUntilReady err=%v", err)
+			signal <- err
+		})
 	if err != nil {
 		return err
 	}
@@ -127,7 +129,7 @@ func (conn *gocbCoreConn) Bucket() string {
 	return conn.bucketName
 }
 
-func (conn *gocbCoreConn) SetMeta(key string, body []byte, dataType uint8, target base.ConflictLogTarget) (err error) {
+func (conn *gocbCoreConn) SetMeta(key string, body []byte, dataType uint8, target baseclog.Target) (err error) {
 	ch := make(chan error)
 
 	opts := gocbcore.SetMetaOptions{
@@ -154,7 +156,7 @@ func (conn *gocbCoreConn) SetMeta(key string, body []byte, dataType uint8, targe
 	select {
 	case <-conn.finch:
 		pendingOp.Cancel()
-		err = ErrWriterClosed
+		err = baseclog.ErrWriterClosed
 	case err = <-ch:
 	}
 
@@ -164,7 +166,7 @@ func (conn *gocbCoreConn) SetMeta(key string, body []byte, dataType uint8, targe
 func (conn *gocbCoreConn) Close() error {
 	select {
 	case <-conn.finch:
-		return ErrWriterClosed
+		return baseclog.ErrWriterClosed
 	default:
 		close(conn.finch)
 		return conn.agent.Close()

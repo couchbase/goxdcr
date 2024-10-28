@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
@@ -34,7 +35,7 @@ type ConflictLogLoadTest struct {
 
 type ConflictLoggerOptions struct {
 	// Target is the target conflict bucket details
-	Target base.ConflictLogTarget `json:"target"`
+	Target baseclog.Target `json:"target"`
 
 	// DocSizeRange is the min and max size in bytes of the source & target documents
 	// in a conflict
@@ -174,7 +175,7 @@ func runLoggerLoad(wg *sync.WaitGroup, logger *log.CommonLogger, opts *ConflictL
 				h, err := clog.Log(crd)
 				if err != nil {
 					logger.Errorf("error in sending conflict log err=%v", err)
-					if err == conflictlog.ErrQueueFull {
+					if err == baseclog.ErrQueueFull {
 						continue
 					}
 					return

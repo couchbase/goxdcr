@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/base/iopool"
+	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-var _ Logger = (*loggerImpl)(nil)
+var _ baseclog.Logger = (*loggerImpl)(nil)
 
 // loggerImpl implements the Logger interface
 type loggerImpl struct {
@@ -54,6 +56,10 @@ type loggerImpl struct {
 
 	// wg is used to wait for outstanding log requests to be finished
 	wg sync.WaitGroup
+
+	// an abstract component has the ability to register async listeners,
+	// as required for generating statistics events.
+	*component.AbstractComponent
 }
 
 type logRequest struct {
@@ -86,19 +92,20 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	logger.Infof("creating new conflict logger id=%d replId=%s loggerOptions=%s", loggerId, replId, options.String())
 
 	l = &loggerImpl{
-		logger:           logger,
-		id:               loggerId,
-		utils:            utils,
-		replId:           replId,
-		rulesLock:        sync.RWMutex{},
-		connPool:         connPool,
-		opts:             options,
-		rwMtx:            sync.RWMutex{},
-		throttlerSvc:     throttlerSvc,
-		logReqCh:         make(chan logRequest, options.logQueueCap),
-		finch:            make(chan bool, 1),
-		shutdownWorkerCh: make(chan bool, LoggerShutdownChCap),
-		wg:               sync.WaitGroup{},
+		logger:            logger,
+		id:                loggerId,
+		utils:             utils,
+		replId:            replId,
+		rulesLock:         sync.RWMutex{},
+		connPool:          connPool,
+		opts:              options,
+		rwMtx:             sync.RWMutex{},
+		throttlerSvc:      throttlerSvc,
+		logReqCh:          make(chan logRequest, options.logQueueCap),
+		finch:             make(chan bool, 1),
+		shutdownWorkerCh:  make(chan bool, LoggerShutdownChCap),
+		wg:                sync.WaitGroup{},
+		AbstractComponent: component.NewAbstractComponentWithLogger(fmt.Sprintf("%s_%v", ConflictLoggerName, loggerId), logger),
 	}
 
 	logger.Infof("spawning conflict logger workers replId=%s count=%d", l.replId, l.opts.workerCount)
@@ -125,24 +132,29 @@ func (l *loggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 
 	select {
 	case <-l.finch:
-		err = ErrLoggerClosed
+		err = baseclog.ErrLoggerClosed
 	case l.logReqCh <- req:
 	default:
-		err = ErrQueueFull
+		err = baseclog.ErrQueueFull
 	}
 
 	return
 }
 
-func (l *loggerImpl) Log(c *ConflictRecord) (h base.ConflictLoggerHandle, err error) {
-	l.logger.Debugf("logging conflict record replId=%s sourceKey=%s", l.replId, c.Source.Id)
+func (l *loggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
+	l.logger.Debugf("logging conflict record replId=%s scope=%s collection=%s", l.replId, c.Scope(), c.Collection())
 
 	if l.isClosed() {
-		err = ErrLoggerClosed
+		err = baseclog.ErrLoggerClosed
 		return
 	}
 
-	ackCh, err := l.log(c)
+	record, ok := c.(*ConflictRecord)
+	if !ok {
+		err = fmt.Errorf("wrong type of conflict record %T", c)
+	}
+
+	ackCh, err := l.log(record)
 	if err != nil {
 		return
 	}
@@ -212,7 +224,7 @@ func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
 	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
 
 	if newCount <= 0 || newCount == l.opts.workerCount {
-		err = ErrNoChange
+		err = baseclog.ErrNoChange
 		return
 	}
 
@@ -234,7 +246,7 @@ func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
 }
 
 // r should be non-nil
-func (l *loggerImpl) UpdateRules(r *base.ConflictLogRules) (err error) {
+func (l *loggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 	l.rulesLock.Lock()
 	defer l.rulesLock.Unlock()
 
@@ -244,7 +256,7 @@ func (l *loggerImpl) UpdateRules(r *base.ConflictLogRules) (err error) {
 
 	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d", l.replId, l.opts.rules, r)
 	if r == nil {
-		err = ErrEmptyRules
+		err = baseclog.ErrEmptyRules
 		return
 	}
 
@@ -254,7 +266,7 @@ func (l *loggerImpl) UpdateRules(r *base.ConflictLogRules) (err error) {
 	}
 
 	if l.opts.rules.SameAs(r) {
-		err = ErrNoChange
+		err = baseclog.ErrNoChange
 		return
 	}
 
@@ -284,7 +296,7 @@ func (l *loggerImpl) worker() {
 	}
 }
 
-func (l *loggerImpl) getTarget(rec *ConflictRecord) (t base.ConflictLogTarget, err error) {
+func (l *loggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err error) {
 	l.rulesLock.RLock()
 	defer l.rulesLock.RUnlock()
 
@@ -324,7 +336,7 @@ func (l *loggerImpl) throttle() {
 }
 
 // setMetaTimeout is a wrapper on Connection's SetMeta using the timeout configured with the logger
-func (l *loggerImpl) setMetaTimeout(conn Connection, key string, body []byte, dataType uint8, target base.ConflictLogTarget) error {
+func (l *loggerImpl) setMetaTimeout(conn Connection, key string, body []byte, dataType uint8, target baseclog.Target) error {
 	resultCh := make(chan error, 1)
 	go func() {
 		l.throttle()
@@ -339,11 +351,11 @@ func (l *loggerImpl) setMetaTimeout(conn Connection, key string, body []byte, da
 	case err := <-resultCh:
 		return err
 	case <-t.C:
-		return ErrSetMetaTimeout
+		return baseclog.ErrSetMetaTimeout
 	}
 }
 
-func (l *loggerImpl) writeDocs(req logRequest, target base.ConflictLogTarget) (err error) {
+func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err error) {
 
 	// Write source document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -453,7 +465,7 @@ type logReqHandle struct {
 func (h logReqHandle) Wait(finch chan bool) (err error) {
 	select {
 	case <-finch:
-		err = ErrLogWaitAborted
+		err = baseclog.ErrLogWaitAborted
 	case err = <-h.ackCh:
 	}
 
@@ -463,7 +475,7 @@ func (h logReqHandle) Wait(finch chan bool) (err error) {
 // newCap should be greater than or equal to existing queue capacity
 func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	if l.isClosed() {
-		return ErrLoggerClosed
+		return baseclog.ErrLoggerClosed
 	}
 
 	// acquire the lock so that no more writes to the channel happens.
@@ -479,7 +491,7 @@ func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	}
 
 	if l.opts.logQueueCap == newCap {
-		err = ErrNoChange
+		err = baseclog.ErrNoChange
 		return
 	}
 

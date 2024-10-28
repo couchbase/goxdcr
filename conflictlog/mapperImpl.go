@@ -2,6 +2,7 @@ package conflictlog
 
 import (
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
@@ -15,9 +16,9 @@ func NewConflictMapper(logger *log.CommonLogger) *conflictMapper {
 }
 
 // returns the "target" to which the conflict record needs to be routed.
-func (m *conflictMapper) Map(rules *base.ConflictLogRules, c Conflict) (target base.ConflictLogTarget, err error) {
+func (m *conflictMapper) Map(rules *baseclog.Rules, c baseclog.Conflict) (target baseclog.Target, err error) {
 	if rules == nil {
-		err = ErrEmptyRules
+		err = baseclog.ErrEmptyRules
 		return
 	}
 

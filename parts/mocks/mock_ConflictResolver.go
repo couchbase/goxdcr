@@ -3,10 +3,10 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/v8/base"
 	crMeta "github.com/couchbase/goxdcr/v8/crMeta"
 
 	gomemcached "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/v8/base"
 
 	hlv "github.com/couchbase/goxdcr/v8/hlv"
 

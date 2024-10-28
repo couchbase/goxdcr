@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/couchbase/goxdcr/v8/base"
-	"github.com/couchbase/goxdcr/v8/conflictlog"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
@@ -130,5 +130,5 @@ type Pipeline interface {
 
 	GetRebalanceProgress() (string, string)
 
-	ConflictLogger() conflictlog.Logger
+	ConflictLogger() baseclog.Logger
 }

@@ -8,15 +8,6 @@ import (
 	"time"
 )
 
-// Conflict is an abstraction over conflict record
-type Conflict interface {
-	// Scope is source bucket's scope
-	Scope() string
-
-	// Collection is source bucket's scope
-	Collection() string
-}
-
 // DocInfo is the subset of the information about a doc needed for
 // conflict logging
 type DocInfo struct {

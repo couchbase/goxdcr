@@ -1,4 +1,14 @@
-package base
+/*
+Copyright 2024-Present Couchbase, Inc.
+
+Use of this software is governed by the Business Source License included in
+the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+file, in accordance with the Business Source License, use of this software will
+be governed by the Apache License, Version 2.0, included in the file
+licenses/APL2.txt.
+*/
+
+package conflictlog
 
 import (
 	"encoding/json"
@@ -6,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,9 +31,9 @@ func TestRules_Parse(t *testing.T) {
 
 		// expectedMapping is the what the final mapping should look like
 		// after parsing. A nil is an accepted value.
-		expectedMapping map[CollectionNamespace]ConflictLogTarget
+		expectedMapping map[base.CollectionNamespace]Target
 		// expectedTarget is the expected fallback target value.
-		expectedTarget ConflictLogTarget
+		expectedTarget Target
 
 		// shouldFail=true implies we expect a failure for the input
 		shouldFail bool
@@ -126,10 +137,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "_default", "_default"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "_default", "_default"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] just collection incomplete, should default to _default",
@@ -143,10 +154,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "S2", "_default"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "_default"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] fallback target collection missing, should default to _default",
@@ -160,10 +171,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "S2", "C1"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "C1"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "_default"),
+			expectedTarget: NewTarget("B1", "S1", "_default"),
 		},
 		{
 			name: "[positive] fallback target scope and collection missing, should default to _default",
@@ -176,10 +187,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "S2", "C1"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "C1"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "_default", "_default"),
+			expectedTarget: NewTarget("B1", "_default", "_default"),
 		},
 		{
 			name: "[positive] only default target",
@@ -187,7 +198,7 @@ func TestRules_Parse(t *testing.T) {
 				"bucket":"B1",
 				"collection":"S1.C1"
 			}`,
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] only default target but loggingRules=nil",
@@ -196,7 +207,7 @@ func TestRules_Parse(t *testing.T) {
 					"collection":"S1.C1",
 					"loggingRules": null
 				}`,
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] only default target but loggingRules={}",
@@ -205,7 +216,7 @@ func TestRules_Parse(t *testing.T) {
 					"collection":"S1.C1",
 					"loggingRules": {}
 				}`,
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] only scope in source key",
@@ -216,10 +227,10 @@ func TestRules_Parse(t *testing.T) {
 						"US": null
 					}
 				}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US"}: BlacklistConflictLogTarget(),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US"}: BlacklistTarget(),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] scope.collection in source key",
@@ -235,12 +246,12 @@ func TestRules_Parse(t *testing.T) {
 						}
 					}
 				}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "S2", "C2"),
-				{ScopeName: "US", CollectionName: ""}:     BlacklistConflictLogTarget(),
-				{ScopeName: "India", CollectionName: ""}:  NewConflictLogTarget("B1", "S1", "C1"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "C2"),
+				{ScopeName: "US", CollectionName: ""}:     BlacklistTarget(),
+				{ScopeName: "India", CollectionName: ""}:  NewTarget("B1", "S1", "C1"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "C1"),
+			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
 			name: "[positive] target collection missing, default to be used",
@@ -256,12 +267,12 @@ func TestRules_Parse(t *testing.T) {
 						}
 					}
 				}`,
-			expectedMapping: map[CollectionNamespace]ConflictLogTarget{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewConflictLogTarget("B2", "S2", "_default"),
-				{ScopeName: "US", CollectionName: ""}:     BlacklistConflictLogTarget(),
-				{ScopeName: "India", CollectionName: ""}:  NewConflictLogTarget("B1", "S1", "_default"),
+			expectedMapping: map[base.CollectionNamespace]Target{
+				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "_default"),
+				{ScopeName: "US", CollectionName: ""}:     BlacklistTarget(),
+				{ScopeName: "India", CollectionName: ""}:  NewTarget("B1", "S1", "_default"),
 			},
-			expectedTarget: NewConflictLogTarget("B1", "S1", "_default"),
+			expectedTarget: NewTarget("B1", "S1", "_default"),
 		},
 	}
 
@@ -271,7 +282,7 @@ func TestRules_Parse(t *testing.T) {
 			err := json.Unmarshal([]byte(tt.jsonStr), &j)
 			require.Nil(t, err)
 
-			rules, err := ParseConflictLogRules(j)
+			rules, err := ParseRules(j)
 			if tt.shouldFail {
 				require.NotNil(t, err)
 				return

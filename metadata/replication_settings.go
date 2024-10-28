@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
@@ -1359,7 +1360,7 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 	case CLogKey:
-		if convertedValue, err = base.ValidateAndConvertJsonMapToConflictLoggingMapping(value); err != nil {
+		if convertedValue, err = baseclog.ValidateAndConvertJsonMapToConflictLoggingMapping(value); err != nil {
 			return
 		}
 	default:

@@ -4,14 +4,13 @@ import (
 	"fmt"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
-type LoggerGetter func() Logger
-
 // returns a logger only if non-null rules are parsed without any errors.
-func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, settings *metadata.ReplicationSettings, logger_ctx *log.LoggerContext, logger *log.CommonLogger) (Logger, error) {
+func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, settings *metadata.ReplicationSettings, logger_ctx *log.LoggerContext, logger *log.CommonLogger) (baseclog.Logger, error) {
 	if conflictLoggingMap == nil {
 		return nil, fmt.Errorf("nil conflictLoggingMap")
 	}
@@ -19,12 +18,12 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 	conflictLoggingEnabled := !conflictLoggingMap.Disabled()
 	if !conflictLoggingEnabled {
 		logger.Infof("Conflict logger will be off for pipeline=%s, with input=%v", replId, conflictLoggingMap)
-		return nil, ErrConflictLoggingIsOff
+		return nil, baseclog.ErrConflictLoggingIsOff
 	}
 
-	var rules *base.ConflictLogRules
+	var rules *baseclog.Rules
 	var err error
-	rules, err = base.ParseConflictLogRules(conflictLoggingMap)
+	rules, err = baseclog.ParseRules(conflictLoggingMap)
 	if err != nil {
 		return nil, fmt.Errorf("error converting %v to rules, err=%v", conflictLoggingMap, err)
 	}
@@ -34,7 +33,7 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 	}
 
 	var clm Manager
-	var conflictLogger Logger
+	var conflictLogger baseclog.Logger
 	clm, err = GetManager()
 	if err != nil {
 		return nil, fmt.Errorf("error getting conflict logging manager. err=%v", err)
@@ -64,7 +63,7 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 
 // updates the input logger with the new rules,
 // only if non-null rules are parsed without any errors.
-func UpdateLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, exisitingLogger Logger, replId string, logger *log.CommonLogger) error {
+func UpdateLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, exisitingLogger baseclog.Logger, replId string, logger *log.CommonLogger) error {
 	if exisitingLogger == nil {
 		return fmt.Errorf("nil logger, quit updating")
 	}
@@ -76,12 +75,12 @@ func UpdateLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, 
 	conflictLoggingEnabled := !conflictLoggingMap.Disabled()
 	if !conflictLoggingEnabled {
 		logger.Infof("Conflict logger will be off with input=%v", conflictLoggingMap)
-		return ErrConflictLoggingIsOff
+		return baseclog.ErrConflictLoggingIsOff
 	}
 
-	var rules *base.ConflictLogRules
+	var rules *baseclog.Rules
 	var err error
-	rules, err = base.ParseConflictLogRules(conflictLoggingMap)
+	rules, err = baseclog.ParseRules(conflictLoggingMap)
 	if err != nil {
 		return fmt.Errorf("error converting %v to rules, err=%v", conflictLoggingMap, err)
 	}
@@ -92,7 +91,7 @@ func UpdateLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, 
 
 	err = exisitingLogger.UpdateRules(rules)
 	if err != nil {
-		if err == ErrNoChange {
+		if err == baseclog.ErrNoChange {
 			return nil
 		}
 		return fmt.Errorf("error updating %s rules, err=%v", rules, err)
