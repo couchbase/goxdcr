@@ -301,8 +301,6 @@ const (
 	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
 	CLogResourceManagerBoostKey = "CLogResourceManagerBoost"
 	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
-
-	VariableVBSupportKey = "VariableVBSupport"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -442,7 +440,6 @@ var RMTokenDistributionStrConfig = &SettingsConfig{base.RMTokenDistributionStr, 
 var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
 var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
 var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMaxFreqInterval / time.Second), &Range{30, 24 * 60 * 60 /* 1 day */}}
-var VariableVBSupportConfig = &SettingsConfig{base.VariableVBSupport, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -582,7 +579,6 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CLogSkipTlsVerifyKey:                          CLogSkipTlsVerifyConfig,
 	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
 	CLogStatsLoggingMaxFreqKey:                    CLogStatsLoggingMaxFreqConfig,
-	VariableVBSupportKey:                          VariableVBSupportConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -102,9 +102,6 @@ function runOneRebalanceCycle {
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
 
-	setInternalSettings "C1" "VariableVBSupport=true"
-	setInternalSettings "C2" "VariableVBSupport=true"
-
 	# Previous test may have messed with the CAs
 	setupCertsForTesting
 	cleanupClientCertMaps

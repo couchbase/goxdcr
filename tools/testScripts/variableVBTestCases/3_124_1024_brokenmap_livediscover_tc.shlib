@@ -163,9 +163,6 @@ function runTestCase {
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
 
-	setInternalSettings "C1" "VariableVBSupport=true"
-	setInternalSettings "C2" "VariableVBSupport=true"
-
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
