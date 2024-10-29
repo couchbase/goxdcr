@@ -267,7 +267,6 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 func (b *BackfillReplicationService) backfillSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	val, ok := b.getCache().Get(replicationId)
 	if !ok {
-		b.logger.Errorf("%v not found in backfill cache", replicationId)
 		return nil, base.ReplNotFoundErr
 	}
 	replSpecVal, ok := val.(*ReplicationSpecVal)
