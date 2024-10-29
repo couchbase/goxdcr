@@ -62,8 +62,6 @@ function runOneReplicationCycleAndPause {
 	setupTopologies
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
-	setInternalSettings "C1" "VariableVBSupport=true"
-	setInternalSettings "C2" "VariableVBSupport=true"
 	sleep 5
 	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
 	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
