@@ -68,9 +68,6 @@ function runTestCase {
 		exit 1
 	fi
 
-	setInternalSettings "C1" "VariableVBSupport=true"
-	setInternalSettings "C2" "VariableVBSupport=true"
-
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"

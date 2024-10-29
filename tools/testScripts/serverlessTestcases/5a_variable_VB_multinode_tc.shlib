@@ -62,9 +62,6 @@ function runTestCase {
 		exit 1
 	fi
 
-	setInternalSettings "C1" "VariableVBSupport=true"
-	setInternalSettings "C2" "VariableVBSupport=true"
-
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
 
