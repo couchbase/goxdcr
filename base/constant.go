@@ -582,6 +582,7 @@ const (
 	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
 	DocsSentWithSubdocCmdEventListener   = "DocsSentWithSubdocSetEventListener"
 	DocsSentWithPoisonedCasEventListener = "DocsSentWithPoisonedCasEventListener"
+	ClogEventListener                    = "ClogEventListener"
 )
 
 const (
@@ -591,6 +592,7 @@ const (
 	CheckpointStatsCollector = "CheckpointStatsCollector"
 	ThroughSeqnoTracker      = "ThroughSeqnoTracker"
 	ConflictMgrCollector     = "ConflictManagerCollector"
+	CLogStatsCollector       = "CLogStatsCollector"
 )
 
 var CouchbaseBucketType = "membase"

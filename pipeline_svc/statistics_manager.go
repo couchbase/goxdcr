@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
@@ -162,6 +163,8 @@ var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC
 	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE,
 	service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE}
 
+var CLogVBMetricKeys = []string{}
+
 var VBMetricKeys []string
 var compileVBMetricKeyOnce sync.Once
 var vbMetricKeyLock sync.RWMutex
@@ -297,7 +300,8 @@ type StatisticsManager struct {
 	pipelineErrors int32
 }
 
-func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
+	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error), hasConflictLogger bool) *StatisticsManager {
 	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
@@ -323,6 +327,11 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		initDone:                  make(chan bool),
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
+	if hasConflictLogger {
+		// the data-structures needed for stats collection will not be initialised
+		// if conflict logger doesn't exist for this pipeline.
+		stats_mgr.collectors = append(stats_mgr.collectors, &cLogCollector{})
+	}
 
 	stats_mgr.initialize()
 	return stats_mgr
@@ -3095,4 +3104,99 @@ func GetReadOnlyOverviewStats(repStatus pipeline_pkg.ReplicationStatusIface, pip
 	initOverviewMap.Set(base.CurrentTime, currentTimeVar)
 
 	return initOverviewMap
+}
+
+// metrics collector for conflict logger
+type cLogCollector struct {
+	id        string
+	stats_mgr *StatisticsManager
+	common.AsyncComponentEventHandler
+	// key of outer map: component id
+	// key of inner map: metric name
+	// value of inner map: metric value
+	component_map  map[string]map[string]interface{}
+	vbMetricHelper *VbBasedMetricHelper
+}
+
+func (cLog_collector *cLogCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	return cLog_collector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
+}
+
+func (cLog_collector *cLogCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	return cLog_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
+}
+
+func (cLog_collector *cLogCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	cLog_collector.vbMetricHelper.HandleLatestThroughSeqnos(SeqnoMap)
+}
+
+func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	cLog_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.CLogStatsCollector)
+	cLog_collector.stats_mgr = stats_mgr
+	cLog_collector.component_map = make(map[string]map[string]interface{})
+	cLog_collector.vbMetricHelper = NewVbBasedMetricHelper()
+	clogger := pipeline.ConflictLogger()
+	if clogger != nil {
+		cloggerImpl, ok := clogger.(*conflictlog.LoggerImpl)
+		if !ok {
+			return fmt.Errorf("wrong type of conflict logger in use %T", clogger)
+		}
+
+		registry := stats_mgr.getOrCreateRegistry(clogger.Id())
+		conflict_docs_written := metrics.NewCounter()
+		registry.Register(service_def.CONFLICT_DOCS_WRITTEN, conflict_docs_written)
+		src_conflict_docs_written := metrics.NewCounter()
+		registry.Register(service_def.SRC_CONFLICT_DOCS_WRITTEN, src_conflict_docs_written)
+		tgt_conflict_docs_written := metrics.NewCounter()
+		registry.Register(service_def.TGT_CONFLICT_DOCS_WRITTEN, tgt_conflict_docs_written)
+		crd_conflict_docs_written := metrics.NewCounter()
+		registry.Register(service_def.CRD_CONFLICT_DOCS_WRITTEN, crd_conflict_docs_written)
+
+		metric_map := make(map[string]interface{})
+		metric_map[service_def.CONFLICT_DOCS_WRITTEN] = conflict_docs_written
+		metric_map[service_def.SRC_CONFLICT_DOCS_WRITTEN] = src_conflict_docs_written
+		metric_map[service_def.TGT_CONFLICT_DOCS_WRITTEN] = tgt_conflict_docs_written
+		metric_map[service_def.CRD_CONFLICT_DOCS_WRITTEN] = crd_conflict_docs_written
+
+		cLog_collector.component_map[clogger.Id()] = metric_map
+		responsibleVbs := make([]uint16, 0)
+		sources := pipeline.Sources()
+		for _, source := range sources {
+			responsibleVbs = append(responsibleVbs, source.ResponsibleVBs()...)
+		}
+		cLog_collector.vbMetricHelper.Register(cLog_collector.Id(), responsibleVbs, clogger.Id(), CLogVBMetricKeys)
+		cloggerImpl.RegisterComponentEventListener(common.ConflictDocsWritten, cLog_collector)
+		// register cLog_collector as the async event handler for relevant events
+		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.ClogEventListener, cLog_collector)
+	}
+
+	return nil
+}
+
+func (cLog_collector *cLogCollector) Id() string {
+	return cLog_collector.id
+}
+
+func (cLog_collector *cLogCollector) OnEvent(event *common.Event) {
+	cLog_collector.ProcessEvent(event)
+}
+
+func (cLog_collector *cLogCollector) ProcessEvent(event *common.Event) error {
+	metricMap := cLog_collector.component_map[event.Component.Id()]
+
+	switch event.EventType {
+	case common.ConflictDocsWritten:
+		docType := event.Data.(conflictlog.ConflictDocType)
+		switch docType {
+		case conflictlog.SourceDoc:
+			metricMap[service_def.SRC_CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
+		case conflictlog.TargetDoc:
+			metricMap[service_def.TGT_CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
+		case conflictlog.CRD:
+			metricMap[service_def.CRD_CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
+		}
+		metricMap[service_def.CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
+	}
+	return nil
 }

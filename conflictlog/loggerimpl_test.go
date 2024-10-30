@@ -94,7 +94,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 
 // the workers will be shutdown to test the number of workers.
 // so the caller should expect 0 workers in the loggers after this routine exits.
-func testNumWorkers(t *testing.T, l *loggerImpl, num int) {
+func testNumWorkers(t *testing.T, l *LoggerImpl, num int) {
 	assert.Equal(t, l.opts.workerCount, num)
 
 	for i := 0; i < num; i++ {
@@ -201,7 +201,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 
 	fakeConnectionSleep = 1 * time.Second
 
-	testCapacity := func(l *loggerImpl, num int) {
+	testCapacity := func(l *LoggerImpl, num int) {
 		assert.Equal(t, l.opts.logQueueCap, num)
 		assert.Equal(t, cap(l.logReqCh), num)
 	}

@@ -86,6 +86,30 @@
         ],
         "stability": "committed"
     },
+    "xdcr_conflict_docs_written_total": {
+        "type": "counter",
+        "help": "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_crd_conflict_docs_written_total": {
+        "type": "counter",
+        "help": "Number of CRDs written to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_data_merge_failed_bytes": {
         "type": "counter",
         "help": "Amount of data failed to merge as part of Source custom conflict-resolution",
@@ -981,6 +1005,18 @@
         ],
         "stability": "committed"
     },
+    "xdcr_src_conflict_docs_written_total": {
+        "type": "counter",
+        "help": "Number of source conflict docs written to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_subdoc_cmd_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Subdoc sets and delete operations that failed because the CAS on the Target changed",
@@ -1058,6 +1094,18 @@
         "type": "counter",
         "help": "The total number of writes to target data service that returned with a status code that XDCR cannot comprehend",
         "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_tgt_conflict_docs_written_total": {
+        "type": "counter",
+        "help": "Number of target conflict docs written to the conflict bucket.",
+        "added": "8.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",

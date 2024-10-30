@@ -150,3 +150,11 @@ func InsertConflictXattrToBody(body []byte, datatype uint8) ([]byte, uint8, erro
 
 	return out, datatype, err
 }
+
+type ConflictDocType int
+
+const (
+	SourceDoc ConflictDocType = iota
+	TargetDoc ConflictDocType = iota
+	CRD       ConflictDocType = iota
+)

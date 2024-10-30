@@ -19,7 +19,7 @@ import (
 // Logger interface allows logging of conflicts in an abstracted manner
 type Logger interface {
 	// Id() returns the unique id for the logger
-	Id() int64
+	Id() string
 
 	// Log writes the conflict to the conflict buccket
 	Log(c Conflict) (base.ConflictLoggerHandle, error)

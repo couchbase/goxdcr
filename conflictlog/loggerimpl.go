@@ -8,20 +8,21 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/base/iopool"
+	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-var _ baseclog.Logger = (*loggerImpl)(nil)
+var _ baseclog.Logger = (*LoggerImpl)(nil)
 
-// loggerImpl implements the Logger interface
-type loggerImpl struct {
+// LoggerImpl implements the Logger interface
+type LoggerImpl struct {
 	logger *log.CommonLogger
 
 	// id uniquely identifies a logger instance
-	id int64
+	id string
 
 	// utils object for misc utilities
 	utils utils.UtilsIface
@@ -70,7 +71,7 @@ type logRequest struct {
 
 // newLoggerImpl creates a new logger impl instance.
 // throttlerSvc is allowed to be nil, which means no throttling
-func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, opts ...LoggerOpt) (l *loggerImpl, err error) {
+func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, opts ...LoggerOpt) (l *LoggerImpl, err error) {
 	// set the defaults
 	options := LoggerOptions{
 		rules:                nil,
@@ -88,10 +89,10 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		opt(&options)
 	}
 
-	loggerId := newLoggerId()
+	loggerId := fmt.Sprintf("%s_%v", ConflictLoggerName, newLoggerId())
 	logger.Infof("creating new conflict logger id=%d replId=%s loggerOptions=%s", loggerId, replId, options.String())
 
-	l = &loggerImpl{
+	l = &LoggerImpl{
 		logger:            logger,
 		id:                loggerId,
 		utils:             utils,
@@ -105,7 +106,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		finch:             make(chan bool, 1),
 		shutdownWorkerCh:  make(chan bool, LoggerShutdownChCap),
 		wg:                sync.WaitGroup{},
-		AbstractComponent: component.NewAbstractComponentWithLogger(fmt.Sprintf("%s_%v", ConflictLoggerName, loggerId), logger),
+		AbstractComponent: component.NewAbstractComponentWithLogger(loggerId, logger),
 	}
 
 	logger.Infof("spawning conflict logger workers replId=%s count=%d", l.replId, l.opts.workerCount)
@@ -116,11 +117,11 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	return
 }
 
-func (l *loggerImpl) Id() int64 {
+func (l *LoggerImpl) Id() string {
 	return l.id
 }
 
-func (l *loggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
+func (l *LoggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 	ackCh = make(chan error, 1)
 	req := logRequest{
 		conflictRec: c,
@@ -141,7 +142,7 @@ func (l *loggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 	return
 }
 
-func (l *loggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
+func (l *LoggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
 	l.logger.Debugf("logging conflict record replId=%s scope=%s collection=%s", l.replId, c.Scope(), c.Collection())
 
 	if l.isClosed() {
@@ -166,7 +167,7 @@ func (l *loggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err 
 	return
 }
 
-func (l *loggerImpl) isClosed() bool {
+func (l *LoggerImpl) isClosed() bool {
 	select {
 	case <-l.finch:
 		return true
@@ -175,7 +176,7 @@ func (l *loggerImpl) isClosed() bool {
 	}
 }
 
-func (l *loggerImpl) Close() (err error) {
+func (l *LoggerImpl) Close() (err error) {
 	// check for closed channel as multiple threads could have attempted it
 	if l.isClosed() {
 		return nil
@@ -188,7 +189,7 @@ func (l *loggerImpl) Close() (err error) {
 		return nil
 	}
 
-	l.logger.Infof("closing conflict logger id=%d replId=%s", l.id, l.replId)
+	l.logger.Infof("closing conflict logger id=%s replId=%s", l.id, l.replId)
 
 	// The close is implemented on the same principle that some restaurants have:
 	// "last entry at 10:00 PM". When translated here it means, we will disallow
@@ -203,17 +204,17 @@ func (l *loggerImpl) Close() (err error) {
 	defer l.rwMtx.Unlock()
 
 	l.wg.Wait()
-	l.logger.Infof("closing of conflict logger done id=%d replId=%s", l.id, l.replId)
+	l.logger.Infof("closing of conflict logger done id=%s replId=%s", l.id, l.replId)
 
 	return
 }
 
-func (l *loggerImpl) startWorker() {
+func (l *LoggerImpl) startWorker() {
 	l.wg.Add(1)
 	go l.worker()
 }
 
-func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
+func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
 
@@ -221,15 +222,15 @@ func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
 		return
 	}
 
-	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
+	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
 
 	if newCount <= 0 || newCount == l.opts.workerCount {
 		err = baseclog.ErrNoChange
 		return
 	}
 
-	l.logger.Infof("changing conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
-	defer l.logger.Infof("done changing conflict logger worker count replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCount, l.id)
+	l.logger.Infof("changing conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
+	defer l.logger.Infof("done changing conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
 
 	if newCount > l.opts.workerCount {
 		for i := 0; i < (newCount - l.opts.workerCount); i++ {
@@ -246,7 +247,7 @@ func (l *loggerImpl) UpdateWorkerCount(newCount int) (err error) {
 }
 
 // r should be non-nil
-func (l *loggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
+func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 	l.rulesLock.Lock()
 	defer l.rulesLock.Unlock()
 
@@ -272,17 +273,17 @@ func (l *loggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 
 	l.opts.rules = r
 
-	l.logger.Infof("conflict logger rules=%v updated id=%d replId=%s", r, l.id, l.replId)
+	l.logger.Infof("conflict logger rules=%v updated id=%s replId=%s", r, l.id, l.replId)
 	return
 }
 
-func (l *loggerImpl) worker() {
+func (l *LoggerImpl) worker() {
 	defer l.wg.Done()
 
 	for {
 		select {
 		case <-l.shutdownWorkerCh:
-			l.logger.Infof("shutting down conflict log worker replId=%s, id=%v", l.replId, l.id)
+			l.logger.Infof("shutting down conflict log worker replId=%s, id=%s", l.replId, l.id)
 			return
 		case req := <-l.logReqCh:
 			// nil implies that logReqCh might be closed
@@ -296,7 +297,7 @@ func (l *loggerImpl) worker() {
 	}
 }
 
-func (l *loggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err error) {
+func (l *LoggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err error) {
 	l.rulesLock.RLock()
 	defer l.rulesLock.RUnlock()
 
@@ -308,7 +309,7 @@ func (l *loggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err erro
 	return
 }
 
-func (l *loggerImpl) getFromPool(bucketName string) (conn Connection, err error) {
+func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error) {
 	obj, err := l.connPool.Get(bucketName, l.opts.poolGetTimeout)
 	if err != nil {
 		return
@@ -323,7 +324,7 @@ func (l *loggerImpl) getFromPool(bucketName string) (conn Connection, err error)
 	return
 }
 
-func (l *loggerImpl) throttle() {
+func (l *LoggerImpl) throttle() {
 	if l.throttlerSvc == nil {
 		return
 	}
@@ -336,7 +337,7 @@ func (l *loggerImpl) throttle() {
 }
 
 // setMetaTimeout is a wrapper on Connection's SetMeta using the timeout configured with the logger
-func (l *loggerImpl) setMetaTimeout(conn Connection, key string, body []byte, dataType uint8, target baseclog.Target) error {
+func (l *LoggerImpl) setMetaTimeout(conn Connection, key string, body []byte, dataType uint8, target baseclog.Target) error {
 	resultCh := make(chan error, 1)
 	go func() {
 		l.throttle()
@@ -355,8 +356,7 @@ func (l *loggerImpl) setMetaTimeout(conn Connection, key string, body []byte, da
 	}
 }
 
-func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err error) {
-
+func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err error) {
 	// Write source document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
 		err := l.setMetaTimeout(conn, req.conflictRec.Source.Id, req.conflictRec.Source.Body, req.conflictRec.Source.Datatype, target)
@@ -367,6 +367,7 @@ func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		// we let the callers deal with it
 		return err
 	}
+	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, SourceDoc, l, nil, nil))
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -376,6 +377,7 @@ func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
+	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, TargetDoc, l, nil, nil))
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -385,6 +387,7 @@ func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
+	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, CRD, l, nil, nil))
 
 	return
 }
@@ -392,7 +395,7 @@ func (l *loggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 // writeDocRetry arranges for a connection from the pool which the supplied function can use. The function
 // wraps the supplied function to check for network errors and appropriately releases the connection back
 // to the pool
-func (l *loggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error) (err error) {
+func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error) (err error) {
 	var conn Connection
 
 	for i := 0; i < l.opts.networkRetryCount; i++ {
@@ -406,7 +409,7 @@ func (l *loggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 			continue
 		}
 
-		l.logger.Debugf("got connection from pool, id=%d rid=%s lid=%v", conn.Id(), l.replId, l.id)
+		l.logger.Debugf("got connection from pool, id=%d rid=%s lid=%s", conn.Id(), l.replId, l.id)
 
 		// The call to connPool.Put is not advised to be done in a defer here.
 		// This is because calling defer in a loop accumulates multiple defers
@@ -414,14 +417,14 @@ func (l *loggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 		// will be error prone in this case
 		err = fn(conn)
 		if err == nil {
-			l.logger.Debugf("releasing connection to pool after success, id=%d damaged=%v rid=%s lid=%v", conn.Id(), false, l.replId, l.id)
+			l.logger.Debugf("releasing connection to pool after success, id=%d damaged=%v rid=%s lid=%s", conn.Id(), false, l.replId, l.id)
 			l.connPool.Put(bucketName, conn, false)
 			break
 		}
 
-		l.logger.Errorf("error in writing doc to conflict bucket err=%v, id=%d rid=%s lid=%v", err, conn.Id(), l.replId, l.id)
+		l.logger.Errorf("error in writing doc to conflict bucket err=%v, id=%d rid=%s lid=%s", err, conn.Id(), l.replId, l.id)
 		nwError := l.utils.IsSeriousNetError(err)
-		l.logger.Debugf("releasing connection to pool after failure, id=%d damaged=%v rid=%s lid=%v", conn.Id(), nwError, l.replId, l.id)
+		l.logger.Debugf("releasing connection to pool after failure, id=%d damaged=%v rid=%s lid=%s", conn.Id(), nwError, l.replId, l.id)
 		l.connPool.Put(bucketName, conn, nwError)
 		if !nwError {
 			break
@@ -432,7 +435,7 @@ func (l *loggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 	return err
 }
 
-func (l *loggerImpl) processReq(req logRequest) error {
+func (l *LoggerImpl) processReq(req logRequest) error {
 	var err error
 
 	target, err := l.getTarget(req.conflictRec)
@@ -473,7 +476,7 @@ func (h logReqHandle) Wait(finch chan bool) (err error) {
 }
 
 // newCap should be greater than or equal to existing queue capacity
-func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
+func (l *LoggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	if l.isClosed() {
 		return baseclog.ErrLoggerClosed
 	}
@@ -483,7 +486,7 @@ func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
 
-	l.logger.Debugf("going to change conflict logger queue capacity replId=%s old=%d new=%d id=%v", l.replId, l.opts.workerCount, newCap, l.id)
+	l.logger.Debugf("going to change conflict logger queue capacity replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCap, l.id)
 
 	if l.logReqCh == nil {
 		err = fmt.Errorf("nil queue")
@@ -501,8 +504,8 @@ func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 		return
 	}
 
-	l.logger.Infof("changing conflict logger queue capacity replId=%s old=%d new=%d id=%v", l.replId, l.opts.logQueueCap, newCap, l.id)
-	defer l.logger.Infof("done changing conflict logger queue capacity replId=%s cap=%d id=%v", l.replId, l.opts.logQueueCap, l.id)
+	l.logger.Infof("changing conflict logger queue capacity replId=%s old=%d new=%d id=%s", l.replId, l.opts.logQueueCap, newCap, l.id)
+	defer l.logger.Infof("done changing conflict logger queue capacity replId=%s cap=%d id=%s", l.replId, l.opts.logQueueCap, l.id)
 
 	// temporarily make sure there is no one reading from the queue.
 	for i := 0; i < l.opts.workerCount; i++ {
@@ -542,7 +545,7 @@ func (l *loggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	return
 }
 
-func (l *loggerImpl) UpdateNWRetryCount(cnt int) {
+func (l *LoggerImpl) UpdateNWRetryCount(cnt int) {
 	if l.isClosed() {
 		return
 	}
@@ -553,7 +556,7 @@ func (l *loggerImpl) UpdateNWRetryCount(cnt int) {
 	l.opts.networkRetryCount = cnt
 }
 
-func (l *loggerImpl) UpdateNWRetryInterval(t time.Duration) {
+func (l *LoggerImpl) UpdateNWRetryInterval(t time.Duration) {
 	if l.isClosed() {
 		return
 	}
@@ -564,7 +567,7 @@ func (l *loggerImpl) UpdateNWRetryInterval(t time.Duration) {
 	l.opts.networkRetryInterval = t
 }
 
-func (l *loggerImpl) UpdateSetMetaTimeout(t time.Duration) {
+func (l *LoggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 	if l.isClosed() {
 		return
 	}
@@ -575,7 +578,7 @@ func (l *loggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 	l.opts.setMetaTimeout = t
 }
 
-func (l *loggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
+func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 	if l.isClosed() {
 		return
 	}

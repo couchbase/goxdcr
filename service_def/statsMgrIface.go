@@ -176,6 +176,12 @@ const (
 	// Heartbeat
 	SOURCE_CLUSTER_NUM_NODES = "number_of_source_nodes"
 	SOURCE_CLUSTER_NUM_REPL  = "number_of_source_replications"
+
+	// conflict logging stats
+	CONFLICT_DOCS_WRITTEN     = "conflict_docs_written"
+	SRC_CONFLICT_DOCS_WRITTEN = "src_conflict_docs_written"
+	TGT_CONFLICT_DOCS_WRITTEN = "tgt_conflict_docs_written"
+	CRD_CONFLICT_DOCS_WRITTEN = "crd_conflict_docs_written"
 )
 
 const (
@@ -1526,6 +1532,38 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "For a given source cluster, the total number of outbound replications to this cluster",
 		Stability:    Committed,
 		Labels:       SourceClusterV1ReplLabels,
+	},
+	CONFLICT_DOCS_WRITTEN: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		Description:  "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	SRC_CONFLICT_DOCS_WRITTEN: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		Description:  "Number of source conflict docs written to the conflict bucket.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	TGT_CONFLICT_DOCS_WRITTEN: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		Description:  "Number of target conflict docs written to the conflict bucket.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	CRD_CONFLICT_DOCS_WRITTEN: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		Description:  "Number of CRDs written to the conflict bucket.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 }
 
