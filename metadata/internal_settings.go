@@ -295,7 +295,7 @@ const (
 	SrcHeartbeatMinIntervalKey       = "SrcHeartbeatMinInterval"
 	SrcHeartbeatMaxIntervalFactorKey = "SrcHeartbeatMaxIntervalFactor"
 
-	RMTokenDistributionKey = "RMTokenDistribution"
+	RMTokenDistributionStrKey = "RMTokenDistribution"
 
 	// conflict logging related internal settings
 	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
@@ -435,7 +435,7 @@ var SrcHeartbeatSkipIntraClusterConfig = &SettingsConfig{base.SrcHeartbeatSkipIn
 var SrcHeartbeatSkipCapellaTargetConfig = &SettingsConfig{base.SrcHeartbeatSkipCapellaTarget, nil}
 var SrcHeartbeatMinIntervalConfig = &SettingsConfig{int(base.SrcHeartbeatMinInterval / time.Second), &Range{10, 3600 /* 1 hour */}}
 var SrcHeartbeatMaxIntervalFactorConfig = &SettingsConfig{base.SrcHeartbeatMaxIntervalFactor, &Range{1, 100}}
-var RMTokenDistributionConfig = &SettingsConfig{base.RMTokenDistribution, nil}
+var RMTokenDistributionStrConfig = &SettingsConfig{base.RMTokenDistributionStr, nil}
 var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
 var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
 
@@ -573,7 +573,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	SrcHeartbeatSkipIntraClusterKey:               SrcHeartbeatSkipIntraClusterConfig,
 	SrcHeartbeatMinIntervalKey:                    SrcHeartbeatMinIntervalConfig,
 	SrcHeartbeatMaxIntervalFactorKey:              SrcHeartbeatMaxIntervalFactorConfig,
-	RMTokenDistributionKey:                        RMTokenDistributionConfig,
+	RMTokenDistributionStrKey:                     RMTokenDistributionStrConfig,
 	CLogSkipTlsVerifyKey:                          CLogSkipTlsVerifyConfig,
 	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
 }

@@ -11,7 +11,8 @@ const (
 	MemcachedConnUserAgent    string = "conflictLog"
 
 	// Logger consts
-	LoggerShutdownChCap int = 10
+	LoggerShutdownChCap  int = 10
+	DefaultPoolConnLimit int = 10
 
 	// ConflictRecord consts
 	SourcePrefix    string = "src"

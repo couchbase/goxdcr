@@ -152,6 +152,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FILTERED_CAS_POISONING_METRIC:  service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR:   service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE: service_def.MetricTypeCounter,
+	service_def.CONFLICT_DOCS_WRITTEN:               service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,

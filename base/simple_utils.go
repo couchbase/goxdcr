@@ -2456,3 +2456,40 @@ func SeparateScopeCollection(scopeCol string) (scope string, collection string) 
 	}
 	return
 }
+
+// ParseRMTokenDistStr parse the string into RM token distribution percentages
+func ParseRMTokenDistStr(orig string) (dist []int, err error) {
+	s := strings.TrimSpace(orig)
+	if len(s) == 0 {
+		err = fmt.Errorf("RM token dist string cannot be empty s=%s", s)
+		return
+	}
+
+	arr := strings.Split(s, ":")
+	if len(arr) != 3 {
+		err = fmt.Errorf("RM token dist string must have 3 parts s=%s", s)
+		return
+	}
+	dist = []int{0, 0, 0}
+
+	for i, e := range arr {
+		n, err := strconv.Atoi(e)
+		if err != nil {
+			err = fmt.Errorf("failed to parse RM dist string: s=%s, err=%v", s, err)
+			return nil, err
+		}
+		dist[i] = n
+	}
+
+	total := 0
+	for _, n := range dist {
+		total += n
+	}
+
+	if total != 100 {
+		err = fmt.Errorf("Total of RM token dist parts must be 100, s=%s", s)
+		return
+	}
+
+	return
+}

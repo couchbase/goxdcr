@@ -30,6 +30,14 @@ type ThroughputThrottler struct {
 	throughput_quota int64
 	// tokens for high priority replications, as number of mutations per second
 	high_tokens int64
+	// conflictLogEnabled tells whether the said feature is enabled or not
+	conflictLogEnabled *base.AtomicBooleanType
+	// tokens for conflict logging
+	conflictLogTokens int64
+	// tokens for conflict logging per slot
+	conflictLogQuota int64
+	// unitConflictLogTokens is the number of tokens to consume when conflict log is request
+	unitConflictLogTokens int64
 	// high tokens that are not used up by high priority replications, as number of mutations.
 	// it can be negative, in which case it needs to be brought back to the positive territory
 	// by future unused tokens before any tokens can be reassigned to low priority replications
@@ -55,10 +63,38 @@ type ThroughputThrottler struct {
 
 func NewThroughputThrottlerSvc(logger_ctx *log.LoggerContext) *ThroughputThrottler {
 	return &ThroughputThrottler{
-		finish_ch:       make(chan bool),
-		cond_var:        sync.NewCond(&sync.Mutex{}),
-		needToCalibrate: base.NewAtomicBooleanType(true),
-		logger:          log.NewLogger("TpThrottler", logger_ctx)}
+		finish_ch:             make(chan bool),
+		cond_var:              sync.NewCond(&sync.Mutex{}),
+		conflictLogEnabled:    base.NewAtomicBooleanType(false),
+		needToCalibrate:       base.NewAtomicBooleanType(true),
+		unitConflictLogTokens: throttlerSvc.UnitConflictLogTokens,
+		logger:                log.NewLogger("TpThrottler", logger_ctx)}
+}
+
+func (t *ThroughputThrottler) SetId(id string) {
+	t.id = id
+}
+
+func (t *ThroughputThrottler) replenishClogTokens() {
+	// update throughput_quota
+	for {
+		limit := atomic.LoadInt64(&t.conflictLogTokens)
+		if limit == 0 {
+			// nothing to do
+			break
+		}
+
+		quota := atomic.LoadInt64(&t.conflictLogQuota)
+		// increment quota
+		new_quota := quota + limit/int64(base.NumberOfSlotsForThroughputThrottling)
+		if new_quota > limit {
+			// keep quota below limit
+			new_quota = limit
+		}
+		if atomic.CompareAndSwapInt64(&t.conflictLogQuota, quota, new_quota) {
+			break
+		}
+	}
 }
 
 func (throttler *ThroughputThrottler) Start() error {
@@ -134,6 +170,8 @@ func (throttler *ThroughputThrottler) updateOnce() {
 		}
 	}
 
+	throttler.replenishClogTokens()
+
 	// process unused_high_tokens
 	high_tokens := atomic.LoadInt64(&throttler.high_tokens)
 	new_high_tokens := high_tokens / int64(base.NumberOfSlotsForThroughputThrottling)
@@ -153,12 +191,16 @@ func (throttler *ThroughputThrottler) updateOnce() {
 
 		// reassignable_high_tokens is the smaller of unused token and max_reassignable_tokens_per_slot
 		reassignable_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
+		throttler.logger.Debugf("thpt throttler update loop 1 in max_reassignable_tokens_per_slot=%d, unused_high_tokens=%d",
+			max_reassignable_tokens_per_slot, reassignable_high_tokens)
 		if reassignable_high_tokens > max_reassignable_tokens_per_slot {
 			reassignable_high_tokens = max_reassignable_tokens_per_slot
 		}
 
 		// reassign high tokens, which could be negative, to low priority replications
 		atomic.AddInt64(&throttler.reassigned_high_tokens, reassignable_high_tokens)
+		throttler.logger.Debugf("thpt throttler update loop 2 in max_reassignable_tokens_per_slot=%d, reassigned_high_tokens=%d",
+			max_reassignable_tokens_per_slot, throttler.reassigned_high_tokens)
 	}
 
 	// assign more high tokens for the next time slot
@@ -196,13 +238,113 @@ func (throttler *ThroughputThrottler) clearReassignedTokens() error {
 	return nil
 }
 
-// output:
-// true - if the mutation can be sent
-// false - if the mutation cannot be sent
-func (throttler *ThroughputThrottler) CanSend(isHighPriorityReplication bool) bool {
-	if isHighPriorityReplication {
+// consumeQuota attempts to take 'n' tokens
+// If it returns retry = true then caller should call the function again
+// 'result' should only be used when retry == false
+func (t *ThroughputThrottler) consumeQuota(limit, quota *int64, n int64) (retry, result bool) {
+	l := atomic.LoadInt64(limit)
+	if l == 0 {
+		result = true
+		return
+	}
+
+	q := atomic.LoadInt64(quota)
+	if q-n <= 0 {
+		return
+	}
+
+	if atomic.CompareAndSwapInt64(quota, q, q-n) {
+		result = true
+	} else {
+		retry = true
+	}
+
+	return
+}
+
+// consumeReassignedTokens attempts to take 'n' tokens
+// If it returns retry = true then caller should call the function again
+// 'result' should only be used when retry == false
+func (t *ThroughputThrottler) consumeReassignedTokens(n int64) (retry, result bool) {
+	// if there is no quota left, check if we can get allowance from reassigned high tokens
+	reassigned_high_tokens := atomic.LoadInt64(&t.reassigned_high_tokens)
+	if reassigned_high_tokens-n > 0 {
+		if atomic.CompareAndSwapInt64(&t.reassigned_high_tokens, reassigned_high_tokens, reassigned_high_tokens-n) {
+			result = true
+		} else {
+			retry = true
+		}
+	}
+
+	return
+}
+
+func (t *ThroughputThrottler) handleHighReq() bool {
+	atomic.AddInt64(&t.unused_high_tokens, -1)
+	return true
+}
+
+func (t *ThroughputThrottler) handleLowReq() bool {
+	// for low priority replications, we need to check whether quota/token is available
+	for {
+		retry, result := t.consumeQuota(&t.throughput_limit, &t.throughput_quota, 1)
+		if retry {
+			continue
+		}
+
+		if result {
+			return true
+		}
+
+		retry, result = t.consumeReassignedTokens(1)
+		if !retry {
+			return result
+		}
+	}
+}
+
+func (t *ThroughputThrottler) handleClogReq() bool {
+	// for low priority replications, we need to check whether quota/token is available
+	for {
+		retry, result := t.consumeQuota(&t.conflictLogTokens, &t.conflictLogQuota, t.unitConflictLogTokens)
+		if retry {
+			continue
+		}
+
+		if result {
+			return true
+		}
+
+		retry, result = t.consumeReassignedTokens(t.unitConflictLogTokens)
+		if !retry {
+			return result
+		}
+	}
+}
+
+func (t *ThroughputThrottler) canSendWithClog(req throttlerSvc.ThrottlerReq) bool {
+	switch req {
+	case throttlerSvc.ThrottlerReqHighRepl:
+		return t.handleHighReq()
+	case throttlerSvc.ThrottlerReqLowRepl:
+		return t.handleLowReq()
+	case throttlerSvc.ThrottlerReqCLog:
+		return t.handleClogReq()
+	default:
+		return false
+	}
+}
+
+func (throttler *ThroughputThrottler) canSendWithoutClog(req throttlerSvc.ThrottlerReq) bool {
+	if req == throttlerSvc.ThrottlerReqHighRepl {
 		// for high priority replications, only bookkeeping is needed
 		atomic.AddInt64(&throttler.unused_high_tokens, -1)
+		return true
+	}
+
+	// Allow clog requests when clog is disabled. This is because of inherent race between
+	// enabling the feature and throttler knowing about it.
+	if req == throttlerSvc.ThrottlerReqCLog {
 		return true
 	}
 
@@ -239,6 +381,19 @@ func (throttler *ThroughputThrottler) CanSend(isHighPriorityReplication bool) bo
 		// no quota/token available. cannot send
 		return false
 	}
+}
+
+// output:
+// true - if the mutation can be sent
+// false - if the mutation cannot be sent
+func (throttler *ThroughputThrottler) CanSend(req throttlerSvc.ThrottlerReq) bool {
+	clogEnabled := throttler.conflictLogEnabled.Get()
+
+	if clogEnabled {
+		return throttler.canSendWithClog(req)
+	}
+
+	return throttler.canSendWithoutClog(req)
 }
 
 // blocks till the next measurement interval, when throughput usage allowance may become available
@@ -285,10 +440,25 @@ func (throttler *ThroughputThrottler) UpdateSettings(settings map[string]interfa
 		}
 	}
 
+	clogTokens, ok := settings[throttlerSvc.ConflictLogTokensKey]
+	if ok {
+		err := throttler.setConflictLogTokens(clogTokens.(int64))
+		if err != nil {
+			errMap[throttlerSvc.ConflictLogTokensKey] = err
+		}
+	}
+
+	enabled, ok := settings[throttlerSvc.ConflictLogEnabledKey]
+	if ok {
+		throttler.conflictLogEnabled.Set(enabled.(bool))
+	}
+
 	needToCalibrate, ok := settings[throttlerSvc.NeedToCalibrateKey]
 	if ok {
 		throttler.needToCalibrate.Set(needToCalibrate.(bool))
 	}
+
+	throttler.logger.Debugf("throughput throttler update settings: %#v", throttler)
 
 	return errMap
 }
@@ -318,16 +488,23 @@ func (throttler *ThroughputThrottler) setMaxReassignableHighTokens(tokens int64)
 	return nil
 }
 
+func (throttler *ThroughputThrottler) setConflictLogTokens(tokens int64) error {
+	if tokens < 0 {
+		return fmt.Errorf("Conflict log tokens cannot be negative, tokens=%d", tokens)
+	}
+
+	atomic.StoreInt64(&throttler.conflictLogTokens, tokens)
+	atomic.StoreInt64(&throttler.conflictLogQuota, tokens/int64(base.NumberOfSlotsForThroughputThrottling))
+
+	return nil
+}
+
 func (throttler *ThroughputThrottler) setLowTokens(tokens int64) error {
 	if tokens < 0 {
 		return fmt.Errorf("Throughput limit cannot be negative. limit=%v\n", tokens)
 	}
 
 	atomic.StoreInt64(&throttler.throughput_limit, tokens)
-
-	if tokens == 0 {
-		return nil
-	}
 
 	// reset quota accordingly
 	newQuota := tokens / int64(base.NumberOfSlotsForThroughputThrottling)
@@ -362,25 +539,29 @@ func (throttler *ThroughputThrottler) logStats() {
 		case <-throttler.finish_ch:
 			return
 		case <-logStats_ticker.C:
-			throttler.logStatsOnce()
+			throttler.logStatsOnce("")
 		}
 	}
 }
 
-func (throttler *ThroughputThrottler) logStatsOnce() {
+func (throttler *ThroughputThrottler) logStatsOnce(prefixMsg string) {
 	throughput_limit := atomic.LoadInt64(&throttler.throughput_limit)
-	if throughput_limit == 0 {
-		return
-	}
+
 	throughput_quota := atomic.LoadInt64(&throttler.throughput_quota)
 	high_tokens := atomic.LoadInt64(&throttler.high_tokens)
+	clogTokens := atomic.LoadInt64(&throttler.conflictLogTokens)
+	clogQuota := atomic.LoadInt64(&throttler.conflictLogQuota)
 	unused_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
 	reassigned_high_tokens := atomic.LoadInt64(&throttler.reassigned_high_tokens)
 	max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
 	needToCalibrate := throttler.needToCalibrate.Get()
+	clogEnabled := throttler.conflictLogEnabled.Get()
+
+	msg := ""
 	if throughput_quota < 0 {
-		throttler.logger.Errorf("%v went over the limit. throughput_limit=%v, throughput_quota=%v, high_tokens=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n", throttler.id, throughput_limit, throughput_quota, high_tokens, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
-	} else {
-		throttler.logger.Infof("%v throughput_limit=%v, throughput_quota=%v, high_tokens=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n", throttler.id, throughput_limit, throughput_quota, high_tokens, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
+		msg = "went over the limit. "
 	}
+
+	throttler.logger.Infof("%s%v %sthroughput_limit=%v, throughput_quota=%v, high_tokens=%v, clogEnabled:%v, clog_tokens=%v, clog_quota=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n",
+		prefixMsg, throttler.id, msg, throughput_limit, throughput_quota, high_tokens, clogEnabled, clogTokens, clogQuota, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
 }

@@ -1947,17 +1947,24 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 	return nil
 }
 
+func (router *Router) getThrottlerReq() throttlerSvc.ThrottlerReq {
+	if router.isHighReplication.Get() {
+		return throttlerSvc.ThrottlerReqHighRepl
+	}
+	return throttlerSvc.ThrottlerReqLowRepl
+}
+
 func (router *Router) throttle() {
 	// this statement before the for loop is to ensure that
 	// we do not incur the overhead of collecting start time
 	// and raising event when throttling does not happen
-	if router.throughputThrottlerSvc.CanSend(router.isHighReplication.Get()) {
+	if router.throughputThrottlerSvc.CanSend(router.getThrottlerReq()) {
 		return
 	}
 
 	start_time := time.Now()
 	for {
-		if router.throughputThrottlerSvc.CanSend(router.isHighReplication.Get()) {
+		if router.throughputThrottlerSvc.CanSend(router.getThrottlerReq()) {
 			break
 		} else {
 			router.throughputThrottlerSvc.Wait()

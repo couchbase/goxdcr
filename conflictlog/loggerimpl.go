@@ -17,6 +17,10 @@ import (
 
 var _ baseclog.Logger = (*LoggerImpl)(nil)
 
+const (
+	ThrottlerTimeoutPercent = float64(0.20)
+)
+
 // LoggerImpl implements the Logger interface
 type LoggerImpl struct {
 	logger *log.CommonLogger
@@ -45,6 +49,9 @@ type LoggerImpl struct {
 	// throttlerSvc is the IOPS throttler
 	throttlerSvc throttlerSvc.ThroughputThrottlerSvc
 
+	// number of attempts to try for throttler
+	throttlerAttempts int
+
 	// logReqCh is the work queue for all logging requests
 	logReqCh chan logRequest
 
@@ -69,6 +76,21 @@ type logRequest struct {
 	ackCh chan error
 }
 
+// calcThrottlerAttempts returns the number of attempts to get go ahead
+// from the throttler
+func calcThrottlerAttempts(setMetaTimeout time.Duration) int {
+
+	slotMs := float64(time.Second.Milliseconds()) / float64(base.NumberOfSlotsForThroughputThrottling)
+	tmp := (float64(setMetaTimeout.Milliseconds()) * ThrottlerTimeoutPercent) / slotMs
+
+	attempts := int(tmp)
+	if attempts == 0 {
+		attempts = 1
+	}
+
+	return attempts
+}
+
 // newLoggerImpl creates a new logger impl instance.
 // throttlerSvc is allowed to be nil, which means no throttling
 func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, opts ...LoggerOpt) (l *LoggerImpl, err error) {
@@ -89,8 +111,13 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		opt(&options)
 	}
 
+	throttlerAttempts := calcThrottlerAttempts(options.setMetaTimeout)
+	if throttlerAttempts == 0 {
+		throttlerAttempts = 1
+	}
+
 	loggerId := fmt.Sprintf("%s_%v", ConflictLoggerName, newLoggerId())
-	logger.Infof("creating new conflict logger id=%d replId=%s loggerOptions=%s", loggerId, replId, options.String())
+	logger.Infof("creating new conflict logger id=%d replId=%s loggerOptions=%s throttlerAttempts=%d ", loggerId, replId, options.String(), throttlerAttempts)
 
 	l = &LoggerImpl{
 		logger:            logger,
@@ -102,6 +129,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		opts:              options,
 		rwMtx:             sync.RWMutex{},
 		throttlerSvc:      throttlerSvc,
+		throttlerAttempts: throttlerAttempts,
 		logReqCh:          make(chan logRequest, options.logQueueCap),
 		finch:             make(chan bool, 1),
 		shutdownWorkerCh:  make(chan bool, LoggerShutdownChCap),
@@ -140,6 +168,10 @@ func (l *LoggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 	}
 
 	return
+}
+
+func (l *LoggerImpl) QueueSize() int {
+	return len(l.logReqCh)
 }
 
 func (l *LoggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
@@ -324,42 +356,54 @@ func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error)
 	return
 }
 
-func (l *LoggerImpl) throttle() {
+func (l *LoggerImpl) throttle() error {
 	if l.throttlerSvc == nil {
-		return
+		return nil
 	}
 
-	ok := l.throttlerSvc.CanSend(false)
-	for !ok {
+	var ok bool
+
+	// The attempt count is guaranteed to be atleast 1
+	for i := 0; i < l.throttlerAttempts; i++ {
+		ok = l.throttlerSvc.CanSend(throttlerSvc.ThrottlerReqCLog)
+		if ok {
+			return nil
+		}
+
+		// If its a last attempt then there is no point in waiting
+		// so we bail
+		if i == l.throttlerAttempts-1 {
+			break
+		}
+
 		l.throttlerSvc.Wait()
-		ok = l.throttlerSvc.CanSend(false)
 	}
+
+	return baseclog.ErrThrottle
 }
 
-// setMetaTimeout is a wrapper on Connection's SetMeta using the timeout configured with the logger
-func (l *LoggerImpl) setMetaTimeout(conn Connection, key string, body []byte, dataType uint8, target baseclog.Target) error {
+func (l *LoggerImpl) writeDocsWithTimeout(req logRequest, target baseclog.Target, timeout time.Duration) (err error) {
 	resultCh := make(chan error, 1)
 	go func() {
-		l.throttle()
-		err := conn.SetMeta(key, body, dataType, target)
+		err := l.writeDocs(req, target)
 		resultCh <- err
 	}()
 
-	t := time.NewTimer(l.opts.setMetaTimeout)
+	t := time.NewTimer(timeout)
 	defer t.Stop()
 
 	select {
 	case err := <-resultCh:
 		return err
 	case <-t.C:
-		return baseclog.ErrSetMetaTimeout
+		return baseclog.ErrTimeout
 	}
 }
 
 func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err error) {
 	// Write source document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
-		err := l.setMetaTimeout(conn, req.conflictRec.Source.Id, req.conflictRec.Source.Body, req.conflictRec.Source.Datatype, target)
+		err := conn.SetMeta(req.conflictRec.Source.Id, req.conflictRec.Source.Body, req.conflictRec.Source.Datatype, target)
 		return err
 	})
 	if err != nil {
@@ -371,7 +415,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
-		err = l.setMetaTimeout(conn, req.conflictRec.Target.Id, req.conflictRec.Target.Body, req.conflictRec.Target.Datatype, target)
+		err = conn.SetMeta(req.conflictRec.Target.Id, req.conflictRec.Target.Body, req.conflictRec.Target.Datatype, target)
 		return err
 	})
 	if err != nil {
@@ -381,7 +425,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
-		err = l.setMetaTimeout(conn, req.conflictRec.Id, req.conflictRec.Body, req.conflictRec.Datatype, target)
+		err = conn.SetMeta(req.conflictRec.Id, req.conflictRec.Body, req.conflictRec.Datatype, target)
 		return err
 	})
 	if err != nil {
@@ -438,6 +482,11 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 func (l *LoggerImpl) processReq(req logRequest) error {
 	var err error
 
+	err = l.throttle()
+	if err != nil {
+		return err
+	}
+
 	target, err := l.getTarget(req.conflictRec)
 	if err != nil {
 		return err
@@ -453,7 +502,8 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 		return err
 	}
 
-	err = l.writeDocs(req, target)
+	timeout := l.opts.setMetaTimeout
+	err = l.writeDocsWithTimeout(req, target, timeout)
 	if err != nil {
 		return err
 	}

@@ -22,6 +22,11 @@ import (
 
 var _ Connection = (*MemcachedConn)(nil)
 
+const (
+	MCReadTimeout  = 30 * time.Second
+	MCWriteTimeout = 30 * time.Second
+)
+
 type MemcachedConn struct {
 	id            int64
 	addr          string
@@ -155,10 +160,8 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 	// For setMeta, negotiate compression, if it is set
 	features.CompressionType = base.CompressionTypeSnappy
 	userAgent := MemcachedConnUserAgent
-	readTimeout := 30 * time.Second
-	writeTimeout := 30 * time.Second
 
-	retFeatures, err := m.utilsObj.SendHELOWithFeatures(conn, userAgent, readTimeout, writeTimeout, features, m.logger)
+	retFeatures, err := m.utilsObj.SendHELOWithFeatures(conn, userAgent, MCReadTimeout, MCWriteTimeout, features, m.logger)
 	if err != nil {
 		return
 	}

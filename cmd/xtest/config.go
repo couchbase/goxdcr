@@ -8,7 +8,6 @@ type Config struct {
 	MemcachedAddr string `json:"memcachedAddr"`
 
 	ConflictLogPertest *ConflictLogLoadTest `json:"conflictLogLoadTest"`
-	GocbcoreTest       *GocbcoreTest        `json:"gocbcoreTest"`
 	CBAuthTest         *CBAuthTest          `json:"cbauthTest"`
 	ThrottlerTest      *ThrottlerTest       `json:"throttlerTest"`
 

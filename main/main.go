@@ -266,7 +266,9 @@ func main() {
 			fmt.Printf("Error getting global settings. err=%v\n", err)
 			os.Exit(1)
 		}
-		conflictlog.InitManager(log.GetOrCreateContext(base.CLogManagerKey), utils, top_svc, securitySvc,
+
+		thThrottler := throttlerSvcImpl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey))
+		conflictlog.InitManager(log.GetOrCreateContext(base.CLogManagerKey), utils, top_svc, securitySvc, thThrottler,
 			globalSettings.GetCLogPoolGCInterval(), globalSettings.GetCLogPoolReapInterval(), globalSettings.GetCLogPoolConnLimit())
 
 		// start replication manager in normal mode
@@ -284,7 +286,7 @@ func main() {
 			eventlog_svc,
 			processSetting_svc,
 			internalSettings_svc,
-			throttlerSvcImpl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey)),
+			thThrottler,
 			resolver_svc,
 			utils,
 			collectionsManifestService,

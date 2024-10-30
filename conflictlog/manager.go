@@ -2,6 +2,7 @@ package conflictlog
 
 import (
 	"io"
+	"sync"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -9,11 +10,11 @@ import (
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
-	"github.com/couchbase/goxdcr/v8/service_impl/throttlerSvcImpl"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
 var manager Manager
+var singleton managerSingleton
 
 var _ Manager = (*managerImpl)(nil)
 
@@ -39,6 +40,10 @@ type EncryptionInfoGetter interface {
 	IsMyClusterEncryptionLevelStrict() bool
 }
 
+type managerSingleton struct {
+	once sync.Once
+}
+
 // GetManager returns the global conflict manager
 func GetManager() (Manager, error) {
 	if manager == nil {
@@ -49,29 +54,28 @@ func GetManager() (Manager, error) {
 }
 
 // InitManager intializes global conflict manager
-func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrGetter MemcachedAddrGetter, securityInfo SecurityInfo,
-	poolGCInterval, poolReapInterval time.Duration, connLimit int) {
+func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrGetter MemcachedAddrGetter, securityInfo SecurityInfo, throttler throttlerSvc.ThroughputThrottlerSvc, poolGCInterval, poolReapInterval time.Duration, connLimit int) {
+	singleton.once.Do(func() {
+		logger := log.NewLogger(ConflictManagerLoggerName, loggerCtx)
 
-	logger := log.NewLogger(ConflictManagerLoggerName, loggerCtx)
+		logger.Info("intializing conflict manager")
 
-	logger.Infof("intializing conflict manager with connLimit=%v", connLimit)
+		impl := &managerImpl{
+			logger:           logger,
+			memdAddrGetter:   memdAddrGetter,
+			securityInfo:     securityInfo,
+			utils:            utils,
+			manifestCache:    newManifestCache(),
+			poolGCInterval:   poolGCInterval,
+			poolReapInterval: poolReapInterval,
+			connLimit:        connLimit,
+			throttlerSvc:     throttler,
+		}
 
-	throttlerSvc := throttlerSvcImpl.NewThroughputThrottlerSvc(loggerCtx)
-	throttlerSvc.Start()
+		impl.setConnPool()
 
-	impl := &managerImpl{
-		logger:         logger,
-		memdAddrGetter: memdAddrGetter,
-		securityInfo:   securityInfo,
-		utils:          utils,
-		manifestCache:  newManifestCache(),
-		connLimit:      connLimit,
-		throttlerSvc:   throttlerSvc,
-	}
-
-	impl.setConnPool(poolGCInterval, poolReapInterval)
-
-	manager = impl
+		manager = impl
+	})
 }
 
 // managerImpl implements conflict manager
@@ -84,8 +88,12 @@ type managerImpl struct {
 	manifestCache  *ManifestCache
 	throttlerSvc   throttlerSvc.ThroughputThrottlerSvc
 
+	poolGCInterval   time.Duration
+	poolReapInterval time.Duration
 	// connLimit is the max number of connections
 	connLimit int
+
+	skipTlsVerify bool
 }
 
 func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, opts ...LoggerOpt) (l baseclog.Logger, err error) {
@@ -99,6 +107,11 @@ func (m *managerImpl) SetConnLimit(limit int) {
 	m.connPool.SetLimit(limit)
 }
 
+func (m *managerImpl) SetSkipTlsVerify(v bool) {
+	m.logger.Infof("setting tls skip verify=%v", v)
+	m.skipTlsVerify = v
+}
+
 func (m *managerImpl) SetIOPSLimit(limit int64) {
 	m.logger.Infof("setting IOPS limit = %d", limit)
 	m.throttlerSvc.UpdateSettings(map[string]interface{}{
@@ -106,22 +119,14 @@ func (m *managerImpl) SetIOPSLimit(limit int64) {
 	})
 }
 
-func (m *managerImpl) setConnPool(gcInterval, reapInterval time.Duration) {
+func (m *managerImpl) setConnPool() {
 	m.logger.Infof("creating conflict manager gomemcached connection pool, connLimit=%v", m.connLimit)
 
-	m.connPool = iopool.NewConnPool(m.logger, m.connLimit, gcInterval, reapInterval, m.newMemcachedConn)
+	m.connPool = iopool.NewConnPool(m.logger, m.connLimit, m.poolGCInterval, m.poolReapInterval, m.newMemcachedConn)
 }
 
 func (m *managerImpl) ConnPool() iopool.ConnPool {
 	return m.connPool
-}
-
-// Not in use. Was used for a POC.
-// Refer to newMemcachedConn below, which is in use for conflict logging.
-func (m *managerImpl) newGocbCoreConn(bucketName string) (conn io.Closer, err error) {
-	m.logger.Infof("creating new conflict gocbcore bucket=%s encStrict=%v", bucketName, m.securityInfo.IsClusterEncryptionLevelStrict())
-
-	return NewGocbConn(m.logger, m.memdAddrGetter, bucketName, m.securityInfo)
 }
 
 func (m *managerImpl) newMemcachedConn(bucketName string) (conn io.Closer, err error) {
@@ -131,6 +136,6 @@ func (m *managerImpl) newMemcachedConn(bucketName string) (conn io.Closer, err e
 		return
 	}
 
-	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, base.CLogSkipTlsVerify)
+	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, m.skipTlsVerify)
 	return
 }

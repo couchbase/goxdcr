@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,14 +24,13 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
+	"github.com/couchbase/goxdcr/v8/pipeline"
 	"github.com/couchbase/goxdcr/v8/pipeline_manager"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/rcrowley/go-metrics"
 )
-
-const ResourceManagerName = "ResourceMgr"
 
 var pipelineNotRunning = fmt.Errorf("pipeline is not running yet")
 
@@ -39,6 +39,8 @@ type ReplStats struct {
 	changesLeft         int64
 	docsReceivedFromDcp int64
 	docsRepQueue        int64
+	clogDocsWritten     int64
+	clogQueueSize       int64
 	// timestamp that the stats is updated
 	timestamp int64
 	// stats derived from other stats
@@ -105,6 +107,8 @@ type State struct {
 	throughputLimit int64
 	// tokens given to high priority replications
 	highTokens int64
+	// conflictLog tokens
+	conflictLogTokens int64
 	// max high tokens that can be reassigned to low priority replications
 	maxReassignableTokens int64
 	// throughput of all replications
@@ -114,6 +118,8 @@ type State struct {
 	highThroughput int64
 	// max throughput that system can sustain
 	maxThroughput int64
+	// throughput considering all reaplications needed to satisfy QOS
+	totalThroughputNeeded int64
 	// throughput needed to satisfy QOS for high priority replications
 	throughputNeededByHighRepl int64
 	// whether high priority replications exist
@@ -122,6 +128,9 @@ type State struct {
 	lowPriorityReplExist bool
 	// whether high priority replications with backlog exist
 	backlogReplExist bool
+
+	// indicator whether conflict logging is enabled or not
+	isConflictLoggingEnabled bool
 
 	// runtime stats of active replications
 	replStatsMap map[string]*ReplStats
@@ -176,10 +185,8 @@ func (s *State) String() string {
 type ResourceManager struct {
 	pipelineMgr            pipeline_manager.PipelineMgrIface
 	repl_spec_svc          service_def.ReplicationSpecSvc
-	xdcr_topology_svc      service_def.XDCRCompTopologySvc
-	remote_cluster_svc     service_def.RemoteClusterSvc
-	checkpoint_svc         service_def.CheckpointsService
-	uilog_svc              service_def.UILogSvc
+	kvNodeGetter           service_def.XDCRCompTopologySvc
+	replStatsGetter        ReplStatsGetter
 	throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc
 	logger                 *log.CommonLogger
 	utils                  utilities.UtilsIface
@@ -249,20 +256,19 @@ type ResourceMgrIface interface {
 	HandleGoMaxProcsChange(goMaxProcs int)
 }
 
+type ReplStatsGetter interface {
+	CollectReplStats() map[*metadata.GenericSpecification]*ReplStats
+}
+
 func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, throughput_throttler_svc throttlerSvc.ThroughputThrottlerSvc,
-	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) ResourceMgrIface {
+	throughput_throttler_svc throttlerSvc.ThroughputThrottlerSvc,
+	logger_context *log.LoggerContext, backfillReplSvc service_def.BackfillReplSvc) *ResourceManager {
 
 	resourceMgrRetVar := &ResourceManager{
 		pipelineMgr:                pipelineMgr,
 		repl_spec_svc:              repl_spec_svc,
-		xdcr_topology_svc:          xdcr_topology_svc,
-		remote_cluster_svc:         remote_cluster_svc,
-		checkpoint_svc:             checkpoint_svc,
-		logger:                     log.NewLogger(ResourceManagerName, logger_context),
-		uilog_svc:                  uilog_svc,
-		utils:                      utilsIn,
+		kvNodeGetter:               xdcr_topology_svc,
+		logger:                     log.NewLogger(base.ResourceMgrKey, logger_context),
 		finch:                      make(chan bool),
 		ongoingReplMap:             make(map[string]bool),
 		replDcpPriorityMap:         make(map[string]mcc.PriorityType),
@@ -277,14 +283,20 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 		managedResourceOnceSpecMap: make(map[string]*metadata.GenericSpecification),
 	}
 
+	resourceMgrRetVar.replStatsGetter = resourceMgrRetVar
+
 	resourceMgrRetVar.logger.Info("Resource Manager is initialized")
 
 	return resourceMgrRetVar
 }
 
+func (rm *ResourceManager) SetReplStatsGetter(getter ReplStatsGetter) {
+	rm.replStatsGetter = getter
+}
+
 func (rm *ResourceManager) Start() error {
-	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
-	defer rm.logger.Infof("%v started\n", ResourceManagerName)
+	rm.logger.Infof("%v starting ....\n", base.ResourceMgrKey)
+	defer rm.logger.Infof("%v started\n", base.ResourceMgrKey)
 
 	// this could take a while when ns_server starts up, run in bg
 	go rm.checkForKVService()
@@ -311,7 +323,7 @@ func (rm *ResourceManager) checkForKVService() {
 	// When a node first starts up and before it is a "cluster" IsKVNode() will return 404
 	// XDCR must retry until it gets a successful lookup of services
 	for {
-		isKVNode, err := rm.xdcr_topology_svc.IsKVNode()
+		isKVNode, err := rm.kvNodeGetter.IsKVNode()
 		if err != nil {
 			time.Sleep(base.ResourceMgrKVDetectionRetryInterval)
 		} else {
@@ -325,8 +337,8 @@ func (rm *ResourceManager) checkForKVService() {
 }
 
 func (rm *ResourceManager) Stop() error {
-	rm.logger.Infof("%v stopping ....\n", ResourceManagerName)
-	defer rm.logger.Infof("%v stopped\n", ResourceManagerName)
+	rm.logger.Infof("%v stopping ....\n", base.ResourceMgrKey)
+	defer rm.logger.Infof("%v stopped\n", base.ResourceMgrKey)
 
 	close(rm.finch)
 	rm.waitGrp.Wait()
@@ -335,7 +347,7 @@ func (rm *ResourceManager) Stop() error {
 
 	err := rm.throughputThrottlerSvc.Stop()
 	if err != nil {
-		rm.logger.Errorf("%v Error stopping throughput throttler service. err=%v\n", ResourceManagerName, err)
+		rm.logger.Errorf("%v Error stopping throughput throttler service. err=%v\n", base.ResourceMgrKey, err)
 	}
 	return err
 }
@@ -522,6 +534,8 @@ func (rm *ResourceManager) manageResources() {
 }
 
 func (rm *ResourceManager) manageResourcesOnce() error {
+	isClogEnabled := false
+
 	specs, err := rm.repl_spec_svc.AllActiveReplicationSpecsReadOnly()
 	if err != nil {
 		rm.logger.Infof("Skipping resource management actions because of err = %v\n", err)
@@ -530,6 +544,9 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	backfillSpecs, err := rm.backfillReplSvc.AllActiveBackfillSpecsReadOnly()
 	rm.managedResourceOnceSpecMap = make(map[string]*metadata.GenericSpecification)
 	for _, spec := range specs {
+		if !isClogEnabled && !spec.Settings.GetConflictLoggingMapping().Disabled() {
+			isClogEnabled = true
+		}
 		genSpec := metadata.GenericSpecification(spec)
 		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
 	}
@@ -548,15 +565,12 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	}
 	rm.RemoveAnyStaleMapValues()
 
-	if rm.needResourceManagement() == false {
-		return nil
-	}
-
-	specReplStatsMap := rm.collectReplStats()
+	specReplStatsMap := rm.CollectReplStats()
 
 	previousState := rm.getPreviousState()
 
 	state := rm.computeState(specReplStatsMap, previousState)
+	state.isConflictLoggingEnabled = isClogEnabled
 
 	rm.computeActionsToTake(previousState, state)
 
@@ -653,7 +667,7 @@ func (rm *ResourceManager) setPreviousState(state *State) {
 	rm.previousState = state
 }
 
-func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification]*ReplStats {
+func (rm *ResourceManager) CollectReplStats() map[*metadata.GenericSpecification]*ReplStats {
 	specReplStatsMap := make(map[*metadata.GenericSpecification]*ReplStats)
 
 	for _, specPtr := range rm.managedResourceOnceSpecMap {
@@ -669,29 +683,6 @@ func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification
 	}
 
 	return specReplStatsMap
-}
-
-// There is no need for resource management if all replications are high priority or all replications are low priority
-// Medium priority replications may need resource management based on whether it is in initial replication.
-func (rm *ResourceManager) needResourceManagement() bool {
-	first := true
-	var priority base.PriorityType
-	for _, genericSpecPtr := range rm.managedResourceOnceSpecMap {
-		spec := *genericSpecPtr
-		if first {
-			priority = spec.GetReplicationSpec().Settings.GetPriority()
-			first = false
-			if priority == base.PriorityTypeMedium {
-				return true
-			}
-		} else {
-			if priority != spec.GetReplicationSpec().Settings.GetPriority() {
-				return true
-			}
-		}
-	}
-	// All replications have the same priority, either high or low. No need for resource management
-	return false
 }
 
 func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSpecification]*ReplStats, previousState *State) (state *State) {
@@ -733,10 +724,23 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSp
 			throughput = previousReplStats.throughput
 		} else {
 			if previousReplStats != nil {
+				clogDocsWritten := replStats.clogDocsWritten - previousReplStats.clogDocsWritten
+				if clogDocsWritten < 0 {
+					clogDocsWritten = 0
+				}
+
+				clogQueueSizeDiff := previousReplStats.clogQueueSize - replStats.clogQueueSize
+				clogDocsWritten += clogQueueSizeDiff
+
 				docsProcessed := replStats.docsReceivedFromDcp - previousReplStats.docsReceivedFromDcp + previousReplStats.docsRepQueue - replStats.docsRepQueue
+				docsProcessed += clogDocsWritten
 				throughput = int64(float64(docsProcessed) / (float64(replStats.timestamp-previousReplStats.timestamp) / float64(1000000000)))
+				rm.logger.Tracef("clogCount=%d, docsProcessed=%d, stats:%#v, prevStats=%#v",
+					clogDocsWritten, docsProcessed, replStats, previousReplStats)
 			} else {
 				docsProcessed := replStats.docsReceivedFromDcp - replStats.docsRepQueue
+				docsProcessed += replStats.clogDocsWritten
+				docsProcessed -= replStats.clogQueueSize
 				throughput = int64(float64(docsProcessed) / base.ResourceManagementInterval.Seconds())
 			}
 			if throughput < 0 {
@@ -748,16 +752,19 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSp
 		replStats.throughput = throughput
 		state.overallThroughput += throughput
 
+		throughPutNeeded := replStats.changesLeft * 1000 / int64(spec.GetReplicationSpec().Settings.GetDesiredLatencyMs())
+
+		state.totalThroughputNeeded += throughPutNeeded
+
 		if isReplHighPriority {
 			state.highThroughput += throughput
 
 			// for high priority replications, compute throughputNeededByHighRepl
 			// This is the throughput desired to clear the changesLeft in whatever time specified
-			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.GetReplicationSpec().Settings.GetDesiredLatencyMs())
-			state.throughputNeededByHighRepl += throughputNeededByHighRepl
+			state.throughputNeededByHighRepl += throughPutNeeded
 
 			// If we cannot clear the changesLeft within specified time, this is considered backlog
-			if throughput < throughputNeededByHighRepl {
+			if throughput < throughPutNeeded {
 				state.backlogReplExist = true
 			}
 		}
@@ -781,15 +788,6 @@ func (rm *ResourceManager) computeActionsToTake(previousState, state *State) {
 }
 
 func (rm *ResourceManager) computeThrottlingActions(previousState, state *State) {
-	if !state.highPriorityReplExist || !state.lowPriorityReplExist {
-		// when there is at most one group of replications, there is no need for throttling
-
-		// set highTokens to 0 to reduce overhead of high tokens maintenance
-		state.highTokens = 0
-		// set throughputLimit to 0 to indicate no throttling
-		state.throughputLimit = 0
-		return
-	}
 
 	if !rm.inExtraQuotaPeriod.Get() {
 		// not in extra quota period
@@ -851,7 +849,15 @@ func (rm *ResourceManager) computeThrottlingActions(previousState, state *State)
 		}
 	}
 
-	state.highTokens, state.throughputLimit, state.maxReassignableTokens = rm.computeTokens(state.maxThroughput, state.throughputNeededByHighRepl)
+	var rmTokens []int64
+	rmTokens, state.maxReassignableTokens = rm.computeTokens(state, state.maxThroughput, state.throughputNeededByHighRepl)
+
+	rm.logger.Tracef("totalTPut=%d, totalTPutNeeded=%d, maxRA=%d, rmTokens=%v",
+		int64(rm.overallThroughputSamples.Mean()), state.totalThroughputNeeded, state.maxReassignableTokens, rmTokens)
+
+	state.highTokens = rmTokens[0]
+	state.throughputLimit = rmTokens[1]
+	state.conflictLogTokens = rmTokens[2]
 }
 
 func (rm *ResourceManager) applyExtraQuota(state *State) {
@@ -865,7 +871,8 @@ func (rm *ResourceManager) applyExtraQuota(state *State) {
 	state.maxThroughput += state.maxThroughput * int64(base.ExtraQuotaForUnderutilizedCPU) / int64(base.ResourceManagementRatioBase)
 }
 
-func (rm *ResourceManager) computeTokens(maxThroughput, throughputNeededByHighRepl int64) (highTokens, throughputLimit, maxReassignableTokens int64) {
+// computeTokensWithoutClog reverts back to token distribution that existed before conflict logging
+func (rm *ResourceManager) computeTokensWithoutClog(maxThroughput, throughputNeededByHighRepl int64) (highTokens, throughputLimit, maxReassignableTokens int64) {
 	// this is the max throughput high priority replications are allowed, after reserving minimum quota for low priority replications
 	maxThroughputAllowedForHighRepl := maxThroughput * int64(base.ResourceManagementRatioUpperBound) / int64(base.ResourceManagementRatioBase)
 
@@ -882,6 +889,51 @@ func (rm *ResourceManager) computeTokens(maxThroughput, throughputNeededByHighRe
 
 	// assign remaining tokens, which serves as a throughput limit, to low priority replications
 	throughputLimit = maxThroughput - highTokens
+
+	return
+}
+
+func (rm *ResourceManager) computeTokens(state *State, maxThroughput, throughputNeededByHighRepl int64) (rmTokens []int64, maxReassignableTokens int64) {
+	if !state.isConflictLoggingEnabled {
+		highTokens, lowTokens, commonTokens := rm.computeTokensWithoutClog(state.maxThroughput, throughputNeededByHighRepl)
+		rmTokens = []int64{highTokens, lowTokens, 0}
+		maxReassignableTokens = commonTokens
+		return
+	}
+
+	// this is the max throughput high priority replications are allowed, after reserving minimum quota for low priority replications
+	highTokens := maxThroughput * int64(base.RMTokenDistribution[base.RMDistHighRepl]) / int64(base.ResourceManagementRatioBase)
+
+	// assign remaining tokens, which serves as a throughput limit, to low priority replications
+	lowPriorityTokens := maxThroughput * int64(base.RMTokenDistribution[base.RMDistLowRepl]) / int64(base.ResourceManagementRatioBase)
+
+	maxReassignableTokens = state.totalThroughputNeeded - int64(rm.overallThroughputSamples.Mean())
+	if maxReassignableTokens < 0 {
+		maxReassignableTokens = 0
+	}
+
+	replThroughPut := highTokens + lowPriorityTokens
+
+	if maxReassignableTokens > replThroughPut {
+		maxReassignableTokens = replThroughPut
+	}
+
+	clogTokens := maxThroughput * int64(base.RMTokenDistribution[base.RMDistCLog]) / int64(base.ResourceManagementRatioBase)
+	if base.CLogResourceManagerBoost > 0 && clogTokens < int64(base.CLogResourceManagerBoost) {
+		clogTokens = (maxThroughput + int64(base.CLogResourceManagerBoost)) * int64(base.RMTokenDistribution[base.RMDistCLog]) / int64(base.ResourceManagementRatioBase)
+	}
+
+	if !state.highPriorityReplExist {
+		maxReassignableTokens += highTokens
+		highTokens = 0
+	}
+
+	if !state.lowPriorityReplExist {
+		maxReassignableTokens += lowPriorityTokens
+		lowPriorityTokens = 0
+	}
+
+	rmTokens = []int64{highTokens, lowPriorityTokens, clogTokens}
 
 	return
 }
@@ -944,13 +996,15 @@ func (rm *ResourceManager) setThrottlerActions(previousState, state *State) {
 	var previousHighTokens int64 = -1
 	var previousMaxReassignableTokens int64 = -1
 	var previousThroughputLimit int64 = -1
+	var previousClogTokens int64 = -1
 	if previousState != nil {
 		previousHighTokens = previousState.highTokens
 		previousMaxReassignableTokens = previousState.maxReassignableTokens
 		previousThroughputLimit = previousState.throughputLimit
+		previousClogTokens = previousState.conflictLogTokens
 	}
 
-	settings := rm.constructSettings(state, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit)
+	settings := rm.constructSettings(state, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit, previousClogTokens)
 	errMap := rm.throughputThrottlerSvc.UpdateSettings(settings)
 	if len(errMap) > 0 {
 		if err, ok := errMap[throttlerSvc.HighTokensKey]; ok {
@@ -969,7 +1023,7 @@ func (rm *ResourceManager) setThrottlerActions(previousState, state *State) {
 }
 
 // construct settings map for throttler service
-func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit int64) map[string]interface{} {
+func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, previousMaxReassignableTokens, previousThroughputLimit int64, previousClogTokens int64) map[string]interface{} {
 	settings := make(map[string]interface{})
 
 	if state.highTokens != previousHighTokens {
@@ -983,6 +1037,12 @@ func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, p
 	if state.throughputLimit != previousThroughputLimit {
 		settings[throttlerSvc.LowTokensKey] = state.throughputLimit
 	}
+
+	if state.conflictLogTokens != previousClogTokens {
+		settings[throttlerSvc.ConflictLogTokensKey] = state.conflictLogTokens
+	}
+
+	settings[throttlerSvc.ConflictLogEnabledKey] = state.isConflictLoggingEnabled
 
 	switch state.throttlerCalibrationAction {
 	case ThrottlerCalibrationActionEnable:
@@ -1151,7 +1211,7 @@ func (rm *ResourceManager) applySettingsToPipeline(spec metadata.GenericSpecific
 	}
 
 	if pipeline == nil {
-		return fmt.Errorf("Skipping updating settings for %v because of nil pipeline. err=%v\n", replId)
+		return fmt.Errorf("Skipping updating settings for %v because of nil pipeline. err=%v\n", replId, err)
 	}
 	// apply the setting to the live pipeline
 	return pipeline.UpdateSettings(settings)
@@ -1168,7 +1228,7 @@ func (rm *ResourceManager) setDcpPriority(spec metadata.GenericSpecification, pr
 
 func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecification) (*ReplStats, error) {
 	if atomic.LoadUint32(&rm.isKVNode) == 0 {
-		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
+		return &ReplStats{0, 0, 0, 0, 0, time.Now().UnixNano(), 0}, nil
 	}
 
 	var pipelineType common.PipelineType
@@ -1212,6 +1272,35 @@ func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecific
 	if err != nil {
 		return nil, err
 	}
+
+	clogDocsWritten, err := base.ParseStats(statsMap, base.ConflictDocsWritten)
+	if err != nil {
+		// we ignore if the stat is not found because the stat is dependent on
+		// whether conflict logging is enabled or not.
+		if !strings.Contains(err.Error(), "Cannot find value for stats") {
+			return nil, err
+		}
+		clogDocsWritten = 0
+	}
+
+	clogQueueSize := rm.getClogQueueSize(rs)
+
 	// throughput will be computer later and is temporarily set to 0 for now
-	return &ReplStats{changesLeft, docsFromDcp, docsRepQueue, timestamp, 0}, nil
+	return &ReplStats{changesLeft, docsFromDcp, docsRepQueue, clogDocsWritten, clogQueueSize, timestamp, 0}, nil
+}
+
+func (rm *ResourceManager) getClogQueueSize(rs pipeline.ReplicationStatusIface) int64 {
+	pipe := rs.Pipeline()
+	if pipe == nil {
+		return 0
+	}
+
+	logger := pipe.ConflictLogger()
+	if logger == nil {
+		return 0
+	}
+
+	sz := int64(logger.QueueSize())
+
+	return sz
 }

@@ -21,6 +21,9 @@ type Logger interface {
 	// Id() returns the unique id for the logger
 	Id() string
 
+	// QueueSize returns the number of items in its work channel
+	QueueSize() int
+
 	// Log writes the conflict to the conflict buccket
 	Log(c Conflict) (base.ConflictLoggerHandle, error)
 

@@ -194,6 +194,12 @@ const (
 	MethodDelete = "DELETE"
 )
 
+const (
+	RMDistHighRepl = 0
+	RMDistLowRepl  = 1
+	RMDistCLog     = 2
+)
+
 // delimiter for multiple parts in a key
 var KeyPartsDelimiter = "/"
 
@@ -510,6 +516,7 @@ var XDCR_EXPVAR_ROOT = "XDCR_Replications"
 const ChangesLeftStats = "changes_left"
 const DocsFromDcpStats = "docs_received_from_dcp"
 const DocsRepQueueStats = "docs_rep_queue"
+const ConflictDocsWritten = "conflict_docs_written"
 
 // constants for replication docs
 const (
@@ -1450,7 +1457,12 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	SrcHeartbeatSkipCapellaTarget = srcHeartbeatSkipCapellaTarget
 	SrcHeartbeatMinInterval = srcHeartbeatMinInterval
 	SrcHeartbeatMaxIntervalFactor = srcHeartbeatMaxIntervalFactor
-	RMTokenDistribution = rmTokenDistribution
+	RMTokenDistributionStr = rmTokenDistribution
+
+	// We ignore the error here because it is assumed that it will be validated
+	// in the settings rest api
+	RMTokenDistribution, _ = ParseRMTokenDistStr(RMTokenDistributionStr)
+
 	CLogSkipTlsVerify = cLogSkipTlsVerify
 	CLogResourceManagerBoost = cLogRMBoost
 }
@@ -1905,7 +1917,14 @@ func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequ
 // 89 for high priority replications,
 // 9 for low priority replications,
 // 3 for all the conflict loggers in the system.
-var RMTokenDistribution string = "89:9:3"
+var RMTokenDistributionStr string = "89:9:3"
+
+// RMTokenDistribution for different resource consumers
+var RMTokenDistribution = []int{
+	89, // High priority replication %
+	8,  // Low priority replication %
+	3,  // Conflict log %
+}
 
 // Used for internal testing with self-signed certs.
 // Exposed as an internal setting.

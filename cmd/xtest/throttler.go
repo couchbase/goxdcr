@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/service_impl/throttlerSvcImpl"
 )
 
@@ -24,7 +25,7 @@ func tworker(wg *sync.WaitGroup, svc *throttlerSvcImpl.ThroughputThrottler, work
 
 		done := false
 		for !done {
-			done = svc.CanSend(false)
+			done = svc.CanSend(throttlerSvc.ThrottlerReqCLog)
 			if !done {
 				svc.Wait()
 			}

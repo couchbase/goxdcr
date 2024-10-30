@@ -365,7 +365,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.SrcHeartbeatSkipCapellaTargetKey].(bool),
 		time.Duration(internal_settings.Values[metadata.SrcHeartbeatMinIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.SrcHeartbeatMaxIntervalFactorKey].(int),
-		internal_settings.Values[metadata.RMTokenDistributionKey].(string),
+		internal_settings.Values[metadata.RMTokenDistributionStrKey].(string),
 		internal_settings.Values[metadata.CLogSkipTlsVerifyKey].(bool),
 		internal_settings.Values[metadata.CLogResourceManagerBoostKey].(int),
 	)
@@ -529,7 +529,7 @@ func (rm *replicationManager) init(
 	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
 	rm.p2pMgr.SetPushReqMergerOnce(rm.pipelineMgr.HandlePeerCkptPush)
 
-	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.GetOrCreateContext(base.ResourceMgrKey), rm.utils, rm.backfillReplSvc)
+	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, throughput_throttler_svc, log.GetOrCreateContext(base.ResourceMgrKey), rm.backfillReplSvc)
 	rm.resourceMgr.Start()
 
 	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, xdcr_topology_svc, checkpoint_svc, rm.bucketTopologySvc, rm.utils)

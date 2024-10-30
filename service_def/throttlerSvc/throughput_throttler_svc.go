@@ -13,6 +13,19 @@ const HighTokensKey = "HighTokens"
 const MaxReassignableHighTokensKey = "MaxReassignableHighTokens"
 const LowTokensKey = "LowTokens"
 const NeedToCalibrateKey = "NeedToCalibrate"
+const ConflictLogTokensKey = "ConflictLogTokens"
+const ConflictLogEnabledKey = "ConflictLogEnabled"
+const UnitConflictLogTokensKey = "UnitConflictLogTokens"
+
+const UnitConflictLogTokens = int64(3)
+
+type ThrottlerReq int
+
+const (
+	ThrottlerReqHighRepl ThrottlerReq = 0
+	ThrottlerReqLowRepl  ThrottlerReq = 1
+	ThrottlerReqCLog     ThrottlerReq = 2
+)
 
 type ThroughputThrottlerSvc interface {
 	Start() error
@@ -24,7 +37,7 @@ type ThroughputThrottlerSvc interface {
 	// output:
 	// true - if the mutation can be sent
 	// false - if the mutation cannot be sent
-	CanSend(isHighPriorityReplication bool) bool
+	CanSend(req ThrottlerReq) bool
 
 	// blocks till the next measurement interval, when throughput allowance may become available
 	Wait()

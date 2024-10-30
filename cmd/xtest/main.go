@@ -96,7 +96,7 @@ func main() {
 
 	utils := utils.NewUtilities()
 
-	conflictlog.InitManager(log.DefaultLoggerContext, utils, addrGetter, xsvc.SecuritySvc,
+	conflictlog.InitManager(log.DefaultLoggerContext, utils, addrGetter, xsvc.SecuritySvc, nil,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
 		base.DefaultCLogPoolConnLimit,
@@ -105,8 +105,6 @@ func main() {
 	switch name {
 	case "conflictLogLoadTest":
 		err = conflictLogLoadTest(cfg)
-	case "gocbcoreTest":
-		err = gocbcoreTest(cfg)
 	case "throttlerTest":
 		err = throttlerTest(cfg)
 	case "cbauthTest":
