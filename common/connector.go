@@ -12,7 +12,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
-//Connector abstracts the logic which moves data from one processing steps to another
+// Connector abstracts the logic which moves data from one processing steps to another
 type Connector interface {
 	Component
 
@@ -31,4 +31,11 @@ type Connector interface {
 	Stop() error
 
 	GetUpstreamObjRecycler() func(obj interface{})
+
+	// GetLayoutString is a stringer method that asks a specific part attached to it to output a human-readable string
+	GetLayoutString(part Part) string
+
+	// RegisterUpstreamPart - When a connector is used by multiple upstream parts, this register call will allow the
+	// connector to be aware of the different parts
+	RegisterUpstreamPart(part Part) error
 }

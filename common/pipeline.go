@@ -107,7 +107,7 @@ type Pipeline interface {
 
 	Type() PipelineType
 
-	Sources() map[string]Nozzle
+	Sources() map[string]SourceNozzle
 	Targets() map[string]Nozzle
 
 	//getter\setter of the runtime environment
@@ -139,4 +139,15 @@ type Pipeline interface {
 	SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping)
 
 	GetRebalanceProgress() (string, string)
+}
+
+type NozzleMap map[string]Nozzle
+type SourceNozzleMap map[string]SourceNozzle
+
+func (n NozzleMap) ToSourceNozzleMap() SourceNozzleMap {
+	out := make(SourceNozzleMap)
+	for k, v := range n {
+		out[k] = v.(SourceNozzle)
+	}
+	return out
 }

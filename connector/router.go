@@ -10,6 +10,7 @@ package connector
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -17,6 +18,7 @@ import (
 	common "github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -51,13 +53,21 @@ type Router struct {
 	collectionsRerouteCb CollectionsRerouteFunc
 
 	upstreamObjRecycler utilities.RecycleObjFunc
+
+	routingMapStringer func() map[string][]uint16
+}
+
+func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	// Nothing to do
+	return nil
 }
 
 func NewRouter(id string, downStreamParts map[string]common.Part,
 	routing_callback *Routing_Callback_Func,
 	logger_context *log.LoggerContext, logger_module string,
 	startable bool, startFunc, stopFunc func() error, collectionsRerouteCb CollectionsRerouteFunc,
-	upstreamObjRecycler utilities.RecycleObjFunc) *Router {
+	upstreamObjRecycler utilities.RecycleObjFunc,
+	routingMapStringer func() map[string][]uint16) *Router {
 	router := &Router{
 		AbstractComponent:    component.NewAbstractComponentWithLogger(id, log.NewLogger(logger_module, logger_context)),
 		downStreamParts:      downStreamParts,
@@ -66,6 +76,7 @@ func NewRouter(id string, downStreamParts map[string]common.Part,
 		stopFunc:             stopFunc,
 		collectionsRerouteCb: collectionsRerouteCb,
 		upstreamObjRecycler:  upstreamObjRecycler,
+		routingMapStringer:   routingMapStringer,
 	}
 	if startable {
 		atomic.StoreUint32(&router.startable, 1)
@@ -158,4 +169,13 @@ func (router *Router) SetRoutingCallBackFunc(routing_callback *Routing_Callback_
 
 func (router *Router) GetUpstreamObjRecycler() func(interface{}) {
 	return router.upstreamObjRecycler
+}
+
+func (r *Router) GetLayoutString(part common.Part) string {
+	return fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", r.Id(), r.routingMapStringer())
+}
+
+func (r *Router) RegisterUpstreamPart(part common.Part) error {
+	// No op
+	return nil
 }

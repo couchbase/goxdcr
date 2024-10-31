@@ -205,6 +205,14 @@ type CapiNozzle struct {
 	vbList []uint16
 }
 
+func (capi *CapiNozzle) SetConflictLogger(i interface{}) error {
+	return base.ErrorNotSupported
+}
+
+func (capi *CapiNozzle) GetConflictLogger() interface{} {
+	return nil
+}
+
 type BatchInfo struct {
 	vbno uint16
 	size uint32

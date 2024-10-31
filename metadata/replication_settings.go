@@ -1105,7 +1105,10 @@ func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRul
 			if s.GetFilterSystemScope() {
 				// Only pass through collections are replicated when filterSystemScope is true
 				for _, col := range base.FilterSystemScopePassthruCollections {
-					colObj := base.CollectionNamespace{base.SystemScopeName, col}
+					colObj := base.CollectionNamespace{
+						ScopeName:      base.SystemScopeName,
+						CollectionName: col,
+					}
 					colStr := colObj.ToIndexString()
 					rulesClone[colStr] = colStr
 				}

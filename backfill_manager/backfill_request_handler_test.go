@@ -120,12 +120,13 @@ func createTestSpec() *metadata.ReplicationSpecification {
 	}
 }
 
-func brhMockSourceNozzles() map[string]commonReal.Nozzle {
+func brhMockSourceNozzles() map[string]commonReal.SourceNozzle {
 	nozzleId := "dummyDCP"
-	dcpNozzle := &common.Nozzle{}
+	dcpNozzle := &common.SourceNozzle{}
 	dcpNozzle.On("Id").Return(nozzleId)
 	dcpNozzle.On("AsyncComponentEventListeners").Return(nil)
 	dcpNozzle.On("Connector").Return(nil)
+	dcpNozzle.On("Connectors").Return(nil)
 	dcpNozzle.On("RegisterComponentEventListener", mock.Anything, mock.Anything).Return(nil)
 	// One nozzle responsible for 1024 vb's
 	var vbsList []uint16
@@ -134,12 +135,12 @@ func brhMockSourceNozzles() map[string]commonReal.Nozzle {
 	}
 	dcpNozzle.On("ResponsibleVBs").Return(vbsList)
 
-	retMap := make(map[string]commonReal.Nozzle)
+	retMap := make(map[string]commonReal.SourceNozzle)
 	retMap[nozzleId] = dcpNozzle
 	return retMap
 }
 
-func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext, spec *metadata.ReplicationSpecification) (*common.Pipeline, *common.Pipeline) {
+func brhMockFakePipeline(sourcesMap map[string]commonReal.SourceNozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext, spec *metadata.ReplicationSpecification) (*common.Pipeline, *common.Pipeline) {
 	pipeline := &common.Pipeline{}
 
 	pipeline.On("GetAsyncListenerMap").Return(nil)
@@ -238,8 +239,8 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	var addCount int
 	var setCount int
 	// Make a dummy namespacemapping
-	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
-	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{ScopeName: "dummy", CollectionName: "dummy"}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, collectionNs)
 
@@ -326,7 +327,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	var setCount int
 	var delCount int
 	// Make a dummy namespacemapping
-	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	//	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, collectionNs)
@@ -438,8 +439,8 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	var setCount int
 	var delCount int
 	// Make a dummy namespacemapping
-	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
-	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{ScopeName: "dummy", CollectionName: "dummy"}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, dummyNs)
 
@@ -504,8 +505,8 @@ func TestHandleMigrationDiff(t *testing.T) {
 	var setCount int
 	var delCount int
 	// Make a dummy namespacemapping
-	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
-	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{ScopeName: "dummy", CollectionName: "dummy"}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, dummyNs)
 
@@ -568,7 +569,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	var setCount int
 	var delCount int
 	// Make a dummy namespacemapping
-	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, collectionNs)
 
