@@ -115,11 +115,11 @@ const CustomCollectionName = "CustomCollection"
 
 func constructDummyTasksMapCustom(set TasksMapType) *metadata.VBTasksMapType {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
 	nonDefaultNamespaceMapping := make(metadata.CollectionNamespaceMapping)
-	nonDefaultNamespace := &base.CollectionNamespace{CustomScopeName, CustomCollectionName}
+	nonDefaultNamespace := &base.CollectionNamespace{ScopeName: CustomScopeName, CollectionName: CustomCollectionName}
 	nonDefaultNamespaceMapping.AddSingleMapping(nonDefaultNamespace, nonDefaultNamespace)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}

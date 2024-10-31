@@ -246,7 +246,7 @@ func setupPipelineMock(
 	ckptMock *service_def.CheckpointsService,
 	spec *metadata.ReplicationSpecification) {
 
-	var emptyNozzles map[string]commonReal.Nozzle
+	var emptyNozzles map[string]commonReal.SourceNozzle
 	testPipeline.On("Sources").Return(emptyNozzles)
 	// Test pipeline running test
 	testPipeline.On("State").Return(commonReal.Pipeline_Running)

@@ -1964,3 +1964,5 @@ var RMTokenDistribution = []int{
 var CLogSkipTlsVerify bool
 var CLogResourceManagerBoost int
 var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
+
+const ROUTER_NAME_PREFIX = "Router"

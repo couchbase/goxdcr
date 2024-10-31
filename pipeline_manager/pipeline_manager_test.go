@@ -178,7 +178,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.Pip
 	rcCapability := metadata.UnitTestGetCollectionsCapability()
 	remoteClusterMock.On("GetCapability", mock.Anything).Return(rcCapability, nil)
 
-	var emptyNozzles map[string]commonReal.Nozzle
+	var emptyNozzles map[string]commonReal.SourceNozzle
 	testPipeline.On("Sources").Return(emptyNozzles)
 	// Test pipeline running test
 	testPipeline.On("State").Return(commonReal.Pipeline_Running)
@@ -877,7 +877,7 @@ func TestCollectionsRefreshError(t *testing.T) {
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
-	dummyNs := &base.CollectionNamespace{"dummyScope", "dummyCollection"}
+	dummyNs := &base.CollectionNamespace{ScopeName: "dummyScope", CollectionName: "dummyCollection"}
 	dummyColInfo := &base.TargetCollectionInfo{ManifestId: 500}
 	dummyReq := &base.WrappedMCRequest{SrcColNamespace: dummyNs, ColInfo: dummyColInfo}
 	xmemErr := parts.GetErrorXmemTargetUnknownCollection(dummyReq)

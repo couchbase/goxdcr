@@ -34,7 +34,7 @@ func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent
 }
 
 func setupBoilerPlate() (*commonMock.Pipeline,
-	*commonMock.Nozzle,
+	*commonMock.SourceNozzle,
 	*service_def.ReplicationSpecSvc,
 	*commonMock.PipelineRuntimeContext,
 	*pipelineSvc.PipelineSupervisorSvc) {
@@ -44,13 +44,13 @@ func setupBoilerPlate() (*commonMock.Pipeline,
 	runtimeCtxMock := &commonMock.PipelineRuntimeContext{}
 	pipelineSupervisorSvc := &pipelineSvc.PipelineSupervisorSvc{}
 
-	nozzleMock := &commonMock.Nozzle{}
+	nozzleMock := &commonMock.SourceNozzle{}
 
 	return pipelineMock, nozzleMock, replSpecSvcMock, runtimeCtxMock, pipelineSupervisorSvc
 }
 
 func setupMocks(pipeline *commonMock.Pipeline,
-	sourceNozzle *commonMock.Nozzle,
+	sourceNozzle *commonMock.SourceNozzle,
 	replSpecSvc *service_def.ReplicationSpecSvc,
 	runtimeCtxMock *commonMock.PipelineRuntimeContext,
 	pipelineSupervisorSvc *pipelineSvc.PipelineSupervisorSvc) *ThroughSeqnoTrackerSvc {
@@ -61,8 +61,9 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	sourceNozzle.On("Id").Return("TestNozzleId")
 	sourceNozzle.On("AsyncComponentEventListeners").Return(nil)
 	sourceNozzle.On("Connector").Return(nil)
+	sourceNozzle.On("Connectors").Return(nil)
 
-	sourceMap := make(map[string]common.Nozzle)
+	sourceMap := make(map[string]common.SourceNozzle)
 	sourceMap["dummy"] = sourceNozzle
 
 	runtimeCtxMock.On("Service", base.PIPELINE_SUPERVISOR_SVC).Return(pipelineSupervisorSvc)
