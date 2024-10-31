@@ -413,8 +413,18 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		dcp.RegisterComponentEventListener(common.SnapshotMarkerReceived, ckmgr)
 
 		// Checkpoint manager needs to listen to router's collections routing updates
-		router := dcp.Connector()
-		router.RegisterComponentEventListener(common.BrokenRoutingUpdateEvent, ckmgr)
+		var found bool
+		for _, connector := range dcp.Connectors() {
+			if !strings.Contains(connector.Id(), base.ROUTER_NAME_PREFIX) {
+				continue
+			}
+			found = true
+			connector.RegisterComponentEventListener(common.BrokenRoutingUpdateEvent, ckmgr)
+		}
+
+		if !found {
+			return fmt.Errorf("%v is unable to find router", dcp.Id())
+		}
 	}
 
 	//register pipeline supervisor as ckmgr's error handler

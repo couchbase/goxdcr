@@ -1335,6 +1335,8 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	colInfo := dcp.collectionNamespacePool.Get()
 	colInfo.ScopeName = mappedScopeName
 	colInfo.CollectionName = mappedColName
+	colInfo.SetUseRecycleVbnoHint(true)
+	colInfo.SetRecycleVbnoHint(m.VBucket)
 	if dcp.Logger().GetLogLevel() > log.LogLevelDebug {
 		dcp.Logger().Debugf("For doc %v topManifest is %v srcColId: %v namespace is %v:%v", string(m.Key), topManifestUid, m.CollectionId, colInfo.ScopeName, colInfo.CollectionName)
 	}
@@ -2025,6 +2027,8 @@ func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
 			ns := req.(*base.CollectionNamespace)
 			ns.ScopeName = ""
 			ns.CollectionName = ""
+			ns.SetUseRecycleVbnoHint(false)
+			ns.SetRecycleVbnoHint(0)
 			dcp.collectionNamespacePool.Put(ns)
 		}
 	default:
@@ -2186,4 +2190,29 @@ func (dcp *DcpNozzle) vbStreamEndShouldRaiseEvt(vbno uint16) bool {
 		return true
 	}
 	return false
+}
+
+func (dcp *DcpNozzle) SetConnector(connector common.Connector) error {
+	err := dcp.AbstractPart.SetConnector(connector)
+	if err != nil {
+		return err
+	}
+
+	return connector.RegisterUpstreamPart(dcp)
+}
+
+// DCP nozzle may have one or more related connectors. This can be found using name search
+// as the convention is to have connectors include the source nozzle's names in its IDs
+func (dcp *DcpNozzle) Connectors() []common.Connector {
+	var connectorList []common.Connector
+
+	firstConnector := dcp.Connector()
+	connectorList = append(connectorList, firstConnector)
+
+	for id, part := range dcp.connector.DownStreams() {
+		if strings.Contains(id, dcp.Id()) {
+			connectorList = append(connectorList, part.Connector())
+		}
+	}
+	return connectorList
 }

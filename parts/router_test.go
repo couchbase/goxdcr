@@ -395,7 +395,7 @@ func TestRouterManifestChange(t *testing.T) {
 
 	assert.Nil(collectionsRouter.handleNewTgtManifestChanges(&targetv8Manifest))
 	// Force a manual brokenmap. V9 will have the following fixed
-	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	implicitNamespace := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col3"}
 	collectionsRouter.brokenDenyMtx.Lock()
 	collectionsRouter.brokenMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
 	collectionsRouter.brokenDenyMtx.Unlock()
@@ -454,7 +454,7 @@ func TestRouterTargetCollectionDNE(t *testing.T) {
 
 	mcReq := getMutationMCReq(err, assert)
 
-	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	implicitNamespace := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col3"}
 	dummyData := &base.WrappedMCRequest{
 		SrcColNamespace: implicitNamespace,
 		Req:             mcReq,
@@ -514,7 +514,7 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 	collectionsRouter.ignoreDataFunc = ignoreFunc
 
 	mcReq := getMutationMCReq(err, assert)
-	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
+	implicitNamespace := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col3"}
 	dummyData := &base.WrappedMCRequest{
 		SrcColNamespace: implicitNamespace,
 		Req:             mcReq,
@@ -572,7 +572,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	collectionsRouter.routingUpdater = newRoutingUpdater
 	collectionsRouter.ignoreDataFunc = ignoreFunc
 
-	sourceNs := &base.CollectionNamespace{"S1", "col1"}
+	sourceNs := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
 	mcReq := &gomemcached.MCRequest{
 		Key:    []byte("testKey"),
 		Keylen: len("testKey"),
@@ -682,7 +682,7 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(delEvent)
 
-	sourceNs := &base.CollectionNamespace{"S1", "col1"}
+	sourceNs := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
 	mcReq := &gomemcached.MCRequest{
 		Key:    delEvent.Key,
 		Keylen: len(delEvent.Key),

@@ -581,19 +581,19 @@ func (_c *Pipeline_Settings_Call) RunAndReturn(run func() metadata.ReplicationSe
 }
 
 // Sources provides a mock function with given fields:
-func (_m *Pipeline) Sources() map[string]common.Nozzle {
+func (_m *Pipeline) Sources() map[string]common.SourceNozzle {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Sources")
 	}
 
-	var r0 map[string]common.Nozzle
-	if rf, ok := ret.Get(0).(func() map[string]common.Nozzle); ok {
+	var r0 map[string]common.SourceNozzle
+	if rf, ok := ret.Get(0).(func() map[string]common.SourceNozzle); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]common.Nozzle)
+			r0 = ret.Get(0).(map[string]common.SourceNozzle)
 		}
 	}
 
@@ -617,12 +617,12 @@ func (_c *Pipeline_Sources_Call) Run(run func()) *Pipeline_Sources_Call {
 	return _c
 }
 
-func (_c *Pipeline_Sources_Call) Return(_a0 map[string]common.Nozzle) *Pipeline_Sources_Call {
+func (_c *Pipeline_Sources_Call) Return(_a0 map[string]common.SourceNozzle) *Pipeline_Sources_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Pipeline_Sources_Call) RunAndReturn(run func() map[string]common.Nozzle) *Pipeline_Sources_Call {
+func (_c *Pipeline_Sources_Call) RunAndReturn(run func() map[string]common.SourceNozzle) *Pipeline_Sources_Call {
 	_c.Call.Return(run)
 	return _c
 }

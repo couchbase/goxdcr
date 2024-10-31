@@ -135,7 +135,7 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc, xdcrTopologyS
 
 	pipeline.On("Specification").Return(replicationSpec)
 	pipeline.On("Topic").Return(pipelineTopic)
-	sourceMap := make(map[string]commonReal.Nozzle)
+	sourceMap := make(map[string]commonReal.SourceNozzle)
 	sourceMap[testDCPPart] = dcpNozzle
 	pipeline.On("Sources").Return(sourceMap)
 	targetMap := map[string]commonReal.Nozzle{
@@ -153,6 +153,7 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc, xdcrTopologyS
 	downstreamMap[xmemNozzle.Id()] = xmemNozzle
 	connector.On("DownStreams").Return(downstreamMap)
 	connector.On("Id").Return(testRouter)
+	connector.On("RegisterUpstreamPart", mock.Anything).Return(nil)
 
 	dcpNozzle.SetConnector(connector)
 }

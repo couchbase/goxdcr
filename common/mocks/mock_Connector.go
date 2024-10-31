@@ -209,6 +209,52 @@ func (_c *Connector_Forward_Call) RunAndReturn(run func(interface{}) error) *Con
 	return _c
 }
 
+// GetLayoutString provides a mock function with given fields: part
+func (_m *Connector) GetLayoutString(part common.Part) string {
+	ret := _m.Called(part)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLayoutString")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(common.Part) string); ok {
+		r0 = rf(part)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// Connector_GetLayoutString_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLayoutString'
+type Connector_GetLayoutString_Call struct {
+	*mock.Call
+}
+
+// GetLayoutString is a helper method to define mock.On call
+//   - part common.Part
+func (_e *Connector_Expecter) GetLayoutString(part interface{}) *Connector_GetLayoutString_Call {
+	return &Connector_GetLayoutString_Call{Call: _e.mock.On("GetLayoutString", part)}
+}
+
+func (_c *Connector_GetLayoutString_Call) Run(run func(part common.Part)) *Connector_GetLayoutString_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(common.Part))
+	})
+	return _c
+}
+
+func (_c *Connector_GetLayoutString_Call) Return(_a0 string) *Connector_GetLayoutString_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Connector_GetLayoutString_Call) RunAndReturn(run func(common.Part) string) *Connector_GetLayoutString_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetUpstreamObjRecycler provides a mock function with given fields:
 func (_m *Connector) GetUpstreamObjRecycler() func(interface{}) {
 	ret := _m.Called()
@@ -422,6 +468,52 @@ func (_c *Connector_RegisterComponentEventListener_Call) Return(_a0 error) *Conn
 }
 
 func (_c *Connector_RegisterComponentEventListener_Call) RunAndReturn(run func(common.ComponentEventType, common.ComponentEventListener) error) *Connector_RegisterComponentEventListener_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RegisterUpstreamPart provides a mock function with given fields: part
+func (_m *Connector) RegisterUpstreamPart(part common.Part) error {
+	ret := _m.Called(part)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterUpstreamPart")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(common.Part) error); ok {
+		r0 = rf(part)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Connector_RegisterUpstreamPart_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterUpstreamPart'
+type Connector_RegisterUpstreamPart_Call struct {
+	*mock.Call
+}
+
+// RegisterUpstreamPart is a helper method to define mock.On call
+//   - part common.Part
+func (_e *Connector_Expecter) RegisterUpstreamPart(part interface{}) *Connector_RegisterUpstreamPart_Call {
+	return &Connector_RegisterUpstreamPart_Call{Call: _e.mock.On("RegisterUpstreamPart", part)}
+}
+
+func (_c *Connector_RegisterUpstreamPart_Call) Run(run func(part common.Part)) *Connector_RegisterUpstreamPart_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(common.Part))
+	})
+	return _c
+}
+
+func (_c *Connector_RegisterUpstreamPart_Call) Return(_a0 error) *Connector_RegisterUpstreamPart_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Connector_RegisterUpstreamPart_Call) RunAndReturn(run func(common.Part) error) *Connector_RegisterUpstreamPart_Call {
 	_c.Call.Return(run)
 	return _c
 }

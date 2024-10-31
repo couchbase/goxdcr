@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	baseFilter "github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/common"
+	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/connector"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -1460,7 +1461,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	var routingFunc connector.Routing_Callback_Func = router.Route
 	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter",
 		startable, router.Start, router.Stop, (connector.CollectionsRerouteFunc)(router.RouteCollection),
-		(utilities.RecycleObjFunc)(router.recycleDataObj))
+		(utilities.RecycleObjFunc)(router.recycleDataObj), router.RoutingMapByDownstreams)
 
 	routingUpdater := func(info CollectionsRoutingInfo) error {
 		// 1. It should raise a backfill event telling backfill manager to persist the backfill mapping
@@ -1979,6 +1980,7 @@ func (router *Router) RoutingMap() map[uint16]string {
 	return router.routingMap
 }
 
+// RoutingMapByDownstreams displays a map of downstream partIDs and the VBs that the part is responsible for
 func (router *Router) RoutingMapByDownstreams() map[string][]uint16 {
 	ret := make(map[string][]uint16)
 	for vbno, partId := range router.routingMap {
@@ -2228,4 +2230,58 @@ func (router *Router) CheckCasDrift(wrappedUpr *base.WrappedUprEvent) bool {
 	}
 
 	return false
+}
+
+type RouterPart struct {
+	AbstractPart
+	router *Router
+
+	responsibleVBsMtx sync.RWMutex
+	responsibleVBs    []uint16
+	responsibleVBsSet bool
+}
+
+func (r *RouterPart) ResponsibleVBs() []uint16 {
+	r.responsibleVBsMtx.RLock()
+	defer r.responsibleVBsMtx.RUnlock()
+
+	if !r.responsibleVBsSet {
+		r.responsibleVBsMtx.RUnlock()
+		r.responsibleVBsMtx.Lock()
+		if !r.responsibleVBsSet {
+			r.responsibleVBs = []uint16{}
+			for vbno, _ := range r.router.routingMap {
+				r.responsibleVBs = append(r.responsibleVBs, vbno)
+			}
+			r.responsibleVBsSet = true
+		}
+		r.responsibleVBsMtx.Unlock()
+		r.responsibleVBsMtx.RLock()
+	}
+
+	return r.responsibleVBs
+}
+
+func (r *RouterPart) Start(settings metadata.ReplicationSettingsMap) error {
+	return r.router.Start()
+}
+
+func (r *RouterPart) Stop() error {
+	return r.router.Stop()
+}
+
+func (r *RouterPart) Receive(data interface{}) error {
+	return r.router.Forward(data)
+}
+
+// GetPart returns a wrapper that implements the common.Part methods
+func (r *Router) GetPart() *RouterPart {
+	return &RouterPart{
+		AbstractPart: AbstractPart{
+			AbstractComponent: component.NewAbstractComponent(r.Router.Id()),
+			connector:         r,
+			state:             common.Part_Initial,
+		},
+		router: r,
+	}
 }

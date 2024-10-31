@@ -39,5 +39,7 @@ type Part interface {
 	//return the state of the part
 	State() PartState
 
+	ResponsibleVBs() []uint16
+
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
 }

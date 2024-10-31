@@ -1976,3 +1976,5 @@ var CLogResourceManagerBoost int
 var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
 
 const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"
+
+const ROUTER_NAME_PREFIX = "Router"

@@ -366,7 +366,7 @@ func setupMainPipelineMock(spec *metadata.ReplicationSpecification, supervisor *
 
 func getBackfillTask() *metadata.BackfillTask {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
 

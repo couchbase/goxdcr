@@ -394,6 +394,7 @@ func TestArrayXattrFieldIterator(t *testing.T) {
 			err:     true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			it, err := NewArrayXattrFieldIterator([]byte(tt.xattr))
@@ -416,7 +417,6 @@ func TestArrayXattrFieldIterator(t *testing.T) {
 }
 
 func Test_xtocIterator(t *testing.T) {
-
 	tests := []struct {
 		name string
 		body []byte
@@ -508,7 +508,6 @@ func Test_xtocIterator(t *testing.T) {
 			len:  3,
 			body: []byte(fmt.Sprintf(`  [  "%s", "%s",  "%s"  ]   `, `foo`, `ba\"r\"`, "foo1")),
 		},
-
 		{
 			name: "multiple entries 3",
 			list: []string{`foo`, "bar", `foo\"1\"`},
@@ -544,6 +543,68 @@ func Test_xtocIterator(t *testing.T) {
 			for i := 0; i < len(tt.list); i++ {
 				assert.Equal(t, res[i], tt.list[i])
 			}
+		})
+	}
+}
+
+func TestKvVBMapType_HasSameNumberOfVBs(t *testing.T) {
+	type args struct {
+		other KvVBMapType
+	}
+	tests := []struct {
+		name string
+		k    KvVBMapType
+		args args
+		want bool
+	}{
+		{
+			"Same number of VBs",
+			KvVBMapType{
+				"a": []uint16{
+					0, 1, 2,
+				},
+			},
+			args{KvVBMapType{
+				"a": []uint16{
+					0, 1, 2,
+				},
+			}},
+			true,
+		},
+		{
+			"One nil map",
+			nil,
+			args{KvVBMapType{
+				"a": []uint16{
+					0, 1, 2,
+				},
+			}},
+			false,
+		},
+		{
+			"Both nil maps",
+			nil,
+			args{nil},
+			true,
+		},
+		{
+			"Different number of VBs",
+			KvVBMapType{
+				"a": []uint16{
+					0, 1, 2, 3,
+				},
+			},
+			args{KvVBMapType{
+				"a": []uint16{
+					0, 1, 2,
+				},
+			}},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, tt.k.HasSameNumberOfVBs(tt.args.other), "HasSameNumberOfVBs(%v)", tt.args.other)
 		})
 	}
 }
