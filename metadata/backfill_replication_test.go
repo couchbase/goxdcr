@@ -26,7 +26,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 	assert := assert.New(t)
 
 	namespaceMapping := make(CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
@@ -144,11 +144,11 @@ func TestMergeTask(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestMergeTask =================")
 	namespaceMapping := make(CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
 	namespaceMapping2 := make(CollectionNamespaceMapping)
-	namespace2 := &base.CollectionNamespace{"dummy", "dummy"}
+	namespace2 := &base.CollectionNamespace{ScopeName: "dummy", CollectionName: "dummy"}
 	namespaceMapping2.AddSingleMapping(namespace2, namespace2)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
@@ -211,7 +211,7 @@ func TestMergeTasks(t *testing.T) {
 	fmt.Println("============== Test case start: TestMergeTasks =================")
 
 	namespaceMapping := make(CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
@@ -272,9 +272,9 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	fmt.Println("============== Test case start: TestMergeTasksIntoSpec =================")
 	assert := assert.New(t)
 
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
-	namespace2 := &base.CollectionNamespace{"scope2", "collection2"}
-	namespace3 := &base.CollectionNamespace{"scope3", "collection3"}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	namespace2 := &base.CollectionNamespace{ScopeName: "scope2", CollectionName: "collection2"}
+	namespace3 := &base.CollectionNamespace{ScopeName: "scope3", CollectionName: "collection3"}
 
 	namespaceMapping := make(CollectionNamespaceMapping)
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
@@ -436,13 +436,13 @@ func TestDiffTasksCleanup(t *testing.T) {
 	backfillTs := BackfillVBTimestamps{StartingTimestamp: &startTs, EndingTimestamp: &endTs}
 
 	nsMapping := make(CollectionNamespaceMapping)
-	srcMapping := &base.CollectionNamespace{"S1", "col1"}
-	tgtMapping := &base.CollectionNamespace{"S1T", "col1t"}
+	srcMapping := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
+	tgtMapping := &base.CollectionNamespace{ScopeName: "S1T", CollectionName: "col1t"}
 	nsMapping.AddSingleMapping(srcMapping, tgtMapping)
 
 	nsMapping2 := make(CollectionNamespaceMapping)
-	srcMapping2 := &base.CollectionNamespace{"S2", "col2"}
-	tgtMapping2 := &base.CollectionNamespace{"S2T", "col2t"}
+	srcMapping2 := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col2"}
+	tgtMapping2 := &base.CollectionNamespace{ScopeName: "S2T", CollectionName: "col2t"}
 	nsMapping2.AddSingleMapping(srcMapping2, tgtMapping2)
 
 	// Do a "layering of tasks"
@@ -493,13 +493,13 @@ func TestIdenticalReMerge(t *testing.T) {
 	backfillTs := BackfillVBTimestamps{StartingTimestamp: &startTs, EndingTimestamp: &endTs}
 
 	nsMapping := make(CollectionNamespaceMapping)
-	srcMapping := &base.CollectionNamespace{"S1", "col1"}
-	tgtMapping := &base.CollectionNamespace{"S1T", "col1t"}
+	srcMapping := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
+	tgtMapping := &base.CollectionNamespace{ScopeName: "S1T", CollectionName: "col1t"}
 	nsMapping.AddSingleMapping(srcMapping, tgtMapping)
 
 	nsMapping2 := make(CollectionNamespaceMapping)
-	srcMapping2 := &base.CollectionNamespace{"S2", "col2"}
-	tgtMapping2 := &base.CollectionNamespace{"S2T", "col2t"}
+	srcMapping2 := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col2"}
+	tgtMapping2 := &base.CollectionNamespace{ScopeName: "S2T", CollectionName: "col2t"}
 	nsMapping2.AddSingleMapping(srcMapping2, tgtMapping2)
 
 	// Do a "layering of tasks"
@@ -533,7 +533,7 @@ func TestRollbackTo0(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestRollbackTo0 =================")
 
 	namespaceMapping := make(CollectionNamespaceMapping)
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
@@ -546,7 +546,7 @@ func TestRollbackTo0(t *testing.T) {
 	vb0Task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
 
 	differentNsMapping := make(CollectionNamespaceMapping)
-	diffTargetNamespace := &base.CollectionNamespace{"nonDefaultScope", "nonDefaultCollection"}
+	diffTargetNamespace := &base.CollectionNamespace{ScopeName: "nonDefaultScope", CollectionName: "nonDefaultCollection"}
 	differentNsMapping.AddSingleMapping(defaultNamespace, diffTargetNamespace)
 	ts1 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
@@ -621,9 +621,9 @@ func TestMergeTasksIntoSpecWithNilTask(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestMergeTasksIntoSpecWithNilTask =================")
 	assert := assert.New(t)
 
-	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
-	namespace2 := &base.CollectionNamespace{"scope2", "collection2"}
-	namespace3 := &base.CollectionNamespace{"scope3", "collection3"}
+	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	namespace2 := &base.CollectionNamespace{ScopeName: "scope2", CollectionName: "collection2"}
+	namespace3 := &base.CollectionNamespace{ScopeName: "scope3", CollectionName: "collection3"}
 
 	namespaceMapping := make(CollectionNamespaceMapping)
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)

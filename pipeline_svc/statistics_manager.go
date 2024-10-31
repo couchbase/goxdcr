@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2383,9 +2384,26 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	r_collector.component_map = make(map[string]map[string]interface{})
 	r_collector.vbMetricHelper = NewVbBasedMetricHelper()
 	dcp_parts := pipeline.Sources()
-	for _, dcp_part := range dcp_parts {
-		//get connector
-		conn := dcp_part.Connector()
+
+	routersToRegister := make(map[string]common.Connector)
+	routersListOfVB := make(map[string][]uint16)
+
+	for _, dcpPart := range dcp_parts {
+		// Look for router/all the routers
+		for _, conn := range dcpPart.Connectors() {
+			if !strings.Contains(conn.Id(), base.ROUTER_NAME_PREFIX) {
+				continue
+			}
+			routersToRegister[conn.Id()] = conn
+			routersListOfVB[conn.Id()] = dcpPart.ResponsibleVBs()
+		}
+	}
+
+	if len(routersToRegister) == 0 {
+		return fmt.Errorf("%v is unable to find router", r_collector.Id())
+	}
+
+	for _, conn := range routersToRegister {
 		registry_router := stats_mgr.getOrCreateRegistry(conn.Id())
 		docs_filtered := metrics.NewCounter()
 		registry_router.Register(service_def.DOCS_FILTERED_METRIC, docs_filtered)
@@ -2445,7 +2463,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.DOCS_FILTERED_CLOG_METRIC] = clog_docs_filtered
 
 		// VB specific stats
-		listOfVbs := dcp_part.ResponsibleVBs()
+		listOfVbs := routersListOfVB[conn.Id()]
 		r_collector.vbMetricHelper.Register(r_collector.Id(), listOfVbs, conn.Id(), RouterVBMetricKeys)
 		r_collector.component_map[conn.Id()] = metric_map
 	}

@@ -30,9 +30,6 @@ type Nozzle interface {
 	//IsOpen returns true if the nozzle is open; returns false if the nozzle is closed
 	IsOpen() bool
 
-	// Returns a list of its responsible VBs (Read-only) and unlocker when done
-	ResponsibleVBs() []uint16
-
 	// To avoid garbage
 	RecycleDataObj(obj interface{})
 }
@@ -41,9 +38,15 @@ type OutNozzle interface {
 	Nozzle
 
 	SetUpstreamObjRecycler(func(interface{}))
-
 	SetUpstreamErrReporter(func(interface{}))
 
 	SetConflictLogger(interface{}) error
 	GetConflictLogger() interface{}
+}
+
+type SourceNozzle interface {
+	Nozzle
+
+	// Source nozzles may have more than one connector related to it
+	MultiConnectable
 }

@@ -534,7 +534,10 @@ func (sourceManifest *CollectionsManifest) ImplicitMap(targetManifest *Collectio
 			for _, sourceCollection := range sourceScope.Collections {
 				_, err := targetManifest.GetCollectionId(sourceScope.Name, sourceCollection.Name)
 				if err == nil {
-					implicitNamespace := &base.CollectionNamespace{sourceScope.Name, sourceCollection.Name}
+					implicitNamespace := &base.CollectionNamespace{
+						ScopeName:      sourceScope.Name,
+						CollectionName: sourceCollection.Name,
+					}
 					successfulMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
 				} else {
 					unmappedSources[sourceCollection.Name] = sourceCollection
@@ -1121,9 +1124,8 @@ func (c CollectionNamespaceList) IsSubset(other CollectionNamespaceList) bool {
 
 func (c CollectionNamespaceList) Clone() (other CollectionNamespaceList) {
 	for _, j := range c {
-		ns := &base.CollectionNamespace{}
-		*ns = *j
-		other = append(other, ns)
+		ns := j.Clone()
+		other = append(other, &ns)
 	}
 	return
 }
@@ -1133,8 +1135,15 @@ func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) b
 		panic("Nil namespace")
 	}
 
+	if c == nil || len(c) == 0 {
+		if namespace == nil || namespace.IsEmpty() {
+			return true
+		}
+		return false
+	}
+
 	for _, j := range c {
-		if *j == *namespace {
+		if j.IsSameAs(*namespace) {
 			return true
 		}
 	}
@@ -1578,7 +1587,7 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace, compiled
 
 	if compiledIndex == nil {
 		for k, v := range *c {
-			if *(k.CollectionNamespace) == *src {
+			if k.CollectionNamespace.IsSameAs(*src) {
 				// found
 				srcPtr = k
 				tgt = v

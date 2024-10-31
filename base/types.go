@@ -573,6 +573,11 @@ func NewErrorInfoFromEventInfo(event *EventInfo, t int64) ErrorInfo {
 type CollectionNamespace struct {
 	ScopeName      string
 	CollectionName string
+
+	// When vbucket boundaries are crossed (i.e. variable vbucket mode), hints are needed
+	// to know which pool from which the item originated
+	useRecycleVbnoHint bool
+	recycleVbnoHint    uint16
 }
 
 var DefaultCollectionNamespace = CollectionNamespace{
@@ -707,6 +712,22 @@ func (c CollectionNamespace) String() string {
 	}
 
 	return fmt.Sprintf("%s%s%s", scope, ScopeCollectionDelimiter, collection)
+}
+
+func (c *CollectionNamespace) SetUseRecycleVbnoHint(val bool) {
+	c.useRecycleVbnoHint = val
+}
+
+func (c *CollectionNamespace) SetRecycleVbnoHint(val uint16) {
+	c.recycleVbnoHint = val
+}
+
+func (c *CollectionNamespace) GetRecycleVbnoHint() uint16 {
+	return c.recycleVbnoHint
+}
+
+func (c *CollectionNamespace) GetUseRecycleVbnoHint() bool {
+	return c.useRecycleVbnoHint
 }
 
 type CollectionNamespacePtrList []*CollectionNamespace
@@ -2553,6 +2574,31 @@ func (k *KvVBMapType) FilterByVBs(vbs []uint16) KvVBMapType {
 	return retMap
 }
 
+// Note - this method does not check to make sure the VBs are the same
+// It simply performs VBs counts
+func (k *KvVBMapType) HasSameNumberOfVBs(other KvVBMapType) bool {
+	if k == nil {
+		if other == nil {
+			return true
+		} else {
+			return false
+		}
+	} else if other == nil {
+		if k == nil {
+			return true
+		} else if *k == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	kList := k.GetSortedVBList()
+	otherList := other.GetSortedVBList()
+
+	return len(kList) == len(otherList)
+}
+
 func GetKeysListFromStrStrMap(a map[string]string) []string {
 	var retList []string
 	for k, _ := range a {
@@ -3566,4 +3612,20 @@ func (p CLogHibernationStatusGauge) String() string {
 	default:
 		return ""
 	}
+}
+
+type VbStringMap map[uint16]string
+
+func (v VbStringMap) FilterByVBs(vbsList []uint16) VbStringMap {
+	if v == nil {
+		return nil
+	}
+	filteredMap := make(VbStringMap)
+	sortedVbsList := SortUint16List(CloneUint16List(vbsList))
+	for vbno, str := range v {
+		if _, found := SearchUint16List(sortedVbsList, vbno); found {
+			filteredMap[vbno] = str
+		}
+	}
+	return filteredMap
 }

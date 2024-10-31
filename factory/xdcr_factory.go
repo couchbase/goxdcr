@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
+	"github.com/couchbase/goxdcr/v8/connector"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
@@ -264,7 +266,12 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		panic("Not implemented")
 	}
 
-	xdcrf.logger.Infof("%v %v sourceCRMode=%v\n", pipelineType.String(), topic, sourceCRMode)
+	kvsVbMap := latestSourceBucketTopology.GetKvVbMapRO()
+	targetKvVbMap := latestTargetBucketTopology.GetTargetServerVBMap()
+	variableVBMode := !kvsVbMap.HasSameNumberOfVBs(targetKvVbMap)
+
+	xdcrf.logger.Infof("%v %v sourceCRMode=%v variableVBMode=%v",
+		pipelineType.String(), topic, sourceCRMode, variableVBMode)
 
 	/**
 	 * Construct the Source nozzles
@@ -306,6 +313,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	var logOncePerPipeline sync.Once
 	colMigrationMultiTargetUIRaiser := xdcrf.getUILogOnceMessenger(logOncePerPipeline)
 
+	translator := xdcrf.constructVBTranslator(variableVBMode, logger_ctx)
+
 	// construct routers to be able to connect the nozzles
 	for _, sourceNozzle := range sourceNozzles {
 		vblist := sourceNozzle.(*parts.DcpNozzle).ResponsibleVBs()
@@ -323,12 +332,19 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 			downStreamParts[targetNozzleId] = outNozzle
 		}
 
-		// Construct a router - each Source nozzle has a router.
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
+		// Each source nozzle has a VB translator before a router
+		// The vbTranslater could be a no-op one, or an actual one based on variableVB mode
+		sourceNozzle.SetConnector(translator)
+
+		// The router is only responsible for the VBs that the source node is responsible for
+		filteredVBNozzleMap := base.VbStringMap(vbNozzleMap).FilterByVBs(sourceNozzle.ResponsibleVBs())
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, filteredVBNozzleMap,
+			sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
 		if err != nil {
 			return nil, nil, err
 		}
-		sourceNozzle.SetConnector(router)
+
+		translator.AddDownStream(router.Id(), router.GetPart())
 
 		for _, nozzle := range outNozzles {
 			outNozzle := nozzle.(common.OutNozzle)
@@ -384,9 +400,20 @@ func getNozzleList(nozzle_map map[string]common.Nozzle) []common.Nozzle {
 	return nozzle_list
 }
 
+// get nozzle list from nozzle map
+func getSourceNozzleList(nozzle_map map[string]common.SourceNozzle) []common.SourceNozzle {
+	nozzle_list := make([]common.SourceNozzle, len(nozzle_map))
+	index := 0
+	for _, nozzle := range nozzle_map {
+		nozzle_list[index] = nozzle
+		index++
+	}
+	return nozzle_list
+}
+
 // construct and register async componet event listeners on source nozzles
 func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
-	sources := getNozzleList(pipeline.Sources())
+	sources := getSourceNozzleList(pipeline.Sources())
 
 	num_of_sources := len(sources)
 	num_of_listeners := min(num_of_sources, base.MaxNumberOfAsyncListeners)
@@ -427,13 +454,18 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
 
-			conn := dcp_part.Connector()
-			conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
-			conn.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
-			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
-			conn.RegisterComponentEventListener(common.DataNotReplicated, data_filtered_event_listener)
-			conn.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, collection_routing_event_listener)
-			conn.RegisterComponentEventListener(common.DataCloned, data_cloned_event_listener)
+			connectors := dcp_part.Connectors()
+			for _, conn := range connectors {
+				if !strings.Contains(conn.Id(), base.ROUTER_NAME_PREFIX) {
+					continue
+				}
+				conn.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
+				conn.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
+				conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
+				conn.RegisterComponentEventListener(common.DataNotReplicated, data_filtered_event_listener)
+				conn.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, collection_routing_event_listener)
+				conn.RegisterComponentEventListener(common.DataCloned, data_cloned_event_listener)
+			}
 		}
 	}
 }
@@ -539,8 +571,8 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipelin
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.SourceNotification) (map[string]common.Nozzle, map[string][]uint16, error) {
-	sourceNozzles := make(map[string]common.Nozzle)
+func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.SourceNotification) (map[string]common.SourceNozzle, map[string][]uint16, error) {
+	sourceNozzles := make(map[string]common.SourceNozzle)
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
@@ -701,7 +733,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			}
 
 			// construct outgoing nozzle
-			var outNozzle common.Nozzle
+			var outNozzle common.OutNozzle
 
 			if isCapiReplication {
 				outNozzle, err = xdcrf.constructCAPINozzle(topic, targetUserName, targetPassword, targetClusterRef.Certificates(), vbList, vbCouchApiBaseMap, i, logger_ctx)
@@ -734,8 +766,12 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 	return
 }
 
+func getRouterIdUsingDCPId(id string) string {
+	return base.ROUTER_NAME_PREFIX + PART_NAME_DELIMITER + id
+}
+
 func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext, srcNozzleObjRecycler utilities.RecycleObjFunc, migrationUIMsgRaiser func(string)) (*parts.Router, error) {
-	routerId := "Router" + PART_NAME_DELIMITER + id
+	routerId := getRouterIdUsingDCPId(id)
 
 	// When router detects a diff, it simply calls this function and this will handle the rest
 	explicitMappingChangeHandler := func(diff metadata.CollectionNamespaceMappingsDiffPair) {
@@ -777,7 +813,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {
-		xdcrf.logger.Infof("Constructed router %v", routerId)
+		xdcrf.logger.Infof("Constructed router %v with responsible VBs %v", routerId, router.GetPart().ResponsibleVBs())
 	}
 	return router, err
 }
@@ -812,7 +848,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	sourceClusterUUID string,
 	sourceHostname string,
 	pipelineType common.PipelineType,
-) common.Nozzle {
+) common.OutNozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, sourceBucketUuid, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
@@ -827,7 +863,7 @@ func (xdcrf *XDCRFactory) constructCAPINozzle(topic string,
 	vbList []uint16,
 	vbCouchApiBaseMap map[uint16]string,
 	nozzle_index int,
-	logger_ctx *log.LoggerContext) (common.Nozzle, error) {
+	logger_ctx *log.LoggerContext) (common.OutNozzle, error) {
 	if len(vbList) == 0 {
 		// should never get here
 		xdcrf.logger.Errorf("Skip constructing capi nozzle with index %v since it contains no vbucket", nozzle_index)
@@ -1958,4 +1994,13 @@ func (xdcrf *XDCRFactory) ConstructConflictLogger(pipeline common.Pipeline, logg
 	}
 
 	return nil
+}
+
+func (xdcrf *XDCRFactory) constructVBTranslator(variableVBMode bool, loggerContext *log.LoggerContext) common.Connector {
+	if !variableVBMode {
+		return connector.NewNoOpTranslator()
+	}
+
+	translator := connector.NewVBTranslator("VBTranslator", loggerContext)
+	return translator
 }

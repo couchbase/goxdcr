@@ -287,6 +287,53 @@ func (_c *Part_RegisterComponentEventListener_Call) RunAndReturn(run func(common
 	return _c
 }
 
+// ResponsibleVBs provides a mock function with given fields:
+func (_m *Part) ResponsibleVBs() []uint16 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResponsibleVBs")
+	}
+
+	var r0 []uint16
+	if rf, ok := ret.Get(0).(func() []uint16); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	return r0
+}
+
+// Part_ResponsibleVBs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResponsibleVBs'
+type Part_ResponsibleVBs_Call struct {
+	*mock.Call
+}
+
+// ResponsibleVBs is a helper method to define mock.On call
+func (_e *Part_Expecter) ResponsibleVBs() *Part_ResponsibleVBs_Call {
+	return &Part_ResponsibleVBs_Call{Call: _e.mock.On("ResponsibleVBs")}
+}
+
+func (_c *Part_ResponsibleVBs_Call) Run(run func()) *Part_ResponsibleVBs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Part_ResponsibleVBs_Call) Return(_a0 []uint16) *Part_ResponsibleVBs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Part_ResponsibleVBs_Call) RunAndReturn(run func() []uint16) *Part_ResponsibleVBs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetConnector provides a mock function with given fields: connector
 func (_m *Part) SetConnector(connector common.Connector) error {
 	ret := _m.Called(connector)

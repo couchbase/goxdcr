@@ -11,6 +11,7 @@ package pipeline
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,7 +81,7 @@ type GenericPipeline struct {
 	pipelineType common.PipelineType
 
 	//incoming nozzles of the pipeline
-	sources map[string]common.Nozzle
+	sources map[string]common.SourceNozzle
 
 	//outgoing nozzles of the pipeline
 	targets map[string]common.Nozzle
@@ -210,7 +211,8 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	if part.Connector() != nil {
 		if part.Connector().IsStartable() {
 			err = part.Connector().Start()
-			if err != nil {
+			// It is possible that a part can be started more than once due to variable VB
+			if err != nil && !strings.Contains(err.Error(), parts.PartAlreadyStartedError.Error()) {
 				err_ch <- base.ComponentError{part.Connector().Id(), err}
 			}
 		}
@@ -247,7 +249,8 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 
 	err = part.Start(partSettings)
-	if err != nil && err.Error() != parts.PartAlreadyStartedError.Error() {
+	// It is possible that a part can be stopped more than once due to variable VB
+	if err != nil && !strings.Contains(err.Error(), parts.PartAlreadyStartedError.Error()) {
 		err_ch <- base.ComponentError{part.Id(), err}
 	}
 }
@@ -774,7 +777,7 @@ func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *syn
 	defer wait_grp.Done()
 	genericPipeline.logger.Infof("%v trying to stop part %v\n", genericPipeline.InstanceId(), part.Id())
 	err := part.Stop()
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), parts.PartAlreadyStoppedError.Error()) {
 		genericPipeline.logger.Warnf("%v failed to stop part %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), part.Id(), err)
 		err_ch <- base.ComponentError{part.Id(), err}
 	}
@@ -784,7 +787,7 @@ func (genericPipeline *GenericPipeline) stopConnector(connector common.Connector
 	defer wait_grp.Done()
 	genericPipeline.logger.Infof("%v trying to stop connector %v\n", genericPipeline.InstanceId(), connector.Id())
 	err := connector.Stop()
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), parts.PartAlreadyStoppedError.Error()) {
 		genericPipeline.logger.Warnf("%v failed to stop connector %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), connector.Id(), err)
 		err_ch <- base.ComponentError{connector.Id(), err}
 	}
@@ -894,7 +897,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	return errMap
 }
 
-func (genericPipeline *GenericPipeline) Sources() map[string]common.Nozzle {
+func (genericPipeline *GenericPipeline) Sources() map[string]common.SourceNozzle {
 	return genericPipeline.sources
 }
 
@@ -912,7 +915,7 @@ func (genericPipeline *GenericPipeline) FullTopic() string {
 
 // Used for testing only
 func NewGenericPipeline(t string,
-	sources map[string]common.Nozzle,
+	sources map[string]common.SourceNozzle,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
 	uilog_svc service_def.UILogSvc) *GenericPipeline {
@@ -928,13 +931,12 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle,
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.SourceNozzle, targets map[string]common.Nozzle,
 	spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor,
 	connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
 	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLoggerCtor ConflictLoggerCtor) (*GenericPipeline, error) {
-
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -1092,11 +1094,19 @@ func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.Asy
 
 			mergeListenersMap(listenersMap, part.AsyncComponentEventListeners())
 
-			connector := part.Connector()
-			if connector != nil {
-				mergeListenersMap(listenersMap, connector.AsyncComponentEventListeners())
-				for _, downStreamPart := range connector.DownStreams() {
-					addAsyncListenersToMap(downStreamPart, listenersMap, partsMap)
+			var connectors []common.Connector
+			partWithConnectors, ok := part.(common.MultiConnectable)
+			if ok {
+				connectors = partWithConnectors.Connectors()
+			} else {
+				connectors = append(connectors, part.Connector())
+			}
+			for _, connector := range connectors {
+				if connector != nil {
+					mergeListenersMap(listenersMap, connector.AsyncComponentEventListeners())
+					for _, downStreamPart := range connector.DownStreams() {
+						addAsyncListenersToMap(downStreamPart, listenersMap, partsMap)
+					}
 				}
 			}
 		}
@@ -1173,15 +1183,14 @@ func (genericPipeline *GenericPipeline) Layout() string {
 	for _, sourceNozzle := range genericPipeline.Sources() {
 		vbsList := sourceNozzle.ResponsibleVBs()
 		dcpSection := fmt.Sprintf("\t%s:{vbList=%v}\n", sourceNozzle.Id(), vbsList)
-		router := sourceNozzle.Connector().(*parts.Router)
-		routerSection := fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", router.Id(), router.RoutingMapByDownstreams())
-		downstreamParts := router.DownStreams()
+		connectorSection := sourceNozzle.Connector().GetLayoutString(sourceNozzle)
+		downstreamParts := sourceNozzle.Connector().DownStreams()
 		targetNozzleSection := ""
 		for partId, _ := range downstreamParts {
 			targetNozzleSection = targetNozzleSection + fmt.Sprintf("\t\t\t%s\n", partId)
 		}
 
-		content = content + fmt.Sprintf("%s%s%s\n", dcpSection, routerSection, targetNozzleSection)
+		content = content + fmt.Sprintf("%s%s%s\n", dcpSection, connectorSection, targetNozzleSection)
 	}
 	return fmt.Sprintf("%s\n%s\n%s\n", header, content, footer)
 }

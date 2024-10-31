@@ -267,9 +267,9 @@ func TestCollectionsNsMapping(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestCollectionsMapping =================")
 	mapping := make(CollectionNamespaceMapping)
-	implicitEntry := &base.CollectionNamespace{"scope", "collection"}
-	implicitEntry2 := &base.CollectionNamespace{"scope", "collection"}
-	implicitEntry3 := &base.CollectionNamespace{"scope", "collection1"}
+	implicitEntry := &base.CollectionNamespace{ScopeName: "scope", CollectionName: "collection"}
+	implicitEntry2 := &base.CollectionNamespace{ScopeName: "scope", CollectionName: "collection"}
+	implicitEntry3 := &base.CollectionNamespace{ScopeName: "scope", CollectionName: "collection1"}
 
 	// This tests to make sure that even though using diff structs, the info inside the map
 	// is de-referenced and deduped to work correctly
@@ -368,7 +368,7 @@ func TestMarshalUnmarshalCollectionsNamespaceMapping(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestMarshalUnmarshalCollectionsNamespaceMapping =================")
 	nsMap := make(CollectionNamespaceMapping)
-	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	defaultNamespace := base.CollectionNamespace{ScopeName: "_default", CollectionName: "_default"}
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &defaultNamespace)
 	nsMap[NewSourceCollectionNamespace(&defaultNamespace)] = nslist
@@ -389,11 +389,11 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 	fmt.Println("============== Test case start: TestCollectionsNsConsolidate =================")
 
 	nsMap := make(CollectionNamespaceMapping)
-	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
-	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	defaultNamespace := base.CollectionNamespace{ScopeName: "_default", CollectionName: "_default"}
+	c1Ns := base.CollectionNamespace{ScopeName: "C1", CollectionName: "C1"}
 	c1NsSrc := NewSourceCollectionNamespace(&c1Ns)
-	c2Ns := base.CollectionNamespace{"C2", "C2"}
-	c3Ns := base.CollectionNamespace{"C3", "C3"}
+	c2Ns := base.CollectionNamespace{ScopeName: "C2", CollectionName: "C2"}
+	c3Ns := base.CollectionNamespace{ScopeName: "C3", CollectionName: "C3"}
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &c1Ns)
 	nslist = append(nslist, &c3Ns)
@@ -453,10 +453,10 @@ func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	nsMap := make(CollectionNamespaceMapping)
 	nsMapPrime := make(CollectionNamespaceMapping)
 
-	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	defaultNamespace := base.CollectionNamespace{ScopeName: "_default", CollectionName: "_default"}
 	defaultSrcNamespace := NewSourceCollectionNamespace(&defaultNamespace)
-	c1Ns := base.CollectionNamespace{"C1", "C1"}
-	c3Ns := base.CollectionNamespace{"C3", "C3"}
+	c1Ns := base.CollectionNamespace{ScopeName: "C1", CollectionName: "C1"}
+	c3Ns := base.CollectionNamespace{ScopeName: "C3", CollectionName: "C3"}
 
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &c1Ns)
@@ -950,8 +950,8 @@ func TestCollectionNsMappingsDocMarshallerWithMigration(t *testing.T) {
 	defaultSrcNamespace, err := NewSourceMigrationNamespace(expr, nil)
 	assert.Nil(err)
 
-	c1Ns := base.CollectionNamespace{"C1", "C1"}
-	c3Ns := base.CollectionNamespace{"C3", "C3"}
+	c1Ns := base.CollectionNamespace{ScopeName: "C1", CollectionName: "C1"}
+	c3Ns := base.CollectionNamespace{ScopeName: "C3", CollectionName: "C3"}
 
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &c1Ns)
@@ -1795,4 +1795,152 @@ func TestManifestsDocToFromPair(t *testing.T) {
 	assert.NotNil(checkPair)
 
 	assert.True(checkPair.IsSameAs(origPair))
+}
+
+func TestCollectionNamespaceMapping_Diff(t *testing.T) {
+	type args struct {
+		other CollectionNamespaceMapping
+	}
+	colNs := &base.CollectionNamespace{ScopeName: "scope", CollectionName: "collection"}
+	colNsClone := colNs.Clone()
+	colNsCloneWithHint := colNs.Clone()
+	colNsCloneWithHint.SetRecycleVbnoHint(123)
+	tests := []struct {
+		name        string
+		c           CollectionNamespaceMapping
+		args        args
+		wantAdded   CollectionNamespaceMapping
+		wantRemoved CollectionNamespaceMapping
+	}{
+		{
+			name: "Nil test",
+			c:    CollectionNamespaceMapping{},
+			args: args{
+				CollectionNamespaceMapping{},
+			},
+			wantRemoved: CollectionNamespaceMapping{},
+			wantAdded:   CollectionNamespaceMapping{},
+		},
+		{
+			name: "Added test",
+			c:    CollectionNamespaceMapping{},
+			args: args{
+				other: CollectionNamespaceMapping{
+					NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+						colNs,
+					},
+				},
+			},
+			wantRemoved: CollectionNamespaceMapping{},
+			wantAdded: CollectionNamespaceMapping{
+				NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+					colNs,
+				},
+			},
+		},
+		{
+			name: "Removed test",
+			c: CollectionNamespaceMapping{
+				NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+					colNs,
+				},
+			},
+			args: args{
+				other: CollectionNamespaceMapping{},
+			},
+			wantAdded: CollectionNamespaceMapping{},
+			wantRemoved: CollectionNamespaceMapping{
+				NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+					colNs,
+				},
+			},
+		},
+		{
+			name: "Same test",
+			c: CollectionNamespaceMapping{
+				NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+					colNs,
+				},
+			},
+			args: args{
+				other: CollectionNamespaceMapping{
+					NewSourceCollectionNamespace(&colNsClone): CollectionNamespaceList{
+						&colNsClone,
+					},
+				},
+			},
+		},
+		{
+			name: "Same test with hints",
+			c: CollectionNamespaceMapping{
+				NewSourceCollectionNamespace(colNs): CollectionNamespaceList{
+					colNs,
+				},
+			},
+			args: args{
+				other: CollectionNamespaceMapping{
+					NewSourceCollectionNamespace(&colNsCloneWithHint): CollectionNamespaceList{
+						&colNsCloneWithHint,
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAdded, gotRemoved := tt.c.Diff(tt.args.other)
+			if len(tt.wantAdded) > 0 {
+				assert.True(t, gotAdded.IsSame(tt.wantAdded))
+			}
+			if len(tt.wantRemoved) > 0 {
+				assert.True(t, gotRemoved.IsSame(tt.wantRemoved))
+			}
+		})
+	}
+}
+
+func TestCollectionNamespaceList_Contains(t *testing.T) {
+	type args struct {
+		namespace *base.CollectionNamespace
+	}
+	colNs := &base.CollectionNamespace{ScopeName: "test", CollectionName: "test"}
+	colNsClone := colNs.Clone()
+	colNsCloneWithHints := colNs.Clone()
+	colNsCloneWithHints.SetRecycleVbnoHint(123)
+	tests := []struct {
+		name string
+		c    CollectionNamespaceList
+		args args
+		want bool
+	}{
+		{
+			name: "Nil tests",
+			c:    CollectionNamespaceList{},
+			args: args{namespace: &base.CollectionNamespace{}},
+			want: true,
+		},
+		{
+			name: "Neg test",
+			c:    CollectionNamespaceList{},
+			args: args{namespace: colNs},
+			want: false,
+		},
+		{
+			name: "Pos test",
+			c:    CollectionNamespaceList{colNs},
+			args: args{namespace: &colNsClone},
+			want: true,
+		},
+		{
+			name: "Pos test with hints",
+			c:    CollectionNamespaceList{colNs},
+			args: args{namespace: &colNsCloneWithHints},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, tt.c.Contains(tt.args.namespace), "Contains(%v)", tt.args.namespace)
+		})
+	}
 }

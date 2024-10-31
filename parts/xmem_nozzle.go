@@ -804,6 +804,8 @@ type XmemNozzle struct {
 
 	// pipeline level conflict logger
 	conflictLogger baseclog.Logger
+
+	stopOnce uint32
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -954,6 +956,10 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 }
 
 func (xmem *XmemNozzle) Stop() error {
+	if !atomic.CompareAndSwapUint32(&xmem.stopOnce, 0, 1) {
+		return PartAlreadyStoppedError
+	}
+
 	xmem.Logger().Infof("Stopping %v\n", xmem.Id())
 	err := xmem.SetState(common.Part_Stopping)
 	if err != nil {
