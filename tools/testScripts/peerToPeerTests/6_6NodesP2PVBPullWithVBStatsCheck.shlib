@@ -374,6 +374,8 @@ function runTestCase {
 	echo "Verifying vb specific stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
 	echo "============================================================================"
 
+	local sleepSecs=100
+
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
@@ -384,8 +386,8 @@ function runTestCase {
 
 	runOneReplicationCycle
 
-	echo "Sleeping 60 seconds before gathering stats"
-	sleep 60
+	echo "Sleeping $sleepSecs seconds before gathering stats"
+	sleep $sleepSecs
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_BEFORE[@]}); do
 		getFilteringStatsBefore $clusterName "B0"
@@ -397,8 +399,8 @@ function runTestCase {
 
 	runOneRebalanceCycleIn
 
-	echo "Sleeping 60 seconds before gathering stats"
-	sleep 60
+	echo "Sleeping $sleepSecs seconds before gathering stats"
+	sleep $sleepSecs
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
 		getFilteringStatsAfter $clusterName "B0"
