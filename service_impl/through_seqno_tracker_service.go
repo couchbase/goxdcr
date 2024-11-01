@@ -886,9 +886,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 
 	switch event.EventType {
 	case common.DataSent:
-		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
-		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
-		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
+		sentAdditional := event.OtherInfos.(parts.DataSentEventAdditional)
+		vbno := sentAdditional.GetVB()
+		seqno := sentAdditional.Seqno
+		manifestId := sentAdditional.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
@@ -900,9 +901,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		}
 	case common.MergeCasChanged:
 		// Cas changed count as sent. We will converge to new mutation in the source
-		vbno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).VBucket
-		seqno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).Seqno
-		manifestId := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).ManifestId
+		casChangedEvent := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional)
+		vbno := casChangedEvent.GetVB()
+		seqno := casChangedEvent.Seqno
+		manifestId := casChangedEvent.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
@@ -913,9 +915,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.DataMerged:
-		vbno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).VBucket
-		seqno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).Seqno
-		manifestId := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).ManifestId
+		dataMergedEvt := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional)
+		vbno := dataMergedEvt.GetVB()
+		seqno := dataMergedEvt.Seqno
+		manifestId := dataMergedEvt.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
@@ -926,9 +929,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.MergeFailed:
-		vbno := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).VBucket
-		seqno := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).Seqno
-		manifestId := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).ManifestId
+		failedEvt := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional)
+		vbno := failedEvt.GetVB()
+		seqno := failedEvt.Seqno
+		manifestId := failedEvt.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
@@ -971,9 +975,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.DataFailedCRSource:
-		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
-		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
-		manifestId := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).ManifestId
+		dataFailedCRSrc := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
+		seqno := dataFailedCRSrc.Seqno
+		vbno := dataFailedCRSrc.GetVB()
+		manifestId := dataFailedCRSrc.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
@@ -985,9 +990,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.TargetDataSkipped:
-		seqno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
-		vbno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
-		manifestId := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).ManifestId
+		skippedEvt := event.OtherInfos.(parts.TargetDataSkippedEventAdditional)
+		seqno := skippedEvt.Seqno
+		vbno := skippedEvt.GetVB()
+		manifestId := skippedEvt.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
@@ -1046,7 +1052,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		}
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
-		vbno := wrappedMcr.Req.VBucket
+		vbno := wrappedMcr.GetSourceVB()
 		seqno := wrappedMcr.Seqno
 		recycler, ok := event.OtherInfos.(utilities.RecycleObjFunc)
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)

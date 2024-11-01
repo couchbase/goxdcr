@@ -138,6 +138,11 @@ const (
 	XmemClientKey         = "clientKey"
 )
 
+// Variable VB mode related settings used during construction
+const (
+	VariableVBAdditionalVBs = "variableVBAdditionalVBs"
+)
+
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,

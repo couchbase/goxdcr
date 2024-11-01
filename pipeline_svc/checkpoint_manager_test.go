@@ -473,7 +473,7 @@ func TestBackfillVBTaskResume(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	assert.NotNil(ckptMgr)
@@ -545,7 +545,7 @@ func TestCkptMgrPeriodicMerger(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	assert.NotNil(ckptMgr)
@@ -627,7 +627,7 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	assert.NotNil(ckptMgr)
@@ -707,7 +707,7 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	assert.NotNil(ckptMgr)
@@ -786,7 +786,7 @@ func TestCkptMgrPerformCkpt(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
 
@@ -829,7 +829,7 @@ func TestCkptMgrPerformCkptWithDelay(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
 
@@ -878,7 +878,7 @@ func TestCkptMgrPerformCkptWithDelayAndOneTime(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
 
@@ -926,7 +926,7 @@ func TestCkptMgrStopBeforeStart(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	assert.Nil(ckptMgr.Stop())

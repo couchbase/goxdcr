@@ -168,6 +168,8 @@ type CheckpointManager struct {
 	periodicMerger       periodicMergerType // can be replaced for unit test
 
 	lastHighSeqnoVbUuidMap base.HighSeqnoAndVbUuidMap
+
+	variableVBMode bool
 }
 
 type checkpointSyncHelper struct {
@@ -313,16 +315,7 @@ type MergeCkptArgsGetter func() *MergeCkptArgs
 
 type periodicMergerType func()
 
-func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
-	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username,
-	target_password, target_bucket_name string, target_kv_vb_map base.KvVBMapType,
-	target_cluster_ref *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface,
-	statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc,
-	collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc,
-	getBackfillMgr func() service_def.BackfillMgrIface,
-	bucketTopologySvc service_def.BucketTopologySvc) (*CheckpointManager, error) {
+func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username, target_password, target_bucket_name string, target_kv_vb_map base.KvVBMapType, target_cluster_ref *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, getBackfillMgr func() service_def.BackfillMgrIface, bucketTopologySvc service_def.BucketTopologySvc, variableVBMode bool) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -377,6 +370,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		bucketTopologySvc:                 bucketTopologySvc,
 		getHighSeqnoAndVBUuidFromTargetCh: make(chan bool, 1),
 		periodicPushRequested:             make(chan bool, 1),
+		variableVBMode:                    variableVBMode,
 	}
 
 	// So that unit test can override this and test it
@@ -822,11 +816,19 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 // In current deployment - ReplicationManager coexist with source node, it means
 // the list of buckets on that source node
 func (ckmgr *CheckpointManager) getMyVBs() []uint16 {
-	vbList := []uint16{}
-	for _, vbs := range ckmgr.active_vbs {
-		vbList = append(vbList, vbs...)
+	return base.GetVbListFromKvVbMap(ckmgr.active_vbs)
+}
+
+func (ckmgr *CheckpointManager) getMyTgtVBs() []uint16 {
+	targetKvVbMap, err := ckmgr.TargetKvVbMap()
+	if err != nil {
+		return []uint16{}
 	}
-	return vbList
+	return base.GetVbListFromKvVbMap(targetKvVbMap)
+}
+
+func (ckmgr *CheckpointManager) isVariableVBMode() bool {
+	return ckmgr.variableVBMode
 }
 
 func (ckmgr *CheckpointManager) checkCkptCapability() {
@@ -968,7 +970,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 		ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 	}()
-	// Pipeline instances may overlap, so use instance ID instead
+	// Pipeline instances may overlap, So use instance ID instead
 	ckmgr.logger.Infof("Set start seqnos for %v...", ckmgr.pipeline.InstanceId())
 
 	listOfVbs := ckmgr.getMyVBs()
@@ -1307,9 +1309,26 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16) {
 	ckmgr.updateCurrentVBOpaque(vbno, curRemoteVBOpaque)
 }
 
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+	switch ckmgr.isVariableVBMode() {
+	case true:
+		return ckmgr.getDataFromGlobalCkpts(vbno, ckptDoc, max_seqno)
+	default:
+		return ckmgr.getDataFromCkptsInternal(vbno, ckptDoc, max_seqno)
+	}
+}
+
+func (ckmgr *CheckpointManager) getDataFromGlobalCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, maxSeqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+	// NEIL TODO - for now do not support checkpointing
+	vbts := &base.VBTimestamp{
+		Vbno: vbno,
+	}
+	return vbts, nil, nil, 0, 0, nil
+}
+
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkptsInternal(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)

@@ -111,6 +111,27 @@ type baseConfig struct {
 	devBackfillSendDelay uint32
 }
 
+type VbucketCommon struct {
+	VBucket uint16
+
+	VariableVBUsed bool
+	OrigSrcVB      uint16
+}
+
+func (v *VbucketCommon) SetOrigSrcVB(vbno uint16) {
+	v.VariableVBUsed = true
+	v.OrigSrcVB = vbno
+}
+
+// Gets a VB for throughseqno-based operations
+func (v *VbucketCommon) GetVB() uint16 {
+	if v.VariableVBUsed {
+		return v.OrigSrcVB
+	}
+
+	return v.VBucket
+}
+
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
 // This is shared between GetDocReceived and GetMetaReceived
 type GetReceivedEventAdditional struct {
@@ -121,10 +142,10 @@ type GetReceivedEventAdditional struct {
 }
 
 type DataFailedCRSourceEventAdditional struct {
+	VbucketCommon
 	Seqno          uint64
 	Opcode         mc.CommandCode
 	IsExpirySet    bool
-	VBucket        uint16
 	ManifestId     uint64
 	Cloned         bool
 	CloneSyncCh    chan bool
@@ -134,13 +155,13 @@ type DataFailedCRSourceEventAdditional struct {
 type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
 
 type DataSentEventAdditional struct {
+	VbucketCommon
 	Seqno                uint64
 	IsOptRepd            bool
 	Commit_time          time.Duration
 	Resp_wait_time       time.Duration
 	Opcode               mc.CommandCode
 	IsExpirySet          bool
-	VBucket              uint16
 	Req_size             int
 	ManifestId           uint64
 	FailedTargetCR       bool
@@ -153,6 +174,15 @@ type DataSentEventAdditional struct {
 	CasPoisonProtection  base.TargetKVCasPoisonProtectionMode
 	CLogWaitTime         time.Duration
 	CLogError            error
+}
+
+// GetVB is used for doing throughSeqno processing
+func (d *DataSentEventAdditional) GetVB() uint16 {
+	if d.VariableVBUsed {
+		return d.OrigSrcVB
+	} else {
+		return d.VBucket
+	}
 }
 
 type DataFilteredAdditional struct {
