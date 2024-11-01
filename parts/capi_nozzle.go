@@ -776,9 +776,9 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), base.TagUD(item.Req.Key))
 				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      item.GetMemcachedCommand(),
-					IsExpirySet: (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-					VBucket:     item.Req.VBucket,
+					Opcode:        item.GetMemcachedCommand(),
+					IsExpirySet:   (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					VbucketCommon: VbucketCommon{VBucket: item.Req.VBucket},
 				}
 				capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
 			}
@@ -795,12 +795,12 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			// requests in req_list have strictly increasing seqnos
 			// each seqno is the new high seqno
 			additionalInfo := DataSentEventAdditional{Seqno: req.Seqno,
-				IsOptRepd:   capi.optimisticRep(req),
-				Commit_time: time.Since(req.Start_time),
-				Opcode:      req.Req.Opcode,
-				IsExpirySet: (len(req.Req.Extras) >= 8 && binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
-				VBucket:     req.Req.VBucket,
-				Req_size:    req.Req.Size(),
+				VbucketCommon: VbucketCommon{VBucket: req.Req.VBucket},
+				IsOptRepd:     capi.optimisticRep(req),
+				Commit_time:   time.Since(req.Start_time),
+				Opcode:        req.Req.Opcode,
+				IsExpirySet:   (len(req.Req.Extras) >= 8 && binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
+				Req_size:      req.Req.Size(),
 			}
 			capi.RaiseEvent(common.NewEvent(common.DataSent, nil, capi, nil, additionalInfo))
 

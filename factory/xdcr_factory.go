@@ -278,7 +278,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx, latestSourceBucketTopology)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx, latestSourceBucketTopology, variableVBMode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -303,7 +303,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx, sourceClusterUUID, pipelineType)
+		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef,
+			isCapiReplication, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap)
 
 	if err != nil {
 		return nil, nil, err
@@ -313,44 +314,13 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	var logOncePerPipeline sync.Once
 	colMigrationMultiTargetUIRaiser := xdcrf.getUILogOnceMessenger(logOncePerPipeline)
 
-	translator := xdcrf.constructVBTranslator(variableVBMode, logger_ctx)
+	translator := xdcrf.constructVBTranslator(kvsVbMap, targetKvVbMap, logger_ctx, sourceNozzles)
 
-	// construct routers to be able to connect the nozzles
-	for _, sourceNozzle := range sourceNozzles {
-		vblist := sourceNozzle.(*parts.DcpNozzle).ResponsibleVBs()
-		downStreamParts := make(map[string]common.Part)
-		for _, vb := range vblist {
-			targetNozzleId, ok := vbNozzleMap[vb]
-			if !ok {
-				return nil, nil, fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
-			}
-
-			outNozzle, ok := outNozzles[targetNozzleId]
-			if !ok {
-				return nil, nil, fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
-			}
-			downStreamParts[targetNozzleId] = outNozzle
-		}
-
-		// Each source nozzle has a VB translator before a router
-		// The vbTranslater could be a no-op one, or an actual one based on variableVB mode
-		sourceNozzle.SetConnector(translator)
-
-		// The router is only responsible for the VBs that the source node is responsible for
-		filteredVBNozzleMap := base.VbStringMap(vbNozzleMap).FilterByVBs(sourceNozzle.ResponsibleVBs())
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, filteredVBNozzleMap,
-			sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		translator.AddDownStream(router.Id(), router.GetPart())
-
-		for _, nozzle := range outNozzles {
-			outNozzle := nozzle.(common.OutNozzle)
-			outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
-		}
+	err = xdcrf.wirePipeline(topic, sourceNozzles, vbNozzleMap, outNozzles, spec, sourceCRMode, logger_ctx, colMigrationMultiTargetUIRaiser, translator, variableVBMode)
+	if err != nil {
+		return nil, nil, err
 	}
+
 	progress_recorder(common.ProgressNozzlesWired)
 
 	// construct and initializes the pipeline
@@ -379,10 +349,82 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
 		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName,
-			target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode)
+			target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode, variableVBMode)
 	}
 
 	return pipeline, registerCb, nil
+}
+
+func (xdcrf *XDCRFactory) wirePipeline(topic string, sourceNozzles map[string]common.SourceNozzle, vbNozzleMap map[uint16]string, outNozzles map[string]common.Nozzle, spec *metadata.ReplicationSpecification, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext, colMigrationMultiTargetUIRaiser func(string), translator common.Connector, variableVBMode bool) error {
+	var everySourceVBs []uint16
+	for _, sourceNozzle := range sourceNozzles {
+		everySourceVBs = append(everySourceVBs, sourceNozzle.ResponsibleVBs()...)
+	}
+
+	switch variableVBMode {
+	case false:
+		// construct routers to be able to connect the nozzles
+		for _, sourceNozzle := range sourceNozzles {
+			vblist := sourceNozzle.(*parts.DcpNozzle).ResponsibleVBs()
+			downStreamParts := make(map[string]common.Part)
+			for _, vb := range vblist {
+				targetNozzleId, ok := vbNozzleMap[vb]
+				if !ok {
+					return fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
+				}
+
+				outNozzle, ok := outNozzles[targetNozzleId]
+				if !ok {
+					return fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
+				}
+				downStreamParts[targetNozzleId] = outNozzle
+			}
+			// Construct a router - each Source nozzle has a router.
+			filteredVBNozzleMap := base.VbStringMap(vbNozzleMap).FilterByVBs(sourceNozzle.ResponsibleVBs())
+			router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, filteredVBNozzleMap,
+				sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser,
+				sourceNozzle.ResponsibleVBs(), everySourceVBs)
+			if err != nil {
+				return err
+			}
+
+			sourceNozzle.SetConnector(translator)
+			translator.AddDownStream(router.Id(), router.GetPart())
+
+			for _, nozzle := range outNozzles {
+				outNozzle := nozzle.(common.OutNozzle)
+				outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
+			}
+		}
+	case true:
+		// Variable VB mode means that a specific keyed document that belongs to a specific VB could belong
+		// to another VB entirely once re-mapped. This means that every VB needs access to every VB to
+		// correctly route
+
+		for _, sourceNozzle := range sourceNozzles {
+			downStreamParts := make(map[string]common.Part)
+			for targetNozzleId, outNozzle := range outNozzles {
+				downStreamParts[targetNozzleId] = outNozzle
+			}
+
+			// Construct a router - each Source nozzle has a router.
+			router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap,
+				sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser,
+				sourceNozzle.ResponsibleVBs(), everySourceVBs)
+			if err != nil {
+				return err
+			}
+
+			sourceNozzle.SetConnector(translator)
+			translator.AddDownStream(router.Id(), router.GetPart())
+
+			for _, nozzle := range outNozzles {
+				outNozzle := nozzle.(common.OutNozzle)
+				outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
+			}
+		}
+	}
+	return nil
 }
 
 func min(num1 int, num2 int) int {
@@ -571,7 +613,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipelin
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.SourceNotification) (map[string]common.SourceNozzle, map[string][]uint16, error) {
+func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.SourceNotification, shuffleVB bool) (map[string]common.SourceNozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.SourceNozzle)
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
@@ -589,6 +631,13 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 
 		// the number of dcpNozzle nodes to construct is the smaller of vbucket list size and source connection size
 		numOfDcpNozzles := min(numOfVbs, maxNozzlesPerNode)
+
+		if shuffleVB {
+			// Shuffle VB may be used so that the vb distribution will be randomized and not be ordered
+			// i.e. DCP 0 will no longer just own a complete section of [0-511]
+			base.ShuffleVbList(vbnos)
+		}
+
 		// load_distribution is used to ensure that every nozzle gets as close # of vbuckets as possible, with a max delta between them of 1
 		load_distribution := base.BalanceLoad(numOfDcpNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfDcpNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfDcpNozzles, numOfVbs, load_distribution)
@@ -612,7 +661,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			dcpNozzle := parts.NewDcpNozzle(id,
 				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils, getterFunc)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
-			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
+			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), base.SortUint16List(vbList))
 		}
 
 		xdcrf.logger.Infof("Constructed %v source nozzles for %v vbs on %v\n", len(sourceNozzles), numOfVbs, kvaddr)
@@ -631,19 +680,25 @@ func (xdcrf *XDCRFactory) partId(prefix string, topic string, kvaddr string, ind
  * meaning that this pipeline is actually responsible for replication of it.
  * Returns: slice of vbuckets
  */
-func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[string][]uint16) []uint16 {
-	ret := []uint16{}
-	for _, vb := range targetkvVBList {
-		for _, sourcevblist := range kv_vb_map {
-			for _, sourcevb := range sourcevblist {
-				if sourcevb == vb {
-					ret = append(ret, vb)
+func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, srcKvVbMap map[string][]uint16, srcKvsVbMap base.KvVBMapType, totTgtVBs int) []uint16 {
+	totSrcVBs := len(srcKvsVbMap.GetSortedVBList())
+	if totSrcVBs != totTgtVBs {
+		// If variable VB mode, then make sure all
+		// target VBs are meant to be viable because any source doc could be mapped to anywhere on the target
+		return targetkvVBList
+	} else {
+		ret := []uint16{}
+		for _, vb := range targetkvVBList {
+			for _, sourcevblist := range srcKvVbMap {
+				for _, sourcevb := range sourcevblist {
+					if sourcevb == vb {
+						ret = append(ret, vb)
+					}
 				}
 			}
 		}
+		return ret
 	}
-
-	return ret
 }
 
 /**
@@ -658,7 +713,8 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
  */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext, sourceClusterUUID string, pipelineType common.PipelineType) (outNozzles map[string]common.Nozzle,
+	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext, sourceClusterUUID string,
+	pipelineType common.PipelineType, kvsVbMap base.KvVBMapType) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
@@ -694,6 +750,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 		sourceHostname = base.GetHostName(hostAddr)
 		break
 	}
+	tgtMapType := base.KvVBMapType(kvVBMap)
+	numTgtVBs := len(tgtMapType.GetSortedVBList())
 
 	// For each destination host (kvaddr) and its vbucvket list that it has (kvVBList)
 	for kvaddr, kvVBList := range kvVBMap {
@@ -708,7 +766,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 
 		// Given current Destination node's list of VBucketList and the map of all source nodes -> vbLists
 		// Match the needed vbuckets
-		relevantVBs := xdcrf.filterVBList(kvVBList /* Dest */, kv_vb_map /* source */)
+		relevantVBs := xdcrf.filterVBList(kvVBList /* Dest */, kv_vb_map /* source */, kvsVbMap /*sources*/, numTgtVBs)
 
 		xdcrf.logger.Debugf("kvaddr = %v; kvVbList=%v, relevantVBs=-%v\n", kvaddr, kvVBList, relevantVBs)
 
@@ -770,7 +828,7 @@ func getRouterIdUsingDCPId(id string) string {
 	return base.ROUTER_NAME_PREFIX + PART_NAME_DELIMITER + id
 }
 
-func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext, srcNozzleObjRecycler utilities.RecycleObjFunc, migrationUIMsgRaiser func(string)) (*parts.Router, error) {
+func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext, srcNozzleObjRecycler utilities.RecycleObjFunc, migrationUIMsgRaiser func(string), srcNozzleVBs []uint16, allSrcVBs []uint16) (*parts.Router, error) {
 	routerId := getRouterIdUsingDCPId(id)
 
 	// When router detects a diff, it simply calls this function and this will handle the rest
@@ -808,7 +866,8 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, xdcrf.utils,
 		xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() == base.PriorityTypeHigh,
 		spec.Settings.GetExpDelMode(), xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler,
-		remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter, eventsProducer)
+		remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter, eventsProducer,
+		srcNozzleVBs, allSrcVBs)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
@@ -1458,10 +1517,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	return routerSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
-	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
-	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, targetUserName, targetPassword, targetBucketName string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference, targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode, variableVBMode bool) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
@@ -1513,8 +1569,12 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc,
 		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter, conflictLogger != nil)
 
-	// register pipeline checkpoint manager
-	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName, targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr, xdcrf.bucketTopologySvc)
+	//register pipeline checkpoint manager
+	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc,
+		xdcrf.repl_spec_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
+		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx, xdcrf.utils, actualStatsMgr,
+		xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr,
+		xdcrf.bucketTopologySvc, variableVBMode)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -1996,11 +2056,13 @@ func (xdcrf *XDCRFactory) ConstructConflictLogger(pipeline common.Pipeline, logg
 	return nil
 }
 
-func (xdcrf *XDCRFactory) constructVBTranslator(variableVBMode bool, loggerContext *log.LoggerContext) common.Connector {
-	if !variableVBMode {
+func (xdcrf *XDCRFactory) constructVBTranslator(src, tgt base.KvVBMapType, loggerContext *log.LoggerContext, srcNozzles map[string]common.SourceNozzle) common.Connector {
+	if src.HasSameNumberOfVBs(tgt) {
 		return connector.NewNoOpTranslator()
 	}
 
-	translator := connector.NewVBTranslator("VBTranslator", loggerContext)
+	srcVBs := len(src.GetSortedVBList())
+	tgtVBs := len(tgt.GetSortedVBList())
+	translator := connector.NewVBTranslator("VBTranslator", loggerContext, srcVBs, tgtVBs, len(srcNozzles))
 	return translator
 }

@@ -11,8 +11,9 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=13003)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
@@ -21,9 +22,10 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
 declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A Bucket2Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["numVBuckets"]=64)
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
-insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
@@ -52,28 +54,26 @@ function validateDataLoad {
 }
 
 function runTestCase {
-	# Vbucket settings
-	# ----------------------
-	CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=128)
-
 	echo "============================================================================"
-	echo "Running 128 to 128 VB basic test"
+	echo "Running multi-node simple variable VB test case"
 	echo "============================================================================"
-	cleanClusterRun
-	setupTopologies -c -v
-	if (($? != 0)); then
-		exit 1
-	fi
-
-	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
-	sleep 10
-	testIdleXdcrCPU
+	setupTopologies
 	if (($? != 0)); then
 		exit 1
 	fi
 
 	setInternalSettings "C1" "VariableVBSupport=true"
 	setInternalSettings "C2" "VariableVBSupport=true"
+
+	echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+
+	addNodesIn
+	echo "Rebalance C1"
+	startRebalancing "C1"
+	echo "Rebalance C2"
+	startRebalancing "C2"
+	echo "Rebalancing node in is completed"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -83,8 +83,6 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	checkUnidirectionalChangesLeft
-
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count"
@@ -99,9 +97,11 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-	cleanupBucketReplications -c
+	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
 
-	CLUSTER_VBCOUNT_MAP=()
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+	restoreClusterBack "C2"
 }

@@ -1064,10 +1064,13 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 	} else if fromTarget {
 		// Change is from target. Don't replicate back
 		additionalInfo := TargetDataSkippedEventAdditional{Seqno: request.Seqno,
-			Opcode:      request.GetMemcachedCommand(),
-			IsExpirySet: (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
-			VBucket:     request.Req.VBucket,
-			ManifestId:  request.GetManifestId(),
+			VbucketCommon: VbucketCommon{VBucket: request.Req.VBucket},
+			Opcode:        request.GetMemcachedCommand(),
+			IsExpirySet:   (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
+			ManifestId:    request.GetManifestId(),
+		}
+		if request.OrigSrcVB != nil {
+			additionalInfo.SetOrigSrcVB(*request.OrigSrcVB)
 		}
 		xmem.RaiseEvent(common.NewEvent(common.TargetDataSkipped, nil, xmem, nil, additionalInfo))
 		xmem.recycleDataObj(request)
@@ -1451,13 +1454,16 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				// lost on conflict resolution on source side
 				// this still counts as data sent
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
+					VbucketCommon:  VbucketCommon{VBucket: item.Req.VBucket},
 					Opcode:         item.GetMemcachedCommand(),
 					IsExpirySet:    (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-					VBucket:        item.Req.VBucket,
 					ManifestId:     item.GetManifestId(),
 					Cloned:         item.Cloned,
 					CloneSyncCh:    item.ClonedSyncCh,
 					ImportMutation: item.ImportMutation,
+				}
+				if item.OrigSrcVB != nil {
+					additionalInfo.SetOrigSrcVB(*item.OrigSrcVB)
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				if item.ImportMutation &&
@@ -3682,10 +3688,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 				additionalInfo := DataSentEventAdditional{
 					Seqno:                seqno,
+					VbucketCommon:        VbucketCommon{VBucket: req.VBucket},
 					IsOptRepd:            xmem.optimisticRep(wrappedReq),
 					Opcode:               req.Opcode,
 					IsExpirySet:          isExpirySet,
-					VBucket:              req.VBucket,
 					Req_size:             req.Size(),
 					Commit_time:          committing_time,
 					Resp_wait_time:       resp_wait_time,
@@ -3700,6 +3706,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					CasPoisonProtection:  xmem.handleCasPoisoning(wrappedReq, response),
 					CLogWaitTime:         cLogWaitTime,
 					CLogError:            cLogErr,
+				}
+				if wrappedReq.OrigSrcVB != nil {
+					additionalInfo.SetOrigSrcVB(*wrappedReq.OrigSrcVB)
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 				if wrappedReq.ImportMutation && xmem.getMobileCompatible() == base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
