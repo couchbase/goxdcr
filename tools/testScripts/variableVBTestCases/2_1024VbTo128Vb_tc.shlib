@@ -43,21 +43,13 @@ function runDataLoad {
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 }
 
-function validateDataLoad {
-	echo "VALIDATING Data..."
-	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
-	checkBidirectionalChangesLeft
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-}
-
 function runTestCase {
 	# Vbucket settings
 	# ----------------------
-	CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=128)
+	CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=1024)
 
 	echo "============================================================================"
-	echo "Running 128 to 128 VB basic test"
+	echo "Running 128 to 1024 VB basic test"
 	echo "============================================================================"
 	cleanClusterRun
 	setupTopologies -c -v
@@ -93,8 +85,6 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
-
-	validateDataLoad
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -62,9 +62,9 @@ var (
 )
 
 type DataMergeEventCommon struct {
+	parts.VbucketCommon
 	Seqno       uint64
 	IsExpirySet bool
-	VBucket     uint16
 	ManifestId  uint64
 }
 type DataMergedEventAdditional struct {
@@ -309,12 +309,15 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 					}
 					additionalInfo := DataMergeFailedEventAdditional{
 						DataMergeEventCommon: DataMergeEventCommon{
-							Seqno:       source.Seqno,
-							IsExpirySet: isExpirySet,
-							VBucket:     source.Req.VBucket,
-							ManifestId:  source.GetManifestId(),
+							VbucketCommon: parts.VbucketCommon{VBucket: source.Req.VBucket},
+							Seqno:         source.Seqno,
+							IsExpirySet:   isExpirySet,
+							ManifestId:    source.GetManifestId(),
 						},
 						Req_size: source.Req.Size(),
+					}
+					if source.OrigSrcVB != nil {
+						additionalInfo.SetOrigSrcVB(*source.OrigSrcVB)
 					}
 					c.RaiseEvent(common.NewEvent(common.MergeFailed, nil, c, nil, additionalInfo))
 					failureInfo := mergeFailureInfo{fmt.Sprintf("%s%q%s", base.UdTagBegin, v.Input.Source.Req.Key, base.UdTagEnd), v.Input.Source.Req.Cas, err.Error()}
@@ -593,10 +596,13 @@ func (c *ConflictManager) sendDocument(id int, input *crMeta.ConflictParams, req
 						isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
 					}
 					additionalInfo := DataMergeCasChangedEventAdditional{
-						Seqno:       input.Source.Seqno,
-						IsExpirySet: isExpirySet,
-						VBucket:     req.VBucket,
-						ManifestId:  input.Source.GetManifestId(),
+						VbucketCommon: parts.VbucketCommon{VBucket: req.VBucket},
+						Seqno:         input.Source.Seqno,
+						IsExpirySet:   isExpirySet,
+						ManifestId:    input.Source.GetManifestId(),
+					}
+					if input.Source.OrigSrcVB != nil {
+						additionalInfo.SetOrigSrcVB(*input.Source.OrigSrcVB)
 					}
 					c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
 					return
@@ -614,15 +620,18 @@ func (c *ConflictManager) sendDocument(id int, input *crMeta.ConflictParams, req
 				}
 				additionalInfo := DataMergedEventAdditional{
 					DataMergeEventCommon: DataMergeEventCommon{
-						Seqno:       input.Source.Seqno,
-						IsExpirySet: isExpirySet,
-						VBucket:     req.VBucket,
-						ManifestId:  input.Source.GetManifestId(),
+						VbucketCommon: parts.VbucketCommon{VBucket: req.VBucket},
+						Seqno:         input.Source.Seqno,
+						IsExpirySet:   isExpirySet,
+						ManifestId:    input.Source.GetManifestId(),
 					},
 					Commit_time:    time.Since(input.Source.Start_time), // time from routing to merged and acknowledged by source cluster
 					Resp_wait_time: time.Since(sent_time),
 					Opcode:         req.Opcode,
 					Req_size:       req.Size(),
+				}
+				if input.Source.OrigSrcVB != nil {
+					additionalInfo.SetOrigSrcVB(*input.Source.OrigSrcVB)
 				}
 				c.RaiseEvent(common.NewEvent(common.DataMerged, nil, c, nil, additionalInfo))
 				if c.Logger().GetLogLevel() >= log.LogLevelDebug {

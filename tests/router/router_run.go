@@ -182,7 +182,11 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
+<<<<<<< HEAD
 	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0, nil)
+=======
+	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0, nil, nil)
+>>>>>>> 951f3ff0 (MB-53378: replicating with variable vb mapping works without checkpointing)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {

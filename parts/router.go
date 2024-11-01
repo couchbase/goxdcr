@@ -172,6 +172,9 @@ type Router struct {
 	devCasDriftKeyMtx   sync.Mutex
 
 	eventsProducer common.PipelineEventsProducer
+
+	sourceVBs    []uint16
+	allSourceVBs []uint16
 }
 
 /**
@@ -1388,7 +1391,13 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.C
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error), eventsProducer common.PipelineEventsProducer) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part,
+	routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext,
+	utilsIn utilities.UtilsIface, throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc,
+	isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc,
+	dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair),
+	remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error),
+	eventsProducer common.PipelineEventsProducer, srcNozzleVBs []uint16, allSrcVBs []uint16) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, exprFound := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -1445,6 +1454,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		finCh:                    make(chan bool),
 		eventsProducer:           eventsProducer,
 		casDriftThreshold:        casDriftThreshold,
+		sourceVBs:                srcNozzleVBs,
+		allSourceVBs:             allSrcVBs,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -1536,7 +1547,11 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	req.Cas = event.Cas
 	wrapped_req.HLVModeOptions.ActualCas = event.Cas
 	req.Opaque = 0
-	req.VBucket = event.VBucket
+	req.VBucket = wrappedEvent.GetTargetVB()
+	if wrappedEvent.GetSourceVB() != wrappedEvent.GetTargetVB() {
+		sourceVB := wrappedEvent.GetSourceVB()
+		wrapped_req.OrigSrcVB = &sourceVB
+	}
 	req.Key = event.Key
 	req.Opcode = event.Opcode
 	req.DataType = event.DataType
@@ -1692,7 +1707,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	}
 
 	// use vbMap to determine which downstream part to route the request
-	partId, ok := router.routingMap[uprEvent.VBucket]
+	partId, ok := router.routingMap[wrappedUpr.GetTargetVB()]
 	if !ok {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
@@ -2185,6 +2200,9 @@ func (router *Router) recycleDataObj(obj interface{}) {
 			req.SlicesToBeReleasedMtx.Unlock()
 			req.Cloned = false
 			req.ClonedSyncCh = nil
+			if req.OrigSrcVB != nil {
+				req.OrigSrcVB = nil
+			}
 			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
 		}
 	default:
@@ -2250,10 +2268,24 @@ func (r *RouterPart) ResponsibleVBs() []uint16 {
 		r.responsibleVBsMtx.Lock()
 		if !r.responsibleVBsSet {
 			r.responsibleVBs = []uint16{}
-			for vbno, _ := range r.router.routingMap {
-				r.responsibleVBs = append(r.responsibleVBs, vbno)
+			if len(r.router.routingMap) != len(r.router.sourceVBs) {
+				// Variable VB mode
+				// The most important thing is that the "source" VB
+				// cannot be overwritten, but the target VB can be, and
+				// all target VBs should be covered in the returned range
+
+				// Source VB cannot be duplicated because the recycling needs to occur for the
+				// originating DCP nozzle/router
+				for _, vbno := range r.router.sourceVBs {
+					r.responsibleVBs = append(r.responsibleVBs, vbno)
+				}
+			} else {
+				// Standard/matching VB mode
+				for vbno, _ := range r.router.routingMap {
+					r.responsibleVBs = append(r.responsibleVBs, vbno)
+				}
+				r.responsibleVBsSet = true
 			}
-			r.responsibleVBsSet = true
 		}
 		r.responsibleVBsMtx.Unlock()
 		r.responsibleVBsMtx.RLock()
@@ -2272,6 +2304,21 @@ func (r *RouterPart) Stop() error {
 
 func (r *RouterPart) Receive(data interface{}) error {
 	return r.router.Forward(data)
+}
+
+// Overrides AbstractPart.UpdateSettings
+func (r *RouterPart) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	if vbsToAddRaw, ok := settings[metadata.VariableVBAdditionalVBs]; ok {
+		vbsList, ok := vbsToAddRaw.([]uint16)
+		if !ok {
+			return fmt.Errorf("expecting []uint16, got %T", vbsToAddRaw)
+		}
+		r.responsibleVBsMtx.Lock()
+		r.responsibleVBs = append(r.responsibleVBs, vbsList...)
+		r.Logger().Infof("Router %v now has additional responsible VBs of %v", r.Id(), vbsList)
+		r.responsibleVBsMtx.Unlock()
+	}
+	return nil
 }
 
 // GetPart returns a wrapper that implements the common.Part methods

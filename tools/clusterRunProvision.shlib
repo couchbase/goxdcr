@@ -691,7 +691,6 @@ function addNodesIn {
 	local dependentClusterName
 	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		local nodeName=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
-
 		addOneNodeIn $dependentClusterName $nodeName
 	done
 }
