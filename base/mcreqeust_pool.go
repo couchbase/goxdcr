@@ -75,6 +75,7 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.HLVModeOptions.IncludeTgtHlv = false
 	req.MouAfterProcessing = nil
 	req.ResetSubdocOptionsForRetry()
+	req.Size = 0
 	return req
 }
 
