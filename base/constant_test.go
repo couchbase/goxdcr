@@ -2,8 +2,10 @@ package base
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
+	"regexp"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestServerVersion_String(t *testing.T) {
@@ -58,4 +60,19 @@ func TestNewServerVersionFromString(t *testing.T) {
 			assert.Equalf(t, tt.want, got, "NewServerVersionFromString(%v)", tt.args.str)
 		})
 	}
+}
+
+func TestATRDocVbucketRegex(t *testing.T) {
+	assert := assert.New(t)
+
+	var VbucketRegex = regexp.MustCompile("^" + ValidVbucketRangeRegexpGroup + "$")
+	for i := -20000; i < 20000; i++ {
+		vbucket := []byte(fmt.Sprintf("%v", i))
+		vaildVbucket := i >= 0 && i < 1024
+		matches := VbucketRegex.Match(vbucket)
+		if matches != vaildVbucket {
+			assert.FailNow(fmt.Sprintf("failed for vb %s", vbucket))
+		}
+	}
+
 }
