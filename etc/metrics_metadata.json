@@ -801,7 +801,8 @@
         "help": "For a given source cluster, the number of data service nodes that it contains",
         "added": "8.0",
         "labels": [
-            "sourceClusterUUID"
+            "sourceClusterUUID",
+            "sourceClusterName"
         ],
         "stability": "committed"
     },
@@ -811,6 +812,7 @@
         "added": "8.0",
         "labels": [
             "sourceClusterUUID",
+            "sourceClusterName",
             "status"
         ],
         "stability": "committed"
