@@ -4123,7 +4123,7 @@ func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) error {
 	case <-xmem.dataChan_control:
 		select {
 		case xmem.dataChan <- item:
-			atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Req.Size()))
+			atomic.AddInt32(&xmem.bytes_in_dataChan, int32(item.Size))
 			xmem.dataChanControl()
 			return nil
 		// provides an alternative exit path when xmem stops
@@ -4141,7 +4141,7 @@ func (xmem *XmemNozzle) writeToDataChan(item *base.WrappedMCRequest) error {
 func (xmem *XmemNozzle) readFromDataChan() (*base.WrappedMCRequest, error) {
 	select {
 	case item := <-xmem.dataChan:
-		atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Req.Size()))
+		atomic.AddInt32(&xmem.bytes_in_dataChan, int32(0-item.Size))
 		xmem.dataChanControl()
 		return item, nil
 	case <-xmem.finish_ch:

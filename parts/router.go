@@ -1614,6 +1614,8 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	wrapped_req.ColInfo = router.targetColInfoPool.Get()
 	wrapped_req.ColInfoMtx.Unlock()
 
+	wrapped_req.Size = req.Size()
+
 	return wrapped_req, nil
 }
 

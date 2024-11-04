@@ -748,6 +748,10 @@ type WrappedMCRequest struct {
 	// In the mobile mode, we might have to recompose _mou before replicating
 	// This stores the re-composed _mou to replicate, nil if it doesn't exist or the new mou would be empty
 	MouAfterProcessing []byte
+
+	// cache the MCRequest's size for the sake of stats.
+	// Size = Req.HdrSize() + len(Req.Body) + len(Req.ExtMeta)
+	Size int
 }
 
 // Set options to replicate using HLV.
