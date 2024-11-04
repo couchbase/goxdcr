@@ -31,7 +31,8 @@ const (
 	FilteredOnUserDefinedFilter base.FilteringStatusType = iota
 	FilteredOnMobileRecord      base.FilteringStatusType = iota
 	FilteredOnConflictLogRecord base.FilteringStatusType = iota
-	FilteredOnOthers            base.FilteringStatusType = iota // could be filtered because of error, binary doc, expiry, deletion etc which do not need to be explicitly distinguished
+	// could be filtered because of error, binary doc, expiry, deletion etc which do not need to be explicitly distinguished
+	FilteredOnOthers base.FilteringStatusType = iota
 )
 
 type FilterImpl struct {
@@ -230,7 +231,7 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *mcc.UprEvent) (n
 //  6. failedDpCnt int64 - Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
 //  7. If body has been modified due to stripping the transactional xattr
 //  8. Status of system xattr based filtering - not filtered based on txns, not filtered because of error, not filtered because it is an ATR document,
-//     not filtered because of txt xattrs, not filtered because of client txn records, filtered because of conflict logging xattr.
+//     not filtered because of txt xattrs, not filtered because of client txn records, not filtered because of conflict logging xattr.
 //
 // Note that body in 2 is not nil only in the following scenario:
 // (1). uprEvent is compressed
@@ -267,7 +268,7 @@ func (filter *FilterImpl) filterNecessarySystemXattrsRelatedUprEvent(uprEvent *m
 		return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 	}
 	if hasConflictLoggingXattr {
-		// it is a conflict log records, do not replicate
+		// it is a conflict log record, do not replicate
 		return false, body, endBodyPos, nil, "", failedDpCnt, false, FilteredOnConflictLogRecord
 	}
 

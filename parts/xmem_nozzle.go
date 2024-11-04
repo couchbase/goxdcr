@@ -1319,21 +1319,20 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 			// check if conflict logging needs to be done for this item
 			logConflicts := xmem.conflictLoggingEnabled()
-			if logConflicts && !xmem.isCCR() {
+			if logConflicts {
 				resp, err := batch.conflictLookupMap.deregisterLookup(item.UniqueKey)
 				if err == nil {
 					err = xmem.log(item, resp)
-					if err != nil {
-						// warn and continue to replicate
-						if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerClosed {
-							// SUMUKH TODO - can spam, good to update it to a counter.
-
-							// xmem.Logger().Warnf("%v Conflict logging queue full, could not log for key=%v%s%v",
-							// 	xmem.Id(),
-							// 	base.UdTagBegin, item.Req.Key, base.UdTagEnd,
-							// )
-						} else {
-							xmem.Logger().Warnf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, specs=%v, err=%v",
+					if err != baseclog.ErrLoggerClosed {
+						xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, nil, err))
+						if err == baseclog.ErrQueueFull {
+							xmem.Logger().Debugf("%v Conflict logging queue full, could not log for key=%v%s%v",
+								xmem.Id(),
+								base.UdTagBegin, item.Req.Key, base.UdTagEnd,
+							)
+						} else if err != nil {
+							// log and continue to replicate
+							xmem.Logger().Errorf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, specs=%v, err=%v",
 								xmem.Id(),
 								base.UdTagBegin, item.Req.Key, base.UdTagEnd,
 								base.UdTagBegin, item.Req, base.UdTagEnd,
@@ -1344,7 +1343,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 							)
 						}
 					}
-					// The log() function performs a clone of necessary information to log,
+
+					// The log function performs a clone of necessary information to log,
 					// safe to recycle.
 					respToGc[resp.Resp] = true
 				}
@@ -2105,9 +2105,11 @@ func (xmem *XmemNozzle) log(req *base.WrappedMCRequest, resp *base.SubdocLookupR
 	tgtCollectionName := req.TgtColNamespace.CollectionName
 	req.TgtColNamespaceMtx.RUnlock()
 
+	timestamp := time.Now()
+
 	// Generate a conflict record from above information.
 	conflictRecord := conflictlog.ConflictRecord{
-		Timestamp: time.Now().Format(conflictlog.TimestampFormat),
+		Timestamp: timestamp.Format(conflictlog.TimestampFormat),
 		DocId:     string(req.Req.Key),
 		Source: conflictlog.DocInfo{
 			Scope:       srcScopeName,
@@ -2153,7 +2155,8 @@ func (xmem *XmemNozzle) log(req *base.WrappedMCRequest, resp *base.SubdocLookupR
 			VBUUID:   targetDoc.VbUUID,
 			Seqno:    targetDoc.Seqno,
 		},
-		Datatype: base.JSONDataType,
+		Datatype:  base.JSONDataType,
+		StartTime: timestamp,
 	}
 
 	conflictLogger := xmem.conflictLogger()
@@ -2264,37 +2267,22 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 				respToGc[resp.Resp] = true
 			} else if base.IsSuccessGetResponse(resp.Resp) {
-				logConflicts := xmem.shouldLogConflicts(wrappedReq, resp)
+				conflictLoggingIsOn := xmem.shouldLogConflicts(wrappedReq, resp) && !xmem.isCCR()
 
-				CDResult, CRResult, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, logConflicts, xmem.uncompressBody, xmem.Logger())
+				CDResult, CRResult, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, conflictLoggingIsOn, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
 					continue
 				}
 
-				if !xmem.isCCR() && logConflicts && CDResult.IsConflict() {
+				logConflict := conflictLoggingIsOn && CDResult.IsConflict()
+				if logConflict {
 					conflictMap[uniqueKey] = wrappedReq
 					err := conflictLookupMap.registerLookup(uniqueKey, resp)
 					if err != nil {
 						// warn and continue to replicate
-						if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerClosed {
-							// SUMUKH TODO - can spam, good to update it to a counter.
-							// xmem.Logger().Warnf("%v Conflict logging queue full or closed, could not log for key=%v%s%v",
-							// 	xmem.Id(),
-							// 	base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd,
-							// )
-						} else {
-							xmem.Logger().Warnf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, specs=%v, err=%v",
-								xmem.Id(),
-								base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd,
-								base.UdTagBegin, wrappedReq.Req, base.UdTagEnd,
-								base.UdTagBegin, wrappedReq.Req.Body, base.UdTagEnd,
-								resp.Resp.Opcode,
-								base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
-								resp.Specs, err,
-							)
-						}
+						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for conflictLookupMap response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
 					}
 				}
 
@@ -2308,7 +2296,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 					}
 				case crMeta.CRSkip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-					if xmem.isCCR() || !logConflicts || !CDResult.IsConflict() {
+					if !logConflict {
 						// can only recycle if the response is not used for conflict logging
 						respToGc[resp.Resp] = true
 					}
@@ -3551,17 +3539,32 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				resp_wait_time = time.Since(*sent_time)
 				manifestId = wrappedReq.GetManifestId()
 
+				now := time.Now()
 				// before moving the throughseqno forward,
 				// wait for it's conflict logging to be done
-				wrappedReq.WaitForConflictLogging(xmem.finish_ch, xmem.Logger())
+				cLogErr := wrappedReq.WaitForConflictLogging(xmem.finish_ch)
+				if cLogErr != nil && cLogErr != baseclog.ErrLogWaitAborted {
+					// the errors are captured in the form of stats.
+					// One has to turn on debug logging inorder to identify the exact errors
+					// that are not captured by the stats.
+					xmem.Logger().Debugf("Error waiting for conflict logging to finish, key=%v%s%v, err=%v",
+						base.UdTagBegin, req.Key, base.UdTagEnd,
+						cLogErr,
+					)
+				}
+				cLogWaitTime := time.Since(now)
 
 				isExpirySet := false
+				subdocOpType := base.NotSubdoc
 				if wrappedReq.IsSubdocOp() {
 					isExpirySet = (len(req.Extras) > 1)
+					subdocOpType = wrappedReq.SubdocCmdOptions.SubdocOp
 				} else {
 					isExpirySet = (len(req.Extras) >= 8 && binary.BigEndian.Uint32(req.Extras[4:8]) != 0)
 				}
-				additionalInfo := DataSentEventAdditional{Seqno: seqno,
+
+				additionalInfo := DataSentEventAdditional{
+					Seqno:                seqno,
 					IsOptRepd:            xmem.optimisticRep(wrappedReq),
 					Opcode:               req.Opcode,
 					IsExpirySet:          isExpirySet,
@@ -3576,6 +3579,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					ImportMutation:       wrappedReq.ImportMutation,
 					Cloned:               wrappedReq.Cloned,
 					CloneSyncCh:          wrappedReq.ClonedSyncCh,
+					SubdocOpType:         subdocOpType,
+					CasPoisonProtection:  xmem.handleCasPoisoning(wrappedReq, response),
+					CLogWaitTime:         cLogWaitTime,
+					CLogError:            cLogErr,
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 				if wrappedReq.ImportMutation && xmem.getMobileCompatible() == base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
@@ -3585,13 +3592,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						base.EventsMap{},
 						nil)
 				}
-				isSubDocOp := wrappedReq.IsSubdocOp()
-				if isSubDocOp {
-					vbno := wrappedReq.Req.VBucket
-					seqno := wrappedReq.Seqno
-					xmem.RaiseEvent(common.NewEvent(common.DocsSentWithSubdocCmd, wrappedReq.SubdocCmdOptions.SubdocOp, xmem, []interface{}{vbno, seqno}, nil))
-				}
-				xmem.handleCasPoisoning(wrappedReq, response)
+
 				//feedback the most current commit_time to xmem.config.respTimeout
 				xmem.adjustRespTimeout(resp_wait_time)
 
@@ -3613,7 +3614,7 @@ done:
 	xmem.Logger().Infof("%v receiveResponse exits\n", xmem.Id())
 }
 
-func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, response *mc.MCResponse) {
+func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, response *mc.MCResponse) base.TargetKVCasPoisonProtectionMode {
 	isSubDocOp := wrappedReq.IsSubdocOp()
 	sentCas, err := wrappedReq.GetSentCas()
 	if err != nil && !isSubDocOp {
@@ -3621,18 +3622,20 @@ func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, re
 		// Note: We shouldn't hit this case in practice
 		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v, isSubDocOp: %v", wrappedReq.Req, len(wrappedReq.Req.Extras), isSubDocOp)
 	}
-	vbno := wrappedReq.Req.VBucket
-	seqno := wrappedReq.Seqno
+
 	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && !isSubDocOp { //replace mode
 		// Currently CAS regeneration takes place in two scenario's
 		// 1. If SubDoc is used
 		// 2. If there is a CAS poisoned doc and KV's protection mode is set to "replace"
 		// Note that this counter does not account for poisoned CAS's incase of subDocOp
-		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ReplaceMode, xmem, []interface{}{vbno, seqno}, nil))
+		return base.ReplaceMode
 	} else if response.Status == mc.CAS_VALUE_INVALID { //error mode
-		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ErrorMode, xmem, []interface{}{vbno, seqno}, nil))
+		return base.ErrorMode
 	}
+
+	return base.CasNotPoisoned
 }
+
 func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) {
 	if req.IsSubdocOp() {
 		// If we have used subdoc command before for this request before, enter the retry assuming we wouldn't need subdoc command anymore

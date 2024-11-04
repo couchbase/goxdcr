@@ -104,8 +104,8 @@ func (o *LoggerOptions) SetMapper(mapper Mapper) {
 	o.mapper = mapper
 }
 
-func (o *LoggerOptions) SetLogQueueCap(cap int) {
-	o.logQueueCap = cap
+func (o *LoggerOptions) SetLogQueueCap(capacity int) {
+	o.logQueueCap = capacity
 }
 
 type LoggerOpt func(o *LoggerOptions)

@@ -104,7 +104,13 @@ const (
 	// We use subdoc multipath sets and deletes when we have a specific mobile/xdcr case to avoid cas rollback on target
 	DocsSentWithSubdocCmd   ComponentEventType = iota
 	DocsSentWithPoisonedCas ComponentEventType = iota
-	ConflictDocsWritten     ComponentEventType = iota
+
+	// Conflict logger events:
+	// 1. xmem's conflict logging stats
+	ConflictsDetected ComponentEventType = iota
+	// 2. conflict logging stats
+	CLogDocsWritten ComponentEventType = iota
+	CLogWriteStatus ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

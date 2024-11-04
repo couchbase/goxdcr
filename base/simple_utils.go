@@ -2431,32 +2431,6 @@ func CheckIfHostnameIsAlternate(externalInfoGetter ExternalMgmtHostAndPortGetter
 	return false, nil
 }
 
-// ParseReplicationId parses the replication id string into its components
-func ParseReplicationId(id string) (targetUUID string, sourceBucket string, targetBucket string, err error) {
-	parts := strings.Split(id, KeyPartsDelimiter)
-	if len(parts) != 3 {
-		err = fmt.Errorf("Invalid replication id: %v", id)
-		return
-	}
-
-	targetUUID = parts[0]
-	sourceBucket = parts[1]
-	targetBucket = parts[2]
-	return
-}
-
-// given "[scope].[collection]", the string will be split to "[scope]" and "[collection]"
-func SeparateScopeCollection(scopeCol string) (scope string, collection string) {
-	scopeColArr := strings.Split(scopeCol, ".")
-	if len(scopeColArr) > 0 {
-		scope = scopeColArr[0]
-	}
-	if len(scopeColArr) > 1 {
-		collection = scopeColArr[1]
-	}
-	return
-}
-
 // ParseRMTokenDistStr parse the string into RM token distribution percentages
 func ParseRMTokenDistStr(orig string) (dist []int, err error) {
 	s := strings.TrimSpace(orig)
@@ -2491,5 +2465,13 @@ func ParseRMTokenDistStr(orig string) (dist []int, err error) {
 		return
 	}
 
+	return
+}
+
+func ParseString(o interface{}) (ok bool, val string) {
+	if o == nil {
+		return
+	}
+	val, ok = o.(string)
 	return
 }

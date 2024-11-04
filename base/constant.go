@@ -381,7 +381,6 @@ var ErrorSubdocLookupPathNotFound = errors.New("SUBDOC_MULTI_LOOKUP does not inc
 var ErrorUnexpectedSubdocOp = errors.New("Unexpected subdoc op was observed")
 var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
 var ErrorHostNameEmpty = errors.New("Hostname is empty")
-var ErrorConflictLoggingInputInvalid = errors.New("conflict logging input json object should either contain nothing (considered to turn off) or should compulsory contain \"bucket\" and \"collection\" keys")
 var ErrorReplicationSpecNotActive = errors.New("replication specification not found or no longer active")
 var ErrorCLoggingMixedModeUnsupported = errors.New("not all nodes support conflict logging feature")
 
@@ -588,9 +587,8 @@ const (
 	HlvUpdatedEventListener              = "HlvUpdatedEventListener"
 	HlvPrunedEventListener               = "HlvPrunedEventListener"
 	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
-	DocsSentWithSubdocCmdEventListener   = "DocsSentWithSubdocSetEventListener"
-	DocsSentWithPoisonedCasEventListener = "DocsSentWithPoisonedCasEventListener"
-	ClogEventListener                    = "ClogEventListener"
+	CLogDocsWrittenEventListener         = "CLogDocsWrittenEventListener"
+	CLogWriteStatusEventListener         = "CLogWriteStatusEventListener"
 )
 
 const (
@@ -1647,8 +1645,6 @@ const (
 	VersionPruningWindowHrsKey = "versionPruningWindowHrs"
 	// Bucket setting for enable versioning when CR mode is not custom CR
 	EnableCrossClusterVersioningKey = "enableCrossClusterVersioning"
-	// Bucket setting for starting timestamp (CAS) to enable versioning
-	VbucketsMaxCasKey = "vbucketsMaxCas"
 	// Bucket setting for starting timestamp (CAS) to eanble versioning
 	HlvVbMaxCasKey = "vbucketsMaxCas"
 )
@@ -1815,6 +1811,7 @@ const (
 	DocsSentWithPoisonedCasErrorMode   = "docs_sent_with_poisonedCas_errorMode"
 	DocsSentWithPoisonedCasReplaceMode = "docs_sent_with_poisonedCas_replaceMode"
 	DocsCasPoisoned                    = "docs_cas_poisoned"
+	DocsOfCLog                         = "clog_docs_filtered"
 )
 
 var ValidJsonEnds []byte = []byte{

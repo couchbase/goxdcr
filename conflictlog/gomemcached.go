@@ -139,7 +139,14 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 		isEncStrict = m.securityInfo.IsClusterEncryptionLevelStrict()
 	}
 
-	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s encStrict=%v tlsSkipVerify=%v", m.id, user, addr, isEncStrict, m.skipVerify)
+	var features utils.HELOFeatures
+	features.Xattribute = true
+	features.Xerror = true
+	features.Collections = true
+	features.DataType = true
+	// For setMeta, negotiate compression, if it is set
+	features.CompressionType = base.CompressionTypeSnappy
+	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s encStrict=%v tlsSkipVerify=%v features=%+v", m.id, user, addr, isEncStrict, m.skipVerify, features)
 
 	if isEncStrict {
 		conn, err = m.newTLSConn(addr, user, passwd)
@@ -151,14 +158,6 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 		return nil, err
 	}
 
-	var features utils.HELOFeatures
-	features.Xattribute = true
-	features.Xerror = true
-	features.Collections = true
-	features.DataType = true
-
-	// For setMeta, negotiate compression, if it is set
-	features.CompressionType = base.CompressionTypeSnappy
 	userAgent := MemcachedConnUserAgent
 
 	retFeatures, err := m.utilsObj.SendHELOWithFeatures(conn, userAgent, MCReadTimeout, MCWriteTimeout, features, m.logger)
@@ -166,7 +165,7 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 		return
 	}
 
-	m.logger.Debugf("returned features: %s", retFeatures.String())
+	m.logger.Tracef("returned features: %s", retFeatures.String())
 
 	return
 }
@@ -239,7 +238,7 @@ func (m *MemcachedConn) setMeta(conn mcc.ClientIface, key string, vbNo uint16, b
 	copy(keybuf[0:encLen], encCid[0:encLen])
 	copy(keybuf[encLen:], []byte(key))
 
-	m.logger.Debugf("vbNo=%d encCid: %v, len=%d, keybuf:%v", vbNo, encCid[0:encLen], totalLen, keybuf)
+	m.logger.Tracef("vbNo=%d encCid: %v, len=%d, keybuf:%v", vbNo, encCid[0:encLen], totalLen, keybuf)
 
 	cas := uint64(time.Now().UnixNano())
 	opaque := atomic.AddUint32(&m.opaque, 1)
@@ -264,7 +263,7 @@ func (m *MemcachedConn) setMeta(conn mcc.ClientIface, key string, vbNo uint16, b
 	binary.BigEndian.PutUint32(req.Extras[24:28], options)
 
 	rsp, err := conn.Send(req)
-	err2 := m.handleResponse(rsp, opaque)
+	err2 := m.handleResponse(key, rsp, opaque)
 	if err2 != nil {
 		return err2
 	}
@@ -275,33 +274,81 @@ func (m *MemcachedConn) setMeta(conn mcc.ClientIface, key string, vbNo uint16, b
 	return
 }
 
-func (m *MemcachedConn) handleResponse(rsp *gomemcached.MCResponse, opaque uint32) (err error) {
+// Returns true if the response status should not be returned by design.
+// Since each key of SetWithMeta is uniquely generated, we should never get:
+// 1. KEY_EEXISTS
+// 2. KEY_ENOENT
+// 3. LOCKED
+func IsCLogImpossibleResponse(status gomemcached.Status) bool {
+	return base.IsMutationLockedError(status) ||
+		base.IsENoEntError(status) ||
+		base.IsEExistsError(status)
+}
+
+// Returns true if the response is fatal and cannot be fixed by resending.
+// Such responses will be logged for debugging.
+// This includes EINVAL and XATTR_EINVAL.
+func IsCLogFatalResponse(status gomemcached.Status) bool {
+	return status == gomemcached.EINVAL ||
+		status == gomemcached.XATTR_EINVAL
+}
+
+func (m *MemcachedConn) handleResponse(key string, rsp *gomemcached.MCResponse, opaque uint32) (err error) {
 	if rsp == nil {
 		return
 	}
 
 	if rsp.Opaque != opaque {
-		err = fmt.Errorf("opaque value mismatch expected=%d,got=%d", opaque, rsp.Opaque)
+		err = fmt.Errorf("opaque value mismatch expected=%d, got=%d", opaque, rsp.Opaque)
 		return
 	}
 
-	if rsp.Status == gomemcached.UNKNOWN_COLLECTION {
-		m.logger.Debugf("got unknown_collection id=%d, body=%s", m.id, string(rsp.Body))
+	status := rsp.Status
+	if status == gomemcached.SUCCESS {
+		err = nil
+	} else if base.IsCollectionMappingError(status) {
+		m.logger.Debugf("got clog unknown_collection response id=%d, key=%v%s%v, body=%v%s%v", m.id,
+			base.UdTagBegin, key, base.UdTagEnd,
+			base.UdTagBegin, rsp.Body, base.UdTagEnd,
+		)
 		err = baseclog.ErrUnknownCollection
-		return
-	}
-
-	if rsp.Status == gomemcached.NOT_MY_VBUCKET {
-		m.logger.Debugf("got not_my_vbucket id=%d, bucketName=%s", m.id, m.bucketName)
+	} else if base.IsTopologyChangeMCError(status) {
+		m.logger.Debugf("got clog not_my_vbucket response id=%d, key=%v%s%v, body=%v%s%v", m.id,
+			base.UdTagBegin, key, base.UdTagEnd,
+			base.UdTagBegin, rsp.Body, base.UdTagEnd,
+		)
 		m.bucketInfo, err = parseNotMyVbucketValue(m.logger, rsp.Body, m.addr)
 		if err != nil {
 			return
 		}
 		err = baseclog.ErrNotMyBucket
-		return
+	} else if base.IsTemporaryMCError(status) {
+		err = baseclog.ErrTMPFAIL
+	} else if base.IsGuardRailError(status) {
+		err = baseclog.ErrGuardrail
+	} else if base.IsEAccessError(status) {
+		err = baseclog.ErrEACCESS
+	} else if IsCLogImpossibleResponse(status) {
+		m.logger.Debugf("got clog impossible response id=%d, status=%s, key=%v%s%v", m.id, rsp.Status,
+			base.UdTagBegin, key, base.UdTagEnd,
+		)
+		err = baseclog.ErrImpossibleResp
+	} else if IsCLogFatalResponse(status) {
+		m.logger.Errorf("got clog write fatal error id=%d, status=%s, key=%v%s%v, body=%v%v%v", m.id, rsp.Status,
+			base.UdTagBegin, key, base.UdTagEnd,
+			base.UdTagBegin, rsp.Body, base.UdTagEnd,
+		)
+	} else {
+		// One may need to turn on debug logging to detect the unknown response.
+		// There will be a counter to detect if we have received an unknown response.
+		m.logger.Debugf("got clog write unknown error id=%d, status=%s, key=%v%s%v, body=%v%v%v", m.id,
+			base.UdTagBegin, key, base.UdTagEnd,
+		)
+		err = baseclog.ErrUnknownResp
 	}
 
-	m.logger.Debugf("received rsp key=%s status=%d", rsp.Key, rsp.Status)
+	m.logger.Tracef("received rsp key=%s status=%d", rsp.Key, rsp.Status)
+
 	return
 }
 
@@ -391,7 +438,7 @@ func (m *MemcachedConn) Close() error {
 }
 
 func parseNotMyVbucketValue(logger *log.CommonLogger, value []byte, sourceAddr string) (info *BucketInfo, err error) {
-	logger.Debugf("parsing NOT_MY_BUCKET response")
+	logger.Tracef("parsing NOT_MY_BUCKET response")
 
 	sourceHost := base.GetHostName(sourceAddr)
 	// Try to parse the value as a bucket configuration

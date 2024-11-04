@@ -86,6 +86,187 @@
         ],
         "stability": "committed"
     },
+    "xdcr_clog_eaccesses_total": {
+        "type": "counter",
+        "help": "Number of EACCESS errors encountered while writing the conflict records to the conflict bucket. It is likely that something has gone wrong with the previliges of the user used for conflict writing",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_fatal_resps_total": {
+        "type": "counter",
+        "help": "Number of fatal errors encountered while writing the conflict records to the conflict bucket. It includes EINVAL and XATTR_EINVAL.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_guardrail_hits_total": {
+        "type": "counter",
+        "help": "Number of guardrail hit errors encountered while writing the conflict records to the conflict bucket. It includes resident ratio, data size and disk space guardrail errors.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_impossible_resps_total": {
+        "type": "counter",
+        "help": "Number of errors which by design should not have been returned, encountered while writing the conflict records to the conflict bucket. It includes EEXISTS, ENOENT and LOCKED errors.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_not_my_vbs_total": {
+        "type": "counter",
+        "help": "Number of NOT_MY_VBUCKET errors encountered while writing the conflict records to the conflict bucket. It mostly is an indicator of topology changes.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_nw_errors_total": {
+        "type": "counter",
+        "help": "Number of network errors encountered while writing the conflict records to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_other_errors_total": {
+        "type": "counter",
+        "help": "Number of unidentified errors encountered while writing the conflict records to the conflict bucket. One should turn on debug logging for the replication to catch the unknown response.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_pool_get_timedout_total": {
+        "type": "counter",
+        "help": "Number of conflict records for which the conflict logger had trouble getting a connection to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_queue_full_total": {
+        "type": "counter",
+        "help": "Number of docs which were identified as conflicts, but could not be logged because the logging queue was full.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_throttled_total": {
+        "type": "counter",
+        "help": "Number of conflict records which were throttled due to resource management and hence not written to conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_tmpfails_total": {
+        "type": "counter",
+        "help": "Number of TMPFAIL errors encountered while writing the conflict records to the conflict bucket. It indicates that the data service was temporarily busy and could not process the incoming write.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_unknown_collections_total": {
+        "type": "counter",
+        "help": "Number of UNKNOWN_COLLECTION errors encountered while writing the conflict records to the conflict bucket. It indicates that where was a change to the collections setup which affected the conflict writes.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_unknown_resps_total": {
+        "type": "counter",
+        "help": "Number of unknown responses returned by the source KV while writing the conflict records to the conflict bucket. One should turn on debug logging for the replication to catch the unknown response.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_wait_time_seconds": {
+        "type": "gauge",
+        "help": "Rolling average of time the replication to target cluster was delayed due to conflict logging.",
+        "added": "8.0.0",
+        "unit": "seconds",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_write_timedout_total": {
+        "type": "counter",
+        "help": "Number of conflict records for which the write to conflict bucket was timed out.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_conflict_docs_written_total": {
         "type": "counter",
         "help": "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
@@ -1152,6 +1333,18 @@
             "pipelineType"
         ],
         "notes": "The higher the number, the more burdened XDCR is or the slower the performance of simple_store (metakv)",
+        "stability": "committed"
+    },
+    "xdcr_true_conflicts_detected_total": {
+        "type": "counter",
+        "help": "Number of true conflicts detected when the conflict logging feature is turned on. Logging of all these conflicts to a conflict bucket is best-effort, based on the system's state.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
         "stability": "committed"
     },
     "xdcr_wtavg_docs_latency_seconds": {

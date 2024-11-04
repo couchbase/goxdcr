@@ -177,8 +177,8 @@ func DetectConflictIfNeeded(req *base.WrappedMCRequest, resp *mc.MCResponse, spe
 		}
 	}
 
-	if logger.GetLogLevel() >= log.LogLevelDebug {
-		logger.Debugf("req=%v%s%v,reqBody=%v%v%v,resp=%s,respBody=%v,sourceMeta=%s,targetMeta=%s,cdRes=%v",
+	if logger.GetLogLevel() >= log.LogLevelTrace {
+		logger.Tracef("req=%v%s%v,reqBody=%v%v%v,resp=%s,respBody=%v,sourceMeta=%s,targetMeta=%s,cdRes=%v",
 			base.UdTagBegin, req.Req, base.UdTagEnd,
 			base.UdTagBegin, req.Req.Body, base.UdTagEnd,
 			resp.Status, resp.Body, sourceMeta, targetMeta, cdResult,

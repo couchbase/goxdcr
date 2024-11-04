@@ -3,6 +3,7 @@ package conflictlog
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -68,12 +69,29 @@ type LoggerImpl struct {
 	// an abstract component has the ability to register async listeners,
 	// as required for generating statistics events.
 	*component.AbstractComponent
+
+	// these stats will be printed periodically to help debug issues.
+	stats clStats
 }
 
 type logRequest struct {
 	conflictRec *ConflictRecord
 	//ackCh is the channel on which the result of the logging is reported back
 	ackCh chan error
+}
+
+type clStats struct {
+	recordCnt uint64
+
+	// conflict logging of a single conflict detected by xmem is mainly spent time
+	// in the following four phases.
+	waitTime          uint64
+	throttleLatency   uint64
+	preprocessLatency uint64
+	totalWriteLatency uint64
+
+	poolGetLatency uint64
+	poolGetCnt     uint64
 }
 
 // calcThrottlerAttempts returns the number of attempts to get go ahead
@@ -137,12 +155,49 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		AbstractComponent: component.NewAbstractComponentWithLogger(loggerId, logger),
 	}
 
-	logger.Infof("spawning conflict logger workers replId=%s count=%d", l.replId, l.opts.workerCount)
+	logger.Infof("spawning conflict logger workers replId=%s count=%d id=%s", l.replId, l.opts.workerCount, l.id)
 	for i := 0; i < l.opts.workerCount; i++ {
 		l.startWorker()
 	}
 
+	go l.printStats()
+
 	return
+}
+
+func (l *LoggerImpl) printStats() {
+	defer l.logger.Infof("%s (%s) printStats exiting", l.id, l.replId)
+
+	t := time.NewTicker(base.StatsLogInterval)
+	for {
+		select {
+		case <-l.finch:
+			t.Stop()
+			return
+		case <-t.C:
+			avgWaitTimeLatency := 0.0
+			avgThrottleLatency := 0.0
+			avgPreprocessLatency := 0.0
+			avgTotalWriteLatency := 0.0
+			avgPoolGetLatency := 0.0
+
+			numRecords := atomic.LoadUint64(&l.stats.recordCnt)
+			if numRecords > 0 {
+				avgWaitTimeLatency = float64(atomic.LoadUint64(&l.stats.waitTime) / numRecords)
+				avgThrottleLatency = float64(atomic.LoadUint64(&l.stats.throttleLatency) / numRecords)
+				avgPreprocessLatency = float64(atomic.LoadUint64(&l.stats.preprocessLatency) / numRecords)
+				avgTotalWriteLatency = float64(atomic.LoadUint64(&l.stats.totalWriteLatency) / numRecords)
+			}
+
+			poolGetCnt := atomic.LoadUint64(&l.stats.poolGetCnt)
+			if poolGetCnt > 0 {
+				avgPoolGetLatency = float64(atomic.LoadUint64(&l.stats.poolGetLatency) / poolGetCnt)
+			}
+
+			l.logger.Infof("%s stats: conflicts=%v, wait=%v, throttle=%v, preprocess=%v, totalWrite=%v, poolGet=%v, queueLen=%v",
+				l.Id(), numRecords, avgWaitTimeLatency, avgThrottleLatency, avgPreprocessLatency, avgTotalWriteLatency, avgPoolGetLatency, len(l.logReqCh))
+		}
+	}
 }
 
 func (l *LoggerImpl) Id() string {
@@ -175,7 +230,9 @@ func (l *LoggerImpl) QueueSize() int {
 }
 
 func (l *LoggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
-	l.logger.Debugf("logging conflict record replId=%s scope=%s collection=%s", l.replId, c.Scope(), c.Collection())
+	if l.logger.GetLogLevel() >= log.LogLevelTrace {
+		l.logger.Tracef("logging conflict record scope=%s collection=%s", c.Scope(), c.Collection())
+	}
 
 	if l.isClosed() {
 		err = baseclog.ErrLoggerClosed
@@ -185,6 +242,7 @@ func (l *LoggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err 
 	record, ok := c.(*ConflictRecord)
 	if !ok {
 		err = fmt.Errorf("wrong type of conflict record %T", c)
+		return
 	}
 
 	ackCh, err := l.log(record)
@@ -247,6 +305,8 @@ func (l *LoggerImpl) startWorker() {
 }
 
 func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
+	l.logger.Debugf("going to change conflict logger worker count old=%d new=%d id=%s", l.opts.workerCount, newCount, l.id)
+
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
 
@@ -254,15 +314,13 @@ func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
 		return
 	}
 
-	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
-
 	if newCount <= 0 || newCount == l.opts.workerCount {
 		err = baseclog.ErrNoChange
 		return
 	}
 
-	l.logger.Infof("changing conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
-	defer l.logger.Infof("done changing conflict logger worker count replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCount, l.id)
+	l.logger.Infof("changing conflict logger worker count old=%d new=%d id=%s", l.opts.workerCount, newCount, l.id)
+	defer l.logger.Infof("done changing conflict logger worker count old=%d new=%d id=%s", l.opts.workerCount, newCount, l.id)
 
 	if newCount > l.opts.workerCount {
 		for i := 0; i < (newCount - l.opts.workerCount); i++ {
@@ -280,6 +338,8 @@ func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
 
 // r should be non-nil
 func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
+	l.logger.Debugf("going to change conflict logger rules old=%d new=%d", l.opts.rules, r)
+
 	l.rulesLock.Lock()
 	defer l.rulesLock.Unlock()
 
@@ -287,7 +347,6 @@ func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 		return
 	}
 
-	l.logger.Debugf("going to change conflict logger worker count replId=%s old=%d new=%d", l.replId, l.opts.rules, r)
 	if r == nil {
 		err = baseclog.ErrEmptyRules
 		return
@@ -305,7 +364,7 @@ func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 
 	l.opts.rules = r
 
-	l.logger.Infof("conflict logger rules=%v updated id=%s replId=%s", r, l.id, l.replId)
+	l.logger.Infof("conflict logger rules=%v updated id=%s", r, l.id)
 	return
 }
 
@@ -323,8 +382,17 @@ func (l *LoggerImpl) worker() {
 				return
 			}
 
+			atomic.AddUint64(&l.stats.recordCnt, 1)
+
+			queueTime := time.Since(req.conflictRec.StartTime).Microseconds()
+			atomic.AddUint64(&l.stats.waitTime, uint64(queueTime))
+			req.conflictRec.ResetStartTime()
+
 			err := l.processReq(req)
 			req.ackCh <- err
+
+			totalWriteTime := time.Since(req.conflictRec.StartTime).Microseconds()
+			atomic.AddUint64(&l.stats.totalWriteLatency, uint64(totalWriteTime))
 		}
 	}
 }
@@ -342,6 +410,8 @@ func (l *LoggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err erro
 }
 
 func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error) {
+	now := time.Now()
+
 	obj, err := l.connPool.Get(bucketName, l.opts.poolGetTimeout)
 	if err != nil {
 		return
@@ -352,6 +422,10 @@ func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error)
 		err = fmt.Errorf("pool object is of invalid type got=%T", obj)
 		return
 	}
+
+	poolGetLatency := time.Since(now).Microseconds()
+	atomic.AddUint64(&l.stats.waitTime, uint64(poolGetLatency))
+	atomic.AddUint64(&l.stats.poolGetCnt, 1)
 
 	return
 }
@@ -411,7 +485,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		// we let the callers deal with it
 		return err
 	}
-	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, SourceDoc, l, nil, nil))
+	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, nil, nil))
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -421,7 +495,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
-	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, TargetDoc, l, nil, nil))
+	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, nil, nil))
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -431,9 +505,45 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
-	go l.RaiseEvent(common.NewEvent(common.ConflictDocsWritten, CRD, l, nil, nil))
+	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, nil, nil))
 
 	return
+}
+
+// Processes conflict bucket write errors by raising necessary events.
+// Returns the fatality level of error passed in (needs retry, no retry etc)
+func (l *LoggerImpl) processWriteError(err error) writeError {
+	if err == nil {
+		return noRetryErr
+	}
+
+	nwError := l.utils.IsSeriousNetError(err)
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError))
+
+	if nwError {
+		return networkErr
+	}
+
+	switch err {
+	case baseclog.ErrTMPFAIL:
+		fallthrough
+	case baseclog.ErrNotMyBucket:
+		fallthrough
+	case baseclog.ErrUnknownCollection:
+		return needRetryErr
+	case baseclog.ErrImpossibleResp:
+		fallthrough
+	case baseclog.ErrFatalResp:
+		fallthrough
+	case baseclog.ErrEACCESS:
+		fallthrough
+	case baseclog.ErrGuardrail:
+		fallthrough
+	case baseclog.ErrUnknownResp:
+		return noRetryErr
+	default:
+		return unknownErr
+	}
 }
 
 // writeDocRetry arranges for a connection from the pool which the supplied function can use. The function
@@ -441,38 +551,54 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 // to the pool
 func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error) (err error) {
 	var conn Connection
-
+	var nwError bool
 	for i := 0; i < l.opts.networkRetryCount; i++ {
 		conn, err = l.getFromPool(bucketName)
 		if err != nil {
+			nwError = l.utils.IsSeriousNetError(err)
+			l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError))
 			// This is to account for nw errors while connecting
-			if !l.utils.IsSeriousNetError(err) {
+			if !nwError {
 				return
 			}
 			time.Sleep(l.opts.networkRetryInterval)
 			continue
 		}
 
-		l.logger.Debugf("got connection from pool, id=%d rid=%s lid=%s", conn.Id(), l.replId, l.id)
+		if l.logger.GetLogLevel() >= log.LogLevelTrace {
+			l.logger.Tracef("got connection from pool, id=%d lid=%s bucket=%s",
+				conn.Id(), l.id, bucketName)
+		}
 
 		// The call to connPool.Put is not advised to be done in a defer here.
 		// This is because calling defer in a loop accumulates multiple defers
 		// across the iterations and calls all of them when function exits which
 		// will be error prone in this case
 		err = fn(conn)
-		if err == nil {
-			l.logger.Debugf("releasing connection to pool after success, id=%d damaged=%v rid=%s lid=%s", conn.Id(), false, l.replId, l.id)
+
+		writeErr := l.processWriteError(err)
+		if err == nil || writeErr.noRetryNeeded() {
+			// there was no network error and the write was a success or
+			// the write returned a status code which cannot be fixed by retry
+			if err != nil {
+				l.logger.Debugf("releasing connection to pool after write with error, id=%d damaged=%v err=%v lid=%s bucket=%s",
+					conn.Id(), false, err, l.id, bucketName)
+			} else {
+				if l.logger.GetLogLevel() >= log.LogLevelTrace {
+					l.logger.Tracef("releasing connection to pool after write, id=%d damaged=%v err=%v lid=%s bucket=%s",
+						conn.Id(), false, err, l.id, bucketName)
+				}
+			}
 			l.connPool.Put(bucketName, conn, false)
 			break
 		}
 
-		l.logger.Errorf("error in writing doc to conflict bucket err=%v, id=%d rid=%s lid=%s", err, conn.Id(), l.replId, l.id)
-		nwError := l.utils.IsSeriousNetError(err)
-		l.logger.Debugf("releasing connection to pool after failure, id=%d damaged=%v rid=%s lid=%s", conn.Id(), nwError, l.replId, l.id)
+		// there was either a network error or there needs to be a retry
+		nwError = writeErr.isNWError()
+		// Errors are not logged, but captured in the form of stats.
+		// One has to turn on debug logging to capture the errors that are not captured by the stats
+		l.logger.Debugf("error in writing doc to conflict bucket err=%v, id=%d lid=%s nwError=%v bucket=%s", err, conn.Id(), l.id, nwError, bucketName)
 		l.connPool.Put(bucketName, conn, nwError)
-		if !nwError {
-			break
-		}
 		time.Sleep(l.opts.networkRetryInterval)
 	}
 
@@ -487,8 +613,15 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 		return err
 	}
 
+	throttleTime := time.Since(req.conflictRec.StartTime).Microseconds()
+	atomic.AddUint64(&l.stats.throttleLatency, uint64(throttleTime))
+	req.conflictRec.ResetStartTime()
+
 	target, err := l.getTarget(req.conflictRec)
 	if err != nil {
+		l.logger.Errorf("%s error getting conflict log target, r=%v%+v%v, rules=%s, err=%v",
+			l.id, base.UdTagBegin, req.conflictRec, base.UdTagEnd, l.opts.rules.String(), err,
+		)
 		return err
 	}
 
@@ -499,8 +632,15 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 
 	err = req.conflictRec.PopulateData(l.replId)
 	if err != nil {
+		l.logger.Errorf("%s error populating clog data, r=%v%+v%v, err=%v",
+			l.id, base.UdTagBegin, req.conflictRec, base.UdTagEnd, err,
+		)
 		return err
 	}
+
+	preprocessTime := time.Since(req.conflictRec.StartTime).Microseconds()
+	atomic.AddUint64(&l.stats.preprocessLatency, uint64(preprocessTime))
+	req.conflictRec.ResetStartTime()
 
 	timeout := l.opts.setMetaTimeout
 	err = l.writeDocsWithTimeout(req, target, timeout)
@@ -527,6 +667,8 @@ func (h logReqHandle) Wait(finch chan bool) (err error) {
 
 // newCap should be greater than or equal to existing queue capacity
 func (l *LoggerImpl) UpdateQueueCapcity(newCap int) (err error) {
+	l.logger.Debugf("going to change conflict logger queue capacity old=%d new=%d id=%s", l.opts.logQueueCap, newCap, l.id)
+
 	if l.isClosed() {
 		return baseclog.ErrLoggerClosed
 	}
@@ -535,8 +677,6 @@ func (l *LoggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 	// read from channel by the workers can still happen, so we shut down the workers temporarily.
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
-
-	l.logger.Debugf("going to change conflict logger queue capacity replId=%s old=%d new=%d id=%s", l.replId, l.opts.workerCount, newCap, l.id)
 
 	if l.logReqCh == nil {
 		err = fmt.Errorf("nil queue")
@@ -554,8 +694,8 @@ func (l *LoggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 		return
 	}
 
-	l.logger.Infof("changing conflict logger queue capacity replId=%s old=%d new=%d id=%s", l.replId, l.opts.logQueueCap, newCap, l.id)
-	defer l.logger.Infof("done changing conflict logger queue capacity replId=%s cap=%d id=%s", l.replId, l.opts.logQueueCap, l.id)
+	l.logger.Infof("changing conflict logger queue capacity old=%d new=%d id=%s", l.opts.logQueueCap, newCap, l.id)
+	defer l.logger.Infof("done changing conflict logger queue capacity cap=%d id=%s", l.opts.logQueueCap, l.id)
 
 	// temporarily make sure there is no one reading from the queue.
 	for i := 0; i < l.opts.workerCount; i++ {
@@ -603,6 +743,8 @@ func (l *LoggerImpl) UpdateNWRetryCount(cnt int) {
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
 
+	l.logger.Infof("changing conflict logger network retry count old=%d new=%d id=%s", l.opts.networkRetryCount, cnt, l.id)
+
 	l.opts.networkRetryCount = cnt
 }
 
@@ -613,6 +755,8 @@ func (l *LoggerImpl) UpdateNWRetryInterval(t time.Duration) {
 
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
+
+	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.networkRetryInterval, t, l.id)
 
 	l.opts.networkRetryInterval = t
 }
@@ -625,6 +769,8 @@ func (l *LoggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
 
+	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.setMetaTimeout, t, l.id)
+
 	l.opts.setMetaTimeout = t
 }
 
@@ -635,6 +781,8 @@ func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 
 	l.rwMtx.Lock()
 	defer l.rwMtx.Unlock()
+
+	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.poolGetTimeout, t, l.id)
 
 	l.opts.poolGetTimeout = t
 }

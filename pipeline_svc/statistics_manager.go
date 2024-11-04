@@ -21,7 +21,9 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/base/filter"
+	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/conflictlog"
@@ -153,6 +155,13 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR:   service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE: service_def.MetricTypeCounter,
 	service_def.CONFLICT_DOCS_WRITTEN:               service_def.MetricTypeCounter,
+	service_def.TRUE_CONFLICTS_DETECTED:             service_def.MetricTypeCounter,
+	service_def.CLOG_QUEUE_FULL:                     service_def.MetricTypeCounter,
+	service_def.CLOG_THROTTLED:                      service_def.MetricTypeCounter,
+	service_def.CLOG_WRITE_TIMEDOUT:                 service_def.MetricTypeCounter,
+	service_def.CLOG_POOL_GET_TIMEDOUT:              service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_CLOG_METRIC:           service_def.MetricTypeCounter,
+	service_def.CLOG_WAIT_TIME:                      service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -1395,12 +1404,6 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	conflictManager.RegisterComponentEventListener(common.MergeFailed, conflictMgr_collector)
 	conflictManager.RegisterComponentEventListener(common.HlvPrunedAtMerge, conflictMgr_collector)
 
-	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataMergedEventListener, conflictMgr_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.MergeCasChangedEventListener, conflictMgr_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.MergeFailedEventListener, conflictMgr_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedAtMergeEventListener, conflictMgr_collector)
-
 	return nil
 }
 
@@ -1585,6 +1588,18 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR, docsSentWithPoisonedCasError)
 		docsSentWithPoisonedCasReplace := metrics.NewCounter()
 		registry.Register(service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE, docsSentWithPoisonedCasReplace)
+		trueConflictsCnt := metrics.NewCounter()
+		registry.Register(service_def.TRUE_CONFLICTS_DETECTED, trueConflictsCnt)
+		clogQueueFull := metrics.NewCounter()
+		registry.Register(service_def.CLOG_QUEUE_FULL, clogQueueFull)
+		clogThrottled := metrics.NewCounter()
+		registry.Register(service_def.CLOG_THROTTLED, clogThrottled)
+		clogWriteTimedout := metrics.NewCounter()
+		registry.Register(service_def.CLOG_WRITE_TIMEDOUT, clogWriteTimedout)
+		clogPoolGetTimedout := metrics.NewCounter()
+		registry.Register(service_def.CLOG_POOL_GET_TIMEDOUT, clogPoolGetTimedout)
+		clogWaitTime := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(service_def.CLOG_WAIT_TIME, clogWaitTime)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1636,6 +1651,12 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = docsSentWithSubdocDelete
 		metric_map[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR] = docsSentWithPoisonedCasError
 		metric_map[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE] = docsSentWithPoisonedCasReplace
+		metric_map[service_def.TRUE_CONFLICTS_DETECTED] = trueConflictsCnt
+		metric_map[service_def.CLOG_QUEUE_FULL] = clogQueueFull
+		metric_map[service_def.CLOG_THROTTLED] = clogThrottled
+		metric_map[service_def.CLOG_WRITE_TIMEDOUT] = clogWriteTimedout
+		metric_map[service_def.CLOG_POOL_GET_TIMEDOUT] = clogPoolGetTimedout
+		metric_map[service_def.CLOG_WAIT_TIME] = clogWaitTime
 
 		listOfVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
@@ -1657,8 +1678,6 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TgtSyncXattrPreservedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvUpdatedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedEventListener, outNozzle_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DocsSentWithSubdocCmdEventListener, outNozzle_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DocsSentWithPoisonedCasEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -1743,6 +1762,62 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		}
 		metricMap[service_def.DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metricMap[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
+
+		// record the cas poisoning protection mode by target KV if any
+		protectionMode := event_otherInfo.CasPoisonProtection
+		if protectionMode != base.CasNotPoisoned {
+			switch protectionMode {
+			case base.ErrorMode:
+				metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR].(metrics.Counter).Inc(1)
+				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR)
+				if err != nil {
+					return err
+				}
+			case base.ReplaceMode:
+				metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE].(metrics.Counter).Inc(1)
+				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		// record the type of subdoc operation if any
+		subdocOp := event_otherInfo.SubdocOpType
+		if subdocOp != base.NotSubdoc {
+			switch subdocOp {
+			case base.SubdocDelete:
+				metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
+				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
+				if err != nil {
+					return err
+				}
+			case base.SubdocSet:
+				metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
+				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
+				if err != nil {
+					return err
+				}
+			default:
+				err := base.ErrorUnexpectedSubdocOp
+				outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
+				return err
+			}
+
+		}
+
+		// record the clog stats captured by xmem while it was waiting for logging to finish
+		clogErr := event_otherInfo.CLogError
+		switch clogErr {
+		case baseclog.ErrTimeout:
+			metricMap[service_def.CLOG_WRITE_TIMEDOUT].(metrics.Counter).Inc(1)
+		case baseclog.ErrThrottle:
+			metricMap[service_def.CLOG_THROTTLED].(metrics.Counter).Inc(1)
+		case iopool.ErrConnPoolGetTimeout:
+			metricMap[service_def.CLOG_POOL_GET_TIMEDOUT].(metrics.Counter).Inc(1)
+		}
+		clogWaitTime := event_otherInfo.CLogWaitTime
+		metricMap[service_def.CLOG_WAIT_TIME].(metrics.Histogram).Sample().Update(clogWaitTime.Nanoseconds() / 1000000)
 
 	case common.DataFailedCRSource:
 		metricMap[service_def.DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
@@ -1872,40 +1947,14 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	case common.DataSentFailedUnknownStatus:
 		metricMap[service_def.TARGET_UNKNOWN_STATUS_METRIC].(metrics.Counter).Inc(1)
 
-	case common.DocsSentWithSubdocCmd:
-		subdocOp := event.Data.(base.SubdocOpType)
-		switch subdocOp {
-		case base.SubdocDelete:
-			metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
-			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
-			if err != nil {
-				return err
-			}
-		case base.SubdocSet:
-			metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
-			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
-			if err != nil {
-				return err
-			}
-		default:
-			err := base.ErrorUnexpectedSubdocOp
-			outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
-			return err
-		}
-	case common.DocsSentWithPoisonedCas:
-		protectionMode := event.Data.(base.TargetKVCasPoisonProtectionMode)
-		switch protectionMode {
-		case base.ErrorMode:
-			metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR].(metrics.Counter).Inc(1)
-			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR)
-			if err != nil {
-				return err
-			}
-		case base.ReplaceMode:
-			metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE].(metrics.Counter).Inc(1)
-			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE)
-			if err != nil {
-				return err
+	case common.ConflictsDetected:
+		metricMap[service_def.TRUE_CONFLICTS_DETECTED].(metrics.Counter).Inc(1)
+
+		if event.OtherInfos != nil {
+			err := event.OtherInfos.(error)
+			switch err {
+			case baseclog.ErrQueueFull:
+				metricMap[service_def.CLOG_QUEUE_FULL].(metrics.Counter).Inc(1)
 			}
 		}
 	}
@@ -2303,6 +2352,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.DOCS_FILTERED_MOBILE_METRIC, mobile_docs_filtered)
 		casPoisoned := metrics.NewCounter()
 		registry_router.Register(service_def.DOCS_FILTERED_CAS_POISONING_METRIC, casPoisoned)
+		clog_docs_filtered := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_CLOG_METRIC, clog_docs_filtered)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.DOCS_FILTERED_METRIC] = docs_filtered
@@ -2322,6 +2373,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.DOCS_FILTERED_USER_DEFINED_METRIC] = docs_filtered_on_user_defined_filter
 		metric_map[service_def.DOCS_FILTERED_MOBILE_METRIC] = mobile_docs_filtered
 		metric_map[service_def.DOCS_FILTERED_CAS_POISONING_METRIC] = casPoisoned
+		metric_map[service_def.DOCS_FILTERED_CLOG_METRIC] = clog_docs_filtered
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
@@ -2343,6 +2395,9 @@ func (r_collector *routerCollector) Id() string {
 
 func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey string) error {
 	switch metricKey {
+	case service_def.DOCS_FILTERED_CLOG_METRIC:
+		// SUMUKH TODO: persist to ckpt
+		return nil
 	case service_def.DOCS_FILTERED_METRIC:
 		fallthrough
 	case service_def.EXPIRY_FILTERED_METRIC:
@@ -2468,6 +2523,9 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		case filter.FilteredOnMobileRecord:
 			metric_map[service_def.DOCS_FILTERED_MOBILE_METRIC].(metrics.Counter).Inc(1)
 			filteredMetricKey = service_def.DOCS_FILTERED_MOBILE_METRIC
+		case filter.FilteredOnConflictLogRecord:
+			metric_map[service_def.DOCS_FILTERED_CLOG_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_CLOG_METRIC
 		default:
 			return err
 		}
@@ -3138,11 +3196,6 @@ func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *
 	cLog_collector.vbMetricHelper = NewVbBasedMetricHelper()
 	clogger := pipeline.ConflictLogger()
 	if clogger != nil {
-		cloggerImpl, ok := clogger.(*conflictlog.LoggerImpl)
-		if !ok {
-			return fmt.Errorf("wrong type of conflict logger in use %T", clogger)
-		}
-
 		registry := stats_mgr.getOrCreateRegistry(clogger.Id())
 		conflict_docs_written := metrics.NewCounter()
 		registry.Register(service_def.CONFLICT_DOCS_WRITTEN, conflict_docs_written)
@@ -3152,12 +3205,42 @@ func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *
 		registry.Register(service_def.TGT_CONFLICT_DOCS_WRITTEN, tgt_conflict_docs_written)
 		crd_conflict_docs_written := metrics.NewCounter()
 		registry.Register(service_def.CRD_CONFLICT_DOCS_WRITTEN, crd_conflict_docs_written)
+		nw_errors := metrics.NewCounter()
+		registry.Register(service_def.CLOG_NW_ERROR_COUNT, nw_errors)
+		tmpfails := metrics.NewCounter()
+		registry.Register(service_def.CLOG_TMPFAIL_COUNT, tmpfails)
+		notMyVbs := metrics.NewCounter()
+		registry.Register(service_def.CLOG_NOT_MY_VB_COUNT, notMyVbs)
+		unknownCols := metrics.NewCounter()
+		registry.Register(service_def.CLOG_UNKNOWN_COLLECTION_COUNT, unknownCols)
+		impossibleResps := metrics.NewCounter()
+		registry.Register(service_def.CLOG_IMPOSSIBLE_RESP_COUNT, impossibleResps)
+		fatalResps := metrics.NewCounter()
+		registry.Register(service_def.CLOG_FATAL_RESP_COUNT, fatalResps)
+		eaccessErrs := metrics.NewCounter()
+		registry.Register(service_def.CLOG_EACCESS_COUNT, eaccessErrs)
+		guardrailErrs := metrics.NewCounter()
+		registry.Register(service_def.CLOG_GUARDRAIL_HIT_COUNT, guardrailErrs)
+		unknownResps := metrics.NewCounter()
+		registry.Register(service_def.CLOG_UNKNOWN_RESP_COUNT, unknownResps)
+		otherErrors := metrics.NewCounter()
+		registry.Register(service_def.CLOG_OTHER_ERRORS, otherErrors)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.CONFLICT_DOCS_WRITTEN] = conflict_docs_written
 		metric_map[service_def.SRC_CONFLICT_DOCS_WRITTEN] = src_conflict_docs_written
 		metric_map[service_def.TGT_CONFLICT_DOCS_WRITTEN] = tgt_conflict_docs_written
 		metric_map[service_def.CRD_CONFLICT_DOCS_WRITTEN] = crd_conflict_docs_written
+		metric_map[service_def.CLOG_NW_ERROR_COUNT] = nw_errors
+		metric_map[service_def.CLOG_TMPFAIL_COUNT] = tmpfails
+		metric_map[service_def.CLOG_NOT_MY_VB_COUNT] = notMyVbs
+		metric_map[service_def.CLOG_UNKNOWN_COLLECTION_COUNT] = unknownCols
+		metric_map[service_def.CLOG_IMPOSSIBLE_RESP_COUNT] = impossibleResps
+		metric_map[service_def.CLOG_FATAL_RESP_COUNT] = fatalResps
+		metric_map[service_def.CLOG_EACCESS_COUNT] = eaccessErrs
+		metric_map[service_def.CLOG_GUARDRAIL_HIT_COUNT] = guardrailErrs
+		metric_map[service_def.CLOG_UNKNOWN_RESP_COUNT] = unknownResps
+		metric_map[service_def.CLOG_OTHER_ERRORS] = otherErrors
 
 		cLog_collector.component_map[clogger.Id()] = metric_map
 		responsibleVbs := make([]uint16, 0)
@@ -3166,10 +3249,11 @@ func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *
 			responsibleVbs = append(responsibleVbs, source.ResponsibleVBs()...)
 		}
 		cLog_collector.vbMetricHelper.Register(cLog_collector.Id(), responsibleVbs, clogger.Id(), CLogVBMetricKeys)
-		cloggerImpl.RegisterComponentEventListener(common.ConflictDocsWritten, cLog_collector)
-		// register cLog_collector as the async event handler for relevant events
+
+		// register conflict logger as the async event handler for relevant events
 		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
-		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.ClogEventListener, cLog_collector)
+		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.CLogDocsWrittenEventListener, cLog_collector)
+		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.CLogWriteStatusEventListener, cLog_collector)
 	}
 
 	return nil
@@ -3187,7 +3271,7 @@ func (cLog_collector *cLogCollector) ProcessEvent(event *common.Event) error {
 	metricMap := cLog_collector.component_map[event.Component.Id()]
 
 	switch event.EventType {
-	case common.ConflictDocsWritten:
+	case common.CLogDocsWritten:
 		docType := event.Data.(conflictlog.ConflictDocType)
 		switch docType {
 		case conflictlog.SourceDoc:
@@ -3198,6 +3282,36 @@ func (cLog_collector *cLogCollector) ProcessEvent(event *common.Event) error {
 			metricMap[service_def.CRD_CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
 		}
 		metricMap[service_def.CONFLICT_DOCS_WRITTEN].(metrics.Counter).Inc(1)
+	case common.CLogWriteStatus:
+		nwError := event.OtherInfos.(bool)
+		if nwError {
+			metricMap[service_def.CLOG_NW_ERROR_COUNT].(metrics.Counter).Inc(1)
+			return nil
+		}
+
+		if event.Data != nil {
+			err := event.Data.(error)
+			switch err {
+			case baseclog.ErrTMPFAIL:
+				metricMap[service_def.CLOG_TMPFAIL_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrGuardrail:
+				metricMap[service_def.CLOG_GUARDRAIL_HIT_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrEACCESS:
+				metricMap[service_def.CLOG_EACCESS_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrImpossibleResp:
+				metricMap[service_def.CLOG_IMPOSSIBLE_RESP_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrUnknownResp:
+				metricMap[service_def.CLOG_UNKNOWN_RESP_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrFatalResp:
+				metricMap[service_def.CLOG_FATAL_RESP_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrNotMyBucket:
+				metricMap[service_def.CLOG_NOT_MY_VB_COUNT].(metrics.Counter).Inc(1)
+			case baseclog.ErrUnknownCollection:
+				metricMap[service_def.CLOG_UNKNOWN_COLLECTION_COUNT].(metrics.Counter).Inc(1)
+			default:
+				metricMap[service_def.CLOG_OTHER_ERRORS].(metrics.Counter).Inc(1)
+			}
+		}
 	}
 	return nil
 }

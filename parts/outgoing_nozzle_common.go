@@ -148,6 +148,10 @@ type DataSentEventAdditional struct {
 	ImportMutation       bool
 	Cloned               bool
 	CloneSyncCh          chan bool
+	SubdocOpType         base.SubdocOpType
+	CasPoisonProtection  base.TargetKVCasPoisonProtectionMode
+	CLogWaitTime         time.Duration
+	CLogError            error
 }
 
 type DataFilteredAdditional struct {

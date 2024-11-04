@@ -9,10 +9,11 @@
 package pipeline_utils
 
 import (
-	"github.com/couchbase/goxdcr/v8/common"
-	"github.com/couchbase/goxdcr/v8/parts"
 	"strconv"
 	"strings"
+
+	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/parts"
 )
 
 func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
@@ -48,7 +49,6 @@ func RegisterAsyncComponentEventHandler(listenerMap map[string]common.AsyncCompo
 			listener.RegisterComponentEventHandler(handler)
 		}
 	}
-
 }
 
 func IsPipelineUsingCapi(pipeline common.Pipeline) bool {

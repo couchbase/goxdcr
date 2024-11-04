@@ -290,11 +290,12 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
 		return errMap
 	}
+
 	genPipelineId := "GenericPipeline" + base.GetIterationId(&genericPipelineIteration)
 	spec := genericPipeline.Specification().GetReplicationSpec()
 	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
 	if err != nil {
-		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
+		errMap["genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed"] = err
 		return errMap
 	}
 	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
@@ -947,6 +948,19 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 		for _, source := range p.Sources() {
 			addAsyncListenersToMap(source, asyncListenerMap, partsMap)
 		}
+
+		// add async listeners on conflict logger, if it exists, to listeners map
+		cLogger := p.ConflictLogger()
+		if cLogger != nil {
+			cLog, ok := cLogger.(*conflictlog.LoggerImpl)
+			if !ok {
+				panic(fmt.Sprintf("wrong clogger type %T", cLogger))
+			}
+
+			cLogListeners := cLog.AsyncComponentEventListeners()
+			mergeListenersMap(asyncListenerMap, cLogListeners)
+		}
+
 		p.SetAsyncListenerMap(asyncListenerMap)
 	}
 	return asyncListenerMap

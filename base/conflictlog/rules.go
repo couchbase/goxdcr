@@ -129,14 +129,6 @@ func (r *Rules) String() string {
 	return loggingRules.String()
 }
 
-func ParseString(o interface{}) (ok bool, val string) {
-	if o == nil {
-		return
-	}
-	val, ok = o.(string)
-	return
-}
-
 func ParseTarget(m map[string]interface{}) (t Target, err error) {
 	if len(m) == 0 {
 		return
@@ -144,7 +136,7 @@ func ParseTarget(m map[string]interface{}) (t Target, err error) {
 
 	bucketObj, ok := m[base.CLogBucketKey]
 	if ok {
-		ok, s := ParseString(bucketObj)
+		ok, s := base.ParseString(bucketObj)
 		if ok {
 			t.Bucket = s
 		} else {
@@ -155,7 +147,7 @@ func ParseTarget(m map[string]interface{}) (t Target, err error) {
 
 	collectionObj, ok := m[base.CLogCollectionKey]
 	if ok {
-		ok, s := ParseString(collectionObj)
+		ok, s := base.ParseString(collectionObj)
 		if ok {
 			t.NS, err = base.NewOptionalCollectionNamespaceFromString(s)
 			if err != nil {

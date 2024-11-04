@@ -158,3 +158,20 @@ const (
 	TargetDoc ConflictDocType = iota
 	CRD       ConflictDocType = iota
 )
+
+type writeError int
+
+const (
+	unknownErr   writeError = iota
+	noRetryErr   writeError = iota
+	needRetryErr writeError = iota
+	networkErr   writeError = iota
+)
+
+func (w writeError) isNWError() bool {
+	return w == networkErr
+}
+
+func (w writeError) noRetryNeeded() bool {
+	return w == noRetryErr
+}

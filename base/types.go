@@ -29,7 +29,6 @@ import (
 	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/v8/log"
 
 	"github.com/google/uuid"
 )
@@ -819,21 +818,18 @@ type WrappedMCRequest struct {
 }
 
 // If conflict logging is in progress, wait for it to complete.
-func (req *WrappedMCRequest) WaitForConflictLogging(finCh chan bool, logger *log.CommonLogger) {
-	if req == nil {
-		return
+func (req *WrappedMCRequest) WaitForConflictLogging(finCh chan bool) error {
+	if req.HLVModeOptions.ConflictLoggerWait == nil {
+		// no wait
+		return nil
 	}
 
-	if req.HLVModeOptions.ConflictLoggerWait != nil {
-		err := req.HLVModeOptions.ConflictLoggerWait.Wait(finCh)
-		if err != nil {
-			// SUMUKH TODO: Make this a counter.
-			//logger.Errorf("Error during conflict logging to finish, key=%v%s%v, err=%v",
-			//	UdTagBegin, req.Req.Key, UdTagEnd,
-			//	err,
-			//)
-		}
+	err := req.HLVModeOptions.ConflictLoggerWait.Wait(finCh)
+	if err != nil {
+		return err
 	}
+
+	return nil
 }
 
 // Set options to replicate using HLV.
@@ -3024,8 +3020,9 @@ const (
 type TargetKVCasPoisonProtectionMode uint8
 
 const (
-	ErrorMode   TargetKVCasPoisonProtectionMode = iota
-	ReplaceMode TargetKVCasPoisonProtectionMode = iota
+	CasNotPoisoned TargetKVCasPoisonProtectionMode = iota
+	ErrorMode      TargetKVCasPoisonProtectionMode = iota
+	ReplaceMode    TargetKVCasPoisonProtectionMode = iota
 )
 
 // HLVModeOptions indicate the options set when performing replication using HLV i.e. CCR, mobile mode etc

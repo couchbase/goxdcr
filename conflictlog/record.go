@@ -73,8 +73,9 @@ type ConflictRecord struct {
 	Target        DocInfo `json:"tgtDoc"`
 
 	// Note: The following will not be serialized to json
-	Body     []byte `json:"-"`
-	Datatype uint8  `json:"-"`
+	Body      []byte    `json:"-"`
+	Datatype  uint8     `json:"-"`
+	StartTime time.Time `json:"-"`
 }
 
 func (r *ConflictRecord) Scope() string {
@@ -162,4 +163,8 @@ func (r *ConflictRecord) PopulateDocIds(uniqKey string, now int64) {
 	r.Source.Id = fmt.Sprintf("%s_%v_%s", SourcePrefix, now, uniqKey)
 	r.Target.Id = fmt.Sprintf("%s_%v_%s", TargetPrefix, now, uniqKey)
 	r.Id = fmt.Sprintf("%s_%v_%s", CRDPrefix, now, uniqKey)
+}
+
+func (r *ConflictRecord) ResetStartTime() {
+	r.StartTime = time.Now()
 }

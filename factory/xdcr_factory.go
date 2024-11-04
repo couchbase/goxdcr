@@ -338,7 +338,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	progress_recorder(common.ProgressNozzlesWired)
 
 	conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
-	conflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger)
+	conflictLogger, err := conflictlog.NewLoggerWithRules(conflictLoggingMap, common.ComposeFullTopic(spec.UniqueId(), pipelineType), spec.Settings, logger_ctx, xdcrf.logger)
 	if err != nil && err != baseclog.ErrConflictLoggingIsOff {
 		xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
 		return nil, nil, err
@@ -353,6 +353,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
 	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
+	xdcrf.registerAsyncListenersOnConflictLoggerIfNeeded(pipeline, logger_ctx)
 
 	// initialize component event listener map in pipeline
 	pp.GetAllAsyncComponentEventListeners(pipeline)
@@ -489,12 +490,6 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		hlvUpdatedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvUpdatedEventListener, i),
 			pipeline.Topic(), logger_ctx)
-		dataSentWithSubdocCmdListener := component.NewDefaultAsyncComponentEventListenerImpl(
-			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DocsSentWithSubdocCmdEventListener, i),
-			pipeline.Topic(), logger_ctx)
-		dataSentWithPoisonedCasEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
-			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DocsSentWithPoisonedCasEventListener, i),
-			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -512,10 +507,35 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.TargetSyncXattrPreserved, targetSyncXattrPreservedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvPruned, hlvPrunedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
-			out_nozzle.RegisterComponentEventListener(common.DocsSentWithSubdocCmd, dataSentWithSubdocCmdListener)
-			out_nozzle.RegisterComponentEventListener(common.DocsSentWithPoisonedCas, dataSentWithPoisonedCasEventListener)
 		}
 	}
+}
+
+// construct and register async componet event listeners on conflictLogger,
+// only if a conflict logger exists.
+func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
+	cLogger := pipeline.ConflictLogger()
+
+	if cLogger == nil {
+		return
+	}
+
+	cloggerImpl, ok := cLogger.(*conflictlog.LoggerImpl)
+	if !ok {
+		panic(fmt.Sprintf("wrong clog type %T", cLogger))
+	}
+
+	xdcrf.logger.Infof("topic=%v constructing async listeners for conflict logger %s", pipeline.FullTopic(), cLogger.Id())
+
+	cLogDocsWrittenEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CLogDocsWrittenEventListener, 0),
+		pipeline.Topic(), logger_ctx)
+	cLogWriteStatusEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+		pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CLogWriteStatusEventListener, 0),
+		pipeline.Topic(), logger_ctx)
+
+	cloggerImpl.RegisterComponentEventListener(common.CLogDocsWritten, cLogDocsWrittenEventListener)
+	cloggerImpl.RegisterComponentEventListener(common.CLogWriteStatus, cLogWriteStatusEventListener)
 }
 
 /**
