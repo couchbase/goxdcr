@@ -1425,7 +1425,7 @@ const (
 
 const TransactionClientRecordKey = "_txn:client-record"
 const ActiveTransactionRecordPrefix = "^_txn:atr-"
-const ValidVbucketRangeRegexpGroup = "([0-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1][0][0-2][0-3])"
+const ValidVbucketRangeRegexpGroup = "([0-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1][0][0-1][0-9]|[1][0][2][0-3])"
 const ActiveTransactionRecordSuffix = "-#[0-9a-f]+$"
 
 var ActiveTxnRecordRegexp *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("%v%v%v", ActiveTransactionRecordPrefix, ValidVbucketRangeRegexpGroup, ActiveTransactionRecordSuffix))
