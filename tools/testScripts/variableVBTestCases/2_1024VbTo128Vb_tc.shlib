@@ -86,6 +86,10 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
+	pauseReplication "C1" "B1" "C2" "B2"
+  sleep 15
+  grepForPanics
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

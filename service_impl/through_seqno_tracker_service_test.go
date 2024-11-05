@@ -22,7 +22,6 @@ import (
 	commonMock "github.com/couchbase/goxdcr/v8/common/mocks"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
-	pipelineSvc "github.com/couchbase/goxdcr/v8/pipeline_svc/mocks"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -37,12 +36,12 @@ func setupBoilerPlate() (*commonMock.Pipeline,
 	*commonMock.SourceNozzle,
 	*service_def.ReplicationSpecSvc,
 	*commonMock.PipelineRuntimeContext,
-	*pipelineSvc.PipelineSupervisorSvc) {
+	*commonMock.PipelineSupervisorSvc) {
 
 	pipelineMock := &commonMock.Pipeline{}
 	replSpecSvcMock := &service_def.ReplicationSpecSvc{}
 	runtimeCtxMock := &commonMock.PipelineRuntimeContext{}
-	pipelineSupervisorSvc := &pipelineSvc.PipelineSupervisorSvc{}
+	pipelineSupervisorSvc := &commonMock.PipelineSupervisorSvc{}
 
 	nozzleMock := &commonMock.SourceNozzle{}
 
@@ -53,7 +52,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	sourceNozzle *commonMock.SourceNozzle,
 	replSpecSvc *service_def.ReplicationSpecSvc,
 	runtimeCtxMock *commonMock.PipelineRuntimeContext,
-	pipelineSupervisorSvc *pipelineSvc.PipelineSupervisorSvc) *ThroughSeqnoTrackerSvc {
+	pipelineSupervisorSvc *commonMock.PipelineSupervisorSvc) *ThroughSeqnoTrackerSvc {
 
 	var vbList []uint16
 	vbList = append(vbList, 1)
