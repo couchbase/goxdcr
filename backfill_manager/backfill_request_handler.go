@@ -862,7 +862,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 	}
 
 	// Register supervisor for error handling
-	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(pipeline_svc.PipelineSupervisorSvc)
+	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC).(common.PipelineSupervisorSvc)
 	b.RegisterComponentEventListener(common.ErrorEncountered, supervisor)
 
 	b.pipelines = append(b.pipelines, pipeline)

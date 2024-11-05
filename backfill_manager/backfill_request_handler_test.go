@@ -174,14 +174,14 @@ func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
 	return ckptMgr
 }
 
-func brhMockSupervisor() *pipeline_svc.PipelineSupervisorSvc {
-	supervisor := &pipeline_svc.PipelineSupervisorSvc{}
+func brhMockSupervisor() *common.PipelineSupervisorSvc {
+	supervisor := &common.PipelineSupervisorSvc{}
 	supervisor.On("OnEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	return supervisor
 }
 
 func brhMockPipelineContext(ckptMgr *pipeline_svc.CheckpointMgrSvc,
-	supervisor *pipeline_svc.PipelineSupervisorSvc) *common.PipelineRuntimeContext {
+	supervisor *common.PipelineSupervisorSvc) *common.PipelineRuntimeContext {
 
 	ctx := &common.PipelineRuntimeContext{}
 	ctx.On("Service", base.CHECKPOINT_MGR_SVC).Return(ckptMgr)

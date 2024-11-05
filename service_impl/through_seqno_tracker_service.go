@@ -800,7 +800,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 		tsTracker.logger.Errorf("%v", err)
 		return err
 	}
-	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(pipeline_svc.PipelineSupervisorSvc))
+	err := tsTracker.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(common.PipelineSupervisorSvc))
 	if err != nil {
 		tsTracker.logger.Errorf("%v", err)
 		return err
