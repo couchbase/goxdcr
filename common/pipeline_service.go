@@ -27,3 +27,7 @@ type PipelineService interface {
 	// If sharable, allow service to be detached
 	Detach(pipeline Pipeline) error
 }
+type PipelineSupervisorSvc interface {
+	PipelineService
+	ComponentEventListener
+}

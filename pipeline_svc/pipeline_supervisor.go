@@ -43,11 +43,6 @@ var pipeline_supervisor_setting_defs base.SettingDefinitions = base.SettingDefin
 	PIPELINE_LOG_LEVEL:            base.NewSettingDef(reflect.TypeOf((*log.LogLevel)(nil)), false),
 	supervisor.HEARTBEAT_INTERVAL: base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false)}
 
-type PipelineSupervisorSvc interface {
-	common.PipelineService
-	common.ComponentEventListener
-}
-
 type PipelineSupervisor struct {
 	*supervisor.GenericSupervisor
 	pipeline         common.Pipeline

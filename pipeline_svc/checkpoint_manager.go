@@ -426,11 +426,11 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 	if supervisor == nil {
 		return errors.New("Pipeline supervisor has to exist")
 	}
-	err = ckmgr.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
+	err = ckmgr.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(common.PipelineSupervisorSvc))
 	if err != nil {
 		return err
 	}
-	err = ckmgr.RegisterComponentEventListener(common.VBErrorEncountered, supervisor.(*PipelineSupervisor))
+	err = ckmgr.RegisterComponentEventListener(common.VBErrorEncountered, supervisor.(common.PipelineSupervisorSvc))
 	if err != nil {
 		return err
 	}
@@ -593,21 +593,13 @@ func (ckmgr *CheckpointManager) initialize() {
 
 func (ckmgr *CheckpointManager) initializeCkptsPerVB() {
 	myVBsList := ckmgr.getMyVBs()
-	for _, vbno := range myVBsList {
-		ckmgr.initializeCheckpointForVB(vbno)
-	}
-
 	myTgtVBsList := ckmgr.getMyTgtVBs()
-
-	if ckmgr.isVariableVBMode() && len(myTgtVBsList) > len(myVBsList) {
-		_, tgtVBs, _ := base.ComputeDeltaOfUint16Lists(myVBsList, myTgtVBsList, false)
-		for _, vbno := range tgtVBs {
-			ckmgr.initializeCheckpointForVB(vbno)
-		}
+	for _, vbno := range myVBsList {
+		ckmgr.initializeCheckpointForVB(vbno, myTgtVBsList)
 	}
 }
 
-func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16) {
+func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16, tgtVbList []uint16) {
 	ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
 	ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
 	ckmgr.snapshot_history_map[vbno] = &snapshotHistoryWithLock{
@@ -619,9 +611,10 @@ func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16) {
 		ckptToEnhance := ckmgr.cur_ckpts[vbno].ckpt
 		ckptToEnhance.GlobalTimestamp = make(metadata.GlobalTimestamp)
 		ckptToEnhance.GlobalCounters = make(metadata.GlobalTargetCounters)
-		for _, vb := range ckmgr.getMyTgtVBs() {
-			ckptToEnhance.GlobalTimestamp[vb] = &metadata.TargetVBTimestamp{}
-			ckptToEnhance.GlobalCounters[vb] = &metadata.TargetPerVBCounters{}
+
+		for _, tgtVb := range tgtVbList {
+			ckptToEnhance.GlobalTimestamp[tgtVb] = &metadata.GlobalVBTimestamp{}
+			ckptToEnhance.GlobalCounters[tgtVb] = &metadata.TargetPerVBCounters{}
 		}
 	}
 }
@@ -854,6 +847,7 @@ func (ckmgr *CheckpointManager) getMyVBs() []uint16 {
 func (ckmgr *CheckpointManager) getMyTgtVBs() []uint16 {
 	targetKvVbMap, err := ckmgr.TargetKvVbMap()
 	if err != nil {
+		ckmgr.logger.Errorf("Unable to get targetKvVbMap: %v", err)
 		return []uint16{}
 	}
 	return base.GetVbListFromKvVbMap(targetKvVbMap)
@@ -891,11 +885,26 @@ func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque meta
 		obj.lock.Lock()
 		defer obj.lock.Unlock()
 		record := obj.ckpt
+
 		record.Target_vb_opaque = vbOpaque
 	} else {
 		err := fmt.Errorf("%v %v Trying to update vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 		ckmgr.handleGeneralError(err)
 	}
+}
+
+func (ckmgr *CheckpointManager) updateCurrentGlobalVBOpaque(vbno, targetVbno uint16, vbOpaque metadata.TargetVBOpaque) {
+	obj, ok := ckmgr.cur_ckpts[vbno]
+	if ok {
+		obj.lock.Lock()
+		defer obj.lock.Unlock()
+		record := obj.ckpt
+		record.GlobalTimestamp[targetVbno].Target_vb_opaque = vbOpaque
+	} else {
+		err := fmt.Errorf("%v %v Trying to update vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
+		ckmgr.handleGeneralError(err)
+	}
+
 }
 
 // handle fatal error, raise error event to pipeline supervisor
@@ -1393,7 +1402,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		}
 
 		if targetTimestamp != nil || globalTargetTimestamp != nil {
-			bMatch, err := ckmgr.validateTargetTimestampFoResume(vbno, targetTimestamp, globalTargetTimestamp)
+			bMatch, err := ckmgr.validateTargetTimestampForResume(vbno, targetTimestamp, globalTargetTimestamp)
 			if err != nil {
 				return nil, nil, nil, 0, 0, err
 			}
@@ -1418,9 +1427,22 @@ POPULATE:
 	return vbts, vbStatMap, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err
 }
 
-func (ckmgr *CheckpointManager) validateTargetTimestampFoResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, timestamp map[uint16]*service_def.RemoteVBReplicationStatus) (bool, error) {
+func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus) (bool, error) {
 	if ckmgr.isVariableVBMode() {
-		return false, fmt.Errorf("TODO not implemented")
+		var opFailed uint32
+		// TODO NEIL - this is too slow
+		for targetVbno, oneTargetTs := range globalTs {
+			bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, oneTargetTs, ckmgr.support_ckpt)
+			if err != nil {
+				ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
+				return false, err
+			} else if !bMatch {
+				return false, nil
+			}
+
+			ckmgr.updateCurrentGlobalVBOpaque(vbno, targetVbno, current_remoteVBOpaque)
+		}
+		return atomic.LoadUint32(&opFailed) == 0, nil
 	} else {
 		bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, ckmgr.support_ckpt)
 		if err != nil {
@@ -1970,7 +1992,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		return
 	}
 
-	if curCkptTargetVBOpaque == nil {
+	if curCkptTargetVBOpaque == nil || curCkptTargetVBOpaque.Value() == nil {
 		err = fmt.Errorf("Target timestamp for vb %v is not populated properly", vbno)
 		return
 	}
@@ -2122,7 +2144,7 @@ func (ckmgr *CheckpointManager) getRemoteSeqno(vbno uint16, high_seqno_and_vbuui
 	vbuuid := high_seqno_and_vbuuid[1]
 	targetVBOpaque := &metadata.TargetVBUuid{vbuuid}
 	if !curCkptTargetVBOpaque.IsSame(targetVBOpaque) {
-		//ckmgr.logger.Errorf("target vbuuid has changed for vb=%v. old=%v, new=%v", vbno, curCkptTargetVBOpaque, targetVBOpaque)
+		ckmgr.logger.Errorf("target vbuuid has changed for vb=%v. old=%v, new=%v", vbno, curCkptTargetVBOpaque, targetVBOpaque)
 		return nil, targetVbuuidChangedError
 	}
 	remoteSeqno := &metadata.TargetVBTimestamp{
@@ -3485,9 +3507,13 @@ func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(highSeqnoAndVBUuid meta
 		return nil, fmt.Errorf("%v:  getRemoteGlobalTimestamp:highSeqnoAndVBUuid", base.ErrorNilPtr.Error())
 	}
 
+	if globalTargetOpaque == nil {
+		return nil, fmt.Errorf("%v:  getRemoteGlobalTimestamp:globalTargetOpaque", base.ErrorNilPtr.Error())
+	}
+
 	// first check if vbuuid has changed or not
 	if !highSeqnoAndVBUuid.IsSame(globalTargetOpaque) {
-		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", highSeqnoAndVBUuid, globalTargetOpaque)
+		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", globalTargetOpaque, highSeqnoAndVBUuid)
 		return nil, targetVbuuidChangedError
 	}
 
