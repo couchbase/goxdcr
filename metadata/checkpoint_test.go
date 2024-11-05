@@ -58,10 +58,12 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		BrokenMappingSha256: "",
 		brokenMappings:      nil,
 		GlobalTimestamp: GlobalTimestamp{
-			100: &TargetVBTimestamp{
-				Target_vb_opaque: vbUuidAndTimestamp,
-				Target_Seqno:     5,
-				TargetManifest:   10,
+			100: &GlobalVBTimestamp{
+				TargetVBTimestamp{
+					Target_vb_opaque: vbUuidAndTimestamp,
+					Target_Seqno:     5,
+					TargetManifest:   10,
+				},
 			},
 		},
 		GlobalCounters: GlobalTargetCounters{
@@ -548,12 +550,18 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 	}{
 		{
 			name: "globalGetValueTest",
-			g: map[uint16]*TargetVBTimestamp{
-				0: &TargetVBTimestamp{Target_vb_opaque: &TargetVBUuid{1},
-					Target_Seqno: 2,
+			g: map[uint16]*GlobalVBTimestamp{
+				0: &GlobalVBTimestamp{
+					TargetVBTimestamp: TargetVBTimestamp{
+						Target_vb_opaque: &TargetVBUuid{1},
+						Target_Seqno:     2,
+					},
 				},
-				1: &TargetVBTimestamp{Target_vb_opaque: &TargetVBUuid{5},
-					Target_Seqno: 3,
+				1: &GlobalVBTimestamp{
+					TargetVBTimestamp: TargetVBTimestamp{
+						Target_vb_opaque: &TargetVBUuid{5},
+						Target_Seqno:     3,
+					},
 				},
 			},
 			want: map[uint16]*TargetVBUuid{

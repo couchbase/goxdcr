@@ -80,6 +80,22 @@ type SourceVBTimestamp struct {
 	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
 }
 
+type GlobalVBTimestamp struct {
+	TargetVBTimestamp
+}
+
+func (g *GlobalVBTimestamp) IsTraditional() bool {
+	return false
+}
+
+func (g *GlobalVBTimestamp) SameAs(other *GlobalVBTimestamp) bool {
+	return g.TargetVBTimestamp.SameAs(&other.TargetVBTimestamp)
+}
+
+func (g *GlobalVBTimestamp) GetValue() interface{} {
+	return g
+}
+
 // TargetVBTimestamp defines the necessary items to confirm that the checkpoint is valid for resuming
 type TargetVBTimestamp struct {
 	//target vb opaque / high seqno
@@ -142,14 +158,15 @@ func (t *TargetVBTimestamp) LoadUnmarshalled(v interface{}) error {
 }
 
 // Also needs to inplement VBOpaque
-type GlobalTimestamp map[uint16]*TargetVBTimestamp
+type GlobalTimestamp map[uint16]*GlobalVBTimestamp
 
 func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
-	otherGlobalTs, ok := targetVBOpaque.Value().(*GlobalTimestamp)
+	otherGlobalTsMap, ok := targetVBOpaque.Value().(map[uint16]*GlobalVBTimestamp)
 	if !ok {
 		return false
 	}
-	return g.SameAs(otherGlobalTs)
+	otherGlobalTs := GlobalTimestamp(otherGlobalTsMap)
+	return g.SameAs(&otherGlobalTs)
 }
 
 func (g *GlobalTimestamp) Size() int {
@@ -157,6 +174,9 @@ func (g *GlobalTimestamp) Size() int {
 }
 
 func (g *GlobalTimestamp) Value() interface{} {
+	if g == nil {
+		return nil
+	}
 	return g.GetValue()
 }
 
@@ -218,7 +238,7 @@ func (g *GlobalTimestamp) LoadUnmarshalled(generic map[string]interface{}) error
 		}
 		vb := uint16(vbInt)
 
-		newTargetTs := TargetVBTimestamp{}
+		newTargetTs := GlobalVBTimestamp{}
 		err = newTargetTs.LoadUnmarshalled(v)
 		if err != nil {
 			return err
@@ -940,7 +960,10 @@ func (g *GlobalTargetVbUuids) Size() int {
 }
 
 func (g *GlobalTargetVbUuids) Value() interface{} {
-	return g
+	if g == nil {
+		return nil
+	}
+	return *g
 }
 
 // IsSame essentially checks to make sure all VBUUIDs haven't changed
@@ -950,16 +973,29 @@ func (g *GlobalTargetVbUuids) Value() interface{} {
 // meant to be a direct comparison between two GlobalTargetVbUuids objects
 // Use SameAs() for direct comparisons
 func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
-	opaqueMap := globalTargetOpaque.Value().(map[uint16]*TargetVBUuid)
-	for vb, curTargetVbUuid := range opaqueMap {
-		seqnoAndVbuuid, ok := (*g)[vb]
+	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*TargetVBUuid)
+	if !ok {
+		// We don't accept any other type of TargetVBOpaque for global checkpointing
+		// But because interface is hard-coded, there's no other way to raise error and prefer not to
+		// raise panic
+		// So, need to watch out for testing to see if it's constantly restreaming from 0
+		// due to mismatching target VBOpaque
+		return false
+	}
+
+	// VBs need to match
+	if len(*g) != len(lastFetchedTargetOpaque) {
+		return false
+	}
+
+	for vb, latestTargetVbUuid := range lastFetchedTargetOpaque {
+		currentKnownSeqnoAndVbuuid, ok := (*g)[vb]
 		if !ok {
 			return false
 		}
-		vbuuid := seqnoAndVbuuid[1]
+		currentKnownVbUuid := currentKnownSeqnoAndVbuuid[1]
 
-		latestVbUuid := &TargetVBUuid{vbuuid}
-		if !curTargetVbUuid.IsSame(latestVbUuid) {
+		if currentKnownVbUuid != latestTargetVbUuid.Target_vb_uuid {
 			return false
 		}
 	}
@@ -988,10 +1024,12 @@ func (g *GlobalTargetVbUuids) ToGlobalTimestamp() *GlobalTimestamp {
 
 	gts := make(GlobalTimestamp)
 	for vb, pair := range *g {
-		gts[vb] = &TargetVBTimestamp{
-			Target_vb_opaque: &TargetVBUuid{pair[1]},
-			Target_Seqno:     pair[0],
-			//TargetManifest:   0, // TODO
+		gts[vb] = &GlobalVBTimestamp{
+			TargetVBTimestamp: TargetVBTimestamp{
+				Target_vb_opaque: &TargetVBUuid{pair[1]},
+				Target_Seqno:     pair[0],
+				//TargetManifest:   0, // TODO
+			},
 		}
 	}
 

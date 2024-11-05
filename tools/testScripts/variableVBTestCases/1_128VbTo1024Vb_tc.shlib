@@ -25,7 +25,7 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]=false)
 
 # Bucket -> Scopes
 # -----------------
@@ -85,6 +85,10 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
+
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 15
+	grepForPanics
 
 	echo "============================================================================"
 	echo "PASSED"
