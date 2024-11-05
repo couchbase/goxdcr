@@ -600,3 +600,107 @@ func TestDecodeULEB128(t *testing.T) {
 		}
 	}
 }
+
+func TestStringListSearch(t *testing.T) {
+	assert := assert.New(t)
+
+	list1 := StringList{"a", "b", "c"}
+	list2 := StringList{"c", "b", "a"}
+	list3 := StringList{}
+
+	assert.True(list1.Search("a", false))
+	assert.True(list1.Search("a", true))
+	assert.False(list1.Search("1", false))
+	assert.False(list1.Search("1", true))
+
+	assert.True(list2.Search("a", false))
+
+	assert.False(list3.Search("a", true))
+}
+
+func TestParseDatatypeVxattr(t *testing.T) {
+	comparitor := func(in string, isJson, isSnappy, isXattr bool) {
+		assert.Equal(t, isJson, strings.Contains(in, JsonDataTypeStr))
+		assert.Equal(t, isSnappy, strings.Contains(in, SnappyDataTypeStr))
+		assert.Equal(t, isXattr, strings.Contains(in, XattrDataTypeStr))
+	}
+
+	tests := []struct {
+		name         string
+		vxattr       []byte
+		wantIsJson   bool
+		wantIsSnappy bool
+		wantIsXattr  bool
+	}{
+		{
+			name:   "nil",
+			vxattr: nil,
+		},
+		{
+			name:   "none",
+			vxattr: []byte("[]"),
+		},
+		{
+			name:       "only json",
+			vxattr:     []byte(fmt.Sprintf(`["%s"]`, JsonDataTypeStr)),
+			wantIsJson: true,
+		},
+		{
+			name:         "only snappy",
+			vxattr:       []byte(fmt.Sprintf(`["%s"]`, SnappyDataTypeStr)),
+			wantIsSnappy: true,
+		},
+		{
+			name:        "only xattr",
+			vxattr:      []byte(fmt.Sprintf(`["%s"]`, XattrDataTypeStr)),
+			wantIsXattr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isJson, isSnappy, isXattr := ParseDatatypeVxattr(tt.vxattr)
+			comparitor(string(tt.vxattr), isJson, isSnappy, isXattr)
+		})
+	}
+
+	datatypes := []string{JsonDataTypeStr, SnappyDataTypeStr, XattrDataTypeStr}
+	idxs := []int{0, 1, 2}
+	p := Permutations(idxs)
+
+	for _, arr := range p {
+		// only 2 of the 3 exists
+		vxattr := []byte(fmt.Sprintf(`["%s","%s"]`, datatypes[arr[0]], datatypes[arr[1]]))
+		isJson, isSnappy, isXattr := ParseDatatypeVxattr(vxattr)
+		comparitor(string(vxattr), isJson, isSnappy, isXattr)
+
+		// all 3 exists
+		vxattr = []byte(fmt.Sprintf(`["%s","%s","%s"]`, datatypes[arr[0]], datatypes[arr[1]], datatypes[arr[2]]))
+		isJson, isSnappy, isXattr = ParseDatatypeVxattr(vxattr)
+		comparitor(string(vxattr), isJson, isSnappy, isXattr)
+	}
+}
+
+// Heap's Algorithm: generates all possible permutations for a given array, with minimal movements.
+func Permutations(arr []int) [][]int {
+	var helper func([]int, int)
+	res := [][]int{}
+
+	helper = func(arr []int, n int) {
+		if n == 1 {
+			tmp := make([]int, len(arr))
+			copy(tmp, arr)
+			res = append(res, tmp)
+		} else {
+			for i := 0; i < n; i++ {
+				helper(arr, n-1)
+				if n%2 == 1 {
+					arr[i], arr[n-1] = arr[n-1], arr[i]
+				} else {
+					arr[0], arr[n-1] = arr[n-1], arr[0]
+				}
+			}
+		}
+	}
+	helper(arr, len(arr))
+	return res
+}

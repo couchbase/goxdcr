@@ -2112,12 +2112,17 @@ func (lookupResp *WrappedMCResponse) IsTargetJson() (bool, error) {
 			// Response for datatype virtual XATTR should not be nil. This should never happen
 			return false, errors.New("Lookup for datatype virtual xattrs received nil response")
 		}
-		res, err := regexp.Match(JsonDataTypeStr, value)
-		if err == nil && res == true {
-			return true, nil
-		} else {
-			return false, nil
+		vxattrLen := len(value)
+		jsonDatatypeStrLength := len(JsonDataTypeStr)
+
+		for i := 0; i < vxattrLen; i++ {
+			if i+jsonDatatypeStrLength <= vxattrLen {
+				if value[i] == JsonDataTypeStr[0] && Equals(value[i:i+jsonDatatypeStrLength], JsonDataTypeStr) {
+					return true, nil
+				}
+			}
 		}
+		return false, nil
 	default:
 		return false, fmt.Errorf("invalid get opcode for IsTargetJson %v", opcode)
 	}
@@ -2316,13 +2321,14 @@ func DecodeSubDocResp(key []byte, lookupResp *WrappedMCResponse) (DocumentMetada
 					docMeta.RevSeq = uint64(revid)
 				}
 			case VXATTR_DATATYPE:
-				if isJson, err := regexp.Match(JsonDataTypeStr, body[pos:pos+xattrlen]); err == nil && isJson {
+				isJson, isSnappy, isXattr := ParseDatatypeVxattr(body[pos : pos+xattrlen])
+				if isJson {
 					docMeta.DataType = docMeta.DataType | JSONDataType
 				}
-				if isSnappy, err := regexp.Match(SnappyDataTypeStr, body[pos:pos+xattrlen]); err == nil && isSnappy {
+				if isSnappy {
 					docMeta.DataType = docMeta.DataType | SnappyDataType
 				}
-				if isXattr, err := regexp.Match(XattrDataTypeStr, body[pos:pos+xattrlen]); err == nil && isXattr {
+				if isXattr {
 					docMeta.DataType = docMeta.DataType | XattrDataType
 				}
 			case VXATTR_EXPIRY:
@@ -2348,6 +2354,53 @@ func DecodeSubDocResp(key []byte, lookupResp *WrappedMCResponse) (DocumentMetada
 		pos = pos + xattrlen
 	}
 	return docMeta, nil
+}
+
+// datatype vxattr response will be of the form of a json list of strings containing one of:
+// "json", "snappy" and "xattr"
+func ParseDatatypeVxattr(vxattr []byte) (isJson bool, isSnappy bool, isXattr bool) {
+	vxattrLen := len(vxattr)
+	if vxattrLen == 0 {
+		return
+	}
+
+	var matches bool
+	jsonDatatypeStrLength := len(JsonDataTypeStr)
+	snappyDatatypeStrLength := len(SnappyDataTypeStr)
+	xattrDatatypeStrLength := len(XattrDataTypeStr)
+	i := 0
+	for i < vxattrLen {
+		if vxattr[i] == JsonDataTypeStr[0] && i+jsonDatatypeStrLength <= vxattrLen {
+			matches = Equals(vxattr[i:i+jsonDatatypeStrLength], JsonDataTypeStr)
+			if matches {
+				isJson = true
+				i += jsonDatatypeStrLength
+				continue
+			}
+		}
+
+		if vxattr[i] == SnappyDataTypeStr[0] && i+snappyDatatypeStrLength <= vxattrLen {
+			matches = Equals(vxattr[i:i+snappyDatatypeStrLength], SnappyDataTypeStr)
+			if matches {
+				isSnappy = true
+				i += snappyDatatypeStrLength
+				continue
+			}
+		}
+
+		if vxattr[i] == XattrDataTypeStr[0] && i+xattrDatatypeStrLength <= vxattrLen {
+			matches = Equals(vxattr[i:i+xattrDatatypeStrLength], XattrDataTypeStr)
+			if matches {
+				isXattr = true
+				i += xattrDatatypeStrLength
+				continue
+			}
+		}
+
+		i++
+	}
+
+	return
 }
 
 type PruningFunc func(cas uint64) bool
