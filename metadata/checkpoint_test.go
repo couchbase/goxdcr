@@ -47,15 +47,15 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			BrokenMappingSha256: "",
 			brokenMappings:      nil,
 		},
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:  5,
 			FilteredFailedCnt: 6,
+			CasPoisonCnt:      1,
 		},
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt: 100,
 			GuardrailDataSizeCnt:      200,
 			GuardrailDiskSpaceCnt:     300,
-			CasPoisonCnt:              1,
 		},
 	}
 
@@ -82,15 +82,15 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			BrokenMappingSha256: "",
 			brokenMappings:      brokenMap,
 		},
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:  5,
 			FilteredFailedCnt: 6,
+			CasPoisonCnt:      2,
 		},
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt: 50,
 			GuardrailDataSizeCnt:      100,
 			GuardrailDiskSpaceCnt:     200,
-			CasPoisonCnt:              2,
 		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
@@ -376,9 +376,10 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			SourceManifestForDCP:         7,
 			SourceManifestForBackfillMgr: 8,
 		},
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:  5,
 			FilteredFailedCnt: 6,
+			CasPoisonCnt:      2,
 		},
 		GlobalTimestamp: GlobalTimestamp{
 			100: &GlobalVBTimestamp{
@@ -390,9 +391,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			},
 		},
 		GlobalCounters: GlobalTargetCounters{
-			1: &TargetPerVBCounters{
-				CasPoisonCnt: 2,
-			},
+			1: &TargetPerVBCounters{},
 		},
 	}
 	assert.Nil(newCkptRecord.PopulateGlobalTimestampSha())
@@ -421,9 +420,10 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			SourceManifestForDCP:         7,
 			SourceManifestForBackfillMgr: 8,
 		},
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:  5,
 			FilteredFailedCnt: 6,
+			CasPoisonCnt:      2,
 		},
 		GlobalTimestamp: GlobalTimestamp{
 			100: &GlobalVBTimestamp{
@@ -446,9 +446,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			},
 		},
 		GlobalCounters: GlobalTargetCounters{
-			1: &TargetPerVBCounters{
-				CasPoisonCnt: 2,
-			},
+			1: &TargetPerVBCounters{},
 		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
