@@ -17,11 +17,12 @@ type SourceClustersProvider interface {
 }
 
 type HeartbeatCache struct {
-	metadata.HeartbeatMetadata
+	cacheMtx sync.RWMutex
 
-	cacheMtx    sync.RWMutex
-	expiryTimer *time.Timer
-	refreshTime time.Time
+	metadata.HeartbeatMetadata
+	sourceSendTime time.Time
+	refreshTime    time.Time
+	expiryTimer    *time.Timer
 }
 
 // note: should NOT be concurrently called on the same HeartbeatCache value
@@ -31,6 +32,7 @@ func (h *HeartbeatCache) LoadInfoFrom(req *SourceHeartbeatReq) {
 	h.NodesList = req.NodesList
 	h.SourceSpecsList = req.specs
 	h.TTL = req.TTL
+	h.sourceSendTime = req.SendTime
 }
 
 func (h *HeartbeatCache) HasHeartbeatMetadataChanged(incomingReq *SourceHeartbeatReq) bool {
@@ -138,8 +140,13 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 		hbCache.cacheMtx.Lock()
 		defer hbCache.cacheMtx.Unlock()
 
+		if req.SendTime.Before(hbCache.sourceSendTime) {
+			s.logger.Debugf("stale heartbeat received from cluster %v (node %v), ignoring", req.SourceClusterName, req.Sender)
+			return
+		}
+
 		if !hbCache.expiryTimer.Stop() {
-			// heartbeat arrived too late; cache entry has already expired
+			s.logger.Debugf("heartbeat arrived too late from cluster %v (node %v); cache entry has already expired", req.SourceClusterName, req.Sender)
 			return
 		}
 		hbCache.expiryTimer.Reset(req.TTL)

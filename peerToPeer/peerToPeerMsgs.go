@@ -2124,6 +2124,7 @@ type SourceHeartbeatReq struct {
 	NodesList         []string
 	ProxyMode         bool // ProxyMode is set when the receiver node needs to forward the request to its peers
 	TTL               time.Duration
+	SendTime          time.Time
 
 	specs []*metadata.ReplicationSpecification // Use this but not meant for over the wire
 
@@ -2136,6 +2137,7 @@ func NewSourceHeartbeatReq(common RequestCommon) *SourceHeartbeatReq {
 		ProxyMode:     true,
 	}
 	req.ReqType = ReqSrcHeartbeat
+	req.SendTime = time.Now()
 	return req
 }
 
@@ -2146,6 +2148,7 @@ func (s *SourceHeartbeatReq) LoadInfoFrom(orig *SourceHeartbeatReq) *SourceHeart
 	s.NodesList = orig.NodesList
 	s.ProxyMode = orig.ProxyMode
 	s.TTL = orig.TTL
+	s.SendTime = orig.SendTime
 	return s
 }
 
