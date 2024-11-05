@@ -505,9 +505,9 @@ func (g *GlobalTimestamp) CompressToShaCompresedMap(preExistMap ShaMappingCompre
 	return nil
 }
 
-// SourceFilteredCounters are item counts based on source VB streams and are restored to the source-related
+// SourceVBCounters are item counts based on source VB streams and are restored to the source-related
 // components when resuming from a checkpoint
-type SourceFilteredCounters struct {
+type SourceVBCounters struct {
 	// Number of items filtered
 	FilteredItemsCnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
@@ -537,9 +537,11 @@ type SourceFilteredCounters struct {
 	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
 	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
 	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
+	// Number of items that did not send due to source document CAS clock out of bounds
+	CasPoisonCnt uint64 `json:"cas_poison_cnt"`
 }
 
-func (s *SourceFilteredCounters) SameAs(other *SourceFilteredCounters) bool {
+func (s *SourceVBCounters) SameAs(other *SourceVBCounters) bool {
 	if s == nil || other == nil {
 		return s == nil && other == nil
 	}
@@ -559,7 +561,8 @@ func (s *SourceFilteredCounters) SameAs(other *SourceFilteredCounters) bool {
 		s.FilteredConflictDocs == other.FilteredConflictDocs &&
 		s.SrcConflictDocsWritten == other.SrcConflictDocsWritten &&
 		s.TgtConflictDocsWritten == other.TgtConflictDocsWritten &&
-		s.CRDConflictDocsWritten == other.CRDConflictDocsWritten
+		s.CRDConflictDocsWritten == other.CRDConflictDocsWritten &&
+		s.CasPoisonCnt == other.CasPoisonCnt
 }
 
 // TargetPerVBCounters contain a list of counters that are collected throughout a target VB's
@@ -572,7 +575,6 @@ type TargetPerVBCounters struct {
 	// Number of subdoc commands used, instead of set_with_meta/delete_with_meta
 	DocsSentWithSubdocSetCnt    uint64 `json:"docs_sent_with_subdoc_set"`
 	DocsSentWithSubdocDeleteCnt uint64 `json:"docs_sent_with_subdoc_delete"`
-	CasPoisonCnt                uint64 `json:"cas_poison_cnt"`
 	// Docs sent with a poisoned CAS value
 	DocsSentWithPoisonedCasErrorMode   uint64 `json:"docs_sent_with_poisoned_cas_error_mode"`
 	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
@@ -607,7 +609,6 @@ func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
 		t.GuardrailResidentRatioCnt == other.GuardrailResidentRatioCnt &&
 		t.DocsSentWithSubdocDeleteCnt == other.DocsSentWithSubdocDeleteCnt &&
 		t.DocsSentWithSubdocSetCnt == other.DocsSentWithSubdocSetCnt &&
-		t.CasPoisonCnt == other.CasPoisonCnt &&
 		t.DocsSentWithPoisonedCasErrorMode == other.DocsSentWithPoisonedCasErrorMode &&
 		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode
 }
@@ -647,10 +648,6 @@ func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
 		t.DocsSentWithSubdocDeleteCnt = uint64(docsSentWithSubdocDelete.(float64))
 	}
 
-	casPoisonCnt, ok := fieldMap[CasPoisonCnt]
-	if ok {
-		t.CasPoisonCnt = uint64(casPoisonCnt.(float64))
-	}
 	docsSentWithPoisonedCasError, ok := fieldMap[DocsSentWithPoisonedCasErrorMode]
 	if ok {
 		t.DocsSentWithPoisonedCasErrorMode = uint64(docsSentWithPoisonedCasError.(float64))
@@ -744,7 +741,7 @@ type CheckpointRecord struct {
 	CreationTime uint64 `json:"creationTime"`
 
 	SourceVBTimestamp
-	SourceFilteredCounters
+	SourceVBCounters
 
 	// Traditional checkpoints will utilize one single TargetVBTimestamp and one single TargetPerVBCounters
 	TargetVBTimestamp
@@ -1028,7 +1025,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			SourceManifestForBackfillMgr: srcManifestForBackfill,
 		},
 		TargetVBTimestamp: *tgtTimestamp,
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:                   filteredItems,
 			FilteredFailedCnt:                  filterFailed,
 			FilteredItemsOnExpirationsCnt:      filteredExpiredItems,
@@ -1045,6 +1042,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			SrcConflictDocsWritten:             srcConflictDocsWritten,
 			TgtConflictDocsWritten:             tgtConflictDocsWritten,
 			CRDConflictDocsWritten:             crdConflictDocsWritten,
+			CasPoisonCnt:                       casPoisonItems,
 		},
 		CreationTime: creationTime,
 		TargetPerVBCounters: TargetPerVBCounters{
@@ -1053,7 +1051,6 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			GuardrailDiskSpaceCnt:              guardrailDiskSpaceItems,
 			DocsSentWithSubdocSetCnt:           subdocSetItems,
 			DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
-			CasPoisonCnt:                       casPoisonItems,
 			DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
 			DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
 			GetDocsCasChangedCnt:               getDocsCasChangedCnt,
@@ -1067,7 +1064,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetTimestamp TargetTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, creationTime uint64, incomingMetric base.VBCountMetric) (*CheckpointRecord, error) {
 	vbCountMetrics := incomingMetric.GetValue().(base.GlobalVBMetrics)
 
-	var srcFilteredCntrs SourceFilteredCounters
+	var srcFilteredCntrs SourceVBCounters
 	for _, routerKey := range base.RouterVBMetricKeys {
 		vbCountMap := vbCountMetrics[routerKey]
 		if len(vbCountMap) > 1 {
@@ -1102,6 +1099,8 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			srcFilteredCntrs.FilteredItemsOnMobileRecords = uint64(vbCountMap[vbKey])
 		case base.DocsFilteredOnUserDefinedFilter:
 			srcFilteredCntrs.FilteredItemsOnUserDefinedFilters = uint64(vbCountMap[vbKey])
+		case base.DocsCasPoisoned:
+			srcFilteredCntrs.CasPoisonCnt = uint64(vbCountMap[vbKey])
 		}
 	}
 
@@ -1144,8 +1143,6 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 				globalCntrs[vb].DocsSentWithSubdocSetCnt = uint64(count)
 			case base.DocsSentWithSubdocDelete:
 				globalCntrs[vb].DocsSentWithSubdocDeleteCnt = uint64(count)
-			case base.DocsCasPoisoned:
-				globalCntrs[vb].CasPoisonCnt = uint64(count)
 			case base.DocsSentWithPoisonedCasErrorMode:
 				globalCntrs[vb].DocsSentWithPoisonedCasErrorMode = uint64(count)
 			case base.DocsSentWithPoisonedCasReplaceMode:
@@ -1188,10 +1185,10 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			SourceManifestForDCP:         srcManifestForDCP,
 			SourceManifestForBackfillMgr: srcManifestForBackfill,
 		},
-		SourceFilteredCounters: srcFilteredCntrs,
-		GlobalCounters:         globalCntrs,
-		GlobalTimestamp:        *globalTs,
-		CreationTime:           creationTime,
+		SourceVBCounters: srcFilteredCntrs,
+		GlobalCounters:   globalCntrs,
+		GlobalTimestamp:  *globalTs,
+		CreationTime:     creationTime,
 	}
 	return record, nil
 }
@@ -1239,7 +1236,7 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.Dcp_snapshot_seqno == newRecord.Dcp_snapshot_seqno &&
 		ckptRecord.Dcp_snapshot_end_seqno == newRecord.Dcp_snapshot_end_seqno &&
 		ckptRecord.TargetVBTimestamp.SameAs(&newRecord.TargetVBTimestamp) &&
-		ckptRecord.SourceFilteredCounters.SameAs(&newRecord.SourceFilteredCounters) &&
+		ckptRecord.SourceVBCounters.SameAs(&newRecord.SourceVBCounters) &&
 		ckptRecord.SourceManifestForDCP == newRecord.SourceManifestForDCP &&
 		ckptRecord.SourceManifestForBackfillMgr == newRecord.SourceManifestForBackfillMgr &&
 		ckptRecord.BrokenMappingSha256 == newRecord.BrokenMappingSha256 &&
@@ -2399,7 +2396,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			brokenMappings:      c.brokenMappings.Clone(),
 			brokenMappingsMtx:   sync.RWMutex{},
 		},
-		SourceFilteredCounters: SourceFilteredCounters{
+		SourceVBCounters: SourceVBCounters{
 			FilteredItemsCnt:                   c.FilteredItemsCnt,
 			FilteredFailedCnt:                  c.FilteredFailedCnt,
 			FilteredItemsOnExpirationsCnt:      c.FilteredItemsOnExpirationsCnt,
@@ -2416,6 +2413,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			SrcConflictDocsWritten:             c.SrcConflictDocsWritten,
 			TgtConflictDocsWritten:             c.TgtConflictDocsWritten,
 			CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
+			CasPoisonCnt:                       c.CasPoisonCnt,
 		},
 
 		CreationTime: c.CreationTime,
@@ -2425,7 +2423,6 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			GuardrailResidentRatioCnt:          c.GuardrailResidentRatioCnt,
 			DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
 			DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
-			CasPoisonCnt:                       c.CasPoisonCnt,
 			DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
 			DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
 			TrueConflictsDetected:              c.TrueConflictsDetected,
