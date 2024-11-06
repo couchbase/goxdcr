@@ -2060,6 +2060,27 @@ func (s *ShaToCollectionNamespaceMap) Merge(other ShaToCollectionNamespaceMap) {
 	}
 }
 
+func (s *ShaToCollectionNamespaceMap) CompressToShaCompressedMap(preExistMap ShaMappingCompressedMap) error {
+	if s == nil {
+		return base.ErrorNilPtr
+	}
+
+	errorMap := make(base.ErrorMap)
+
+	for sha, brokenMap := range *s {
+		if _, exists := preExistMap[sha]; exists {
+			continue
+		}
+		compressedBytes, compressErr := brokenMap.ToSnappyCompressed()
+		if compressErr != nil {
+			errorMap[fmt.Sprintf("BrokenMap: %v", brokenMap.String())] = fmt.Errorf("Unable to snappyCompress")
+		}
+		preExistMap[sha] = compressedBytes
+	}
+
+	return nil
+}
+
 type CompressedColNamespaceMapping struct {
 	// Snappy compressed byte slice of CollectionNamespaceMapping
 	CompressedMapping []byte `json:compressedMapping`
