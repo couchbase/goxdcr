@@ -1229,14 +1229,20 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 			continue
 		}
 
-		brokenMapping := record.BrokenMappings()
-		if brokenMapping == nil || len(*brokenMapping) == 0 {
+		brokenMappings := record.BrokenMappings()
+		if brokenMappings == nil || len(brokenMappings) == 0 {
 			continue
 		}
-		if ckmgr.cachedBrokenMap.brokenMap == nil {
-			ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+
+		for _, brokenMapping := range brokenMappings {
+			if ckmgr.cachedBrokenMap.brokenMap == nil {
+				ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+			}
+			if brokenMapping == nil || len(*brokenMapping) == 0 {
+				continue
+			}
+			ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMapping)
 		}
-		ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMapping)
 	}
 	ckmgr.cachedBrokenMap.correspondingTargetManifest = highestManifestId
 
@@ -1561,6 +1567,7 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	var brokenMapping *metadata.CollectionNamespaceMapping
+	var brokenMappings metadata.ShaToCollectionNamespaceMap
 	var targetManifestId uint64
 	var backfillBypassAgreedIndex bool
 	var lastSucccessfulBackfillMgrSrcManifestId uint64
@@ -1588,7 +1595,15 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifestForDCP
 			vbts.ManifestIDs.TargetManifestId = ckpt_record.TargetManifest
 
-			brokenMapping = ckpt_record.BrokenMappings()
+			// TODO MB-63393
+			brokenMappings = ckpt_record.BrokenMappings()
+			if len(brokenMappings) > 1 {
+				ckmgr.logger.Errorf("coding error: legacy should have only 1 broken map %v", brokenMappings)
+				return nil, nil, 0, 0, fmt.Errorf("legacy broken map shown as global")
+			}
+			for _, v := range brokenMappings {
+				brokenMapping = v
+			}
 			targetManifestId = ckpt_record.TargetManifest
 			lastSucccessfulBackfillMgrSrcManifestId = ckpt_record.SourceManifestForBackfillMgr
 		}
@@ -1627,8 +1642,9 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
 			obj.ckpt.Seqno = vbts.Seqno
-			if brokenMapping != nil {
-				obj.ckpt.LoadBrokenMapping(*brokenMapping)
+			// TODO MB-63393 double check
+			if brokenMappings != nil {
+				obj.ckpt.LoadBrokenMapping(brokenMappings)
 			}
 			obj.ckpt.TargetManifest = targetManifestId
 		}
@@ -2055,12 +2071,17 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	}
 
 	// Collection-Related items
-	srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
+	err = ckmgr.enhanceTgtTimestampWithCollection(vbno, tgtManifestIds, remoteTimestamp)
+	if err != nil {
+		return
+	}
+
+	srcManifestIdForDcp, srcManifestIdForBackfill := ckmgr.getSrcCollectionItems(vbno, srcManifestIds)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno,
 		remoteTimestamp, vbCountMetrics,
-		srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping, uint64(time.Now().Unix()))
+		srcManifestIdForDcp, srcManifestIdForBackfill, uint64(time.Now().Unix()))
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil
@@ -2083,37 +2104,67 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	return
 }
 
-func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool, srcManifestIds map[uint16]uint64, tgtManifestIds map[uint16]uint64) (uint64, uint64, uint64, metadata.CollectionNamespaceMapping) {
+func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, tgtManifestIds map[uint16]uint64, remoteTimestamp metadata.TargetTimestamp) error {
 	if !ckmgr.collectionEnabled() {
-		return 0, 0, 0, metadata.CollectionNamespaceMapping{}
+		return nil
+	}
+	if remoteTimestamp.IsTraditional() {
+		tgtManifestId, ok := tgtManifestIds[vbno]
+		if !ok {
+			ckmgr.logger.Warnf("Unable to find Target manifest ID for vb %v", vbno)
+		}
+
+		ckmgr.cachedBrokenMap.lock.RLock()
+		brokenMapping := ckmgr.cachedBrokenMap.brokenMap.Clone()
+		// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
+		// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
+		// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
+		// manifestID so future backfill will be created
+		if len(ckmgr.cachedBrokenMap.brokenMap) > 0 && ckmgr.cachedBrokenMap.correspondingTargetManifest > 0 {
+			tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
+		}
+		ckmgr.cachedBrokenMap.lock.RUnlock()
+
+		if len(brokenMapping) == 0 {
+			// Do not decorate with an empty brokenmap
+			return nil
+		}
+
+		tgtVbTimestamp, ok := remoteTimestamp.GetValue().(*metadata.TargetVBTimestamp)
+		if !ok {
+			return fmt.Errorf("expecting remoteTimestamp to be *metadata.TargetVBTimestamp, but got %T", remoteTimestamp)
+		}
+
+		err := tgtVbTimestamp.SetBrokenMappingAsPartOfCreation(brokenMapping)
+		if err != nil {
+			return err
+		}
+
+		tgtVbTimestamp.TargetManifest = tgtManifestId
+	} else {
+		// TODO MB-63378 - enhance tgt timestamp
+		return fmt.Errorf("Not implemented")
+	}
+	return nil
+}
+
+func (ckmgr *CheckpointManager) getSrcCollectionItems(vbno uint16, srcManifestIds map[uint16]uint64) (uint64, uint64) {
+	if !ckmgr.collectionEnabled() {
+		return 0, 0
 	}
 
 	srcManifestId, ok := srcManifestIds[vbno]
 	if !ok {
 		ckmgr.logger.Warnf("Unable to find Source manifest ID for vb %v", vbno)
 	}
-	tgtManifestId, ok := tgtManifestIds[vbno]
-	if !ok {
-		ckmgr.logger.Warnf("Unable to find Target manifest ID for vb %v", vbno)
-	}
-
-	ckmgr.cachedBrokenMap.lock.RLock()
-	brokenMapping := ckmgr.cachedBrokenMap.brokenMap.Clone()
-	// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
-	// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
-	// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
-	// manifestID so future backfill will be created
-	if len(ckmgr.cachedBrokenMap.brokenMap) > 0 && ckmgr.cachedBrokenMap.correspondingTargetManifest > 0 {
-		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
-	}
-	ckmgr.cachedBrokenMap.lock.RUnlock()
 
 	backfillMgr := ckmgr.getBackfillMgr()
 	lastBackfillSuccessfulId, err := backfillMgr.GetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic())
 	if err != nil {
 		ckmgr.logger.Warnf("Unable to get last successful source manifest Id - %v", err)
 	}
-	return srcManifestId, lastBackfillSuccessfulId, tgtManifestId, brokenMapping
+	//return srcManifestId, lastBackfillSuccessfulId, tgtManifestId, brokenMapping
+	return srcManifestId, lastBackfillSuccessfulId
 }
 
 func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map map[uint16]uint64) (uint64, error) {
@@ -2925,15 +2976,16 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 					// no brokenmap, ok to keep
 					replacementList = append(replacementList, ckptRecord)
 				} else {
-					if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
-						err := ckptRecord.LoadBrokenMapping(*brokenMapping)
-						if err != nil {
-							errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
-							continue
-						}
-						// BrokenMapping is found, ok to keep
-						replacementList = append(replacementList, ckptRecord)
-					}
+					// TODO MB-63345
+					//if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
+					//	err := ckptRecord.LoadBrokenMapping(*brokenMapping)
+					//	if err != nil {
+					//		errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
+					//		continue
+					//	}
+					//	// BrokenMapping is found, ok to keep
+					//	replacementList = append(replacementList, ckptRecord)
+					//}
 				}
 			}
 			ckptDoc.Checkpoint_records = replacementList

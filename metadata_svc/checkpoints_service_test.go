@@ -89,7 +89,9 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	assert.Nil(err)
 
 	ckptRecord := metadata.CheckpointRecord{
-		BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
+		},
 	}
 	entries := getEntries(ckptRecord, err, assert)
 
@@ -122,7 +124,12 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 
 	for _, doc := range docs {
 		assert.Equal(1, len(doc.Checkpoint_records))
-		brokenMappingFromRecord := doc.Checkpoint_records[0].BrokenMappings()
+		brokenMappingsFromRecord := doc.Checkpoint_records[0].BrokenMappings()
+		assert.Len(brokenMappingsFromRecord, 1)
+		var brokenMappingFromRecord *metadata.CollectionNamespaceMapping
+		for _, v := range brokenMappingsFromRecord {
+			brokenMappingFromRecord = v
+		}
 		assert.Equal(2, len(*brokenMappingFromRecord))
 	}
 
@@ -265,7 +272,9 @@ func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
 	assert.Nil(err)
 
 	ckptRecord := metadata.CheckpointRecord{
-		BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
+		},
 	}
 	entries := getEntries(ckptRecord, err, assert)
 
