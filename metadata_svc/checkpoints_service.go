@@ -52,11 +52,17 @@ func (b *BrokenMapShaRefCounter) RegisterCkptDoc(doc *metadata.CheckpointsDoc) {
 
 	b.lock.Lock()
 	for _, record := range doc.Checkpoint_records {
-		if record == nil || len(record.BrokenMappingSha256) == 0 {
+		if record == nil || record.BrokenMappingsLen() == 0 {
 			continue
 		}
-		b.refCnt[record.BrokenMappingSha256]++
-		b.shaToMapping[record.BrokenMappingSha256] = record.BrokenMappings()
+		brokenMappings := record.BrokenMappings()
+		for sha, brokenMap := range brokenMappings {
+			if brokenMap == nil || len(*brokenMap) == 0 {
+				continue
+			}
+			b.refCnt[sha]++
+			b.shaToMapping[sha] = brokenMap
+		}
 	}
 	b.lock.Unlock()
 }
@@ -465,7 +471,7 @@ func (ckpt_svc *CheckpointsService) upsertCheckpointsDoc(replicationId string, c
 
 // Ensure that one single broken mapping that will be used for most, if not all, of the checkpoints, are persisted
 func (ckpt_svc *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error {
-	if oneBrokenMapping == nil {
+	if oneBrokenMapping == nil || len(*oneBrokenMapping) == 0 {
 		return nil
 	}
 	return ckpt_svc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping)
@@ -532,13 +538,20 @@ func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRec
 		return err
 	}
 
-	clonedBrokenMap := ckptRecord.BrokenMappings()
-	if clonedBrokenMap != nil && len(*(clonedBrokenMap)) > 0 {
-		incrementerFunc(ckptRecord.BrokenMappingSha256, clonedBrokenMap)
-		for _, removedRecord := range removedRecords {
-			if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
-				decrementerFunc(removedRecord.BrokenMappingSha256)
+	clonedBrokenMaps := ckptRecord.BrokenMappings()
+	if clonedBrokenMaps != nil && len(clonedBrokenMaps) > 0 {
+		for sha, oneBrokenMap := range clonedBrokenMaps {
+			if oneBrokenMap == nil || len(*oneBrokenMap) == 0 {
+				continue
 			}
+			incrementerFunc(sha, oneBrokenMap)
+		}
+	}
+
+	// The following was in a potential wrong place in earlier releases
+	for _, removedRecord := range removedRecords {
+		if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
+			decrementerFunc(removedRecord.BrokenMappingSha256)
 		}
 	}
 	return nil
@@ -681,10 +694,16 @@ func (ckpt_svc *CheckpointsService) registerCkptDocBrokenMappings(ckpt_doc *meta
 		return
 	}
 	for _, record := range ckpt_doc.Checkpoint_records {
-		if record == nil || len(record.BrokenMappingSha256) == 0 {
+		if record == nil || record.BrokenMappingsLen() == 0 {
 			continue
 		}
-		recorder(record.BrokenMappingSha256, record.BrokenMappings())
+
+		for sha, oneMapping := range record.BrokenMappings() {
+			if oneMapping == nil || len(*oneMapping) == 0 {
+				continue
+			}
+			recorder(sha, oneMapping)
+		}
 	}
 }
 
@@ -706,20 +725,42 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 	}
 }
 
-func (ckpt_svc *CheckpointsService) populateActualMapping(doc *metadata.CheckpointsDoc, shaToActualMapping metadata.ShaToCollectionNamespaceMap) {
+func (ckpt_svc *CheckpointsService) populateActualMapping(doc *metadata.CheckpointsDoc, shaToActualMapping metadata.ShaToCollectionNamespaceMap) error {
 	if doc == nil {
-		return
+		return nil
 	}
 
+	errMap := make(base.ErrorMap)
 	for _, record := range doc.Checkpoint_records {
 		if record == nil {
 			continue
 		}
-		mapping, brokenMapExists := shaToActualMapping[record.BrokenMappingSha256]
-		if brokenMapExists {
-			record.LoadBrokenMapping(*mapping)
+
+		shaMapToFill := record.GetShaOnlyMap()
+
+		if len(shaMapToFill) == 0 {
+			continue
+		}
+
+		for oneShaToFill, _ := range shaMapToFill {
+			mapping, exists := shaToActualMapping[oneShaToFill]
+			if !exists {
+				errMap[oneShaToFill] = base.ErrorNotFound
+				continue
+			}
+			shaMapToFill[oneShaToFill] = mapping
+		}
+
+		err := record.LoadBrokenMapping(shaMapToFill)
+		if err != nil {
+			errMap[fmt.Sprintf("populateActualMapping traditional? %v for record created at %v loadMapping %v", record.IsTraditional(), record.CreationTime, shaMapToFill)] = err
 		}
 	}
+	if len(errMap) > 0 {
+		return fmt.Errorf("populateActualMapping for doc internal ID %v Unable to find shas %v",
+			doc.SpecInternalId, base.FlattenErrorMap(errMap))
+	}
+	return nil
 }
 
 // get vbnos of checkpoint docs for specified replicationId
@@ -886,7 +927,7 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 				continue
 			}
 			brokenMappings := record.BrokenMappings()
-			if brokenMappings == nil {
+			if len(brokenMappings) == 0 {
 				continue
 			}
 			toBeDelNamespace := make(metadata.CollectionNamespaceMapping)
@@ -911,39 +952,67 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 	return
 }
 
-func (ckpt_svc *CheckpointsService) removeNamespacesFromCkpt(incomingMapping *metadata.CollectionNamespaceMapping, toBeDelNamespace metadata.CollectionNamespaceMapping, record *metadata.CheckpointRecord, incFunc service_def.IncrementerFunc, decFunc service_def.DecrementerFunc) error {
+func (ckpt_svc *CheckpointsService) removeNamespacesFromCkpt(originalMappings metadata.ShaToCollectionNamespaceMap, toBeDelNamespace metadata.CollectionNamespaceMapping, record *metadata.CheckpointRecord, incFunc service_def.IncrementerFunc, decFunc service_def.DecrementerFunc) error {
 	var err error
-	origShaSlice, _ := incomingMapping.Sha256()
-	origSha := fmt.Sprintf("%x", origShaSlice[:])
-	if incomingMapping != nil && len(*incomingMapping) > 0 {
-		newBrokenMapping := incomingMapping.Delete(toBeDelNamespace)
+	newMappingToReload := make(metadata.ShaToCollectionNamespaceMap)
+
+	for _, originalMapping := range originalMappings {
+		if originalMapping == nil || len(*originalMapping) == 0 {
+			continue
+		}
+
+		// Note that the Delete below could be no-op. Handle the same way regardless
+		newBrokenMapping := originalMapping.Delete(toBeDelNamespace)
+		if len(newBrokenMapping) == 0 {
+			// Do not load a sha entry if it's empty. It is valid to create a sha on an empty map
+			continue
+		}
+
 		newShaSlice, _ := newBrokenMapping.Sha256()
 		newSha := fmt.Sprintf("%x", newShaSlice[:])
-		err = record.LoadBrokenMapping(newBrokenMapping)
-		if err != nil {
-			ckpt_svc.logger.Warnf("when setting brokenMapping SHA: %v", err)
-		} else {
-			incFunc(newSha, &newBrokenMapping)
-			if origSha != "" {
-				decFunc(origSha)
-			}
+		newMappingToReload[newSha] = &newBrokenMapping
+	}
+
+	// Here, we replace the existing set of mappings with another
+	// For ref counting purposes, first account for every single sha -> map in the new set that's loaded
+	// Then decrement the old set
+	// If the two sets are completely identical, then the end result will be the same (i.e. no-op)
+	// If they are not, the logic should still be sound
+	err = record.LoadBrokenMapping(newMappingToReload)
+	if err != nil {
+		ckpt_svc.logger.Warnf("%v when setting brokenMapping SHA: %v", err)
+	} else {
+		for newSha, newBrokenMapping := range newMappingToReload {
+			incFunc(newSha, newBrokenMapping)
+		}
+
+		for origSha, _ := range originalMappings {
+			decFunc(origSha)
 		}
 	}
 	return err
 }
 
-func populateToDelNamespaces(mappingToCheck *metadata.CollectionNamespaceMapping, sources metadata.ScopesMap, toBeDelNamespace metadata.CollectionNamespaceMapping) {
-	for sourceNs, targetNsList := range *mappingToCheck {
-		scope, scopeExists := sources[sourceNs.ScopeName]
-		if !scopeExists {
+// populateToDelNamespace checks the "mappingToCheck" against
+// the "sources". If it exists, it is recorded into the "toBeDelNamespace" as output
+func populateToDelNamespaces(mappingsToCheck metadata.ShaToCollectionNamespaceMap, sources metadata.ScopesMap, toBeDelNamespace metadata.CollectionNamespaceMapping) {
+	for _, mappingToCheck := range mappingsToCheck {
+		if mappingToCheck == nil || len(*mappingToCheck) == 0 {
 			continue
 		}
-		_, collectionExists := scope.Collections[sourceNs.CollectionName]
-		if !collectionExists {
-			continue
+
+		for sourceNs, targetNsList := range *mappingToCheck {
+			scope, scopeExists := sources[sourceNs.ScopeName]
+			if !scopeExists {
+				continue
+			}
+			_, collectionExists := scope.Collections[sourceNs.CollectionName]
+			if !collectionExists {
+				continue
+			}
+			// The source instance from "sources" exists in broken map and should be removed
+			toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
 		}
-		// The source instance from "sources" exists in broken map and should be removed
-		toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
 	}
 }
 
