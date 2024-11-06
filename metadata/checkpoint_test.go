@@ -41,9 +41,11 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			SourceManifestForBackfillMgr: 8,
 		},
 		TargetVBTimestamp: TargetVBTimestamp{
-			Target_vb_opaque: vbUuidAndTimestamp,
-			Target_Seqno:     4,
-			TargetManifest:   9,
+			Target_vb_opaque:    vbUuidAndTimestamp,
+			Target_Seqno:        4,
+			TargetManifest:      9,
+			BrokenMappingSha256: "",
+			brokenMappings:      nil,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
 			Filtered_Items_Cnt:  5,
@@ -55,8 +57,6 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			GuardrailDiskSpaceCnt:     300,
 			CasPoisonCnt:              1,
 		},
-		BrokenMappingSha256: "",
-		brokenMappings:      nil,
 		GlobalTimestamp: GlobalTimestamp{
 			100: &GlobalVBTimestamp{
 				TargetVBTimestamp{
@@ -90,16 +90,16 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			SourceManifestForBackfillMgr: 8,
 		},
 		TargetVBTimestamp: TargetVBTimestamp{
-			Target_vb_opaque: vbUuidAndTimestamp,
-			Target_Seqno:     4,
-			TargetManifest:   9,
+			Target_vb_opaque:    vbUuidAndTimestamp,
+			Target_Seqno:        4,
+			TargetManifest:      9,
+			BrokenMappingSha256: "",
+			brokenMappings:      brokenMap,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
 			Filtered_Items_Cnt:  5,
 			Filtered_Failed_Cnt: 6,
 		},
-		BrokenMappingSha256: "",
-		brokenMappings:      brokenMap,
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt: 50,
 			GuardrailDataSizeCnt:      100,

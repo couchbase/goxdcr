@@ -1045,7 +1045,13 @@ func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
 		CollectionName: "col1",
 	}
 	brokenMap.AddSingleMapping(srcNs, tgtNs)
-	assert.Nil(record1.LoadBrokenMapping(brokenMap))
+	shaMap := make(metadata.ShaToCollectionNamespaceMap)
+	shaBytes, err := brokenMap.Sha256()
+	assert.Nil(err)
+	shaStr := fmt.Sprintf("%x", shaBytes[:])
+	shaMap[shaStr] = &brokenMap
+
+	assert.Nil(record1.LoadBrokenMapping(shaMap))
 
 	// Record 2 is "newer" in terms of target manifest and has no brokenmap
 	record2 := metadata.CheckpointRecord{
