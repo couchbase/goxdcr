@@ -11,6 +11,12 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	mocks3 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/v8/base"
@@ -25,11 +31,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func TestCombineFailoverlogs(t *testing.T) {
@@ -260,6 +261,10 @@ func (cl *ckptDoneListener) OnEvent(event *common.Event) {
 	if event.EventType == common.CheckpointDone {
 		atomic.AddUint64(&cl.ckptDoneCount, 1)
 	}
+}
+
+func (*ckptDoneListener) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 type statsMapResult struct {

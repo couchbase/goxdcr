@@ -311,7 +311,8 @@ type StatisticsManager struct {
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
-	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error), hasConflictLogger bool) *StatisticsManager {
+	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error),
+	hasConflictLogger bool) *StatisticsManager {
 	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
@@ -339,7 +340,9 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 	if hasConflictLogger {
 		// the data-structures needed for stats collection will not be initialised
-		// if conflict logger doesn't exist for this pipeline.
+		// if conflict logger doesn't exist for this pipeline,
+		// and for backfill pipeline of the replication because the logger is shared between
+		// backfill pipeline and main pipeline.
 		stats_mgr.collectors = append(stats_mgr.collectors, &cLogCollector{})
 	}
 
@@ -394,7 +397,7 @@ func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
 	}
 	rs.CleanupBeforeExit(StatsToClearForPausedReplications)
 	statsLog, _ := stats_mgr.formatStatsForLog()
-	stats_mgr.logger.Infof("%v expvar=%v\n", stats_mgr.pipeline.InstanceId(), statsLog)
+	stats_mgr.logger.Infof("%v expvar=%v", stats_mgr.pipeline.InstanceId(), statsLog)
 	return nil
 }
 
@@ -523,7 +526,7 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 		}
 
 		// log listener summary
-		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(stats_mgr.pipeline)
+		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(stats_mgr.pipeline, nil)
 		for _, async_listener := range async_listener_map {
 			async_listener.(*component.AsyncComponentEventListenerImpl).PrintStatusSummary()
 		}
@@ -542,6 +545,13 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 			conflict_mgr.(*ConflictManager).PrintStatusSummary()
 		}
 
+		// Conflict logger
+		if conflictLogger := stats_mgr.pipeline.RuntimeContext().Service(base.CONFLICT_LOGGER); conflictLogger != nil {
+			cLogger, ok := conflictLogger.(*conflictlog.LoggerImpl)
+			if ok {
+				cLogger.PrintStatusSummary()
+			}
+		}
 	}
 	return nil
 }
@@ -1415,6 +1425,10 @@ func (conflictMgr_collector *conflictMgrCollector) OnEvent(event *common.Event) 
 	conflictMgr_collector.ProcessEvent(event)
 }
 
+func (*conflictMgrCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
+}
+
 func (conflictMgr_collector *conflictMgrCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
 	// Nothing
 	return
@@ -1666,7 +1680,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	}
 
 	// register outNozzle_collector as the async event handler for relevant events
-	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TargetDataSkippedEventListener, outNozzle_collector)
@@ -1688,6 +1702,10 @@ func (outNozzle_collector *outNozzleCollector) Id() string {
 
 func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
 	outNozzle_collector.ProcessEvent(event)
+}
+
+func (*outNozzleCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (outNozzleCollector *outNozzleCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
@@ -2051,7 +2069,7 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
 	}
 
-	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataReceivedEventListener, dcp_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataProcessedEventListener, dcp_collector)
 	return nil
@@ -2063,6 +2081,10 @@ func (dcp_collector *dcpCollector) Id() string {
 
 func (dcp_collector *dcpCollector) OnEvent(event *common.Event) {
 	dcp_collector.ProcessEvent(event)
+}
+
+func (*dcpCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (dcp_collector *dcpCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
@@ -2381,7 +2403,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
-	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFilteredEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThroughputThrottledEventListener, r_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataClonedEventListener, r_collector)
@@ -2447,6 +2469,10 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 
 func (r_collector *routerCollector) OnEvent(event *common.Event) {
 	r_collector.ProcessEvent(event)
+}
+
+func (*routerCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (r_collector *routerCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
@@ -2614,6 +2640,10 @@ func (ckpt_collector *checkpointMgrCollector) initRegistry() {
 
 func (ckpt_collector *checkpointMgrCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
 	// Do nothing
+}
+
+func (*checkpointMgrCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
@@ -3175,6 +3205,7 @@ type cLogCollector struct {
 	// value of inner map: metric value
 	component_map  map[string]map[string]interface{}
 	vbMetricHelper *VbBasedMetricHelper
+	pipelineType   common.PipelineType
 }
 
 func (cLog_collector *cLogCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
@@ -3194,9 +3225,16 @@ func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *
 	cLog_collector.stats_mgr = stats_mgr
 	cLog_collector.component_map = make(map[string]map[string]interface{})
 	cLog_collector.vbMetricHelper = NewVbBasedMetricHelper()
-	clogger := pipeline.ConflictLogger()
+	cLog_collector.pipelineType = pipeline.Type()
+	clogger := pipeline.RuntimeContext().Service(base.CONFLICT_LOGGER)
+
 	if clogger != nil {
-		registry := stats_mgr.getOrCreateRegistry(clogger.Id())
+		cLogInstance, ok := clogger.(baseclog.Logger)
+		if !ok {
+			panic(fmt.Sprintf("invalid cLogInstance type %T", clogger))
+		}
+
+		registry := stats_mgr.getOrCreateRegistry(cLogInstance.Id())
 		conflict_docs_written := metrics.NewCounter()
 		registry.Register(service_def.CONFLICT_DOCS_WRITTEN, conflict_docs_written)
 		src_conflict_docs_written := metrics.NewCounter()
@@ -3242,16 +3280,16 @@ func (cLog_collector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *
 		metric_map[service_def.CLOG_UNKNOWN_RESP_COUNT] = unknownResps
 		metric_map[service_def.CLOG_OTHER_ERRORS] = otherErrors
 
-		cLog_collector.component_map[clogger.Id()] = metric_map
+		cLog_collector.component_map[cLogInstance.Id()] = metric_map
 		responsibleVbs := make([]uint16, 0)
 		sources := pipeline.Sources()
 		for _, source := range sources {
 			responsibleVbs = append(responsibleVbs, source.ResponsibleVBs()...)
 		}
-		cLog_collector.vbMetricHelper.Register(cLog_collector.Id(), responsibleVbs, clogger.Id(), CLogVBMetricKeys)
+		cLog_collector.vbMetricHelper.Register(cLog_collector.Id(), responsibleVbs, cLogInstance.Id(), CLogVBMetricKeys)
 
 		// register conflict logger as the async event handler for relevant events
-		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+		async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.CLogDocsWrittenEventListener, cLog_collector)
 		pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.CLogWriteStatusEventListener, cLog_collector)
 	}
@@ -3265,6 +3303,10 @@ func (cLog_collector *cLogCollector) Id() string {
 
 func (cLog_collector *cLogCollector) OnEvent(event *common.Event) {
 	cLog_collector.ProcessEvent(event)
+}
+
+func (*cLogCollector) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (cLog_collector *cLogCollector) ProcessEvent(event *common.Event) error {

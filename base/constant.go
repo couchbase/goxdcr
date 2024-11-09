@@ -268,6 +268,11 @@ const (
 	BANDWIDTH_THROTTLER_SVC    string = "BandwidthThrottlerSvc"
 	BACKFILL_MGR_SVC           string = "BackfillMgrSvc"
 	CONFLICT_MANAGER_SVC       string = "ConflictManager"
+
+	// Conflict logger is technically not a typical pipeline service.
+	// It may or may not exist based on the replication setting.
+	// But it is attached to the pipeline to blend in with the existing design of the pipeline.
+	CONFLICT_LOGGER string = "ConflictLogger"
 )
 
 // supervisor related constants

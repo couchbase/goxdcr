@@ -3325,8 +3325,9 @@ var ConflictLoggingOff ConflictLoggingMappingInput = ConflictLoggingMappingInput
 
 // ignores unrecognised keys from comparision.
 // recognisedKeys should be a map of keys to compare for equality and
-// the datatype of their values to assert before comparision.
-func EqualMaps(clm1, clm2 map[string]interface{}, recognisedKeys map[string]reflect.Kind) bool {
+// the datatype of their values to assert before comparision. Note that a value with a given type
+// and an another value which is a pointer to the same type is not considered as equal.
+func EqualMapsWithKeys(clm1, clm2 map[string]interface{}, recognisedKeys map[string]reflect.Kind) bool {
 	if clm1 == nil || clm2 == nil {
 		return clm1 == nil && clm2 == nil
 	}
@@ -3432,7 +3433,7 @@ func (clm ConflictLoggingMappingInput) Same(otherClm ConflictLoggingMappingInput
 		return len(otherClm) == 0
 	}
 
-	same := EqualMaps(clm, otherClm, SimpleCLogKeys)
+	same := EqualMapsWithKeys(clm, otherClm, SimpleCLogKeys)
 	if !same {
 		return false
 	}
@@ -3463,7 +3464,7 @@ func (clm ConflictLoggingMappingInput) Same(otherClm ConflictLoggingMappingInput
 
 		rule1, ok1 := target1.(map[string]interface{})
 		rule2, ok2 := target2.(map[string]interface{})
-		if ok1 != ok2 || !EqualMaps(rule1, rule2, SimpleConflictLoggingRulesKeys) {
+		if ok1 != ok2 || !EqualMapsWithKeys(rule1, rule2, SimpleConflictLoggingRulesKeys) {
 			return false
 		}
 	}

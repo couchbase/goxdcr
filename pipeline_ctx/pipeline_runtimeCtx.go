@@ -236,7 +236,6 @@ func (ctx *PipelineRuntimeCtx) RegisterService(svc_name string, svc common.Pipel
 	ctx.logger.Infof("Try to attach %v to pipeline %v\n", svc_name, ctx.pipeline.InstanceId())
 	ctx.addService(svc_name, svc)
 	return svc.Attach(ctx.pipeline)
-
 }
 
 func (ctx *PipelineRuntimeCtx) addService(svc_name string, svc common.PipelineService) {

@@ -140,26 +140,41 @@ func (c ComponentEventType) IsSynchronousEvent() bool {
 }
 
 type Event struct {
-	//the type of component event
+	// the type of component event
 	EventType ComponentEventType
-	//the data item
+	// the data item
 	Data interface{}
-	//the originating component
+	// the originating component
 	Component Component
-	//the data items derived from the original item.
+	// the data items derived from the original item.
 	DerivedData []interface{}
-	//any other information the event might be able to supply to its listener
+	// any other information the event might be able to supply to its listener
 	OtherInfos interface{}
 }
 
 func NewEvent(eventType ComponentEventType, data interface{}, component Component, derivedData []interface{}, otherInfos interface{}) *Event {
-	return &Event{eventType, data, component, derivedData, otherInfos}
+	return &Event{
+		EventType:   eventType,
+		Data:        data,
+		Component:   component,
+		DerivedData: derivedData,
+		OtherInfos:  otherInfos,
+	}
 }
+
+type ListenerPipelineType int
+
+const (
+	ListenerNotShared          ListenerPipelineType = iota
+	ListenerOfMainPipeline     ListenerPipelineType = iota
+	ListenerOfBackfillPipeline ListenerPipelineType = iota
+)
 
 // ComponentEventListener abstracts anybody who is interested in an event of a component
 type ComponentEventListener interface {
 	//OnEvent is the callback function that component would notify listener on an event
 	OnEvent(event *Event)
+	ListenerPipelineType() ListenerPipelineType
 }
 
 // AsyncComponentEventListener is a subtype of ComponentEventListener which processes events asynchonously

@@ -2,6 +2,7 @@ package conflictlog
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
@@ -135,7 +137,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	}
 
 	loggerId := fmt.Sprintf("%s_%v", ConflictLoggerName, newLoggerId())
-	logger.Infof("creating new conflict logger id=%d replId=%s loggerOptions=%s throttlerAttempts=%d ", loggerId, replId, options.String(), throttlerAttempts)
+	logger.Infof("creating new conflict logger id=%s replId=%s loggerOptions=%s throttlerAttempts=%d", loggerId, replId, options.String(), throttlerAttempts)
 
 	l = &LoggerImpl{
 		logger:            logger,
@@ -155,17 +157,10 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		AbstractComponent: component.NewAbstractComponentWithLogger(loggerId, logger),
 	}
 
-	logger.Infof("spawning conflict logger workers replId=%s count=%d id=%s", l.replId, l.opts.workerCount, l.id)
-	for i := 0; i < l.opts.workerCount; i++ {
-		l.startWorker()
-	}
-
-	go l.printStats()
-
 	return
 }
 
-func (l *LoggerImpl) printStats() {
+func (l *LoggerImpl) PrintStatusSummary() {
 	defer l.logger.Infof("%s (%s) printStats exiting", l.id, l.replId)
 
 	t := time.NewTicker(base.StatsLogInterval)
@@ -266,7 +261,7 @@ func (l *LoggerImpl) isClosed() bool {
 	}
 }
 
-func (l *LoggerImpl) Close() (err error) {
+func (l *LoggerImpl) close() (err error) {
 	// check for closed channel as multiple threads could have attempted it
 	if l.isClosed() {
 		return nil
@@ -479,46 +474,46 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
 		err := conn.SetMeta(req.conflictRec.Source.Id, req.conflictRec.Source.Body, req.conflictRec.Source.Datatype, target)
 		return err
-	})
+	}, req.conflictRec.OriginatingPipeline)
 	if err != nil {
 		// errors are not logged here as it will spam it when we get errors like TMPFAIL
 		// we let the callers deal with it
 		return err
 	}
-	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, nil, nil))
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, nil, nil), req.conflictRec.OriginatingPipeline)
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
 		err = conn.SetMeta(req.conflictRec.Target.Id, req.conflictRec.Target.Body, req.conflictRec.Target.Datatype, target)
 		return err
-	})
+	}, req.conflictRec.OriginatingPipeline)
 	if err != nil {
 		return err
 	}
-	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, nil, nil))
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, nil, nil), req.conflictRec.OriginatingPipeline)
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
 		err = conn.SetMeta(req.conflictRec.Id, req.conflictRec.Body, req.conflictRec.Datatype, target)
 		return err
-	})
+	}, req.conflictRec.OriginatingPipeline)
 	if err != nil {
 		return err
 	}
-	l.RaiseEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, nil, nil))
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, nil, nil), req.conflictRec.OriginatingPipeline)
 
 	return
 }
 
 // Processes conflict bucket write errors by raising necessary events.
 // Returns the fatality level of error passed in (needs retry, no retry etc)
-func (l *LoggerImpl) processWriteError(err error) writeError {
+func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common.PipelineType) writeError {
 	if err == nil {
 		return noRetryErr
 	}
 
 	nwError := l.utils.IsSeriousNetError(err)
-	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError))
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
 
 	if nwError {
 		return networkErr
@@ -549,14 +544,14 @@ func (l *LoggerImpl) processWriteError(err error) writeError {
 // writeDocRetry arranges for a connection from the pool which the supplied function can use. The function
 // wraps the supplied function to check for network errors and appropriately releases the connection back
 // to the pool
-func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error) (err error) {
+func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error, originatingPipelineType common.PipelineType) (err error) {
 	var conn Connection
 	var nwError bool
 	for i := 0; i < l.opts.networkRetryCount; i++ {
 		conn, err = l.getFromPool(bucketName)
 		if err != nil {
 			nwError = l.utils.IsSeriousNetError(err)
-			l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError))
+			l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
 			// This is to account for nw errors while connecting
 			if !nwError {
 				return
@@ -576,7 +571,7 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 		// will be error prone in this case
 		err = fn(conn)
 
-		writeErr := l.processWriteError(err)
+		writeErr := l.processWriteError(err, originatingPipelineType)
 		if err == nil || writeErr.noRetryNeeded() {
 			// there was no network error and the write was a success or
 			// the write returned a status code which cannot be fixed by retry
@@ -630,7 +625,7 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 		return nil
 	}
 
-	err = req.conflictRec.PopulateData(l.replId)
+	err = req.conflictRec.PopulateData(l.replId, req.conflictRec.OriginatingPipeline)
 	if err != nil {
 		l.logger.Errorf("%s error populating clog data, r=%v%+v%v, err=%v",
 			l.id, base.UdTagBegin, req.conflictRec, base.UdTagEnd, err,
@@ -785,4 +780,171 @@ func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.poolGetTimeout, t, l.id)
 
 	l.opts.poolGetTimeout = t
+}
+
+func (l *LoggerImpl) Attach(_ common.Pipeline) error {
+	// noop - conflict logger doesn't need to have access to the pipeline itself.
+	return nil
+}
+
+func (l *LoggerImpl) Start(_ metadata.ReplicationSettingsMap) error {
+	l.logger.Infof("spawning conflict logger workers replId=%s count=%d id=%s", l.replId, l.opts.workerCount, l.id)
+	for i := 0; i < l.opts.workerCount; i++ {
+		l.startWorker()
+	}
+
+	return nil
+}
+
+func (l *LoggerImpl) Stop() error {
+	err := l.close()
+	return err
+}
+
+// The following conflict logging settings update should result in a restart of pipeline,
+// and which cannot be handled on a live basis by this function:
+// 1. conflict logging mapping change (i.e. On/Enabled -> Off/Disabled change)
+// 2. conflict logging mapping change (i.e Off/Disabled -> On/Enabled change)
+// 3. conflict logging queue capacity decrease (i.e. newCap < oldCap).
+func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	conflictLoggingIsOn := l != nil
+
+	// change of conflict logging rules if needed
+	var conflictLoggingMap base.ConflictLoggingMappingInput
+	var conflictLoggingMapExists bool
+	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
+	if !conflictLoggingMapExists {
+		// no conflict logging update exists, which is fine.
+		return nil
+	}
+
+	conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
+	if !conflictLoggingMapExists {
+		// wrong type
+		err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
+			conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
+		l.logger.Errorf(err.Error())
+		return err
+	}
+
+	if conflictLoggingMap == nil {
+		// nil is not an accepted value, should not reach here.
+		err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
+			conflictLoggingIn)
+		l.logger.Errorf(err.Error())
+		return err
+	}
+
+	// validate if we can perform live pipeline update or not.
+	if conflictLoggingIsOn {
+		if conflictLoggingMap.Disabled() {
+			// conflict logging is on in the pipeline right now
+			// and the setting update was to turn it off. The pipeline should have restarted.
+			err := fmt.Errorf("conflict map respresents Off as input. Ignoring %v for the update because pipeline should have restarted",
+				conflictLoggingIn)
+			l.logger.Errorf(err.Error())
+			return err
+		}
+	} else {
+		if !conflictLoggingMap.Disabled() {
+			// conflict logging is off in the pipeline right now
+			// and the setting update was to turn it on. The pipeline should have restarted.
+			err := fmt.Errorf("conflict map respresents On as input. Ignoring %v for the update because pipeline should have restarted",
+				conflictLoggingIn)
+			log.NewLogger(ConflictLoggerName, log.DefaultLoggerContext).Errorf(err.Error())
+			return err
+		}
+
+		// No need of settings update.
+		// Conflict logging is Off and will remain off.
+		return nil
+	}
+
+	// update logger queue capacity if needed
+	loggerQueueCap, ok := settings[base.CLogQueueCapacity]
+	if ok {
+		cnt, ok := loggerQueueCap.(int)
+		if ok && cnt != 0 {
+			err := l.UpdateQueueCapcity(cnt)
+			if err != nil && err != baseclog.ErrNoChange {
+				l.logger.Errorf("error updating queue capacity to %v", cnt)
+				return err
+			}
+		}
+	}
+
+	// update logger setMeta timeout if needed
+	setMetaTimeoutMs, ok := settings[base.CLogSetMetaTimeout]
+	if ok {
+		t, ok := setMetaTimeoutMs.(int)
+		if ok {
+			l.UpdateSetMetaTimeout(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update logger getPool timeout if needed
+	getPoolTimeoutMs, ok := settings[base.CLogPoolGetTimeout]
+	if ok {
+		t, ok := getPoolTimeoutMs.(int)
+		if ok {
+			l.UpdateGetFromPoolTimeout(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update network retry interval if needed
+	nwRetryIntervalMs, ok := settings[base.CLogNetworkRetryInterval]
+	if ok {
+		t, ok := nwRetryIntervalMs.(int)
+		if ok {
+			l.UpdateNWRetryInterval(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update network retry count if needed
+	nwRetryCount, ok := settings[base.CLogNetworkRetryCount]
+	if ok {
+		cnt, ok := nwRetryCount.(int)
+		if ok {
+			l.UpdateNWRetryCount(cnt)
+		}
+	}
+
+	// update logger worker count if needed
+	workerCount, ok := settings[base.CLogWorkerCount]
+	if ok {
+		cnt, ok := workerCount.(int)
+		if ok && cnt != 0 {
+			err := l.UpdateWorkerCount(cnt)
+			if err != nil && err != baseclog.ErrNoChange {
+				l.logger.Errorf("error updating worker count to %v", cnt)
+				return err
+			}
+		}
+	}
+
+	// change of conflict logging rules if needed
+	if conflictLoggingMapExists {
+		// conflict logging is on and its settings needs to be updated.
+		err := UpdateLoggerWithRules(conflictLoggingMap, l, l.replId, l.logger)
+		if err != nil {
+			err := fmt.Errorf("error updating existing conflict logging rules, ignoring %v and continuing with old rules. err=%v",
+				conflictLoggingMap, err)
+			l.logger.Errorf(err.Error())
+			return err
+		}
+	}
+
+	return nil
+}
+
+// If a service can be shared by more than one pipeline in the same replication.
+// Yes - logger is shared between main and backfill pipeline.
+func (l *LoggerImpl) IsSharable() bool {
+	return false
+}
+
+// If sharable, allow service to be detached
+func (l *LoggerImpl) Detach(pipeline common.Pipeline) error {
+	// no-op
+	return nil
 }

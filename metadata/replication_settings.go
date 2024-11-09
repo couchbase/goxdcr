@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
-	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
@@ -1360,7 +1359,7 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 	case CLogKey:
-		if convertedValue, err = baseclog.ValidateAndConvertJsonMapToConflictLoggingMapping(value); err != nil {
+		if convertedValue, err = ValidateAndConvertStrToCLogMapping(value); err != nil {
 			return
 		}
 	default:
@@ -1484,3 +1483,7 @@ func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *Repli
 		(!old.GetConflictLoggingMapping().Disabled() && new.GetConflictLoggingMapping().Disabled()) ||
 		(!new.GetConflictLoggingMapping().Disabled() && (old.GetCLogQueueCapacity() > new.GetCLogQueueCapacity()))
 }
+
+// validates the input conflict logging in the replication setting,
+// which is a string encoded json map. If the validation is successful, returns the corresponding map.
+var ValidateAndConvertStrToCLogMapping func(settingStr string) (base.ConflictLoggingMappingInput, error)

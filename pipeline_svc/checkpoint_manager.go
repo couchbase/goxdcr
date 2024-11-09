@@ -2062,6 +2062,10 @@ func (ckmgr *CheckpointManager) persistCkptRecord(vbno uint16, ckpt_record *meta
 	return ckmgr.checkpoints_svc.UpsertCheckpoints(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, vbno, ckpt_record)
 }
 
+func (*CheckpointManager) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
+}
+
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 	switch event.EventType {
 	case common.StreamingStart:

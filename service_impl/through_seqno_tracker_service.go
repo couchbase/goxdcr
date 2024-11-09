@@ -777,7 +777,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	tsTracker.initialize(pipeline)
 
-	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataSentEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
@@ -868,6 +868,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markMCRequestAsIgnored(req *base.Wrappe
 // Implement ComponentEventListener
 func (tsTracker *ThroughSeqnoTrackerSvc) OnEvent(event *common.Event) {
 	tsTracker.ProcessEvent(event)
+}
+
+func (*ThroughSeqnoTrackerSvc) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error {

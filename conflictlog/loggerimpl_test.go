@@ -9,6 +9,7 @@ import (
 
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
+	"github.com/couchbase/goxdcr/v8/log"
 
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -59,8 +60,9 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 
 	fakeConnectionSleep = 1 * time.Second
 
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, nil, pool, WithCapacity(20))
 	require.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
 
 	l.UpdateRules(&baseclog.Rules{
 		Target: baseclog.NewTarget("B1", "S1", "C1"),
@@ -74,11 +76,11 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 		handles = append(handles, h)
 	}
 
-	l.Close()
+	assert.Nil(t, l.Stop())
 
 	_, err = l.Log(&ConflictRecord{})
 	require.Equal(t, baseclog.ErrLoggerClosed, err)
-	l.Close()
+	assert.Nil(t, l.Stop())
 
 	wg := &sync.WaitGroup{}
 	for _, h := range handles {
@@ -130,9 +132,10 @@ func TestLoggerImpl_basicClose(t *testing.T) {
 
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool)
 	require.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
 
-	l.Close()
-	l.Close()
+	assert.Nil(t, l.Stop())
+	assert.Nil(t, l.Stop())
 }
 
 func TestLoggerImpl_UpdateWorker(t *testing.T) {
@@ -155,33 +158,36 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	// 1. update with same value
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
 
 	// same as before
 	err = l.UpdateWorkerCount(2)
 	assert.Equal(t, err, baseclog.ErrNoChange)
 	testNumWorkers(t, l, 2)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
 
 	// more than before
 	err = l.UpdateWorkerCount(4)
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.workerCount, 4)
 	testNumWorkers(t, l, 4)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(3))
 	assert.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
 
 	// less than before
 	err = l.UpdateWorkerCount(1)
 	assert.Nil(t, err)
 	testNumWorkers(t, l, 1)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 }
 
 func TestLoggerImpl_UpdateCapacity(t *testing.T) {
@@ -210,33 +216,36 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Nil(t, l.Start(nil))
 
 	// same as before
 	err = l.UpdateQueueCapcity(20)
 	assert.Equal(t, err, baseclog.ErrNoChange)
 	testCapacity(l, 20)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Nil(t, l.Start(nil))
 
 	// more than before
 	err = l.UpdateQueueCapcity(40)
 	assert.Nil(t, err)
 	testCapacity(l, 40)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Nil(t, l.Start(nil))
 
 	// less than before - cannot be done
 	err = l.UpdateQueueCapcity(10)
 	assert.NotNil(t, err)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 4. non-empty queue - test conflicts are not lost
 	numItems := 100000
@@ -244,6 +253,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(0), WithCapacity(numItems))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, numItems)
+	assert.Nil(t, l.Start(nil))
 
 	// simulate conflict writes
 	for i := 0; i < numItems; i++ {
@@ -293,15 +303,16 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	err = l.UpdateWorkerCount(len(l.logReqCh))
 	time.Sleep(5 * time.Second)
 	assert.Equal(t, len(l.logReqCh), 0)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 
 	// 5. test that the worker count remains the same
 	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(10))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.workerCount, 10)
+	assert.Nil(t, l.Start(nil))
 
 	err = l.UpdateQueueCapcity(numItems + 1) // increase the capacity
 	testNumWorkers(t, l, 10)
 	assert.Equal(t, l.opts.workerCount, 10)
-	assert.Nil(t, l.Close())
+	assert.Nil(t, l.Stop())
 }

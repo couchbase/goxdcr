@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/couchbase/goxdcr/v8/common"
 )
 
 // DocInfo is the subset of the information about a doc needed for
@@ -73,9 +75,10 @@ type ConflictRecord struct {
 	Target        DocInfo `json:"tgtDoc"`
 
 	// Note: The following will not be serialized to json
-	Body      []byte    `json:"-"`
-	Datatype  uint8     `json:"-"`
-	StartTime time.Time `json:"-"`
+	Body                []byte              `json:"-"`
+	Datatype            uint8               `json:"-"`
+	StartTime           time.Time           `json:"-"`
+	OriginatingPipeline common.PipelineType `json:"-"`
 }
 
 func (r *ConflictRecord) Scope() string {
@@ -108,12 +111,12 @@ func (r *ConflictRecord) SmallString() string {
 // 1. document Ids.
 // 2. CRD body.
 // 3. xattr for all three conflict records.
-func (r *ConflictRecord) PopulateData(replicationId string) error {
+func (r *ConflictRecord) PopulateData(replicationId string, pipelineType common.PipelineType) error {
 	if r == nil {
 		return fmt.Errorf("nil CRD")
 	}
 
-	r.ReplicationId = replicationId
+	r.ReplicationId = common.ComposeFullTopic(replicationId, pipelineType)
 	now := time.Now().UnixNano()
 
 	uniqKey := r.GenerateUniqKey()

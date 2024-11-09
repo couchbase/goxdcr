@@ -20,6 +20,7 @@ import (
 
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
+	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -1295,7 +1296,7 @@ func (rm *ResourceManager) getClogQueueSize(rs pipeline.ReplicationStatusIface) 
 		return 0
 	}
 
-	logger := pipe.ConflictLogger()
+	logger := baseclog.LoggerFromService(pipe.RuntimeContext().Service(base.CONFLICT_LOGGER))
 	if logger == nil {
 		return 0
 	}

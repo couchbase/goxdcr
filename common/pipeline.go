@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/couchbase/goxdcr/v8/base"
-	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
@@ -45,6 +44,17 @@ func (p PipelineType) String() string {
 		return "BackfillPipeline"
 	default:
 		return "?? (PipelineType)"
+	}
+}
+
+func (p PipelineType) ListenerPipelineType() ListenerPipelineType {
+	switch p {
+	case MainPipeline:
+		return ListenerOfMainPipeline
+	case BackfillPipeline:
+		return ListenerOfBackfillPipeline
+	default:
+		return ListenerNotShared
 	}
 }
 
@@ -129,6 +139,4 @@ type Pipeline interface {
 	SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping)
 
 	GetRebalanceProgress() (string, string)
-
-	ConflictLogger() baseclog.Logger
 }

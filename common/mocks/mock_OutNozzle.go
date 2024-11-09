@@ -3,9 +3,7 @@
 package mocks
 
 import (
-	conflictlog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	common "github.com/couchbase/goxdcr/v8/common"
-
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
 
 	mock "github.com/stretchr/testify/mock"
@@ -504,35 +502,48 @@ func (_c *OutNozzle_ResponsibleVBs_Call) RunAndReturn(run func() []uint16) *OutN
 	return _c
 }
 
-// SetConflictLoggerGetter provides a mock function with given fields: _a0
-func (_m *OutNozzle) SetConflictLoggerGetter(_a0 conflictlog.LoggerGetter) {
-	_m.Called(_a0)
+// SetConflictLogger provides a mock function with given fields: _a0
+func (_m *OutNozzle) SetConflictLogger(_a0 interface{}) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetConflictLogger")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
-// OutNozzle_SetConflictLoggerGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConflictLoggerGetter'
-type OutNozzle_SetConflictLoggerGetter_Call struct {
+// OutNozzle_SetConflictLogger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConflictLogger'
+type OutNozzle_SetConflictLogger_Call struct {
 	*mock.Call
 }
 
-// SetConflictLoggerGetter is a helper method to define mock.On call
-//   - _a0 conflictlog.LoggerGetter
-func (_e *OutNozzle_Expecter) SetConflictLoggerGetter(_a0 interface{}) *OutNozzle_SetConflictLoggerGetter_Call {
-	return &OutNozzle_SetConflictLoggerGetter_Call{Call: _e.mock.On("SetConflictLoggerGetter", _a0)}
+// SetConflictLogger is a helper method to define mock.On call
+//   - _a0 interface{}
+func (_e *OutNozzle_Expecter) SetConflictLogger(_a0 interface{}) *OutNozzle_SetConflictLogger_Call {
+	return &OutNozzle_SetConflictLogger_Call{Call: _e.mock.On("SetConflictLogger", _a0)}
 }
 
-func (_c *OutNozzle_SetConflictLoggerGetter_Call) Run(run func(_a0 conflictlog.LoggerGetter)) *OutNozzle_SetConflictLoggerGetter_Call {
+func (_c *OutNozzle_SetConflictLogger_Call) Run(run func(_a0 interface{})) *OutNozzle_SetConflictLogger_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(conflictlog.LoggerGetter))
+		run(args[0].(interface{}))
 	})
 	return _c
 }
 
-func (_c *OutNozzle_SetConflictLoggerGetter_Call) Return() *OutNozzle_SetConflictLoggerGetter_Call {
-	_c.Call.Return()
+func (_c *OutNozzle_SetConflictLogger_Call) Return(_a0 error) *OutNozzle_SetConflictLogger_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *OutNozzle_SetConflictLoggerGetter_Call) RunAndReturn(run func(conflictlog.LoggerGetter)) *OutNozzle_SetConflictLoggerGetter_Call {
+func (_c *OutNozzle_SetConflictLogger_Call) RunAndReturn(run func(interface{}) error) *OutNozzle_SetConflictLogger_Call {
 	_c.Call.Return(run)
 	return _c
 }

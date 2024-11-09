@@ -65,6 +65,51 @@ func (_c *AsyncComponentEventListener_Id_Call) RunAndReturn(run func() string) *
 	return _c
 }
 
+// ListenerPipelineType provides a mock function with given fields:
+func (_m *AsyncComponentEventListener) ListenerPipelineType() common.ListenerPipelineType {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListenerPipelineType")
+	}
+
+	var r0 common.ListenerPipelineType
+	if rf, ok := ret.Get(0).(func() common.ListenerPipelineType); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(common.ListenerPipelineType)
+	}
+
+	return r0
+}
+
+// AsyncComponentEventListener_ListenerPipelineType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListenerPipelineType'
+type AsyncComponentEventListener_ListenerPipelineType_Call struct {
+	*mock.Call
+}
+
+// ListenerPipelineType is a helper method to define mock.On call
+func (_e *AsyncComponentEventListener_Expecter) ListenerPipelineType() *AsyncComponentEventListener_ListenerPipelineType_Call {
+	return &AsyncComponentEventListener_ListenerPipelineType_Call{Call: _e.mock.On("ListenerPipelineType")}
+}
+
+func (_c *AsyncComponentEventListener_ListenerPipelineType_Call) Run(run func()) *AsyncComponentEventListener_ListenerPipelineType_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *AsyncComponentEventListener_ListenerPipelineType_Call) Return(_a0 common.ListenerPipelineType) *AsyncComponentEventListener_ListenerPipelineType_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *AsyncComponentEventListener_ListenerPipelineType_Call) RunAndReturn(run func() common.ListenerPipelineType) *AsyncComponentEventListener_ListenerPipelineType_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OnEvent provides a mock function with given fields: event
 func (_m *AsyncComponentEventListener) OnEvent(event *common.Event) {
 	_m.Called(event)

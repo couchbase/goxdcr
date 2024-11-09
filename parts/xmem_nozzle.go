@@ -779,8 +779,10 @@ type XmemNozzle struct {
 
 	mcRequestPool *base.MCRequestPool
 
-	// getter to fetch pipeline level conflict logger
-	conflictLogger baseclog.LoggerGetter
+	pipelineType common.PipelineType
+
+	// pipeline level conflict logger
+	conflictLogger baseclog.Logger
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -793,7 +795,7 @@ func getMcStatusFromGuardrailIdx(idx int) mc.Status {
 
 func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int,
 	connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string, sourceHostname string) *XmemNozzle {
+	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string, sourceHostname string, pipelineType common.PipelineType) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
@@ -834,6 +836,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 		nonTempErrsSeen:     make(map[uint16]mc.Status),
 		mcRequestPool:       base.NewMCRequestPool(id, nil),
 		sourceClusterUuid:   sourceClusterUUID,
+		pipelineType:        pipelineType,
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1930,8 +1933,18 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 	return
 }
 
-func (xmem *XmemNozzle) SetConflictLoggerGetter(loggerGetter baseclog.LoggerGetter) {
-	xmem.conflictLogger = loggerGetter
+func (xmem *XmemNozzle) SetConflictLogger(logger interface{}) error {
+	if logger == nil {
+		xmem.conflictLogger = nil
+		return nil
+	}
+
+	cLogger, ok := logger.(baseclog.Logger)
+	if !ok {
+		return fmt.Errorf("invalid CLog type %T", cLogger)
+	}
+	xmem.conflictLogger = cLogger
+	return nil
 }
 
 func getBodyAndXattrSpecs(xtoc []byte) (base.SubdocLookupPathSpecs, error) {
@@ -1970,7 +1983,7 @@ func getBodyAndXattrSpecs(xtoc []byte) (base.SubdocLookupPathSpecs, error) {
 }
 
 func (xmem *XmemNozzle) conflictLoggingEnabled() bool {
-	return xmem.conflictLogger() != nil
+	return xmem.conflictLogger != nil
 }
 
 // logs the source and target document involved in the conflict and their metadata.
@@ -2155,11 +2168,12 @@ func (xmem *XmemNozzle) log(req *base.WrappedMCRequest, resp *base.SubdocLookupR
 			VBUUID:   targetDoc.VbUUID,
 			Seqno:    targetDoc.Seqno,
 		},
-		Datatype:  base.JSONDataType,
-		StartTime: timestamp,
+		Datatype:            base.JSONDataType,
+		StartTime:           timestamp,
+		OriginatingPipeline: xmem.pipelineType,
 	}
 
-	conflictLogger := xmem.conflictLogger()
+	conflictLogger := xmem.conflictLogger
 
 	if conflictLogger != nil {
 		loggerWait, err := conflictLogger.Log(&conflictRecord)

@@ -10,13 +10,14 @@ package connector
 
 import (
 	//	"errors"
+	"sync"
+
 	common "github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
-	"sync"
 )
 
-//SimpleConnector connects one source to one downstream
+// SimpleConnector connects one source to one downstream
 type SimpleConnector struct {
 	*component.AbstractComponent
 	downStreamPart common.Part
@@ -45,7 +46,7 @@ func (con *SimpleConnector) DownStreams() map[string]common.Part {
 	return downStreams
 }
 
-//add a node to its existing set of downstream nodes
+// add a node to its existing set of downstream nodes
 func (con *SimpleConnector) AddDownStream(partId string, part common.Part) error {
 	con.stateLock.Lock()
 	defer con.stateLock.Unlock()

@@ -10,13 +10,14 @@ package connector
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	common "github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"sync"
-	"sync/atomic"
 )
 
 // Router routes data to downstream parts

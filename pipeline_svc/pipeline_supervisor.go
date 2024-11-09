@@ -181,6 +181,10 @@ func (pipelineSupervisor *PipelineSupervisor) checkAndLogFilterErrors() {
 	return
 }
 
+func (*PipelineSupervisor) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
+}
+
 func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 	var err error
 	switch event.EventType {

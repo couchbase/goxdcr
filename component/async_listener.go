@@ -20,20 +20,21 @@ import (
 )
 
 type AsyncComponentEventListenerImpl struct {
-	id         string
-	topic      string
-	event_chan chan *common.Event
-	fin_ch     chan bool
-	done_ch    chan bool
-	isStarted  uint32
-	stopOnce   sync.Once
-	logger     *log.CommonLogger
-	handlers   map[string]common.AsyncComponentEventHandler
+	id           string
+	topic        string
+	event_chan   chan *common.Event
+	fin_ch       chan bool
+	done_ch      chan bool
+	isStarted    uint32
+	stopOnce     sync.Once
+	logger       *log.CommonLogger
+	handlers     map[string]common.AsyncComponentEventHandler
+	pipelineType common.ListenerPipelineType
 }
 
 func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.LoggerContext,
-	event_chan_length int) *AsyncComponentEventListenerImpl {
-	return &AsyncComponentEventListenerImpl{
+	event_chan_length int, pipelineType common.PipelineType) *AsyncComponentEventListenerImpl {
+	al := &AsyncComponentEventListenerImpl{
 		id:         id,
 		topic:      topic,
 		event_chan: make(chan *common.Event, event_chan_length),
@@ -42,11 +43,22 @@ func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.Lo
 		handlers:   make(map[string]common.AsyncComponentEventHandler),
 		logger:     log.NewLogger("AsyncListener", logger_context),
 	}
+
+	switch pipelineType {
+	case common.MainPipeline:
+		al.pipelineType = common.ListenerOfMainPipeline
+	case common.BackfillPipeline:
+		al.pipelineType = common.ListenerOfBackfillPipeline
+	default:
+		al.pipelineType = common.ListenerNotShared
+	}
+
+	return al
 }
 
 func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
-	logger_context *log.LoggerContext) *AsyncComponentEventListenerImpl {
-	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanSize)
+	logger_context *log.LoggerContext, pipelineType common.PipelineType) *AsyncComponentEventListenerImpl {
+	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanSize, pipelineType)
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
@@ -73,6 +85,10 @@ func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
 	default:
 		l.event_chan <- event
 	}
+}
+
+func (b *AsyncComponentEventListenerImpl) ListenerPipelineType() common.ListenerPipelineType {
+	return b.pipelineType
 }
 
 func (l *AsyncComponentEventListenerImpl) Start() error {

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 var (
@@ -27,6 +28,10 @@ var (
 	ErrNilMapping              error = errors.New("conflict logging mapping input should not be nil")
 	ErrSystemNamespace         error = errors.New("conflict logging mapping target cannot be system scope or system collection")
 )
+
+func init() {
+	metadata.ValidateAndConvertStrToCLogMapping = ValidateAndConvertStrToCLogMapping
+}
 
 // Rules captures the conflict logging rules for a replication
 type Rules struct {
@@ -244,7 +249,7 @@ func ParseRules(j base.ConflictLoggingMappingInput) (rules *Rules, err error) {
 	return
 }
 
-func ValidateAndConvertJsonMapToConflictLoggingMapping(value string) (base.ConflictLoggingMappingInput, error) {
+func ValidateAndConvertStrToCLogMapping(value string) (base.ConflictLoggingMappingInput, error) {
 	if value == "null" || value == "nil" {
 		// "nil" is not a accepted value. {} is the smallest input.
 		return nil, fmt.Errorf("null or nil conflict logging mapping not accepted")

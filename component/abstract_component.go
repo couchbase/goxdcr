@@ -19,7 +19,6 @@ import (
 
 type AbstractComponent struct {
 	id              string
-	pipeline        common.Pipeline
 	event_listeners map[common.ComponentEventType][]common.ComponentEventListener
 	evtListenersMtx sync.RWMutex
 	logger          *log.CommonLogger
@@ -92,6 +91,21 @@ func (c *AbstractComponent) RaiseEvent(event *common.Event) {
 		if listener != nil {
 			listener.OnEvent(event)
 		}
+	}
+}
+
+func (c *AbstractComponent) RaisePipelineSpecificEvent(event *common.Event, pipelineType common.PipelineType) {
+	c.evtListenersMtx.RLock()
+	defer c.evtListenersMtx.RUnlock()
+	listenerList := c.event_listeners[event.EventType]
+
+	for _, listener := range listenerList {
+		if listener == nil ||
+			pipelineType.ListenerPipelineType() != listener.ListenerPipelineType() {
+			continue
+		}
+
+		listener.OnEvent(event)
 	}
 }
 

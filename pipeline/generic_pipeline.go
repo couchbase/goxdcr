@@ -11,14 +11,12 @@ package pipeline
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/common"
-	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
@@ -146,11 +144,6 @@ type GenericPipeline struct {
 	targetTopologyProgressMsg string
 
 	prometheusStatusUpdater PrometheusStatusUpdater
-
-	// Conflict logger for the pipeline.
-	// nil indicates that the feature is Off.
-	conflictLogger    baseclog.Logger
-	conflictLoggerMtx sync.RWMutex
 }
 
 // Get the runtime context of this pipeline
@@ -340,7 +333,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
 	// start async event listeners
-	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline) {
+	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline, nil) {
 		async_event_listener.Start()
 	}
 
@@ -755,7 +748,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	genericPipeline.checkpoint_func(genericPipeline)
 
 	// stop async event listeners so that RaiseEvent() would not block
-	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
+	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline, nil) {
 		asyncEventListener.Stop()
 	}
 	genericPipeline.logger.Infof("%v %v Async listeners have been stopped", genericPipeline.Type(), genericPipeline.InstanceId())
@@ -782,11 +775,6 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 
 	connectorsErrMap := genericPipeline.stopConnectorsWithTimeout()
 	base.ConcatenateErrors(errMap, connectorsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
-
-	err = genericPipeline.closeConflictLogger()
-	if err != nil {
-		errMap["genericPipeline.closeConflictLogger"] = err
-	}
 
 	genericPipeline.ReportProgress(common.ProgressPipelineStopped)
 
@@ -838,7 +826,7 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 	connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
-	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLogger baseclog.Logger) *GenericPipeline {
+	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error) *GenericPipeline {
 
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
@@ -862,7 +850,6 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		mergeCkptFunc:                      mergeCkptFunc,
 		utils:                              utils,
 		prometheusStatusUpdater:            prometheusStatusUpdater,
-		conflictLogger:                     conflictLogger,
 	}
 
 	// NOTE: Calling initialize here as part of constructor
@@ -939,7 +926,9 @@ func addConnectorToMap(connector common.Connector, connectorsMap map[string]comm
 // As of now, this method is called by xdcr_factory right after pipeline is constructed and async listeners are registered on parts
 // This is the only time when genericPipeline.asyncEventListenerMap is initialized/modified, when concurrent access is not possible.
 // Hence there are no real concurrency issues.
-func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.AsyncComponentEventListener {
+// conflictLogger can be nil if this is not the first time this function is called before for p.
+// i.e. SetAsyncListenerMap is called for p.
+func GetAllAsyncComponentEventListeners(p common.Pipeline, conflictLogger baseclog.Logger) map[string]common.AsyncComponentEventListener {
 	asyncListenerMap := p.GetAsyncListenerMap()
 	if asyncListenerMap == nil {
 		asyncListenerMap = make(map[string]common.AsyncComponentEventListener)
@@ -949,16 +938,19 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.Asy
 			addAsyncListenersToMap(source, asyncListenerMap, partsMap)
 		}
 
-		// add async listeners on conflict logger, if it exists, to listeners map
-		cLogger := p.ConflictLogger()
-		if cLogger != nil {
-			cLog, ok := cLogger.(*conflictlog.LoggerImpl)
-			if !ok {
-				panic(fmt.Sprintf("wrong clogger type %T", cLogger))
-			}
+		// Now initialise the map with conflict logger listeners.
+		// Since conflict logger is shared between pipelines,
+		// just pick and set the ones that are listeners of this pipeline.
+		if conflictLogger != nil {
+			allPipelinesCLogListeners := conflictLogger.AsyncComponentEventListeners()
+			for listenerId, listener := range allPipelinesCLogListeners {
+				if listener == nil ||
+					listener.ListenerPipelineType() != p.Type().ListenerPipelineType() {
+					continue
+				}
 
-			cLogListeners := cLog.AsyncComponentEventListeners()
-			mergeListenersMap(asyncListenerMap, cLogListeners)
+				asyncListenerMap[listenerId] = listener
+			}
 		}
 
 		p.SetAsyncListenerMap(asyncListenerMap)
@@ -1133,12 +1125,6 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 	// update settings in pipeline itself
 	genericPipeline.updatePipelineSettings(settings)
 
-	// update conflict logging settings if any
-	err := genericPipeline.updateConflictLoggingSettings(settings)
-	if err != nil {
-		return err
-	}
-
 	// update settings on parts and services in pipeline
 	if genericPipeline.partUpdateSetting_constructor != nil {
 		if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
@@ -1193,163 +1179,6 @@ func (genericPipeline *GenericPipeline) updatePipelineSettings(settings metadata
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBSettings(settings)
 	genericPipeline.updateTopologyProgress(settings)
-}
-
-// The following conflict logging settings update should result in a restart of pipeline,
-// and which cannot be handled on a live basis by this function:
-// 1. conflict logging mapping change (i.e. On/Enabled -> Off/Disabled change)
-// 2. conflict logging mapping change (i.e Off/Disabled -> On/Enabled change)
-// 3. conflict logging queue capacity decrease (i.e. newCap < oldCap).
-func (genericPipeline *GenericPipeline) updateConflictLoggingSettings(settings metadata.ReplicationSettingsMap) error {
-	genericPipeline.conflictLoggerMtx.Lock()
-	defer genericPipeline.conflictLoggerMtx.Unlock()
-
-	// the conflict logger instance will be nil
-	// if conflict logging feature is off right now for this pipeline.
-	conflictLogger := genericPipeline.conflictLogger
-	conflictLoggingIsOn := conflictLogger != nil
-
-	// change of conflict logging rules if needed
-	var conflictLoggingMap base.ConflictLoggingMappingInput
-	var conflictLoggingMapExists bool
-	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
-	if !conflictLoggingMapExists {
-		// no conflict logging update exists, which is fine.
-		return nil
-	}
-
-	conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
-	if !conflictLoggingMapExists {
-		// wrong type
-		err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
-			conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
-		genericPipeline.logger.Errorf(err.Error())
-		return err
-	}
-
-	if conflictLoggingMap == nil {
-		// nil is not an accepted value, should not reach here.
-		err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
-			conflictLoggingIn)
-		genericPipeline.logger.Errorf(err.Error())
-		return err
-	}
-
-	// validate if we can perform live pipeline update or not.
-	if conflictLoggingIsOn {
-		if conflictLoggingMap.Disabled() {
-			// conflict logging is on in the pipeline right now
-			// and the setting update was to turn it off. The pipeline should have restarted.
-			err := fmt.Errorf("conflict map respresents Off as input. Ignoring %v for the update because pipeline should have restarted",
-				conflictLoggingIn)
-			genericPipeline.logger.Errorf(err.Error())
-			return err
-		}
-	} else {
-		if !conflictLoggingMap.Disabled() {
-			// conflict logging is off in the pipeline right now
-			// and the setting update was to turn it on. The pipeline should have restarted.
-			err := fmt.Errorf("conflict map respresents On as input. Ignoring %v for the update because pipeline should have restarted",
-				conflictLoggingIn)
-			genericPipeline.logger.Errorf(err.Error())
-			return err
-		}
-
-		// No need of settings update.
-		// Conflict logging is Off and will remain off.
-		return nil
-	}
-
-	spec := genericPipeline.spec.GetReplicationSpec()
-
-	// update logger queue capacity if needed
-	loggerQueueCap, ok := settings[base.CLogQueueCapacity]
-	if ok {
-		cnt, ok := loggerQueueCap.(int)
-		if ok && cnt != 0 {
-			err := conflictLogger.UpdateQueueCapcity(cnt)
-			if err != nil && err != baseclog.ErrNoChange {
-				genericPipeline.logger.Errorf("error updating queue capacity to %v", cnt)
-				return err
-			}
-		}
-	}
-
-	// update logger setMeta timeout if needed
-	setMetaTimeoutMs, ok := settings[base.CLogSetMetaTimeout]
-	if ok {
-		t, ok := setMetaTimeoutMs.(int)
-		if ok {
-			conflictLogger.UpdateSetMetaTimeout(time.Duration(t) * time.Millisecond)
-		}
-	}
-
-	// update logger getPool timeout if needed
-	getPoolTimeoutMs, ok := settings[base.CLogPoolGetTimeout]
-	if ok {
-		t, ok := getPoolTimeoutMs.(int)
-		if ok {
-			conflictLogger.UpdateGetFromPoolTimeout(time.Duration(t) * time.Millisecond)
-		}
-	}
-
-	// update network retry interval if needed
-	nwRetryIntervalMs, ok := settings[base.CLogNetworkRetryInterval]
-	if ok {
-		t, ok := nwRetryIntervalMs.(int)
-		if ok {
-			conflictLogger.UpdateNWRetryInterval(time.Duration(t) * time.Millisecond)
-		}
-	}
-
-	// update network retry count if needed
-	nwRetryCount, ok := settings[base.CLogNetworkRetryCount]
-	if ok {
-		cnt, ok := nwRetryCount.(int)
-		if ok {
-			conflictLogger.UpdateNWRetryCount(cnt)
-		}
-	}
-
-	// update logger worker count if needed
-	workerCount, ok := settings[base.CLogWorkerCount]
-	if ok {
-		cnt, ok := workerCount.(int)
-		if ok && cnt != 0 {
-			err := conflictLogger.UpdateWorkerCount(cnt)
-			if err != nil && err != baseclog.ErrNoChange {
-				genericPipeline.logger.Errorf("error updating worker count to %v", cnt)
-				return err
-			}
-		}
-	}
-
-	// change of conflict logging rules if needed
-	if conflictLoggingMapExists {
-		// conflict logging is on and its settings needs to be updated.
-		err := conflictlog.UpdateLoggerWithRules(conflictLoggingMap, conflictLogger, spec.UniqueId(), genericPipeline.logger)
-		if err != nil {
-			err := fmt.Errorf("error updating existing conflict logging rules, ignoring %v and continuing with old rules. err=%v",
-				conflictLoggingMap, err)
-			genericPipeline.logger.Errorf(err.Error())
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (genericPipeline *GenericPipeline) closeConflictLogger() error {
-	var err error
-	genericPipeline.conflictLoggerMtx.Lock()
-	defer genericPipeline.conflictLoggerMtx.Unlock()
-
-	if genericPipeline.conflictLogger != nil {
-		err = genericPipeline.conflictLogger.Close()
-		genericPipeline.conflictLogger = nil
-	}
-
-	return err
 }
 
 func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings metadata.ReplicationSettingsMap) {
@@ -1462,13 +1291,6 @@ func (genericPipeline *GenericPipeline) GetRebalanceProgress() (string, string) 
 	defer genericPipeline.topologyMtx.Unlock()
 
 	return genericPipeline.sourceTopologyProgressMsg, genericPipeline.targetTopologyProgressMsg
-}
-
-func (genericPipeline *GenericPipeline) ConflictLogger() baseclog.Logger {
-	genericPipeline.conflictLoggerMtx.RLock()
-	defer genericPipeline.conflictLoggerMtx.RUnlock()
-
-	return genericPipeline.conflictLogger
 }
 
 // enforcer for GenericPipeline to implement Pipeline

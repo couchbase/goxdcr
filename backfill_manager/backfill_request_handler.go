@@ -857,7 +857,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 		}
 		atomic.StoreUint32(&b.backfillPipelineAttached, 1)
 	} else if pipeline.Type() == common.MainPipeline {
-		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
 		pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
 	}
 
@@ -929,6 +929,11 @@ func (b *BackfillRequestHandler) Id() string {
 // Implement ComponentEventListener
 func (b *BackfillRequestHandler) OnEvent(event *common.Event) {
 	b.ProcessEvent(event)
+}
+
+// Implement ComponentEventListener
+func (*BackfillRequestHandler) ListenerPipelineType() common.ListenerPipelineType {
+	return common.ListenerNotShared
 }
 
 func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {

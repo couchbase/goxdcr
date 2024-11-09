@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/common"
 )
 
 // Logger interface allows logging of conflicts in an abstracted manner
@@ -47,8 +48,26 @@ type Logger interface {
 	UpdateSetMetaTimeout(t time.Duration)
 	UpdateGetFromPoolTimeout(t time.Duration)
 
-	// Closes the logger. Hence forth the logger will error out
-	Close() error
+	// Conflict logger is technically not a typical pipeline service.
+	// It may or may not exist based on the replication setting.
+	// But it is attached to the pipeline to blend in with the existing design of the pipeline.
+	common.PipelineService
+	// Conflict logger needs to be a component to raise events,
+	// as required for generating statistics.
+	common.Component
 }
 
 type LoggerGetter func() Logger
+
+func LoggerFromService(s common.PipelineService) Logger {
+	if s == nil {
+		return nil
+	}
+
+	cLog, ok := s.(Logger)
+	if !ok {
+		return nil
+	}
+
+	return cLog
+}
