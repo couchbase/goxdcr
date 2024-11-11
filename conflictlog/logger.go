@@ -22,6 +22,9 @@ type LoggerOptions struct {
 	networkRetryInterval time.Duration
 	poolGetTimeout       time.Duration
 	setMetaTimeout       time.Duration
+	maxErrorCount        int
+	errorTimeWindow      time.Duration
+	reattemptDuration    time.Duration
 
 	// this is off by default and only present for
 	// local testing changeable through internal setting.
@@ -37,6 +40,9 @@ func (l *LoggerOptions) String() string {
 	b.WriteString(fmt.Sprintf("networkRetryInterval:%s,", l.networkRetryInterval))
 	b.WriteString(fmt.Sprintf("poolGetTimeout:%s,", l.poolGetTimeout))
 	b.WriteString(fmt.Sprintf("setMetaTimeout:%s,", l.setMetaTimeout))
+	b.WriteString(fmt.Sprintf("maxErrorCount:%v,", l.maxErrorCount))
+	b.WriteString(fmt.Sprintf("errorTimeWindow:%v,", l.errorTimeWindow))
+	b.WriteString(fmt.Sprintf("reattemptDuration:%v", l.reattemptDuration))
 	b.WriteString(fmt.Sprintf("skipTlsVerify:%v", l.skipTlsVerify))
 
 	return b.String()
@@ -96,16 +102,22 @@ func WithSkipTlsVerify(v bool) LoggerOpt {
 	}
 }
 
-func (o *LoggerOptions) SetRules(rules *baseclog.Rules) {
-	o.rules = rules
+func WithMaxErrorCount(val int) LoggerOpt {
+	return func(o *LoggerOptions) {
+		o.maxErrorCount = val
+	}
 }
 
-func (o *LoggerOptions) SetMapper(mapper Mapper) {
-	o.mapper = mapper
+func WithErrorTimeWindow(val time.Duration) LoggerOpt {
+	return func(o *LoggerOptions) {
+		o.errorTimeWindow = val
+	}
 }
 
-func (o *LoggerOptions) SetLogQueueCap(capacity int) {
-	o.logQueueCap = capacity
+func WithReattemptDuration(val time.Duration) LoggerOpt {
+	return func(o *LoggerOptions) {
+		o.reattemptDuration = val
+	}
 }
 
 type LoggerOpt func(o *LoggerOptions)

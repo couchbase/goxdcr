@@ -46,8 +46,8 @@ type LoggerImpl struct {
 	// opts are the logger options
 	opts LoggerOptions
 
-	// rwMtx is the logger level RW lock
-	rwMtx sync.RWMutex
+	// lock is the logger level RW lock
+	lock sync.RWMutex
 
 	// throttlerSvc is the IOPS throttler
 	throttlerSvc throttlerSvc.ThroughputThrottlerSvc
@@ -74,6 +74,22 @@ type LoggerImpl struct {
 
 	// these stats will be printed periodically to help debug issues.
 	stats clStats
+
+	// used to produce UI events.
+	eventsProducer common.PipelineEventsProducer
+
+	// error counts that will decide hibernation.
+	// The logger will be hibernated when: errCnt reaches X across workers
+	// in a time period T, i.e. time.Now() - errStartTime <= T
+	errorCnt       uint64
+	errorStartTime *time.Time
+
+	// hibernated meaning the logger is not accepting any requests.
+	// This can happen when logger was in a error state for a long period of time.
+	// 0 is logger is not in hibernation, unix epoch timestamp of hibernation start time otherwise.
+	hibernated         atomic.Bool
+	hibernationLock    sync.Mutex
+	hibernationEventId int64
 }
 
 type logRequest struct {
@@ -83,17 +99,22 @@ type logRequest struct {
 }
 
 type clStats struct {
-	recordCnt uint64
+	recordCnt atomic.Uint64
 
 	// conflict logging of a single conflict detected by xmem is mainly spent time
 	// in the following four phases.
-	waitTime          uint64
-	throttleLatency   uint64
-	preprocessLatency uint64
-	totalWriteLatency uint64
+	waitTime          atomic.Uint64
+	throttleLatency   atomic.Uint64
+	preprocessLatency atomic.Uint64
+	totalWriteLatency atomic.Uint64
 
-	poolGetLatency uint64
-	poolGetCnt     uint64
+	// miscellaneous stats
+	poolGetLatency atomic.Uint64
+	poolGetCnt     atomic.Uint64
+
+	// the following will be used to decide to print the stats or not.
+	lastRecordCnt atomic.Uint64
+	tickCnt       atomic.Uint64
 }
 
 // calcThrottlerAttempts returns the number of attempts to get go ahead
@@ -113,7 +134,7 @@ func calcThrottlerAttempts(setMetaTimeout time.Duration) int {
 
 // newLoggerImpl creates a new logger impl instance.
 // throttlerSvc is allowed to be nil, which means no throttling
-func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, opts ...LoggerOpt) (l *LoggerImpl, err error) {
+func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l *LoggerImpl, err error) {
 	// set the defaults
 	options := LoggerOptions{
 		rules:                nil,
@@ -124,6 +145,9 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		networkRetryInterval: time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
 		poolGetTimeout:       time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
 		setMetaTimeout:       time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
+		maxErrorCount:        base.DefaultCLogMaxErrorCount,
+		errorTimeWindow:      time.Duration(base.DefaultCLogErrorTimeWindowMs) * time.Millisecond,
+		reattemptDuration:    time.Duration(base.DefaultCLogReattemptDurationMs) * time.Millisecond,
 	}
 
 	// override the defaults
@@ -140,59 +164,67 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	logger.Infof("creating new conflict logger id=%s replId=%s loggerOptions=%s throttlerAttempts=%d", loggerId, replId, options.String(), throttlerAttempts)
 
 	l = &LoggerImpl{
-		logger:            logger,
-		id:                loggerId,
-		utils:             utils,
-		replId:            replId,
-		rulesLock:         sync.RWMutex{},
-		connPool:          connPool,
-		opts:              options,
-		rwMtx:             sync.RWMutex{},
-		throttlerSvc:      throttlerSvc,
-		throttlerAttempts: throttlerAttempts,
-		logReqCh:          make(chan logRequest, options.logQueueCap),
-		finch:             make(chan bool, 1),
-		shutdownWorkerCh:  make(chan bool, LoggerShutdownChCap),
-		wg:                sync.WaitGroup{},
-		AbstractComponent: component.NewAbstractComponentWithLogger(loggerId, logger),
+		logger:             logger,
+		id:                 loggerId,
+		utils:              utils,
+		replId:             replId,
+		rulesLock:          sync.RWMutex{},
+		connPool:           connPool,
+		opts:               options,
+		lock:               sync.RWMutex{},
+		throttlerSvc:       throttlerSvc,
+		throttlerAttempts:  throttlerAttempts,
+		logReqCh:           make(chan logRequest, options.logQueueCap),
+		finch:              make(chan bool, 1),
+		shutdownWorkerCh:   make(chan bool, LoggerShutdownChCap),
+		wg:                 sync.WaitGroup{},
+		AbstractComponent:  component.NewAbstractComponentWithLogger(loggerId, logger),
+		eventsProducer:     eventsProducer,
+		hibernationEventId: -1,
 	}
 
 	return
 }
 
 func (l *LoggerImpl) PrintStatusSummary() {
-	defer l.logger.Infof("%s (%s) printStats exiting", l.id, l.replId)
-
-	t := time.NewTicker(base.StatsLogInterval)
-	for {
-		select {
-		case <-l.finch:
-			t.Stop()
-			return
-		case <-t.C:
-			avgWaitTimeLatency := 0.0
-			avgThrottleLatency := 0.0
-			avgPreprocessLatency := 0.0
-			avgTotalWriteLatency := 0.0
-			avgPoolGetLatency := 0.0
-
-			numRecords := atomic.LoadUint64(&l.stats.recordCnt)
-			if numRecords > 0 {
-				avgWaitTimeLatency = float64(atomic.LoadUint64(&l.stats.waitTime) / numRecords)
-				avgThrottleLatency = float64(atomic.LoadUint64(&l.stats.throttleLatency) / numRecords)
-				avgPreprocessLatency = float64(atomic.LoadUint64(&l.stats.preprocessLatency) / numRecords)
-				avgTotalWriteLatency = float64(atomic.LoadUint64(&l.stats.totalWriteLatency) / numRecords)
-			}
-
-			poolGetCnt := atomic.LoadUint64(&l.stats.poolGetCnt)
-			if poolGetCnt > 0 {
-				avgPoolGetLatency = float64(atomic.LoadUint64(&l.stats.poolGetLatency) / poolGetCnt)
-			}
-
-			l.logger.Infof("%s stats: conflicts=%v, wait=%v, throttle=%v, preprocess=%v, totalWrite=%v, poolGet=%v, queueLen=%v",
-				l.Id(), numRecords, avgWaitTimeLatency, avgThrottleLatency, avgPreprocessLatency, avgTotalWriteLatency, avgPoolGetLatency, len(l.logReqCh))
-		}
+	if l.isClosed() {
+		return
 	}
+
+	// We will print the stats only if one of the below condition is true:
+	// 1. there were conflicts in the last base.StatsLogInterval
+	// 2. it's been 30 minutes since we last printed the stats (by default).
+	maxFrequency := uint64(base.CLogStatsLoggingMaxFreqInterval / base.StatsLogInterval)
+
+	numRecords := l.stats.recordCnt.Load()
+	defer l.stats.tickCnt.Add(1)
+
+	if numRecords == l.stats.lastRecordCnt.Load() &&
+		l.stats.tickCnt.Load()%maxFrequency != 0 {
+		return
+	}
+
+	l.stats.lastRecordCnt.Store(numRecords)
+
+	avgWaitTimeLatency := 0.0
+	avgThrottleLatency := 0.0
+	avgPreprocessLatency := 0.0
+	avgTotalWriteLatency := 0.0
+	avgPoolGetLatency := 0.0
+	if numRecords > 0 {
+		avgWaitTimeLatency = float64(l.stats.waitTime.Load() / numRecords)
+		avgThrottleLatency = float64(l.stats.throttleLatency.Load() / numRecords)
+		avgPreprocessLatency = float64(l.stats.preprocessLatency.Load() / numRecords)
+		avgTotalWriteLatency = float64(l.stats.totalWriteLatency.Load() / numRecords)
+	}
+
+	poolGetCnt := l.stats.poolGetCnt.Load()
+	if poolGetCnt > 0 {
+		avgPoolGetLatency = float64(l.stats.poolGetLatency.Load() / poolGetCnt)
+	}
+
+	l.logger.Infof("%s stats: conflicts=%v, wait=%v, throttle=%v, preprocess=%v, totalWrite=%v, poolGet=%v, queueLen=%v, errCnt=%v, errStartTime=%v, hib=%v",
+		l.Id(), numRecords, avgWaitTimeLatency, avgThrottleLatency, avgPreprocessLatency, avgTotalWriteLatency, avgPoolGetLatency, len(l.logReqCh), l.errorCnt, l.errorStartTime, l.hibernated.Load())
 }
 
 func (l *LoggerImpl) Id() string {
@@ -200,14 +232,21 @@ func (l *LoggerImpl) Id() string {
 }
 
 func (l *LoggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
+	l.stats.recordCnt.Add(1)
+
+	if l.hibernated.Load() {
+		err = baseclog.ErrLoggerHibernated
+		return
+	}
+
 	ackCh = make(chan error, 1)
 	req := logRequest{
 		conflictRec: c,
 		ackCh:       ackCh,
 	}
 
-	l.rwMtx.RLock()
-	defer l.rwMtx.RUnlock()
+	l.lock.RLock()
+	defer l.lock.RUnlock()
 
 	select {
 	case <-l.finch:
@@ -267,12 +306,7 @@ func (l *LoggerImpl) close() (err error) {
 		return nil
 	}
 
-	l.rwMtx.Lock()
-
-	// check for closed channel as multiple threads could have attempted it
-	if l.isClosed() {
-		return nil
-	}
+	l.lock.Lock()
 
 	l.logger.Infof("closing conflict logger id=%s replId=%s", l.id, l.replId)
 
@@ -286,7 +320,7 @@ func (l *LoggerImpl) close() (err error) {
 	// handle inflight log requests (both in the channel and in workers)
 	close(l.logReqCh)
 
-	defer l.rwMtx.Unlock()
+	defer l.lock.Unlock()
 
 	l.wg.Wait()
 	l.logger.Infof("closing of conflict logger done id=%s replId=%s", l.id, l.replId)
@@ -302,12 +336,12 @@ func (l *LoggerImpl) startWorker() {
 func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
 	l.logger.Debugf("going to change conflict logger worker count old=%d new=%d id=%s", l.opts.workerCount, newCount, l.id)
 
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
-
 	if l.isClosed() {
 		return
 	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	if newCount <= 0 || newCount == l.opts.workerCount {
 		err = baseclog.ErrNoChange
@@ -334,13 +368,12 @@ func (l *LoggerImpl) UpdateWorkerCount(newCount int) (err error) {
 // r should be non-nil
 func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 	l.logger.Debugf("going to change conflict logger rules old=%d new=%d", l.opts.rules, r)
-
-	l.rulesLock.Lock()
-	defer l.rulesLock.Unlock()
-
 	if l.isClosed() {
 		return
 	}
+
+	l.rulesLock.Lock()
+	defer l.rulesLock.Unlock()
 
 	if r == nil {
 		err = baseclog.ErrEmptyRules
@@ -377,17 +410,18 @@ func (l *LoggerImpl) worker() {
 				return
 			}
 
-			atomic.AddUint64(&l.stats.recordCnt, 1)
-
 			queueTime := time.Since(req.conflictRec.StartTime).Microseconds()
-			atomic.AddUint64(&l.stats.waitTime, uint64(queueTime))
+			l.stats.waitTime.Add(uint64(queueTime))
 			req.conflictRec.ResetStartTime()
 
 			err := l.processReq(req)
 			req.ackCh <- err
+			if err != nil {
+				l.hibernateIfNeeded(err)
+			}
 
 			totalWriteTime := time.Since(req.conflictRec.StartTime).Microseconds()
-			atomic.AddUint64(&l.stats.totalWriteLatency, uint64(totalWriteTime))
+			l.stats.totalWriteLatency.Add(uint64(totalWriteTime))
 		}
 	}
 }
@@ -419,8 +453,8 @@ func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error)
 	}
 
 	poolGetLatency := time.Since(now).Microseconds()
-	atomic.AddUint64(&l.stats.waitTime, uint64(poolGetLatency))
-	atomic.AddUint64(&l.stats.poolGetCnt, 1)
+	l.stats.waitTime.Add(uint64(poolGetLatency))
+	l.stats.poolGetCnt.Add(1)
 
 	return
 }
@@ -550,6 +584,12 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 	for i := 0; i < l.opts.networkRetryCount; i++ {
 		conn, err = l.getFromPool(bucketName)
 		if err != nil {
+			if base.SelectBucketErrBucketDNE(err) {
+				// the conflict bucket doesn't exist. No need to retry.
+				err = baseclog.ErrRules
+				return
+			}
+
 			nwError = l.utils.IsSeriousNetError(err)
 			l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
 			// This is to account for nw errors while connecting
@@ -570,6 +610,10 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 		// across the iterations and calls all of them when function exits which
 		// will be error prone in this case
 		err = fn(conn)
+		if err == baseclog.ErrScopeColNotFound {
+			err = baseclog.ErrRules
+			return
+		}
 
 		writeErr := l.processWriteError(err, originatingPipelineType)
 		if err == nil || writeErr.noRetryNeeded() {
@@ -609,7 +653,7 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 	}
 
 	throttleTime := time.Since(req.conflictRec.StartTime).Microseconds()
-	atomic.AddUint64(&l.stats.throttleLatency, uint64(throttleTime))
+	l.stats.throttleLatency.Add(uint64(throttleTime))
 	req.conflictRec.ResetStartTime()
 
 	target, err := l.getTarget(req.conflictRec)
@@ -634,7 +678,7 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 	}
 
 	preprocessTime := time.Since(req.conflictRec.StartTime).Microseconds()
-	atomic.AddUint64(&l.stats.preprocessLatency, uint64(preprocessTime))
+	l.stats.preprocessLatency.Add(uint64(preprocessTime))
 	req.conflictRec.ResetStartTime()
 
 	timeout := l.opts.setMetaTimeout
@@ -670,8 +714,8 @@ func (l *LoggerImpl) UpdateQueueCapcity(newCap int) (err error) {
 
 	// acquire the lock so that no more writes to the channel happens.
 	// read from channel by the workers can still happen, so we shut down the workers temporarily.
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	if l.logReqCh == nil {
 		err = fmt.Errorf("nil queue")
@@ -735,8 +779,8 @@ func (l *LoggerImpl) UpdateNWRetryCount(cnt int) {
 		return
 	}
 
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	l.logger.Infof("changing conflict logger network retry count old=%d new=%d id=%s", l.opts.networkRetryCount, cnt, l.id)
 
@@ -748,8 +792,8 @@ func (l *LoggerImpl) UpdateNWRetryInterval(t time.Duration) {
 		return
 	}
 
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.networkRetryInterval, t, l.id)
 
@@ -761,8 +805,8 @@ func (l *LoggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 		return
 	}
 
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.setMetaTimeout, t, l.id)
 
@@ -774,12 +818,51 @@ func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 		return
 	}
 
-	l.rwMtx.Lock()
-	defer l.rwMtx.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.poolGetTimeout, t, l.id)
 
 	l.opts.poolGetTimeout = t
+}
+
+func (l *LoggerImpl) UpdateMaxErrorCount(cnt int) {
+	if l.isClosed() {
+		return
+	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.logger.Infof("changing conflict logger max error count old=%v new=%v id=%s", l.opts.maxErrorCount, cnt, l.id)
+
+	l.opts.maxErrorCount = cnt
+}
+
+func (l *LoggerImpl) UpdateErrorTimeWindow(t time.Duration) {
+	if l.isClosed() {
+		return
+	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.logger.Infof("changing conflict logger error time window old=%v new=%v id=%s", l.opts.errorTimeWindow, t, l.id)
+
+	l.opts.errorTimeWindow = t
+}
+
+func (l *LoggerImpl) UpdateReattemptDuration(t time.Duration) {
+	if l.isClosed() {
+		return
+	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.logger.Infof("changing conflict logger reattempt duration old=%v new=%v id=%s", l.opts.reattemptDuration, t, l.id)
+
+	l.opts.reattemptDuration = t
 }
 
 func (l *LoggerImpl) Attach(_ common.Pipeline) error {
@@ -798,7 +881,14 @@ func (l *LoggerImpl) Start(_ metadata.ReplicationSettingsMap) error {
 
 func (l *LoggerImpl) Stop() error {
 	err := l.close()
-	return err
+	if err != nil {
+		return err
+	}
+
+	// unhibernate the logger to get rid of the UI error message
+	l.unhibernate()
+
+	return nil
 }
 
 // The following conflict logging settings update should result in a restart of pipeline,
@@ -811,7 +901,6 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 
 	// change of conflict logging rules if needed
 	var conflictLoggingMap base.ConflictLoggingMappingInput
-	var conflictLoggingMapExists bool
 	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
 	if !conflictLoggingMapExists {
 		// no conflict logging update exists, which is fine.
@@ -922,6 +1011,33 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 		}
 	}
 
+	// update max error count if needed
+	maxErrCnt, ok := settings[base.CLogMaxErrorCount]
+	if ok {
+		cnt, ok := maxErrCnt.(int)
+		if ok && cnt != 0 {
+			l.UpdateMaxErrorCount(cnt)
+		}
+	}
+
+	// update error time window
+	errTimeWindow, ok := settings[base.CLogErrorTimeWindow]
+	if ok {
+		t, ok := errTimeWindow.(int)
+		if ok {
+			l.UpdateErrorTimeWindow(time.Duration(t) * time.Millisecond)
+		}
+	}
+
+	// update reattempt duration if needed
+	reattemptDuration, ok := settings[base.CLogReattemptDuration]
+	if ok {
+		t, ok := reattemptDuration.(int)
+		if ok {
+			l.UpdateReattemptDuration(time.Duration(t) * time.Millisecond)
+		}
+	}
+
 	// change of conflict logging rules if needed
 	if conflictLoggingMapExists {
 		// conflict logging is on and its settings needs to be updated.
@@ -947,4 +1063,95 @@ func (l *LoggerImpl) IsSharable() bool {
 func (l *LoggerImpl) Detach(pipeline common.Pipeline) error {
 	// no-op
 	return nil
+}
+
+// the function handles errors and hibernates the logger on continuous count of specific errors.
+func (l *LoggerImpl) hibernateIfNeeded(err error) {
+	if err != baseclog.ErrRules &&
+		err != baseclog.ErrThrottle &&
+		err != baseclog.ErrTimeout {
+		return
+	}
+
+	l.hibernationLock.Lock()
+	defer l.hibernationLock.Unlock()
+
+	if l.isClosed() {
+		return
+	}
+
+	if l.hibernated.Load() {
+		// already hibernated
+		return
+	}
+
+	var needToHibernate bool
+
+	if err == baseclog.ErrRules {
+		needToHibernate = true
+	} else if err == baseclog.ErrThrottle || err == baseclog.ErrTimeout {
+		timeNow := time.Now()
+		if l.errorCnt == 0 {
+			// first occurance of the error
+			l.errorStartTime = &timeNow
+			l.errorCnt = 1
+		} else if l.errorStartTime != nil && timeNow.Sub(*l.errorStartTime) <= l.opts.errorTimeWindow {
+			// error inside the timeframe of the first error
+			l.errorCnt++
+			if l.errorCnt == uint64(l.opts.maxErrorCount) {
+				needToHibernate = true
+			}
+		} else {
+			// error outside the timeframe of the first error. Reset the count.
+			l.errorCnt = 0
+			l.errorStartTime = nil
+		}
+	}
+
+	if !needToHibernate || l.opts.reattemptDuration == 0 {
+		return
+	}
+
+	// hibernate the logger
+	defer l.logger.Infof("Conflict logger hibernated rid=%s lid=%s", l.replId, l.id)
+
+	var uiMessage string
+	if err == baseclog.ErrRules {
+		uiMessage = fmt.Sprintf(HibernationRulesErrUIStr, l.opts.reattemptDuration/time.Minute)
+	} else {
+		uiMessage = fmt.Sprintf(HibernationSystemErrUIStr, l.opts.maxErrorCount, l.opts.errorTimeWindow/time.Second, l.opts.reattemptDuration/time.Minute)
+	}
+
+	l.hibernated.Store(true)
+	eventId := l.eventsProducer.AddEvent(base.LowPriorityMsg, uiMessage, base.EventsMap{}, nil)
+	l.hibernationEventId = eventId
+
+	time.AfterFunc(l.opts.reattemptDuration, func() {
+		// unhibernate the logger eventually
+		if l.isClosed() {
+			return
+		}
+
+		l.unhibernate()
+	})
+}
+
+func (l *LoggerImpl) unhibernate() {
+	l.hibernationLock.Lock()
+	defer l.hibernationLock.Unlock()
+
+	l.hibernated.Store(false)
+	l.errorCnt = 0
+	l.errorStartTime = nil
+
+	uiEventId := l.hibernationEventId
+	defer l.logger.Infof("Conflict logger unhibernated rid=%s lid=%s event=%v", l.replId, l.id, uiEventId)
+	if uiEventId == -1 {
+		return
+	}
+
+	err := l.eventsProducer.DismissEvent(int(l.hibernationEventId))
+	if err != nil && err != base.ErrorNotFound {
+		l.logger.Errorf("Error dismissing event=%v rid=%s lid=%s", l.hibernationEventId, l.replId, l.id)
+	}
 }

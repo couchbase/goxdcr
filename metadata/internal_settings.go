@@ -300,6 +300,7 @@ const (
 	// conflict logging related internal settings
 	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
 	CLogResourceManagerBoostKey = "CLogResourceManagerBoost"
+	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -438,6 +439,7 @@ var SrcHeartbeatMaxIntervalFactorConfig = &SettingsConfig{base.SrcHeartbeatMaxIn
 var RMTokenDistributionStrConfig = &SettingsConfig{base.RMTokenDistributionStr, nil}
 var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
 var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
+var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMaxFreqInterval / time.Second), &Range{30, 24 * 60 * 60 /* 1 day */}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -576,6 +578,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	RMTokenDistributionStrKey:                     RMTokenDistributionStrConfig,
 	CLogSkipTlsVerifyKey:                          CLogSkipTlsVerifyConfig,
 	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
+	CLogStatsLoggingMaxFreqKey:                    CLogStatsLoggingMaxFreqConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

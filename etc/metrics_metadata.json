@@ -122,6 +122,18 @@
         ],
         "stability": "committed"
     },
+    "xdcr_clog_hibernated_total": {
+        "type": "counter",
+        "help": "Number of docs which were identified as conflicts, but could not be logged because the conflict logger was hibernated.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_clog_impossible_resps_total": {
         "type": "counter",
         "help": "Number of errors which by design should not have been returned, encountered while writing the conflict records to the conflict bucket. It includes EEXISTS, ENOENT and LOCKED errors.",

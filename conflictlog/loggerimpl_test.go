@@ -60,7 +60,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 
 	fakeConnectionSleep = 1 * time.Second
 
-	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, nil, pool, WithCapacity(20))
+	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, nil, pool, nil, WithCapacity(20))
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -130,7 +130,7 @@ func TestLoggerImpl_basicClose(t *testing.T) {
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
 		newFakeConnection)
 
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool)
+	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil)
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -156,7 +156,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	fakeConnectionSleep = 1 * time.Second
 
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
+	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -167,7 +167,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(2))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -179,7 +179,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20), WithWorkerCount(3))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(3))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -213,7 +213,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	}
 
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -225,7 +225,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -237,7 +237,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithCapacity(20))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -250,7 +250,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	// 4. non-empty queue - test conflicts are not lost
 	numItems := 100000
 	readCount := 0
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(0), WithCapacity(numItems))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithWorkerCount(0), WithCapacity(numItems))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, numItems)
 	assert.Nil(t, l.Start(nil))
@@ -293,10 +293,10 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	// this way testCapacity will only be called after UpdateQueueCapcity is done.
 	time.Sleep(2 * time.Second)
 
-	l.rwMtx.Lock()
+	l.lock.Lock()
 	close(finCh)
 	testCapacity(l, numItems+1)
-	l.rwMtx.Unlock()
+	l.lock.Unlock()
 	assert.Equal(t, len(l.logReqCh)+readCount, numItems)
 
 	// have actual workers and check if the queue is read from
@@ -306,7 +306,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 5. test that the worker count remains the same
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, WithWorkerCount(10))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithWorkerCount(10))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.workerCount, 10)
 	assert.Nil(t, l.Start(nil))

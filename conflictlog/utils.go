@@ -5,12 +5,13 @@ import (
 
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
+	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 // returns a logger only if non-null rules are parsed without any errors.
-func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, settings *metadata.ReplicationSettings, logger_ctx *log.LoggerContext, logger *log.CommonLogger) (baseclog.Logger, error) {
+func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, replId string, settings *metadata.ReplicationSettings, logger_ctx *log.LoggerContext, logger *log.CommonLogger, eventsProducer common.PipelineEventsProducer) (baseclog.Logger, error) {
 	if conflictLoggingMap == nil {
 		return nil, fmt.Errorf("nil conflictLoggingMap")
 	}
@@ -43,6 +44,7 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 	conflictLogger, err = clm.NewLogger(
 		fileLogger,
 		replId,
+		eventsProducer,
 		WithMapper(NewConflictMapper(logger)),
 		WithRules(rules),
 		WithCapacity(settings.GetCLogQueueCapacity()),
@@ -51,6 +53,9 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 		WithPoolGetTimeout(settings.GetCLogPoolGetTimeout()),
 		WithNetworkRetryInterval(settings.GetCLogNetworkRetryInterval()),
 		WithNetworkRetryCount(settings.GetCLogNetworkRetryCount()),
+		WithMaxErrorCount(settings.GetCLogMaxErrorCount()),
+		WithErrorTimeWindow(settings.GetCLogErrorTimeWindow()),
+		WithReattemptDuration(settings.GetCLogReattemptDuration()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error getting a new conflict logger for %v. err=%v", conflictLoggingMap, err)

@@ -162,6 +162,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.CLOG_POOL_GET_TIMEDOUT:              service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_CLOG_METRIC:           service_def.MetricTypeCounter,
 	service_def.CLOG_WAIT_TIME:                      service_def.MetricTypeCounter,
+	service_def.CLOG_HIBERNATED:                     service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -1606,6 +1607,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.TRUE_CONFLICTS_DETECTED, trueConflictsCnt)
 		clogQueueFull := metrics.NewCounter()
 		registry.Register(service_def.CLOG_QUEUE_FULL, clogQueueFull)
+		clogHibernated := metrics.NewCounter()
+		registry.Register(service_def.CLOG_HIBERNATED, clogHibernated)
 		clogThrottled := metrics.NewCounter()
 		registry.Register(service_def.CLOG_THROTTLED, clogThrottled)
 		clogWriteTimedout := metrics.NewCounter()
@@ -1667,6 +1670,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE] = docsSentWithPoisonedCasReplace
 		metric_map[service_def.TRUE_CONFLICTS_DETECTED] = trueConflictsCnt
 		metric_map[service_def.CLOG_QUEUE_FULL] = clogQueueFull
+		metric_map[service_def.CLOG_HIBERNATED] = clogHibernated
 		metric_map[service_def.CLOG_THROTTLED] = clogThrottled
 		metric_map[service_def.CLOG_WRITE_TIMEDOUT] = clogWriteTimedout
 		metric_map[service_def.CLOG_POOL_GET_TIMEDOUT] = clogPoolGetTimedout
@@ -1973,6 +1977,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			switch err {
 			case baseclog.ErrQueueFull:
 				metricMap[service_def.CLOG_QUEUE_FULL].(metrics.Counter).Inc(1)
+			case baseclog.ErrLoggerHibernated:
+				metricMap[service_def.CLOG_HIBERNATED].(metrics.Counter).Inc(1)
 			}
 		}
 	}

@@ -123,6 +123,9 @@ const (
 	CLogNetworkRetryIntervalKey = base.CLogNetworkRetryInterval
 	CLogWorkerCountKey          = base.CLogWorkerCount
 	CLogQueueCapacityKey        = base.CLogQueueCapacity
+	CLogMaxErrorCountKey        = base.CLogMaxErrorCount
+	CLogErrorTimeWindowKey      = base.CLogErrorTimeWindow
+	CLogReattemptDurationKey    = base.CLogReattemptDuration
 )
 
 // keys to facilitate redaction of replication settings map
@@ -255,13 +258,16 @@ var CasDriftThresholdSecsConfig = &SettingsConfig{100, &Range{0, math.MaxInt}}
 var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
 // conflict logging replication settings
-var ConflictLoggingConfig = &SettingsConfig{base.ConflictLoggingOff, nil}                                                       // feature on/off and conflict logging bucket and namespace mapping
-var CLogSetMetaTimeoutMsConfig = &SettingsConfig{base.DefaultCLogSetMetaTimeoutMs, &Range{0, 600000 /* 10 mins */}}             // network write timeout for a single conflict record
-var CLogPoolGetTimeoutMsConfig = &SettingsConfig{base.DefaultCLogPoolGetTimeoutMs, &Range{0, 600000 /* 10 mins */}}             // timeout to get connection obj from global connection pool
-var CLogNetworkRetryCountConfig = &SettingsConfig{base.DefaultCLogNetworkRetryCount, &Range{0, 100}}                            // number of retries after a non-fatal conflict record write failure
-var CLogNetworkRetryIntervalMsConfig = &SettingsConfig{base.DefaultCLogNetworkRetryIntervalMs, &Range{0, 600000 /* 10 mins */}} // sleep duration after a non-fatal conflict record write failure
-var CLogWorkerCountConfig = &SettingsConfig{base.DefaultCLogWorkerCount, &Range{1, 1000}}                                       // number of go-routines performing conflict logging writes accross nozzles for a pipeline
-var CLogQueueCapacityConfig = &SettingsConfig{base.DefaultCLogQueueCapacity, &Range{1, 6000}}                                   // conflict logging queue capacity accross nozzles for a pipeline
+var ConflictLoggingConfig = &SettingsConfig{base.ConflictLoggingOff, nil}                                                                 // feature on/off and conflict logging bucket and namespace mapping
+var CLogSetMetaTimeoutMsConfig = &SettingsConfig{base.DefaultCLogSetMetaTimeoutMs, &Range{0, 600000 /* 10 mins */}}                       // network write timeout for a single conflict record
+var CLogPoolGetTimeoutMsConfig = &SettingsConfig{base.DefaultCLogPoolGetTimeoutMs, &Range{0, 600000 /* 10 mins */}}                       // timeout to get connection obj from global connection pool
+var CLogNetworkRetryCountConfig = &SettingsConfig{base.DefaultCLogNetworkRetryCount, &Range{0, 100}}                                      // number of retries after a non-fatal conflict record write failure
+var CLogNetworkRetryIntervalMsConfig = &SettingsConfig{base.DefaultCLogNetworkRetryIntervalMs, &Range{0, 600000 /* 10 mins */}}           // sleep duration after a non-fatal conflict record write failure
+var CLogWorkerCountConfig = &SettingsConfig{base.DefaultCLogWorkerCount, &Range{1, 1000}}                                                 // number of go-routines performing conflict logging writes accross nozzles for a pipeline
+var CLogQueueCapacityConfig = &SettingsConfig{base.DefaultCLogQueueCapacity, &Range{1, 6000}}                                             // conflict logging queue capacity accross nozzles for a pipeline
+var CLogMaxErrorCountConfig = &SettingsConfig{base.DefaultCLogMaxErrorCount, &Range{1, 1000000}}                                          // maximum number of certain errors in a certain duration (errorTimeWindow) after which conflict logger will stop accepting requests momentarily.
+var CLogErrorTimeWindowConfig = &SettingsConfig{base.DefaultCLogErrorTimeWindowMs, &Range{1, 30 * 24 * 60 * 60 * 1000 /* 30 days */}}     // the time window in which errors when seen in bulk (maxErrorCount), the conflict logger stops accepting requests.
+var CLogReattemptDurationConfig = &SettingsConfig{base.DefaultCLogReattemptDurationMs, &Range{0, 30 * 24 * 60 * 60 * 1000 /* 30 days */}} // the time duration for which the conflict logger will start accepting requests again after it had seen errors in the past.
 
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
@@ -325,6 +331,9 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CLogNetworkRetryIntervalKey:          CLogNetworkRetryIntervalMsConfig,
 	CLogWorkerCountKey:                   CLogWorkerCountConfig,
 	CLogQueueCapacityKey:                 CLogQueueCapacityConfig,
+	CLogMaxErrorCountKey:                 CLogMaxErrorCountConfig,
+	CLogErrorTimeWindowKey:               CLogErrorTimeWindowConfig,
+	CLogReattemptDurationKey:             CLogReattemptDurationConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1470,6 +1479,23 @@ func (s *ReplicationSettings) GetCLogWorkerCount() int {
 func (s *ReplicationSettings) GetCLogQueueCapacity() int {
 	val, _ := s.GetSettingValueOrDefaultValue(CLogQueueCapacityKey)
 	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCLogMaxErrorCount() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogMaxErrorCountKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCLogErrorTimeWindow() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogErrorTimeWindowKey)
+	msInt := val.(int)
+	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetCLogReattemptDuration() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogReattemptDurationKey)
+	msInt := val.(int)
+	return time.Duration(msInt) * time.Millisecond
 }
 
 // need to reconstruct pipeline if:

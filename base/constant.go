@@ -800,7 +800,7 @@ var LengthOfRandomId = 16
 var MaxRetryForRandomIdGeneration = 5
 
 var TimeoutRuntimeContextStart = 30 * time.Second
-var TimeoutRuntimeContextStop = 10 * time.Second
+var TimeoutRuntimeContextStop = 15 * time.Second
 var TimeoutPartsStart = 30 * time.Second
 var TimeoutPartsStop = 10 * time.Second
 var TimeoutConnectorsStop = 5 * time.Second
@@ -1295,7 +1295,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatEnabled bool, srcHeartbeatIgnoreIncoming bool,
 	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
-	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int) {
+	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1416,10 +1416,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ReplStatusExportBrokenMapTimeout = replStatusExportBrokenMapTimeout
 	TopologySvcCoolDownPeriod = topologyCooldownPeriod
 	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
-	if blockedIpv4 == true {
+	if blockedIpv4 {
 		NetTCP = TCP6
 		IpFamilyStr = "ipv6"
-	} else if blockedIpv6 == true {
+	} else if blockedIpv6 {
 		NetTCP = TCP4
 		IpFamilyStr = "ipv4"
 	}
@@ -1468,6 +1468,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	CLogSkipTlsVerify = cLogSkipTlsVerify
 	CLogResourceManagerBoost = cLogRMBoost
+	CLogStatsLoggingMaxFreqInterval = cLogStatsMaxFreq
 }
 
 // XDCR Dev hidden replication settings
@@ -1573,6 +1574,9 @@ const (
 	CLogNetworkRetryInterval string = "CLogNetworkRetryInterval"
 	CLogWorkerCount          string = "CLogWorkerCount"
 	CLogQueueCapacity        string = "CLogQueueCapacity"
+	CLogMaxErrorCount        string = "CLogMaxErrorCount"
+	CLogErrorTimeWindow      string = "CLogErrorTimeWindow"
+	CLogReattemptDuration    string = "CLogReattemptDuration"
 )
 
 // simple keys inside conflict logging mapping. It excludes loggingRules key.
@@ -1596,6 +1600,9 @@ const (
 	DefaultCLogNetworkRetryIntervalMs int = 2000 // in milliseconds
 	DefaultCLogWorkerCount            int = 3
 	DefaultCLogQueueCapacity          int = 5
+	DefaultCLogMaxErrorCount          int = 10
+	DefaultCLogErrorTimeWindowMs      int = 120000         // in milliseconds
+	DefaultCLogReattemptDurationMs    int = 30 * 60 * 1000 // in milliseconds
 
 	// conflict logger's Connection Pool consts
 	// maximum number of connection objects for a given bucket in the pool
@@ -1932,3 +1939,4 @@ var RMTokenDistribution = []int{
 // Exposed as an internal setting.
 var CLogSkipTlsVerify bool
 var CLogResourceManagerBoost int
+var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second

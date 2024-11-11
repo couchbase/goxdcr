@@ -182,6 +182,7 @@ const (
 	// xmem's clog stats
 	TRUE_CONFLICTS_DETECTED = "true_conflicts_detected"
 	CLOG_QUEUE_FULL         = "clog_queue_full"
+	CLOG_HIBERNATED         = "clog_hibernated"
 	CLOG_THROTTLED          = "clog_throttled"
 	CLOG_WRITE_TIMEDOUT     = "clog_write_timedout"
 	CLOG_POOL_GET_TIMEDOUT  = "clog_pool_get_timedout"
@@ -1574,6 +1575,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSrcHeartbeatSupport,
 		Description:  "Number of docs which were identified as conflicts, but could not be logged because the logging queue was full.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	CLOG_HIBERNATED: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		Description:  "Number of docs which were identified as conflicts, but could not be logged because the conflict logger was hibernated.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

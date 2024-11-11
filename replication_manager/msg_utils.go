@@ -114,6 +114,9 @@ const (
 	CLogNetworkRetryIntervalKey       = base.CLogNetworkRetryInterval
 	CLogWorkerCountKey                = base.CLogWorkerCount
 	CLogQueueCapacityKey              = base.CLogQueueCapacity
+	CLogMaxErrorCountKey              = base.CLogMaxErrorCount
+	CLogErrorTimeWindowKey            = base.CLogErrorTimeWindow
+	CLogReattemptDurationKey          = base.CLogReattemptDuration
 )
 
 // constants for parsing create/change/view replication response
@@ -254,6 +257,9 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CLogNetworkRetryIntervalKey:       metadata.CLogNetworkRetryIntervalKey,
 	CLogWorkerCountKey:                metadata.CLogWorkerCountKey,
 	CLogQueueCapacityKey:              metadata.CLogQueueCapacityKey,
+	CLogMaxErrorCountKey:              metadata.CLogMaxErrorCountKey,
+	CLogErrorTimeWindowKey:            metadata.CLogErrorTimeWindowKey,
+	CLogReattemptDurationKey:          metadata.CLogReattemptDurationKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -326,6 +332,9 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogNetworkRetryIntervalKey:          CLogNetworkRetryIntervalKey,
 	metadata.CLogWorkerCountKey:                   CLogWorkerCountKey,
 	metadata.CLogQueueCapacityKey:                 CLogQueueCapacityKey,
+	metadata.CLogMaxErrorCountKey:                 CLogMaxErrorCountKey,
+	metadata.CLogErrorTimeWindowKey:               CLogErrorTimeWindowKey,
+	metadata.CLogReattemptDurationKey:             CLogReattemptDurationKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

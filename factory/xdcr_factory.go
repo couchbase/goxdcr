@@ -348,7 +348,12 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	var conflictLogger baseclog.Logger
 	if pipelineType == common.MainPipeline {
 		conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
-		conflictLogger, err = conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger)
+		eventsProducer, err := xdcrf.GetEventsProducer(topic)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		conflictLogger, err = conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger, eventsProducer)
 		if err != nil && err != baseclog.ErrConflictLoggingIsOff {
 			xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
 			return nil, nil, err

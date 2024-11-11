@@ -22,8 +22,11 @@ var (
 	ErrConflictLoggingIsOff  error = errors.New("conflict logging is off")
 	ErrNoChange              error = errors.New("no change in setting value")
 	ErrTimeout               error = errors.New("conflict logging write timeout")
+	ErrRules                 error = errors.New("error due to configured conflict logging rules. Bucket or scope or collections configured doesn't exist")
 	ErrThrottle              error = errors.New("conflict writer is throttled")
 	ErrLogWaitAborted        error = errors.New("conflict log handle received abort")
+	ErrLoggerHibernated      error = errors.New("conflict logger hibernated")
+	ErrScopeColNotFound      error = errors.New("Scope or collection not found")
 
 	// errors mapped to setMeta gomemcached responses.
 	ErrTMPFAIL           error = errors.New("temporary write failure")

@@ -8,6 +8,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/base/iopool"
+	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -20,7 +21,7 @@ var _ Manager = (*managerImpl)(nil)
 
 // Manager defines behaviour for conflict manager
 type Manager interface {
-	NewLogger(logger *log.CommonLogger, replId string, opts ...LoggerOpt) (l baseclog.Logger, err error)
+	NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error)
 	ConnPool() iopool.ConnPool
 	SetConnLimit(limit int)
 	SetIOPSLimit(limit int64)
@@ -96,9 +97,9 @@ type managerImpl struct {
 	skipTlsVerify bool
 }
 
-func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, opts ...LoggerOpt) (l baseclog.Logger, err error) {
+func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error) {
 	opts = append(opts, WithSkipTlsVerify(base.CLogSkipTlsVerify))
-	l, err = newLoggerImpl(logger, replId, m.utils, m.throttlerSvc, m.connPool, opts...)
+	l, err = newLoggerImpl(logger, replId, m.utils, m.throttlerSvc, m.connPool, eventsProducer, opts...)
 	return
 }
 

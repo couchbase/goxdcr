@@ -214,7 +214,8 @@ func (m *MemcachedConn) getCollectionId(conn mcc.ClientIface, target baseclog.Ta
 	collId, err = man.GetCollectionId(target.NS.ScopeName, target.NS.CollectionName)
 	if err != nil {
 		if err == base.ErrorNotFound {
-			err = fmt.Errorf("scope or collection not found. target=%s", target)
+			m.logger.Errorf("scope or collection not found. target=%s", target)
+			err = baseclog.ErrScopeColNotFound
 		}
 		return 0, err
 	}

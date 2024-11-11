@@ -185,7 +185,7 @@ function testReplicationWithConflictLogging {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running conflict logging test case"
+	echo "Running conflict logging with backfill test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -208,7 +208,7 @@ function runTestCase {
 	testReplicationWithConflictLogging
 
 	echo "============================================================================"
-	echo "Running conflict logging test case passed"
+	echo "Running conflict logging with backfill test case passed"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets

@@ -131,7 +131,7 @@ func runLoggerLoad(wg *sync.WaitGroup, logger *log.CommonLogger, opts *ConflictL
 		options = append(options, conflictlog.WithPoolGetTimeout(time.Duration(opts.GetPoolTimeout)*time.Millisecond))
 	}
 
-	clog, err := m.NewLogger(logger, "1234", options...)
+	clog, err := m.NewLogger(logger, "1234", nil, options...)
 	if err != nil {
 		return
 	}

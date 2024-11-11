@@ -9,11 +9,12 @@
 package service_impl
 
 import (
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"time"
 )
 
 type UILogSvc struct {
@@ -29,7 +30,7 @@ func NewUILogSvc(top_svc service_def.XDCRCompTopologySvc, loggerCtx *log.LoggerC
 		utils:   utilsIn,
 	}
 
-	service.logger.Infof("Created ui log service.\n")
+	service.logger.Infof("Created ui log service.")
 	return service
 }
 
@@ -43,7 +44,10 @@ func (service *UILogSvc) Write(message string) {
 
 func (service *UILogSvc) writeUILog_async(message string) {
 	start_time := time.Now()
-	defer service.logger.Infof("It took %vs to call writeUILog_async\n", time.Since(start_time).Seconds())
+	defer func() {
+		service.logger.Infof("It took %vs to call writeUILog_async", time.Since(start_time).Seconds())
+	}()
+
 	hostname, err := service.top_svc.MyConnectionStr()
 	if err != nil {
 		// should never get here. in case we do, log error and abort
@@ -59,10 +63,10 @@ func (service *UILogSvc) writeUILog_async(message string) {
 
 	err, statusCode := service.utils.InvokeRestWithRetry(hostname, base.UILogPath, false, base.MethodPost, "", body, 0, nil, nil, false, service.logger, base.UILogRetry)
 	if err != nil {
-		service.logger.Errorf("Error writing UI log. err = %v\n", err.Error())
+		service.logger.Errorf("Error writing UI log. err = %v", err.Error())
 	} else {
 		if statusCode != 200 {
-			service.logger.Errorf("Error writing UI log. Received status code %v from http response.\n", statusCode)
+			service.logger.Errorf("Error writing UI log. Received status code %v from http response.", statusCode)
 		}
 	}
 }

@@ -1328,10 +1328,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					err = xmem.log(item, resp)
 					if err != baseclog.ErrLoggerClosed {
 						xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, nil, err))
-						if err == baseclog.ErrQueueFull {
-							xmem.Logger().Debugf("%v Conflict logging queue full, could not log for key=%v%s%v",
+						if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
+							xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 								xmem.Id(),
 								base.UdTagBegin, item.Req.Key, base.UdTagEnd,
+								err,
 							)
 						} else if err != nil {
 							// log and continue to replicate
@@ -1721,7 +1722,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 								xmem.client_for_getMeta.IncrementBackOffFactor()
 							} else {
 								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%s%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
 									base.UdTagBegin, response, base.UdTagEnd, base.UdTagBegin, specs, base.UdTagEnd)
 								err = fmt.Errorf("error response with status %v from memcached", response.Status)
 								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)

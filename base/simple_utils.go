@@ -34,6 +34,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -2474,4 +2475,10 @@ func ParseString(o interface{}) (ok bool, val string) {
 	}
 	val, ok = o.(string)
 	return
+}
+
+// returns true if the error represents that a bucket doesn't exists,
+// when select bucket memcached command was executed.
+func SelectBucketErrBucketDNE(err error) bool {
+	return strings.Contains(err.Error(), gomemcached.StatusNames[gomemcached.KEY_ENOENT])
 }
