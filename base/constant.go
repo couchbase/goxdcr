@@ -1301,8 +1301,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	srcHeartbeatEnabled bool,
-	srcHeartbeatIgnoreIncoming bool, srcHeartbeatSkipIntraCluster bool,
+	srcHeartbeatEnabled bool, srcHeartbeatIgnoreIncoming bool,
+	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
@@ -1465,6 +1465,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	SrcHeartbeatEnabled = srcHeartbeatEnabled
 	SrcHeartbeatIgnoreIncoming = srcHeartbeatIgnoreIncoming
 	SrcHeartbeatSkipIntraCluster = srcHeartbeatSkipIntraCluster
+	SrcHeartbeatSkipCapellaTarget = srcHeartbeatSkipCapellaTarget
 	SrcHeartbeatMinInterval = srcHeartbeatMinInterval
 	SrcHeartbeatMaxIntervalFactor = srcHeartbeatMaxIntervalFactor
 }
@@ -1828,6 +1829,7 @@ var (
 	SrcHeartbeatEnabled           = true             // to enable/disable sending heartbeats as a Source cluster
 	SrcHeartbeatIgnoreIncoming    = false            // to accept or ignore heartbeats from remote Source clusters
 	SrcHeartbeatSkipIntraCluster  = true             // to skip sending heartbeats for intra-cluster replications
+	SrcHeartbeatSkipCapellaTarget = true             // to skip sending heartbeats to a 'Capella' Target cluster
 	SrcHeartbeatMinInterval       = 60 * time.Second // upper bound on heartbeat frequency
 	SrcHeartbeatMaxIntervalFactor = 5                // factor to set lower bound on heartbeat frequency
 )

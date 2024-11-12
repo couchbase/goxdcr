@@ -291,6 +291,7 @@ const (
 	SrcHeartbeatEnabledKey           = "SrcHeartbeatEnabled"
 	SrcHeartbeatIgnoreIncomingKey    = "SrcHeartbeatIgnoreIncoming"
 	SrcHeartbeatSkipIntraClusterKey  = "SrcHeartbeatSkipIntraCluster"
+	SrcHeartbeatSkipCapellaTargetKey = "SrcHeartbeatSkipCapellaTarget"
 	SrcHeartbeatMinIntervalKey       = "SrcHeartbeatMinInterval"
 	SrcHeartbeatMaxIntervalFactorKey = "SrcHeartbeatMaxIntervalFactor"
 )
@@ -425,6 +426,7 @@ var CasPoisoningPreCheckEnabledConfig = &SettingsConfig{base.CasPoisoningPreChec
 var SrcHeartbeatEnabledConfig = &SettingsConfig{base.SrcHeartbeatEnabled, nil}
 var SrcHeartbeatIgnoreIncomingConfig = &SettingsConfig{base.SrcHeartbeatIgnoreIncoming, nil}
 var SrcHeartbeatSkipIntraClusterConfig = &SettingsConfig{base.SrcHeartbeatSkipIntraCluster, nil}
+var SrcHeartbeatSkipCapellaTargetConfig = &SettingsConfig{base.SrcHeartbeatSkipCapellaTarget, nil}
 var SrcHeartbeatMinIntervalConfig = &SettingsConfig{int(base.SrcHeartbeatMinInterval / time.Second), &Range{10, 3600 /* 1 hour */}}
 var SrcHeartbeatMaxIntervalFactorConfig = &SettingsConfig{base.SrcHeartbeatMaxIntervalFactor, &Range{1, 100}}
 
@@ -558,6 +560,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CasPoisoningPreCheckEnabledKey:                CasPoisoningPreCheckEnabledConfig,
 	SrcHeartbeatEnabledKey:                        SrcHeartbeatEnabledConfig,
 	SrcHeartbeatIgnoreIncomingKey:                 SrcHeartbeatIgnoreIncomingConfig,
+	SrcHeartbeatSkipCapellaTargetKey:              SrcHeartbeatSkipCapellaTargetConfig,
 	SrcHeartbeatSkipIntraClusterKey:               SrcHeartbeatSkipIntraClusterConfig,
 	SrcHeartbeatMinIntervalKey:                    SrcHeartbeatMinIntervalConfig,
 	SrcHeartbeatMaxIntervalFactorKey:              SrcHeartbeatMaxIntervalFactorConfig,

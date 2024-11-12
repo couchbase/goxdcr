@@ -361,6 +361,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.SrcHeartbeatEnabledKey].(bool),
 		internal_settings.Values[metadata.SrcHeartbeatIgnoreIncomingKey].(bool),
 		internal_settings.Values[metadata.SrcHeartbeatSkipIntraClusterKey].(bool),
+		internal_settings.Values[metadata.SrcHeartbeatSkipCapellaTargetKey].(bool),
 		time.Duration(internal_settings.Values[metadata.SrcHeartbeatMinIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.SrcHeartbeatMaxIntervalFactorKey].(int),
 	)

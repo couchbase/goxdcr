@@ -1284,8 +1284,11 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		// It is safer to do a synchronous update
 		err = agent.UpdateReferenceFrom(newRef, true /*writeToMetakv*/)
 	} else {
-		// This is a startup time and loading from metakv, not going to update metakv
-		// Quickly get the agent up and running and let any error be fixed by refresh op
+		// This is called:
+		//  i) at startup time while loading from metakv, OR
+		// ii) by RemoteClusterServiceCallback(), when a new RemoteClusterReference is created by another node;
+		// so not going to update metakv.
+		// Aim is to quickly get the agent up and running, and let any error be fixed by refresh op
 		err = agent.UpdateReferenceFromAsync(newRef, false /*WriteToMetakv*/)
 	}
 
@@ -1294,13 +1297,14 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		agentId := agent.pendingRef.Id()
 		agentName := agent.pendingRef.Name()
 		agentUuid := agent.pendingRef.Uuid()
+		agentHost := agent.pendingRef.HostName()
 		agent.refMtx.RUnlock()
 		agent.logger.Infof("Agent %v %v started for cluster: %v synchronously? %v", agentId, agentName, agentUuid, userInitiated)
 
 		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
 
-		if agent.allowedToSendHeartbeats(agentUuid) {
+		if agent.allowedToSendHeartbeats(agentHost, agentUuid) {
 			agent.agentWaitGrp.Add(1)
 			go agent.runHeartbeatSender()
 		}
@@ -1317,9 +1321,13 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 	return err
 }
 
-func (agent *RemoteClusterAgent) allowedToSendHeartbeats(remoteUUID string) bool {
+func (agent *RemoteClusterAgent) allowedToSendHeartbeats(remoteHost, remoteUUID string) bool {
 	if !base.SrcHeartbeatEnabled {
 		return false
+	}
+
+	if metadata.IsCapellaHostname(remoteHost) {
+		return !base.SrcHeartbeatSkipCapellaTarget
 	}
 
 	if !base.SrcHeartbeatSkipIntraCluster {
@@ -4095,7 +4103,7 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 
 		case <-minHBIntervalTicker.C:
 			if !agent.heartbeatPreCheck() {
-				agent.logger.Debugf("heartbeat pre-check failed")
+				agent.logger.Debugf("heartbeat pre-check failed for Target %v", agent.reference.HostName())
 				// check again later
 				continue
 			}
@@ -4119,7 +4127,7 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 
 		case <-maxHBIntervalTicker.C:
 			if !agent.heartbeatPreCheck() {
-				agent.logger.Debugf("heartbeat pre-check failed")
+				agent.logger.Debugf("heartbeat pre-check failed for Target %v", agent.reference.HostName())
 				// check again later
 				continue
 			}
