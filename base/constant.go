@@ -1659,6 +1659,8 @@ const (
 	EnableCrossClusterVersioningKey = "enableCrossClusterVersioning"
 	// Bucket setting for starting timestamp (CAS) to eanble versioning
 	HlvVbMaxCasKey = "vbucketsMaxCas"
+	// The target cluster counterparts for above.
+	TargetHlvVbMaxCasKey = "targetVbucketsMaxCas"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

@@ -235,6 +235,98 @@ func (_c *TargetNotification_GetTargetBucketUUID_Call) RunAndReturn(run func() s
 	return _c
 }
 
+// GetTargetEnableCrossClusterVersioning provides a mock function with given fields:
+func (_m *TargetNotification) GetTargetEnableCrossClusterVersioning() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetEnableCrossClusterVersioning")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// TargetNotification_GetTargetEnableCrossClusterVersioning_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetEnableCrossClusterVersioning'
+type TargetNotification_GetTargetEnableCrossClusterVersioning_Call struct {
+	*mock.Call
+}
+
+// GetTargetEnableCrossClusterVersioning is a helper method to define mock.On call
+func (_e *TargetNotification_Expecter) GetTargetEnableCrossClusterVersioning() *TargetNotification_GetTargetEnableCrossClusterVersioning_Call {
+	return &TargetNotification_GetTargetEnableCrossClusterVersioning_Call{Call: _e.mock.On("GetTargetEnableCrossClusterVersioning")}
+}
+
+func (_c *TargetNotification_GetTargetEnableCrossClusterVersioning_Call) Run(run func()) *TargetNotification_GetTargetEnableCrossClusterVersioning_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetEnableCrossClusterVersioning_Call) Return(_a0 bool) *TargetNotification_GetTargetEnableCrossClusterVersioning_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetEnableCrossClusterVersioning_Call) RunAndReturn(run func() bool) *TargetNotification_GetTargetEnableCrossClusterVersioning_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetTargetHlvVbMaxCas provides a mock function with given fields:
+func (_m *TargetNotification) GetTargetHlvVbMaxCas() []interface{} {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetHlvVbMaxCas")
+	}
+
+	var r0 []interface{}
+	if rf, ok := ret.Get(0).(func() []interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	return r0
+}
+
+// TargetNotification_GetTargetHlvVbMaxCas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetHlvVbMaxCas'
+type TargetNotification_GetTargetHlvVbMaxCas_Call struct {
+	*mock.Call
+}
+
+// GetTargetHlvVbMaxCas is a helper method to define mock.On call
+func (_e *TargetNotification_Expecter) GetTargetHlvVbMaxCas() *TargetNotification_GetTargetHlvVbMaxCas_Call {
+	return &TargetNotification_GetTargetHlvVbMaxCas_Call{Call: _e.mock.On("GetTargetHlvVbMaxCas")}
+}
+
+func (_c *TargetNotification_GetTargetHlvVbMaxCas_Call) Run(run func()) *TargetNotification_GetTargetHlvVbMaxCas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetHlvVbMaxCas_Call) Return(_a0 []interface{}) *TargetNotification_GetTargetHlvVbMaxCas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetHlvVbMaxCas_Call) RunAndReturn(run func() []interface{}) *TargetNotification_GetTargetHlvVbMaxCas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTargetServerVBMap provides a mock function with given fields:
 func (_m *TargetNotification) GetTargetServerVBMap() base.KvVBMapType {
 	ret := _m.Called()

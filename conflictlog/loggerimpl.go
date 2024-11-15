@@ -301,12 +301,17 @@ func (l *LoggerImpl) isClosed() bool {
 }
 
 func (l *LoggerImpl) close() (err error) {
-	// check for closed channel as multiple threads could have attempted it
 	if l.isClosed() {
 		return nil
 	}
 
 	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	// check for closed channel as multiple threads could have attempted it
+	if l.isClosed() {
+		return nil
+	}
 
 	l.logger.Infof("closing conflict logger id=%s replId=%s", l.id, l.replId)
 
@@ -319,8 +324,6 @@ func (l *LoggerImpl) close() (err error) {
 	// We close the work channel as well i.e. logReqCh. This is because we want to
 	// handle inflight log requests (both in the channel and in workers)
 	close(l.logReqCh)
-
-	defer l.lock.Unlock()
 
 	l.wg.Wait()
 	l.logger.Infof("closing of conflict logger done id=%s replId=%s", l.id, l.replId)

@@ -249,6 +249,120 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 }
 
+// returns if ECCV is enabled on source bucket, pruning window, source vbMaxCasMap, error if any
+func (genericPipeline *GenericPipeline) getLocalHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, int, []interface{}, error) {
+	var hlvVbMaxCas []interface{}
+	stopwatch := genericPipeline.utils.StartDiagStopwatch("getHlvVbMaxCasLocal", base.DiagInternalThreshold)
+	defer stopwatch()
+
+	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
+	if err != nil {
+		return false, 0, nil, err
+	}
+	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
+
+	var latestNotification service_def.SourceNotification
+	select {
+	case latestNotification = <-notificationCh:
+		defer latestNotification.Recycle()
+	case <-finCh:
+		// should be timed out
+		return false, 0, nil, fmt.Errorf("getLocalHlvInfo closed")
+	}
+
+	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
+	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
+	if hlvEnable {
+		hlvVbMaxCas = latestNotification.GetHlvVbMaxCas()
+	}
+	return hlvEnable, pruningWindow, hlvVbMaxCas, nil
+}
+
+// returns if ECCV is enabled on target bucket, target vbMaxCasMap, error if any
+func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, []interface{}, error) {
+	var targetHlvVbMaxCas []interface{}
+	stopwatch := genericPipeline.utils.StartDiagStopwatch("getHlvVbMaxCasRemote", base.DiagNetworkThreshold)
+	defer stopwatch()
+
+	targetNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, genPipelineId)
+	if err != nil {
+		return false, nil, err
+	}
+	defer genericPipeline.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, genPipelineId)
+
+	var latestTargetNotification service_def.TargetNotification
+	select {
+	case latestTargetNotification = <-targetNotificationCh:
+		defer latestTargetNotification.Recycle()
+	case <-finCh:
+		// should be timed out
+		return false, nil, fmt.Errorf("getRemoteHlvInfo closed")
+	}
+
+	targetHlvEnable := latestTargetNotification.GetTargetEnableCrossClusterVersioning()
+	if targetHlvEnable {
+		targetHlvVbMaxCas = latestTargetNotification.GetTargetHlvVbMaxCas()
+	}
+	return targetHlvEnable, targetHlvVbMaxCas, nil
+}
+
+func (genericPipeline *GenericPipeline) setHlvInfoWithTimeout(settings metadata.ReplicationSettingsMap, spec *metadata.ReplicationSpecification, genPipelineId string) error {
+	var localErr, remoteErr error
+	var sourceHlvEnabled, targetHlvEnabled bool
+	var pruningWindow int
+	var sourceHlvVbMaxCasMap, targetHlvVbMaxCasMap []interface{}
+	// only fetch target vbMaxCasMap if conflict logging is turned on.
+	fetchRemoteVbMaxCasMap := !spec.Settings.GetConflictLoggingMapping().Disabled()
+	finCh := make(chan bool)
+	defer close(finCh)
+
+	getHlvInfo := func() error {
+		var wg sync.WaitGroup
+
+		// hlv info from the source bucket.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sourceHlvEnabled, pruningWindow, sourceHlvVbMaxCasMap, localErr = genericPipeline.getLocalHlvInfo(spec, genPipelineId, finCh)
+		}()
+
+		// hlv info from the target bucket.
+		// only if conflict logging is turned on.
+		if fetchRemoteVbMaxCasMap {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				targetHlvEnabled, targetHlvVbMaxCasMap, remoteErr = genericPipeline.getRemoteHlvInfo(spec, genPipelineId, finCh)
+			}()
+		}
+
+		wg.Wait()
+		if localErr != nil {
+			return localErr
+		}
+		return remoteErr
+	}
+
+	// if the either local or remote RPCs error out, have a bail out path using timeout.
+	// By default it is 15s, which is ample time.
+	err := base.ExecWithTimeout(getHlvInfo, base.RefreshRemoteClusterRefInterval, genericPipeline.logger)
+	if err != nil {
+		return err
+	}
+
+	settings[base.EnableCrossClusterVersioningKey] = sourceHlvEnabled
+	settings[base.VersionPruningWindowHrsKey] = pruningWindow
+	if sourceHlvEnabled {
+		settings[base.HlvVbMaxCasKey] = sourceHlvVbMaxCasMap
+	}
+
+	if fetchRemoteVbMaxCasMap && targetHlvEnabled {
+		settings[base.TargetHlvVbMaxCasKey] = targetHlvVbMaxCasMap
+	}
+
+	return nil
+}
+
 var genericPipelineIteration uint32
 
 // Start starts the pipeline
@@ -286,21 +400,11 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	genPipelineId := "GenericPipeline" + base.GetIterationId(&genericPipelineIteration)
 	spec := genericPipeline.Specification().GetReplicationSpec()
-	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
+
+	err = genericPipeline.setHlvInfoWithTimeout(settings, spec, genPipelineId)
 	if err != nil {
-		errMap["genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed"] = err
+		errMap["genericPipeline.setHlvInfoWithTimeout"] = err
 		return errMap
-	}
-	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
-	latestNotification := <-notificationCh
-	defer latestNotification.Recycle()
-	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
-	settings[base.EnableCrossClusterVersioningKey] = hlvEnable
-	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
-	settings[base.VersionPruningWindowHrsKey] = pruningWindow
-	if hlvEnable {
-		hlvVbMaxCas := latestNotification.GetHlvVbMaxCas()
-		settings[base.HlvVbMaxCasKey] = hlvVbMaxCas
 	}
 
 	errMap = genericPipeline.preCheckCasCheck(spec, genPipelineId, errMap)

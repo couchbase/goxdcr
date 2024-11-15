@@ -583,6 +583,19 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 					config.vbHlvMaxCas[uint16(i)] = cas
 				}
 			}
+
+			if val, ok := settings[base.TargetHlvVbMaxCasKey]; ok {
+				config.targetVbHlvMaxCas = make(map[uint16]uint64)
+				targetVbMaxCas := val.([]interface{})
+				for i, casObj := range targetVbMaxCas {
+					casStr := casObj.(string)
+					cas, err := strconv.ParseUint(casStr, 10, 64)
+					if err != nil {
+						return fmt.Errorf("bad value %v in targetVbucketsMaxCas %v. err=%v", casStr, targetVbMaxCas, err)
+					}
+					config.targetVbHlvMaxCas[uint16(i)] = cas
+				}
+			}
 		}
 		if val, ok := settings[MOBILE_COMPATBILE]; ok {
 			config.mobileCompatible = uint32(val.(int))
@@ -1321,8 +1334,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 
 			// check if conflict logging needs to be done for this item
-			logConflicts := xmem.conflictLoggingEnabled()
-			if logConflicts {
+			if item.HLVModeOptions.ConflictLoggingEnabled {
 				resp, err := batch.conflictLookupMap.deregisterLookup(item.UniqueKey)
 				if err == nil {
 					err = xmem.log(item, resp)
@@ -2188,19 +2200,24 @@ func (xmem *XmemNozzle) log(req *base.WrappedMCRequest, resp *base.SubdocLookupR
 	return nil
 }
 
-// conflicts are only logged when:
-// 1. required settings are on: ECCV on and conflictLogging on.
-// 2. sourceDoc.Cas >= max_cas (doc on source was updated after ECCV was turned on)
-// 3. targetDoc.Cas >= max_cas (doc on target was updated after ECCV was turned on)
-// where max_cas is the max_cas of the doc's vb when ECCV was turned on in this cluster.
-func (xmem *XmemNozzle) shouldLogConflicts(source *base.WrappedMCRequest, target *base.SubdocLookupResponse) bool {
-	if !xmem.getCrossClusterVers() || !source.HLVModeOptions.ConflictLoggingEnabled ||
-		xmem.config.vbHlvMaxCas == nil || target.Resp == nil {
+// For a given input of source and target, this function decides if these mutations are in conflict,
+// if they can be be logged in a conflict bucket.
+// 1. required settings are on i.e conflictLogging is on.
+// 2. sourceDoc.Cas > max_cas of source vb (doc on source was updated after ECCV was turned on)
+// 3. targetDoc.Cas > max_cas of target vb (doc on target was updated after ECCV was turned on)
+func (xmem *XmemNozzle) canLogConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse) bool {
+	if !source.HLVModeOptions.ConflictLoggingEnabled {
 		// required settings are not enabled
 		return false
 	}
 
-	vbMaxCas, ok := xmem.config.vbHlvMaxCas[source.Req.VBucket]
+	sourceVbMaxCas, ok := xmem.config.vbHlvMaxCas[source.Req.VBucket]
+	if !ok {
+		// this path should not be hit
+		return false
+	}
+
+	targetVbHlvMaxCas, ok := xmem.config.targetVbHlvMaxCas[source.Req.VBucket]
 	if !ok {
 		// this path should not be hit
 		return false
@@ -2208,7 +2225,7 @@ func (xmem *XmemNozzle) shouldLogConflicts(source *base.WrappedMCRequest, target
 
 	// The document should be updated atleast once,
 	// both on source and target after ECCV was turned on.
-	return source.HLVModeOptions.ActualCas >= vbMaxCas && target.Resp.Cas >= vbMaxCas
+	return source.HLVModeOptions.ActualCas > sourceVbMaxCas && target.Resp.Cas > targetVbHlvMaxCas
 }
 
 // This routine will call either getMeta or subdoc_multi_lookup based on the specs set for the batch and the mutation,
@@ -2282,7 +2299,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 				respToGc[resp.Resp] = true
 			} else if base.IsSuccessGetResponse(resp.Resp) {
-				conflictLoggingIsOn := xmem.shouldLogConflicts(wrappedReq, resp) && !xmem.isCCR()
+				conflictLoggingIsOn := xmem.canLogConflict(wrappedReq, resp) && !xmem.isCCR()
 
 				CDResult, CRResult, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, conflictLoggingIsOn, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
@@ -3116,7 +3133,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 	isCCR := xmem.isCCR()
 	crossClusterVers := xmem.getCrossClusterVers()
 	isMobile := xmem.getMobileCompatible() != base.MobileCompatibilityOff
-	conflictLoggingEnabled := xmem.conflictLoggingEnabled()
+	conflictLoggingEnabled := xmem.conflictLoggingEnabled() && xmem.config.vbHlvMaxCas != nil && xmem.config.targetVbHlvMaxCas != nil
 
 	// continue with the same behaviour during the entire lifecycle
 	// for all the requests of this batch.
@@ -4151,7 +4168,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),

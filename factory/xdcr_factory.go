@@ -1198,8 +1198,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
 		xmemSettings[base.VersionPruningWindowHrsKey] = val
 	}
-
-	xmemSettings[base.CLogKey] = metadata.GetSettingFromSettingsMap(settings, metadata.CLogKey, base.ConflictLoggingOff)
+	if val, ok := settings[base.TargetHlvVbMaxCasKey]; ok {
+		xmemSettings[base.TargetHlvVbMaxCasKey] = val
+	}
 
 	return xmemSettings, nil
 }

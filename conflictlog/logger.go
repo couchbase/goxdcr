@@ -10,7 +10,7 @@ import (
 )
 
 // gLoggerId is the counter for all conflict loggers created
-var gLoggerId int64
+var gLoggerId uint64
 
 // LoggerOptions defines optional args for a logger implementation
 type LoggerOptions struct {
@@ -124,6 +124,6 @@ type LoggerOpt func(o *LoggerOptions)
 
 // newLoggerId generates new unique logger Id. This is used by the implementations
 // of the Logger interface
-func newLoggerId() int64 {
-	return atomic.AddInt64(&gLoggerId, 1)
+func newLoggerId() uint64 {
+	return atomic.AddUint64(&gLoggerId, 1)
 }

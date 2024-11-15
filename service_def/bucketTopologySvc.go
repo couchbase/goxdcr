@@ -78,4 +78,6 @@ type TargetNotification interface {
 	GetTargetStorageBackend() string
 	GetVersionPruningWindowHrs() int
 	GetVBMaxCasStats() base.HighSeqnosMapType
+	GetTargetHlvVbMaxCas() []interface{}
+	GetTargetEnableCrossClusterVersioning() bool
 }

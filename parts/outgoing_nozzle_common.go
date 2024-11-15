@@ -105,6 +105,7 @@ type baseConfig struct {
 	vbHlvMaxCas         map[uint16]uint64
 	logger              *log.CommonLogger
 	mobileCompatible    uint32
+	targetVbHlvMaxCas   map[uint16]uint64 // This will be nil unless conflict logging feature is on.
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32

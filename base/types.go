@@ -24,12 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/snappy"
-
-	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-
+	"github.com/golang/snappy"
 	"github.com/google/uuid"
 )
 
@@ -777,7 +774,7 @@ type TargetCollectionInfo struct {
 type WrappedMCRequest struct {
 	Seqno                      uint64
 	VbUUID                     uint64
-	Req                        *gomemcached.MCRequest
+	Req                        *mc.MCRequest
 	Start_time                 time.Time
 	UniqueKey                  string
 	SrcColNamespace            *CollectionNamespace
@@ -986,7 +983,7 @@ func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *SubdocLookupRespons
 		return
 	}
 
-	if lookup == nil || lookup.Resp.Status == gomemcached.KEY_ENOENT {
+	if lookup == nil || lookup.Resp.Status == mc.KEY_ENOENT {
 		// ADD_WITH_META in mobile/CCR mode - fails with KEY_EEXISTS if the doc exists.
 		req.Req.Cas = 0
 	} else {
@@ -1015,10 +1012,10 @@ func (req *WrappedMCRequest) IsCasLockingRequest() bool {
 // Used to translate to Memcached Opcodes that XDCR will issue for the target
 // based on the context of the current wrapped request.
 // In NoTargetCR mode (mobile/CCR mode), req.Cas is expected to be already set.
-func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() gomemcached.CommandCode {
+func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() mc.CommandCode {
 	mcReq := wrappedReq.Req
 	opcode := mcReq.Opcode
-	if opcode == gomemcached.UPR_MUTATION || opcode == gomemcached.TAP_MUTATION {
+	if opcode == mc.UPR_MUTATION || opcode == mc.TAP_MUTATION {
 		if wrappedReq.HLVModeOptions.NoTargetCR {
 			// We do source side CR only. Before calling this, CAS was set to the expected target CAS
 			if mcReq.Cas == 0 {
@@ -1030,7 +1027,7 @@ func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() gomemcached.CommandCod
 		} else {
 			return SET_WITH_META
 		}
-	} else if opcode == gomemcached.TAP_DELETE || opcode == gomemcached.UPR_DELETION || opcode == gomemcached.UPR_EXPIRATION {
+	} else if opcode == mc.TAP_DELETE || opcode == mc.UPR_DELETION || opcode == mc.UPR_EXPIRATION {
 		return DELETE_WITH_META
 	}
 	return opcode
@@ -1056,7 +1053,7 @@ func (wrappedReq *WrappedMCRequest) GetSentCas() (uint64, error) {
 
 type McRequestMap map[string]*WrappedMCRequest
 
-type MCResponseMap map[string]*gomemcached.MCResponse
+type MCResponseMap map[string]*mc.MCResponse
 
 type MetadataChangeListener interface {
 	Id() string
@@ -2042,54 +2039,54 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 	specs = make([]SubdocLookupPathSpec, 0, specLen)
 	if option.IncludeVXattr {
 		// $document.revid
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_REVID)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_REVID)}
 		specs = append(specs, spec)
 		// $document.flags
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_FLAGS)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_FLAGS)}
 		specs = append(specs, spec)
 		// $document.exptime
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_EXPIRY)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_EXPIRY)}
 		specs = append(specs, spec)
 		// $document.datatype
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_DATATYPE)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_DATATYPE)}
 		specs = append(specs, spec)
 	}
 
 	if option.IncludeHlv {
 		// HLV XATTR for CCR
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_HLV)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_HLV)}
 		specs = append(specs, spec)
 	}
 
 	if option.IncludeMobileSync {
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_MOBILE)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_MOBILE)}
 		specs = append(specs, spec)
 	}
 
 	if option.IncludeImportCas {
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_IMPORTCAS)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_IMPORTCAS)}
 		specs = append(specs, spec)
 
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_PREVIOUSREV)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_PREVIOUSREV)}
 		specs = append(specs, spec)
 	}
 	if option.IncludeXTOC {
 		// $document.XTOC
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
 		specs = append(specs, spec)
 	}
 	if option.ConfictLoggingEnabled {
 		// Target doc seqno and VBUUID as needed for conflict logging.
 		// $document.vbucket_uuid
-		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_VBUUID)}
+		spec := SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_VBUUID)}
 		specs = append(specs, spec)
 		// $document.seqno
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_SEQNO)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_SEQNO)}
 		specs = append(specs, spec)
 
 		// Since xattrs needs to be logged too, get XTOC
 		// $document.XTOC
-		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
+		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
 		specs = append(specs, spec)
 	}
 	if option.IncludeBody {
@@ -2949,7 +2946,7 @@ type DocumentMetadata struct {
 	Expiry   uint32 // Item expiration time
 	Deletion bool   // Existence of tombstone
 	DataType uint8  // item data type
-	Opcode   gomemcached.CommandCode
+	Opcode   mc.CommandCode
 	OptionalConflictLoggingMetadata
 }
 
@@ -2999,10 +2996,10 @@ func (docMeta *DocumentMetadata) IsLocked() bool {
 	return docMeta != nil && docMeta.Cas == MaxCas
 }
 
-func IsDocLocked(resp *gomemcached.MCResponse) bool {
+func IsDocLocked(resp *mc.MCResponse) bool {
 	if resp.Opcode == GET_WITH_META && resp.Cas == MaxCas {
 		return true
-	} else if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP && resp.Status == gomemcached.LOCKED {
+	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP && resp.Status == mc.LOCKED {
 		return true
 	}
 	return false
