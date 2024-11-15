@@ -26,6 +26,16 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	return ret
 }
 
+func GetTargetVBListPerPipeline(pipeline common.Pipeline) []uint16 {
+	ret := []uint16{}
+	targetNozzles := pipeline.Targets()
+	for _, targetNozzle := range targetNozzles {
+		responsibleVBs := targetNozzle.ResponsibleVBs()
+		ret = append(ret, responsibleVBs...)
+	}
+	return ret
+}
+
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
 	return pipeline.FullTopic() + "_" + name
 }

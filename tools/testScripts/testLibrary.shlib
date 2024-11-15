@@ -851,8 +851,11 @@ function validateBrokenMapExists {
 
 	if (($(echo "$errList" | jq 'length') == 0)); then
 		echo "See no error list"
+		#read -p "NEIL DEBUG"
 		exit 1
 	fi
+
+	#read -p "NEIL DEBUG passed"
 }
 
 function checkNoErrorInErrorList {

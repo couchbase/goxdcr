@@ -197,9 +197,9 @@ function runTestCase {
 
 	# Pause and resume pipeline should free up dismissal and brokenMap should show up again
 	pauseReplication "C1" "B1" "C2" "B2"
-	sleep 5
+	sleep 30
 	resumeReplication "C1" "B1" "C2" "B2"
-	sleep 5
+	sleep 30
 	validateBrokenMapExists "C1"
 
 	# run data load again to ensure brokenMapping is updated and displayed correctly

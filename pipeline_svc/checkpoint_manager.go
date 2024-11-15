@@ -1476,6 +1476,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			err_ch <- err_info
 			return
 		}
+		fmt.Printf("NEIL DEBUG restoring targetManifestId %v brokenmapping %v\n", targetManifestId, brokenMapping)
 		ckmgr.restoreBrokenMappingManifestsToRouters(brokenMapping, targetManifestId, false /*isRollBack*/)
 		err = ckmgr.setTimestampForVB(vbno, vbts)
 		if err != nil {
@@ -2026,6 +2027,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 	// get through seqnos for all vbuckets in the pipeline
 	through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+	fmt.Printf("NEIL DEBUG tgtManifestIds as part of checkpoint %v\n", tgtManifestIds)
 	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
 	vbSeqnoMap := base.VbSeqnoMapType(through_seqno_map)
 	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential modification
@@ -2113,6 +2115,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		return
 	}
 
+	fmt.Printf("NEIL DEBUG tgtManifestIds as part of checkpoint %v\n", tgtManifestIds)
 	var total_committing_time int64
 
 	if ckmgr.collectionEnabled() {
@@ -2484,6 +2487,7 @@ func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifest
 		} else {
 			useLatestCached = false
 			brokenMapping = ckmgr.cachedBrokenMap.brokenMapHistories[tgtManifestId].Clone()
+			fmt.Printf("NEIL DEBUG not use latest vbno %v tgtManifestId %v brokenMap %v\n", vbno, tgtManifestId, brokenMapping)
 		}
 	}
 
@@ -2494,6 +2498,7 @@ func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifest
 		// manifestID so future backfill will be created
 		brokenMapping = ckmgr.cachedBrokenMap.brokenMap.Clone()
 		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
+		fmt.Printf("NEIL DEBUG use latest cached for tgtVB %v brokenMap %v\n", vbno, brokenMapping.String())
 	}
 	return brokenMapping, tgtManifestId
 }
