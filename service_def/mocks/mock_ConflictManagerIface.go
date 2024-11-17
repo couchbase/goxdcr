@@ -23,7 +23,7 @@ func (_m *ConflictManagerIface) EXPECT() *ConflictManagerIface_Expecter {
 }
 
 // ResolveConflict provides a mock function with given fields: source, target, sourceId, targetId, uncompressFunc, recycler
-func (_m *ConflictManagerIface) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
+func (_m *ConflictManagerIface) ResolveConflict(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	ret := _m.Called(source, target, sourceId, targetId, uncompressFunc, recycler)
 
 	if len(ret) == 0 {
@@ -31,7 +31,7 @@ func (_m *ConflictManagerIface) ResolveConflict(source *base.WrappedMCRequest, t
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {
+	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.WrappedMCResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {
 		r0 = rf(source, target, sourceId, targetId, uncompressFunc, recycler)
 	} else {
 		r0 = ret.Error(0)
@@ -47,7 +47,7 @@ type ConflictManagerIface_ResolveConflict_Call struct {
 
 // ResolveConflict is a helper method to define mock.On call
 //   - source *base.WrappedMCRequest
-//   - target *base.SubdocLookupResponse
+//   - target *base.WrappedMCResponse
 //   - sourceId hlv.DocumentSourceId
 //   - targetId hlv.DocumentSourceId
 //   - uncompressFunc base.UncompressFunc
@@ -56,9 +56,9 @@ func (_e *ConflictManagerIface_Expecter) ResolveConflict(source interface{}, tar
 	return &ConflictManagerIface_ResolveConflict_Call{Call: _e.mock.On("ResolveConflict", source, target, sourceId, targetId, uncompressFunc, recycler)}
 }
 
-func (_c *ConflictManagerIface_ResolveConflict_Call) Run(run func(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest))) *ConflictManagerIface_ResolveConflict_Call {
+func (_c *ConflictManagerIface_ResolveConflict_Call) Run(run func(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest))) *ConflictManagerIface_ResolveConflict_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.WrappedMCRequest), args[1].(*base.SubdocLookupResponse), args[2].(hlv.DocumentSourceId), args[3].(hlv.DocumentSourceId), args[4].(base.UncompressFunc), args[5].(func(*base.WrappedMCRequest)))
+		run(args[0].(*base.WrappedMCRequest), args[1].(*base.WrappedMCResponse), args[2].(hlv.DocumentSourceId), args[3].(hlv.DocumentSourceId), args[4].(base.UncompressFunc), args[5].(func(*base.WrappedMCRequest)))
 	})
 	return _c
 }
@@ -68,13 +68,13 @@ func (_c *ConflictManagerIface_ResolveConflict_Call) Return(_a0 error) *Conflict
 	return _c
 }
 
-func (_c *ConflictManagerIface_ResolveConflict_Call) RunAndReturn(run func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error) *ConflictManagerIface_ResolveConflict_Call {
+func (_c *ConflictManagerIface_ResolveConflict_Call) RunAndReturn(run func(*base.WrappedMCRequest, *base.WrappedMCResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error) *ConflictManagerIface_ResolveConflict_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // SetBackToSource provides a mock function with given fields: source, target, sourceId, targetId, uncompressFunc, recycler
-func (_m *ConflictManagerIface) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
+func (_m *ConflictManagerIface) SetBackToSource(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	ret := _m.Called(source, target, sourceId, targetId, uncompressFunc, recycler)
 
 	if len(ret) == 0 {
@@ -82,7 +82,7 @@ func (_m *ConflictManagerIface) SetBackToSource(source *base.WrappedMCRequest, t
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {
+	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.WrappedMCResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {
 		r0 = rf(source, target, sourceId, targetId, uncompressFunc, recycler)
 	} else {
 		r0 = ret.Error(0)
@@ -98,7 +98,7 @@ type ConflictManagerIface_SetBackToSource_Call struct {
 
 // SetBackToSource is a helper method to define mock.On call
 //   - source *base.WrappedMCRequest
-//   - target *base.SubdocLookupResponse
+//   - target *base.WrappedMCResponse
 //   - sourceId hlv.DocumentSourceId
 //   - targetId hlv.DocumentSourceId
 //   - uncompressFunc base.UncompressFunc
@@ -107,9 +107,9 @@ func (_e *ConflictManagerIface_Expecter) SetBackToSource(source interface{}, tar
 	return &ConflictManagerIface_SetBackToSource_Call{Call: _e.mock.On("SetBackToSource", source, target, sourceId, targetId, uncompressFunc, recycler)}
 }
 
-func (_c *ConflictManagerIface_SetBackToSource_Call) Run(run func(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest))) *ConflictManagerIface_SetBackToSource_Call {
+func (_c *ConflictManagerIface_SetBackToSource_Call) Run(run func(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest))) *ConflictManagerIface_SetBackToSource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.WrappedMCRequest), args[1].(*base.SubdocLookupResponse), args[2].(hlv.DocumentSourceId), args[3].(hlv.DocumentSourceId), args[4].(base.UncompressFunc), args[5].(func(*base.WrappedMCRequest)))
+		run(args[0].(*base.WrappedMCRequest), args[1].(*base.WrappedMCResponse), args[2].(hlv.DocumentSourceId), args[3].(hlv.DocumentSourceId), args[4].(base.UncompressFunc), args[5].(func(*base.WrappedMCRequest)))
 	})
 	return _c
 }
@@ -119,7 +119,7 @@ func (_c *ConflictManagerIface_SetBackToSource_Call) Return(_a0 error) *Conflict
 	return _c
 }
 
-func (_c *ConflictManagerIface_SetBackToSource_Call) RunAndReturn(run func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error) *ConflictManagerIface_SetBackToSource_Call {
+func (_c *ConflictManagerIface_SetBackToSource_Call) RunAndReturn(run func(*base.WrappedMCRequest, *base.WrappedMCResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error) *ConflictManagerIface_SetBackToSource_Call {
 	_c.Call.Return(run)
 	return _c
 }

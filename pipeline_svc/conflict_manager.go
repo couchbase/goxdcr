@@ -236,7 +236,7 @@ func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMa
 	}
 	return nil
 }
-func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
+func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
 		return parts.PartStoppedError
 	}
@@ -420,7 +420,7 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCR
 		specs = append(specs, spec)
 	}
 	// body path
-	body, _ := input.Target.ResponseForAPath("")
+	body, _ := input.Target.FindTargetBodyWithoutXattr()
 	if body != nil {
 		spec = base.NewSubdocMutationPathSpec(uint8(mc.SET), uint8(0), []byte(""), body)
 	} else {
@@ -841,7 +841,7 @@ func (c *ConflictManager) NotifyMergeResult(input *crMeta.ConflictParams, merged
 	}
 }
 
-func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
+func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.WrappedMCResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
 		return parts.PartStoppedError
 	}

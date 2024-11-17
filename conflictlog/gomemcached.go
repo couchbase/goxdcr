@@ -322,7 +322,7 @@ func (m *MemcachedConn) handleResponse(key string, rsp *gomemcached.MCResponse, 
 		if err != nil {
 			return
 		}
-		err = baseclog.ErrNotMyBucket
+		err = baseclog.ErrNotMyVBucket
 	} else if base.IsTemporaryMCError(status) {
 		err = baseclog.ErrTMPFAIL
 	} else if base.IsGuardRailError(status) {
@@ -421,7 +421,7 @@ func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target 
 		case baseclog.ErrUnknownCollection:
 			m.logger.Infof("collection not found key=%s, target=%s", key, target.String())
 			checkCache = false
-		case baseclog.ErrNotMyBucket:
+		case baseclog.ErrNotMyVBucket:
 		default:
 			return err
 		}
@@ -439,7 +439,7 @@ func (m *MemcachedConn) Close() error {
 }
 
 func parseNotMyVbucketValue(logger *log.CommonLogger, value []byte, sourceAddr string) (info *BucketInfo, err error) {
-	logger.Tracef("parsing NOT_MY_BUCKET response")
+	logger.Tracef("parsing NOT_MY_VBUCKET response")
 
 	sourceHost := base.GetHostName(sourceAddr)
 	// Try to parse the value as a bucket configuration

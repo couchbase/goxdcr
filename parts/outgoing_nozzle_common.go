@@ -251,7 +251,7 @@ type dataBatch struct {
 
 type responseLookup struct {
 	// uinque-key to response mapping
-	responses map[string]*base.SubdocLookupResponse
+	responses map[string]*base.WrappedMCResponse
 	// There may be multiple unique-keys that are refering to the same response of a given document key
 	// Therefore, GC or recycle the response only when refCnt is zero
 	refCnter map[*mc.MCResponse]int
@@ -259,13 +259,13 @@ type responseLookup struct {
 
 func NewResponseLookup() *responseLookup {
 	return &responseLookup{
-		responses: make(map[string]*base.SubdocLookupResponse),
+		responses: make(map[string]*base.WrappedMCResponse),
 		refCnter:  make(map[*mc.MCResponse]int),
 	}
 }
 
 // stores response and increases the reference count by 1
-func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.SubdocLookupResponse) error {
+func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.WrappedMCResponse) error {
 	if lookup == nil {
 		return base.ErrorNilPtr
 	}
@@ -279,7 +279,7 @@ func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.Subdoc
 }
 
 // returns the response and decreases the reference count by 1
-func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.SubdocLookupResponse, error) {
+func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.WrappedMCResponse, error) {
 	if lookup == nil {
 		return nil, base.ErrorNilPtr
 	}
@@ -297,7 +297,7 @@ func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.SubdocLo
 }
 
 // returns the response
-func (lookup *responseLookup) getLookup(uniqueKey string) (*base.SubdocLookupResponse, error) {
+func (lookup *responseLookup) getLookup(uniqueKey string) (*base.WrappedMCResponse, error) {
 	if lookup == nil {
 		return nil, base.ErrorNilPtr
 	}

@@ -175,6 +175,14 @@ func DetectConflictIfNeeded(req *base.WrappedMCRequest, resp *mc.MCResponse, spe
 				sourceMeta, targetMeta, err)
 			return CDError, sourceDocMeta, targetDocMeta, err
 		}
+
+		// cache the target doc responses for logging purposes later.
+		cLogOpts := req.ConflictLoggerOptions
+		if cLogOpts != nil {
+			cLogOpts.TargetInfo = &targetDocMeta
+			cLogOpts.CacheTargetXattrsIfNeeded(targetDoc.resp)
+			cLogOpts.TargetCas = targetMeta.actualCas
+		}
 	}
 
 	if logger.GetLogLevel() >= log.LogLevelTrace {

@@ -797,8 +797,9 @@ type WrappedMCRequest struct {
 	Cloned         bool
 	ClonedSyncCh   chan bool
 
-	HLVModeOptions   HLVModeOptions
-	SubdocCmdOptions *SubdocCmdOptions
+	HLVModeOptions        HLVModeOptions
+	SubdocCmdOptions      *SubdocCmdOptions
+	ConflictLoggerOptions *CLoggerOptions
 
 	// The followings are established per batch and are references to those established per batch - read only
 	GetMetaSpecWithoutHlv []SubdocLookupPathSpec
@@ -816,17 +817,32 @@ type WrappedMCRequest struct {
 
 // If conflict logging is in progress, wait for it to complete.
 func (req *WrappedMCRequest) WaitForConflictLogging(finCh chan bool) error {
-	if req.HLVModeOptions.ConflictLoggerWait == nil {
-		// no wait
+	cLogOpts := req.ConflictLoggerOptions
+	if cLogOpts == nil || cLogOpts.Handle == nil {
+		// no conflict logger, or no conflict logging for this req
 		return nil
 	}
 
-	err := req.HLVModeOptions.ConflictLoggerWait.Wait(finCh)
+	err := cLogOpts.Handle.Wait(finCh)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (req *WrappedMCRequest) ResetCLogOptions() {
+	if req.ConflictLoggerOptions == nil {
+		return
+	}
+
+	req.ConflictLoggerOptions.Enabled = false
+	req.ConflictLoggerOptions.Handle = nil
+	req.ConflictLoggerOptions.TargetInfo = nil
+	req.ConflictLoggerOptions.TargetHlv = ""
+	req.ConflictLoggerOptions.TargetMou = ""
+	req.ConflictLoggerOptions.TargetSync = ""
+	req.ConflictLoggerOptions.TargetCas = 0
 }
 
 // Set options to replicate using HLV.
@@ -839,7 +855,9 @@ func (req *WrappedMCRequest) SetHLVModeOptions(isMobile, isCCR, crossClusterVers
 	}
 
 	if conflictLoggingEnabled {
-		req.HLVModeOptions.ConflictLoggingEnabled = true
+		req.ConflictLoggerOptions = &CLoggerOptions{
+			Enabled: true,
+		}
 	}
 }
 
@@ -978,7 +996,7 @@ func (req *WrappedMCRequest) SetSkipTargetCRFlag() {
 }
 
 // set appropriate CAS and skip target CR flag for *_WITH_META requests
-func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *SubdocLookupResponse) {
+func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *WrappedMCResponse) {
 	if req.IsSubdocOp() {
 		return
 	}
@@ -1041,6 +1059,7 @@ func (wrappedReq *WrappedMCRequest) AddByteSliceForXmemToRecycle(slice []byte) {
 	wrappedReq.SlicesToBeReleasedByXmem = append(wrappedReq.SlicesToBeReleasedByXmem, slice)
 	wrappedReq.SlicesToBeReleasedMtx.Unlock()
 }
+
 func (wrappedReq *WrappedMCRequest) GetSentCas() (uint64, error) {
 	var sentCas uint64
 	isSubDocOp := wrappedReq.IsSubdocOp()
@@ -1795,7 +1814,7 @@ func (x *XattrComposer) CommitRawKVPair() (int, error) {
 // Once all the Xattributes are finished, calculate the whole xattr section and append doc value
 // Remember to set Xattr flag
 // req and lookup are passed in for debugging info only and could be nil.
-func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, lookup *SubdocLookupResponse) ([]byte, bool) {
+func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, lookup *WrappedMCResponse) ([]byte, bool) {
 	if !x.atLeastOneXattr {
 		// No xattr written - do not do anything
 		copy(x.body[0:len(val)], val)
@@ -2082,11 +2101,6 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 		specs = append(specs, spec)
 		// $document.seqno
 		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_SEQNO)}
-		specs = append(specs, spec)
-
-		// Since xattrs needs to be logged too, get XTOC
-		// $document.XTOC
-		spec = SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
 		specs = append(specs, spec)
 	}
 	if option.IncludeBody {
@@ -2940,8 +2954,8 @@ type OptionalConflictLoggingMetadata struct {
 
 type DocumentMetadata struct {
 	Key      []byte
-	RevSeq   uint64 //Item revision seqno
-	Cas      uint64 //Item cas
+	RevSeq   uint64 // Item revision seqno
+	Cas      uint64 // Item cas
 	Flags    uint32 // Item flags
 	Expiry   uint32 // Item expiration time
 	Deletion bool   // Existence of tombstone
@@ -2999,7 +3013,8 @@ func (docMeta *DocumentMetadata) IsLocked() bool {
 func IsDocLocked(resp *mc.MCResponse) bool {
 	if resp.Opcode == GET_WITH_META && resp.Cas == MaxCas {
 		return true
-	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP && resp.Status == mc.LOCKED {
+	} else if (resp.Opcode == mc.SUBDOC_MULTI_LOOKUP || resp.Opcode == mc.GETEX) &&
+		resp.Status == mc.LOCKED {
 		return true
 	}
 	return false
@@ -3031,11 +3046,56 @@ type HLVModeOptions struct {
 	PreserveSync  bool   // Preserve target _sync XATTR and send it in setWithMeta.
 	ActualCas     uint64 // copy of Req.Cas, which can be used if Req.Cas is set to 0
 	IncludeTgtHlv bool   // If HLV is fetched from target doc
+}
 
+type CLoggerOptions struct {
+	Enabled bool
 	// Handle to wait for conflict logging in progress for this request.
 	// It has a value of nil if conflict logging is not in progress.
-	ConflictLoggerWait     ConflictLoggerHandle
-	ConflictLoggingEnabled bool
+	Handle ConflictLoggerHandle
+	// cache to log target info.
+	TargetInfo *DocumentMetadata
+	// actual cas, without considering it as import mutation or not.
+	TargetCas uint64
+	// in case target is a tombstone, we will have to
+	// cache the HLV, _mou and _sync got from subdoc_get response for logging.
+	TargetHlv  string
+	TargetSync string
+	TargetMou  string
+}
+
+// incase of a tombstone target, we will cache some of the target xattrs
+// i.e. hlv, mou and sync for conflict logging.
+func (cLogOpts *CLoggerOptions) CacheTargetXattrsIfNeeded(targetResp *WrappedMCResponse) {
+	if cLogOpts == nil || cLogOpts.TargetInfo == nil || !cLogOpts.TargetInfo.Deletion {
+		// no need of caching for a non-tombstone target doc.
+		return
+	}
+
+	// hlv or _vv
+	targetHlv, err := targetResp.ResponseForAPath(XATTR_HLV)
+	if err == nil {
+		cLogOpts.TargetHlv = string(targetHlv)
+	}
+
+	// _sync
+	targetSync, err := targetResp.ResponseForAPath(XATTR_MOBILE)
+	if err == nil {
+		cLogOpts.TargetSync = string(targetSync)
+	}
+
+	// _mou
+	targetImportCas, err1 := targetResp.ResponseForAPath(XATTR_IMPORTCAS)
+	targetPrevRev, err2 := targetResp.ResponseForAPath(XATTR_PREVIOUSREV)
+	targetMou := ""
+	if err1 == nil && err2 == nil {
+		targetMou = fmt.Sprintf(`{"%s":%s, "%s":%s}`, XATTR_IMPORTCAS, targetImportCas, XATTR_PREVIOUSREV, targetPrevRev)
+	} else if err1 == nil {
+		targetMou = fmt.Sprintf(`{"%s":%s}`, XATTR_IMPORTCAS, targetImportCas)
+	} else if err2 == nil {
+		targetMou = fmt.Sprintf(`{"%s":%s}`, XATTR_PREVIOUSREV, targetPrevRev)
+	}
+	cLogOpts.TargetMou = targetMou
 }
 
 // These options are explicitly set when SubdocOp != NotSubdoc

@@ -5,7 +5,7 @@ import (
 )
 
 // BucketInfo, VBucketServerMap are the structs for the bucket topology json returned
-// in the response body when memcached returns NOT_MY_BUCKET.
+// in the response body when memcached returns NOT_MY_VBUCKET.
 
 type BucketInfo struct {
 	VBucketServerMap VBucketServerMap   `json:"vBucketServerMap"`

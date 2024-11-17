@@ -559,7 +559,7 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 	switch err {
 	case baseclog.ErrTMPFAIL:
 		fallthrough
-	case baseclog.ErrNotMyBucket:
+	case baseclog.ErrNotMyVBucket:
 		fallthrough
 	case baseclog.ErrUnknownCollection:
 		return needRetryErr
@@ -811,7 +811,7 @@ func (l *LoggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
-	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.setMetaTimeout, t, l.id)
+	l.logger.Infof("changing conflict logger set meta timeout old=%v new=%v id=%s", l.opts.setMetaTimeout, t, l.id)
 
 	l.opts.setMetaTimeout = t
 }
@@ -824,7 +824,7 @@ func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
-	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.poolGetTimeout, t, l.id)
+	l.logger.Infof("changing conflict logger pool get timeout old=%v new=%v id=%s", l.opts.poolGetTimeout, t, l.id)
 
 	l.opts.poolGetTimeout = t
 }

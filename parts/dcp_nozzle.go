@@ -1076,7 +1076,10 @@ func (dcp *DcpNozzle) processData() (err error) {
 
 						vbuuid, _, err := m.FailoverLog.Latest()
 						if err != nil {
-							dcp.Logger().Warnf("%v error getting latest failover log for vb=%v is not supposed to be opened, err=%v", dcp.Id(), vbno, err)
+							err = fmt.Errorf("%v error getting latest failover log for vb=%v, err=%v", dcp.Id(), vbno, err)
+							dcp.Logger().Error(err.Error())
+							dcp.handleGeneralError(err)
+							return err
 						}
 						dcp.vbuuidMapMtx.Lock()
 						dcp.vbuuidMap[vbno] = vbuuid

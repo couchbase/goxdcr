@@ -720,7 +720,12 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 	}
 
 	if requestedFeatures.DataType {
+		// This is named JSON in kv_engine's feature.h
 		clientFeatureSet = append(clientFeatureSet, mcc.FeatureDataType)
+	}
+
+	if requestedFeatures.SnappyEverywhere {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureSnappyEverywhere)
 	}
 
 	client.SetConnName(userAgent)
@@ -758,6 +763,12 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			}
 			if feature == base.HELO_FEATURE_COLLECTIONS {
 				respondedFeatures.Collections = true
+			}
+			if feature == base.HELO_FEATURE_JSON {
+				respondedFeatures.DataType = true
+			}
+			if feature == base.HELO_FEATURE_SNAPPYEVERYWHERE {
+				respondedFeatures.SnappyEverywhere = true
 			}
 			pos += 2
 		}

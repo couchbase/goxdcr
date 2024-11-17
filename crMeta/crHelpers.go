@@ -47,7 +47,7 @@ const (
 
 type ConflictParams struct {
 	Source         *base.WrappedMCRequest
-	Target         *base.SubdocLookupResponse
+	Target         *base.WrappedMCResponse
 	SourceId       hlv.DocumentSourceId
 	TargetId       hlv.DocumentSourceId
 	MergeFunction  string
@@ -315,7 +315,7 @@ func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 	return
 }
 
-func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
+func getHlvFromMCResponse(lookupResp *base.WrappedMCResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
 	pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
 	cas = lookupResp.Resp.Cas
 	xattr, err1 := lookupResp.ResponseForAPath(base.XATTR_HLV)

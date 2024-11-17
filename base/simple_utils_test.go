@@ -581,3 +581,22 @@ func TestUint64ToHexLittleEndianAndStrip0s(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestDecodeULEB128(t *testing.T) {
+	key := ""
+	for keySize := 0; keySize < 250; keySize++ {
+		key += "a"
+		for c := 0; c < 5000; c++ {
+			encCid, enclen, err := NewUleb128(uint32(c), func(s uint64) ([]byte, error) { return make([]byte, s), nil }, true)
+			totalLen := enclen + len(key)
+			prefixedKey := make([]byte, totalLen)
+			copy(prefixedKey[0:enclen], encCid[0:enclen])
+			copy(prefixedKey[enclen:], []byte(key))
+			assert.Nil(t, err)
+			cid, start, err := DecodeULEB128PrefixedKey(prefixedKey)
+			assert.Nil(t, err)
+			assert.Equal(t, int(cid), int(c))
+			assert.Equal(t, string(prefixedKey[start:]), string(key))
+		}
+	}
+}

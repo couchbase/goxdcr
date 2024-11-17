@@ -33,11 +33,12 @@ type RecycleObjFunc func(obj interface{})
 type ErrReportFunc func(obj interface{})
 
 type HELOFeatures struct {
-	Xattribute      bool
-	CompressionType base.CompressionType
-	Xerror          bool
-	Collections     bool
-	DataType        bool
+	Xattribute       bool
+	CompressionType  base.CompressionType
+	Xerror           bool
+	Collections      bool
+	DataType         bool // This is named as JSON in kv_engine's feature.h
+	SnappyEverywhere bool
 }
 
 func (h *HELOFeatures) String() string {

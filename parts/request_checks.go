@@ -84,7 +84,7 @@ type respTestParams struct {
 	Status mc.Status
 }
 
-func testMcRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse) {
+func testMcRequest(req *base.WrappedMCRequest, lookup *base.WrappedMCResponse) {
 	if reqTestCh == nil {
 		panic("reqTestCh nil")
 	}

@@ -3352,7 +3352,7 @@ func (cLog_collector *cLogCollector) ProcessEvent(event *common.Event) error {
 				metricMap[service_def.CLOG_UNKNOWN_RESP_COUNT].(metrics.Counter).Inc(1)
 			case baseclog.ErrFatalResp:
 				metricMap[service_def.CLOG_FATAL_RESP_COUNT].(metrics.Counter).Inc(1)
-			case baseclog.ErrNotMyBucket:
+			case baseclog.ErrNotMyVBucket:
 				metricMap[service_def.CLOG_NOT_MY_VB_COUNT].(metrics.Counter).Inc(1)
 			case baseclog.ErrUnknownCollection:
 				metricMap[service_def.CLOG_UNKNOWN_COLLECTION_COUNT].(metrics.Counter).Inc(1)

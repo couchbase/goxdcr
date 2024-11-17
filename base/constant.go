@@ -793,6 +793,13 @@ var PROTOCOL_BINARY_DATATYPE_XATTR uint8 = 0x04
 // Collections Feature
 var HELO_FEATURE_COLLECTIONS uint16 = 0x12
 
+// SnappyEverywhere Feature. The client has to
+// honour the snappy datatype bit even in the response packets.
+var HELO_FEATURE_SNAPPYEVERYWHERE uint16 = 0x13
+
+// JSON bit will be set in the response packets.
+var HELO_FEATURE_JSON uint16 = 0x0b
+
 // length of random id
 var LengthOfRandomId = 16
 

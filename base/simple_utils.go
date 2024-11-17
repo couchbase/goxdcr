@@ -34,7 +34,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -2018,16 +2017,40 @@ func (spec *SubdocLookupPathSpec) String() string {
 }
 
 // resp is a response to subdoc_multi_lookup based on the path specs
-type SubdocLookupResponse struct {
+type WrappedMCResponse struct {
 	Specs []SubdocLookupPathSpec
 	Resp  *mc.MCResponse
+
+	// If a new slice is allocated while uncompressing the
+	// response body, it will be stored here. It is the user's responsibility
+	// to handle this safely as the access is not protected.
+	ExtraSlice []byte
+}
+
+// This routine is not thread-safe and lookupResp should be non-nil.
+// This routine will call the recycleFunc on WrappedMCResponse.ExtraSlice.
+// Note that this is different from MCResponse.Recycle(), which GCs the underlying response body
+// of a MCResponse.
+func (lookupResp *WrappedMCResponse) RecyleExtraSlice(recycleFunc func([]byte)) {
+	if lookupResp.ExtraSlice == nil {
+		return
+	}
+
+	recycleFunc(lookupResp.ExtraSlice)
+	// set it to nil to make sure this routine calls recycleFunc on
+	// the RecyclableSlice only once.
+	lookupResp.ExtraSlice = nil
 }
 
 // This routine loop through lookup spec, find the path in the spec and return its lookup value.
 // If the path doesn't exist in the target document, the return value is nil.
 // If the path is not included in the lookup, return error.
 // The path name for document body is empty string
-func (lookupResp *SubdocLookupResponse) ResponseForAPath(path string) ([]byte, error) {
+func (lookupResp *WrappedMCResponse) ResponseForAPath(path string) ([]byte, error) {
+	if lookupResp.Resp.Opcode != mc.SUBDOC_MULTI_LOOKUP {
+		return nil, fmt.Errorf("invalid opcode for ResponseForAPath %v", lookupResp.Resp.Opcode)
+	}
+
 	resp := lookupResp.Resp
 	if resp.Status == mc.KEY_ENOENT {
 		return nil, nil
@@ -2058,24 +2081,44 @@ func (lookupResp *SubdocLookupResponse) ResponseForAPath(path string) ([]byte, e
 	return nil, ErrorSubdocLookupPathNotFound
 }
 
-func (lookupResp *SubdocLookupResponse) FindTargetBodyWithoutXattr() ([]byte, error) {
-	return lookupResp.ResponseForAPath("")
+func (lookupResp *WrappedMCResponse) FindTargetBodyWithoutXattr() ([]byte, error) {
+	opcode := lookupResp.Resp.Opcode
+	switch opcode {
+	case mc.GETEX:
+		if HasXattr(lookupResp.Resp.DataType) {
+			// it is assumed that the body is uncompressed.
+			return StripXattrAndGetBody(lookupResp.Resp.Body)
+		}
+		return lookupResp.Resp.Body, nil
+	case mc.SUBDOC_MULTI_LOOKUP:
+		return lookupResp.ResponseForAPath("")
+	default:
+		return nil, fmt.Errorf("invalid get opcode for FindTargetBodyWithoutXattr %v", opcode)
+	}
 }
 
-func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
-	value, err := lookupResp.ResponseForAPath(VXATTR_DATATYPE)
-	if err != nil {
-		return false, err
-	}
-	if value == nil {
-		// Response for datatype virtual XATTR should not be nil. This should never happen
-		return false, errors.New("Lookup for datatype virtual xattrs received nil response")
-	}
-	res, err := regexp.Match(JsonDataTypeStr, value)
-	if err == nil && res == true {
-		return true, nil
-	} else {
-		return false, nil
+func (lookupResp *WrappedMCResponse) IsTargetJson() (bool, error) {
+	opcode := lookupResp.Resp.Opcode
+	switch opcode {
+	case mc.GETEX:
+		return lookupResp.Resp.DataType&JSONDataType > 0, nil
+	case mc.SUBDOC_MULTI_LOOKUP:
+		value, err := lookupResp.ResponseForAPath(VXATTR_DATATYPE)
+		if err != nil {
+			return false, err
+		}
+		if value == nil {
+			// Response for datatype virtual XATTR should not be nil. This should never happen
+			return false, errors.New("Lookup for datatype virtual xattrs received nil response")
+		}
+		res, err := regexp.Match(JsonDataTypeStr, value)
+		if err == nil && res == true {
+			return true, nil
+		} else {
+			return false, nil
+		}
+	default:
+		return false, fmt.Errorf("invalid get opcode for IsTargetJson %v", opcode)
 	}
 }
 
@@ -2236,7 +2279,7 @@ func DecodeGetMetaResp(key []byte, resp *mc.MCResponse, xattrEnabled bool) (Docu
 	return ret, nil
 }
 
-func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMetadata, error) {
+func DecodeSubDocResp(key []byte, lookupResp *WrappedMCResponse) (DocumentMetadata, error) {
 	specs := lookupResp.Specs
 	resp := lookupResp.Resp
 	body := resp.Body
@@ -2480,5 +2523,39 @@ func ParseString(o interface{}) (ok bool, val string) {
 // returns true if the error represents that a bucket doesn't exists,
 // when select bucket memcached command was executed.
 func SelectBucketErrBucketDNE(err error) bool {
-	return strings.Contains(err.Error(), gomemcached.StatusNames[gomemcached.KEY_ENOENT])
+	return strings.Contains(err.Error(), mc.StatusNames[mc.KEY_ENOENT])
+}
+
+// this is used to decompose a collection ID prefixed document key
+// into two parts - collection ID and document key.
+// returns (collection ID, start index of doc key, error if any)
+func DecodeULEB128PrefixedKey(b []byte) (uint32, int, error) {
+	if len(b) == 0 {
+		return 0, 0, errors.New("no data provided")
+	}
+	var u uint64
+	var n int
+	for i := 0; ; i++ {
+		if i >= len(b) {
+			return 0, 0, errors.New("encoded number is longer than provided data")
+		}
+		if i*7 > 32 {
+			// oversize and then break to get caught below
+			u = 0xffffffffffffffff
+			break
+		}
+
+		u |= uint64(b[i]&0x7f) << (i * 7)
+
+		if b[i]&0x80 == 0 {
+			n = i + 1
+			break
+		}
+	}
+
+	if u > 0xffffffff {
+		return 0, 0, errors.New("encoded data is longer than 32 bits")
+	}
+
+	return uint32(u), n, nil
 }

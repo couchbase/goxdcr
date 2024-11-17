@@ -35,6 +35,6 @@ var (
 	ErrImpossibleResp    error = errors.New("impossible write error")
 	ErrUnknownResp       error = errors.New("unknown error")
 	ErrFatalResp         error = errors.New("fatal error")
-	ErrNotMyBucket       error = errors.New("not my bucket")
+	ErrNotMyVBucket      error = errors.New("not my vbucket")
 	ErrUnknownCollection error = errors.New("unknown collection")
 )

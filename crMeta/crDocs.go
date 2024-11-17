@@ -59,7 +59,7 @@ func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRM
 // It encapsulates subdoc lookup response from target bucket.
 type TargetDocument struct {
 	source       hlv.DocumentSourceId // This would be the target bucket UUID converted to the DcoumentSource format
-	resp         *base.SubdocLookupResponse
+	resp         *base.WrappedMCResponse
 	key          []byte
 	xattrEnabled bool // This affects how to interpret getMeta response.
 	includeHlv   bool
@@ -71,7 +71,7 @@ func NewTargetDocument(key []byte, resp *mc.MCResponse, specs []base.SubdocLooku
 	}
 	return &TargetDocument{
 		source: source,
-		resp: &base.SubdocLookupResponse{
+		resp: &base.WrappedMCResponse{
 			Specs: specs,
 			Resp:  resp,
 		},
