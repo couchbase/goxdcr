@@ -1643,6 +1643,11 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 								xmem.client_for_getMeta.IncrementBackOffFactor()
 								atomic.AddUint64(&xmem.counter_eaccess, 1)
 								xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
+							} else if base.IsDocLocked(response) && !isGetMeta {
+								// For getMeta, we will skip source side CR so this error is OK.
+								// Plus the return code will be SUCCESS for getMeta if locked (but cas will be MaxCas)
+								// For subdoc_get, we will retry so increment backoff factor.
+								xmem.client_for_getMeta.IncrementBackOffFactor()
 							} else {
 								// log the corresponding request to facilitate debugging
 								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
@@ -1822,8 +1827,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 	var respMap map[string]*base.SubdocLookupResponse
 	var hasTmpErr bool
 
-	// Note that there could be some responses that could be recycled immediately, i.e. if it is an error response
-	// But, some responses (eg. of those who are skipped to send) could have been refered by some other unique-keys (other mutations with the same doc key)
+	// Some responses (eg. of those who are skipped to send) could have been refered by some other unique-keys (other mutations with the same doc key)
 	// Store such responses here and take the call to recycle or not before the routine exits based on the refCnter
 	respToGc := make(map[*mc.MCResponse]bool)
 	defer func() {
@@ -1873,7 +1877,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				}
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
-				resp.Resp.Recycle()
+				respToGc[resp.Resp] = true
 			} else if base.IsSuccessGetResponse(resp.Resp) {
 				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
@@ -1925,11 +1929,11 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				}
 
 				if resp.Resp != nil {
-					xmem.Logger().Errorf("Received %v for key %v%q%v", xmem.PrintResponseStatusError(resp.Resp.Status), base.UdTagBegin, key, base.UdTagEnd)
+					xmem.Logger().Debugf("Received %v for key %v%q%v", xmem.PrintResponseStatusError(resp.Resp.Status), base.UdTagBegin, key, base.UdTagEnd)
 				} else {
-					xmem.Logger().Errorf("Received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
+					xmem.Logger().Debugf("Received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
 				}
-				resp.Resp.Recycle()
+				respToGc[resp.Resp] = true
 			}
 		}
 	}
