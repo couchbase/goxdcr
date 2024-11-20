@@ -40,6 +40,8 @@ BACKFILL_KILLED="background waiting backfill streams to all be replicated timed 
 BAD_MAGIC_MSG="bad magic"
 CKPTSEQNO_BACKARD="Checkpoint seqno went backward"
 CKPT_GET_ERR="Error getting ckpt docs for"
+BACKFILL_DEL_OP="metakv operation on backfill spec op=2"
+BACKFILL_CLEANED="BackfillPipelineClean"
 
 # These should be imported after clusterRunProvision script
 

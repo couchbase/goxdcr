@@ -150,6 +150,8 @@ function runTestCase {
 	local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
 	local -i currentBackfillOsoDocCnt
+	local -i currentBackfillDelCnt
+	local -i currentBackfillCleanCnt
 
 	local currentClusterLog
 	currentClusterLog=$(getClusterLogs "C1")
@@ -162,6 +164,8 @@ function runTestCase {
 	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
+	currentBackfillDelCnt=$(echo "$currentXdcrLog" | grep "$BACKFILL_DEL_OP")
+	currentBackfillCleanCnt=$(echo "$currentXdcrLog" | grep "$BACKFILL_CLEANED")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -210,11 +214,15 @@ function runTestCase {
 	createCollection "C1" "B1" "S1" "col2"
 	runDataLoad
 
+	# With global timestamp, it'll take longer for pipeline to start. Wait here to ensure the tests below
+	# will trigger the backfill accordingly instead of being "soaked up" by the pipeline starting
+	sleep 60
+
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 	setupTopologies
-	echo "Sleeping 30 seconds for discovery and automatic backfill"
-	sleep 30
+	echo "Sleeping 60 seconds for discovery and automatic backfill"
+	sleep 60
 
 	printGlobalScopeAndCollectionInfo
 
@@ -226,6 +234,10 @@ function runTestCase {
 
 	# Sometimes racey detection will detect collection manifest changes mid flight and raise more than one backfill
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
+
+	# Before raising data load, should wait for backfill to be done before testing router raising backfill
+	waitForInternalLogInstance "C1" "$BACKFILL_DEL_OP" "$(($currentBackfillDelCnt + 1))" 2
+	waitForInternalLogInstance "C1" "$$BACKFILL_CLEANED" "$(($currentBackfillCleanCnt + 2))" 1
 
 	runDataLoad
 	# After running I/O, router should raise a repaired message

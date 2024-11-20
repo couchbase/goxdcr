@@ -961,6 +961,7 @@ func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestTgtManifest *meta
 
 	err := c.routingUpdater(routingInfo)
 	if err != nil && c.IsRunning() {
+		c.logger.Warnf("Routing updater returned err %v", err)
 		// If routing updater had error, it means that the potentially either or both ckpt mgr and backfill mgr
 		// do not have the most up-to-date brokenmap/repairedmap (routingInfo).
 		// Most likely though, it means that backfill was not able to be persisted correctly.
