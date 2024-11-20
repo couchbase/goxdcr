@@ -395,6 +395,11 @@ type brokenMappingWithLock struct {
 	brokenMap                   metadata.CollectionNamespaceMapping
 	correspondingTargetManifest uint64
 	lock                        sync.RWMutex
+
+	// To handle corner cases where certain target VBs are slow, we keep max of previous manifestHistories
+	// And truncate whenever checkpoint operations take place
+	// Key is the "correspondingTargetManifest"
+	brokenMapHistories map[uint64]metadata.CollectionNamespaceMapping
 }
 
 // 0th element is Main pipeline Vbs->CkptDocs
@@ -705,6 +710,7 @@ func (ckmgr *CheckpointManager) initialize() {
 
 	ckmgr.cachedBrokenMap.lock.Lock()
 	ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+	ckmgr.cachedBrokenMap.brokenMapHistories = make(map[uint64]metadata.CollectionNamespaceMapping)
 	ckmgr.cachedBrokenMap.lock.Unlock()
 
 	ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
@@ -1967,12 +1973,19 @@ done:
 
 func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 	// Before actually persisting the checkpoint, ensure that the current brokenmap is available before the checkpoints are populated
+	var mapsToPreupsert []metadata.CollectionNamespaceMapping
 	ckmgr.cachedBrokenMap.lock.RLock()
-	preUpsertMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	mapsToPreupsert = append(mapsToPreupsert, ckmgr.cachedBrokenMap.brokenMap.Clone())
+	for _, oldMap := range ckmgr.cachedBrokenMap.brokenMapHistories {
+		mapsToPreupsert = append(mapsToPreupsert, oldMap)
+	}
 	ckmgr.cachedBrokenMap.lock.RUnlock()
-	err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
-	if err != nil {
-		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping: %v", err)
+
+	for _, preUpsertMap := range mapsToPreupsert {
+		err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
+		if err != nil {
+			ckmgr.logger.Warnf("Unable to pre-persist brokenMapping %v: %v", preUpsertMap.String(), err)
+		}
 	}
 }
 
@@ -2056,6 +2069,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	if ckmgr.isVariableVBMode() {
 		ckmgr.CommitGlobalTimestampDedupMaps()
 	}
+	ckmgr.ClearBrokenmapHistory(tgtManifestIds)
 	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
@@ -2119,6 +2133,9 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		ckmgr.CommitGlobalTimestampDedupMaps()
 	}
 
+	if ckmgr.collectionEnabled() {
+		ckmgr.ClearBrokenmapHistory(tgtManifestIds)
+	}
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
 
@@ -2390,28 +2407,14 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 		return remoteTimestamp, nil
 	}
 
-	tgtManifestId, ok := tgtManifestIds[vbno]
-	if !ok {
-		ckmgr.logger.Warnf("Unable to find Target manifest ID for vb %v", vbno)
-	}
-
-	ckmgr.cachedBrokenMap.lock.RLock()
-	brokenMapping := ckmgr.cachedBrokenMap.brokenMap.Clone()
-	// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
-	// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
-	// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
-	// manifestID so future backfill will be created
-	if len(ckmgr.cachedBrokenMap.brokenMap) > 0 && ckmgr.cachedBrokenMap.correspondingTargetManifest > 0 {
-		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
-	}
-	ckmgr.cachedBrokenMap.lock.RUnlock()
-
-	if len(brokenMapping) == 0 {
-		// Do not decorate with an empty brokenmap
-		return remoteTimestamp, nil
-	}
-
 	if remoteTimestamp.IsTraditional() {
+		brokenMapping, tgtManifestId := ckmgr.retrieveTargetManifestIdAndBrokenMap(tgtManifestIds, vbno)
+
+		if len(brokenMapping) == 0 {
+			// Do not decorate with an empty brokenmap
+			return remoteTimestamp, nil
+		}
+
 		tgtVbTimestamp, ok := remoteTimestamp.GetValue().(*metadata.TargetVBTimestamp)
 		if !ok {
 			return nil, fmt.Errorf("expecting remoteTimestamp to be *metadata.TargetVBTimestamp, but got %T", remoteTimestamp)
@@ -2425,17 +2428,8 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 		tgtVbTimestamp.TargetManifest = tgtManifestId
 		return tgtVbTimestamp, nil
 	} else {
-		// TODO MB-63478: For now this is a safer implementation because we are taking what works checkpointing for
-		// traditional checkpoints and just extending it to a "global" checkpoint on a per VB basis
-		// This is a more conservative and step-by-step approach to achieve the project goal
-		// However, if we have time down the line before shipping, we can revisit this and see if optimizing the broken
-		// map by deduplication is actually safe. It needs to be carefully thought through and is something to look
-		// at later
-
-		//tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(*metadata.GlobalTimestamp)
 		tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(map[uint16]*metadata.GlobalVBTimestamp)
 		if !ok {
-			//return fmt.Errorf("vb %v expecting *metadata.GlobalTimestamp, got %T", vbno, remoteTimestamp.GetValue())
 			return nil, fmt.Errorf("vb %v expecting map[uint16]*metadata.GlobalVBTimestamp, got %T", vbno, remoteTimestamp.GetValue())
 		}
 
@@ -2445,11 +2439,18 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 
 		errMap := make(base.ErrorMap)
 		for tgtVb, gts := range tgtVbTimestampMap {
+			brokenMapping, tgtManifestId := ckmgr.retrieveTargetManifestIdAndBrokenMap(tgtManifestIds, tgtVb)
+			// Do tgtManifest regardless of brokenmap
+			gts.TargetManifest = tgtManifestId
+			if len(brokenMapping) == 0 {
+				// Do not decorate with an empty brokenmap
+				continue
+			}
+			// Do brokenmap
 			err := gts.SetBrokenMappingAsPartOfCreation(brokenMapping)
 			if err != nil {
 				errMap[fmt.Sprintf("src:tgt vb %v:%v", vbno, tgtVb)] = err
 			}
-			gts.TargetManifest = tgtManifestId
 		}
 		if len(errMap) > 0 {
 			return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
@@ -2457,6 +2458,44 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 		globalTs := metadata.GlobalTimestamp(tgtVbTimestampMap)
 		return &globalTs, nil
 	}
+}
+
+func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifestIds map[uint16]uint64, vbno uint16) (metadata.CollectionNamespaceMapping, uint64) {
+	tgtManifestId, ok := tgtManifestIds[vbno]
+	if !ok {
+		ckmgr.logger.Warnf("unable to find Target manifest ID for vb %v", vbno)
+	}
+
+	var brokenMapping metadata.CollectionNamespaceMapping
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	// In the case of tgtManifestId is 0, we will need to use the "latest cache" to ensure that there is a uniform
+	// view of the broken map, such as when pipelines are paused and resumed, and no data is written due to a complete
+	// mismatch of collections mapping, and there is no target written throughSeqno, and yet for source VBs, they
+	// are all considered "through" because they are part of the brokenmapping
+	var useLatestCached bool = true
+	if tgtManifestId > 0 && tgtManifestId < ckmgr.cachedBrokenMap.correspondingTargetManifest {
+		// This is a very rare condition where the target VB has not yet gone forward
+		if ckmgr.cachedBrokenMap.brokenMapHistories[tgtManifestId] == nil {
+			ckmgr.logger.Warnf("vbno %v unable to find older tgtmanifestId %v from history", vbno, tgtManifestId)
+			tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
+			brokenMapping = ckmgr.cachedBrokenMap.brokenMap.Clone()
+		} else {
+			useLatestCached = false
+			brokenMapping = ckmgr.cachedBrokenMap.brokenMapHistories[tgtManifestId].Clone()
+		}
+	}
+
+	if useLatestCached {
+		// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
+		// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
+		// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
+		// manifestID so future backfill will be created
+		brokenMapping = ckmgr.cachedBrokenMap.brokenMap.Clone()
+		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
+	}
+	return brokenMapping, tgtManifestId
 }
 
 func (ckmgr *CheckpointManager) getSrcCollectionItems(vbno uint16, srcManifestIds map[uint16]uint64) (uint64, uint64) {
@@ -2617,10 +2656,15 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// First, absorb any new broken mappings (case 1 and 2)
 			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
 			if routingInfo.TargetManifestId > ckmgr.cachedBrokenMap.correspondingTargetManifest {
+				oldManifestIdToRecord := ckmgr.cachedBrokenMap.correspondingTargetManifest
+
 				// Newer version means potentially backfill maps that were fixed (case 2)
 				// Remove those from the broken mapppings
 				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
+
+				// As part of bumping, save the pre-bumped manifest - brokenMap pair
+				ckmgr.cachedBrokenMap.brokenMapHistories[oldManifestIdToRecord] = olderMap
 			}
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
@@ -4014,4 +4058,25 @@ func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(highSeqnoAndVBUuid meta
 	}
 
 	return highSeqnoAndVBUuid.ToGlobalTimestamp(), nil
+}
+
+// ClearBrokenmapHistory would remove unreferenced broken maps
+// tgtManfiestIdsUsed is passed in to show manifest IDs that are still being referred
+func (ckmgr *CheckpointManager) ClearBrokenmapHistory(tgtManifestIdsUsed map[uint16]uint64) {
+	ckmgr.cachedBrokenMap.lock.Lock()
+	defer ckmgr.cachedBrokenMap.lock.Unlock()
+
+	tgtManifestIdUsedDedupMap := make(map[uint64]bool)
+	for _, v := range tgtManifestIdsUsed {
+		tgtManifestIdUsedDedupMap[v] = true
+	}
+
+	for manifestId, _ := range ckmgr.cachedBrokenMap.brokenMapHistories {
+		if manifestId == ckmgr.cachedBrokenMap.correspondingTargetManifest {
+			// This entry should not belong in the "history" as this entry is already captured by "current" broken map
+			delete(ckmgr.cachedBrokenMap.brokenMapHistories, manifestId)
+		} else if _, exists := tgtManifestIdUsedDedupMap[manifestId]; !exists {
+			delete(ckmgr.cachedBrokenMap.brokenMapHistories, manifestId)
+		}
+	}
 }
