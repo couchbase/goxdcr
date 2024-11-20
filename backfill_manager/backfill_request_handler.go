@@ -470,9 +470,12 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 
 func (b *BackfillRequestHandler) getVBs(getLatest bool) []uint16 {
 	if getLatest {
+		// Rare possibility: it is possible that latestVbsUpdatedTime to be updated
+		// between curTime and the for loop condition resulting the loop to be executed.
 		curTime := time.Now().UnixNano()
 		for curTime < atomic.LoadInt64(&b.latestVbsUpdatedTime) {
 			time.Sleep(1 * time.Second)
+			curTime = time.Now().UnixNano()
 		}
 	}
 	b.latestCachedSourceNotificationMtx.RLock()
@@ -482,9 +485,12 @@ func (b *BackfillRequestHandler) getVBs(getLatest bool) []uint16 {
 
 func (b *BackfillRequestHandler) getVBsClone(getLatest bool) []uint16 {
 	if getLatest {
+		// Rare possibility: it is possible that latestVbsUpdatedTime to be updated
+		// between curTime and the for loop condition resulting the loop to be executed.
 		curTime := time.Now().UnixNano()
 		for curTime < atomic.LoadInt64(&b.latestVbsUpdatedTime) {
 			time.Sleep(1 * time.Second)
+			curTime = time.Now().UnixNano()
 		}
 	}
 	b.latestCachedSourceNotificationMtx.RLock()
