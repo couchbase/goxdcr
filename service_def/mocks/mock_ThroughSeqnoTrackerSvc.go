@@ -262,7 +262,7 @@ func (_c *ThroughSeqnoTrackerSvc_PrintStatusSummary_Call) RunAndReturn(run func(
 }
 
 // SetStartSeqno provides a mock function with given fields: vbno, seqno, manifestIds
-func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair) {
+func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdsTimestamp) {
 	_m.Called(vbno, seqno, manifestIds)
 }
 
@@ -274,14 +274,14 @@ type ThroughSeqnoTrackerSvc_SetStartSeqno_Call struct {
 // SetStartSeqno is a helper method to define mock.On call
 //   - vbno uint16
 //   - seqno uint64
-//   - manifestIds base.CollectionsManifestIdPair
+//   - manifestIds base.CollectionsManifestIdsTimestamp
 func (_e *ThroughSeqnoTrackerSvc_Expecter) SetStartSeqno(vbno interface{}, seqno interface{}, manifestIds interface{}) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
 	return &ThroughSeqnoTrackerSvc_SetStartSeqno_Call{Call: _e.mock.On("SetStartSeqno", vbno, seqno, manifestIds)}
 }
 
-func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) Run(run func(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair)) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
+func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) Run(run func(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdsTimestamp)) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint16), args[1].(uint64), args[2].(base.CollectionsManifestIdPair))
+		run(args[0].(uint16), args[1].(uint64), args[2].(base.CollectionsManifestIdsTimestamp))
 	})
 	return _c
 }
@@ -291,7 +291,7 @@ func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) Return() *ThroughSeqnoTrack
 	return _c
 }
 
-func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) RunAndReturn(run func(uint16, uint64, base.CollectionsManifestIdPair)) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
+func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) RunAndReturn(run func(uint16, uint64, base.CollectionsManifestIdsTimestamp)) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
 	_c.Call.Return(run)
 	return _c
 }

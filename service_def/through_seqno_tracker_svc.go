@@ -19,7 +19,7 @@ type ThroughSeqnoTrackerSvc interface {
 	GetThroughSeqno(vbno uint16) uint64
 	// get through seqnos for all vbs managed by the pipeline
 	GetThroughSeqnos() map[uint16]uint64
-	SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair)
+	SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdsTimestamp)
 	PrintStatusSummary()
 
 	// Get ManifestIDs alongside with the through sequence numbers

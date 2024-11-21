@@ -122,7 +122,7 @@ func constructDummyTasksMapCustom(set TasksMapType) *metadata.VBTasksMapType {
 	nonDefaultNamespace := &base.CollectionNamespace{ScopeName: CustomScopeName, CollectionName: CustomCollectionName}
 	nonDefaultNamespaceMapping.AddSingleMapping(nonDefaultNamespace, nonDefaultNamespace)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &metadata.BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},

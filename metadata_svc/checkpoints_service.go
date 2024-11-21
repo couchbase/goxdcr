@@ -144,8 +144,10 @@ func (ckpt_svc *CheckpointsService) checkpointsDocInternal(replicationId string,
 	globalTsShaMap, _ := ckpt_svc.globalTsRefCountSvc.GetShaGlobalTsMap(replicationId)
 
 	ckpt_doc, err := ckpt_svc.constructCheckpointDoc(result, rev, shaMap, globalTsShaMap)
-	ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v err %v",
-		replicationId, vbno, key, err)
+	if err != nil {
+		ckpt_svc.logger.Errorf("Unable to construct ckpt doc from metakv given replication: %v vbno: %v key: %v err %v",
+			replicationId, vbno, key, err)
+	}
 	return ckpt_doc, err
 }
 
@@ -908,18 +910,21 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 				continue
 			}
 		}
-		if len(shaToBrokenMapping) > 0 {
-			err := ckpt_svc.populateActualMapping(ckpt_doc, shaToBrokenMapping)
-			if err != nil {
-				return nil, err
-			}
-		}
+		// Must populate global timestamp mapping first as the mapping is needed to restore
+		// the actual brokenmapping sha's needed for actual broken map population
 		if len(shaToGtsMapping) > 0 {
 			err := ckpt_svc.populateGlobalTsMapping(ckpt_doc, shaToGtsMapping)
 			if err != nil {
 				return nil, err
 			}
 		}
+		if len(shaToBrokenMapping) > 0 {
+			err := ckpt_svc.populateActualMapping(ckpt_doc, shaToBrokenMapping)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		return ckpt_doc, nil
 	} else {
 		return nil, service_def.MetadataNotFoundErr
@@ -938,7 +943,6 @@ func (ckpt_svc *CheckpointsService) populateActualMapping(doc *metadata.Checkpoi
 		}
 
 		shaMapToFill := record.GetShaOnlyMap()
-
 		if len(shaMapToFill) == 0 {
 			continue
 		}
