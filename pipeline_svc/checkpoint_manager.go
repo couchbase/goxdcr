@@ -1377,7 +1377,7 @@ func (ckmgr *CheckpointManager) loadBrokenMappingCommit(cacheLookupMap map[uint6
 
 	listToTraverse := cacheLookupMap[highestManifestId]
 	for _, record := range listToTraverse {
-		if record == nil || record.TargetManifest < highestManifestId {
+		if record == nil {
 			continue
 		}
 
@@ -1427,6 +1427,7 @@ func (ckmgr *CheckpointManager) loadBrokenMappingsGlobal(ckptDocs map[uint16]*me
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
+	// Don't print globalManifetId for ease of reading
 	ckmgr.logger.Infof("Set VBTimestamp: vb=%v, ts.Seqno=%v, ts.SourceManifestId=%v ts.TargetManifestId=%v\n",
 		vbno, ts.Seqno, ts.ManifestIDs.SourceManifestId, ts.ManifestIDs.TargetManifestId)
 
@@ -1443,18 +1444,73 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 	return nil
 }
 
-// Restores broken mappings to multiple collection routers
-func (ckmgr *CheckpointManager) restoreBrokenMappingManifestsToRouters(brokenMappingRO *metadata.CollectionNamespaceMapping, manifestId uint64, isRollBack bool) {
-	if brokenMappingRO == nil || len(*brokenMappingRO) == 0 || manifestId == 0 {
+// Restores broken mappings to multiple collection routers and other components
+func (ckmgr *CheckpointManager) restoreBrokenMappingManifests(traditionalPair metadata.ManifestIdAndBrokenMapPair, globalPairs map[uint16]metadata.ManifestIdAndBrokenMapPair, isRollBack bool) {
+	if traditionalPair.BrokenMap == nil && traditionalPair.ManifestId == 0 && len(globalPairs) == 0 {
+		// Nothing valid was entered
 		return
 	}
+
+	// Restore to routers
 	settings := make(map[string]interface{})
 	var argsList []interface{}
-	argsList = append(argsList, brokenMappingRO)
-	argsList = append(argsList, manifestId)
-	argsList = append(argsList, isRollBack)
-	settings[metadata.BrokenMappingsUpdateKey] = argsList
-	ckmgr.pipeline.UpdateSettings(settings)
+	if traditionalPair.BrokenMap != nil {
+		// Traditional brokenMap to restore
+		argsList = append(argsList, traditionalPair.BrokenMap)
+		argsList = append(argsList, traditionalPair.ManifestId)
+		argsList = append(argsList, isRollBack)
+		settings[metadata.BrokenMappingsUpdateKey] = argsList
+		ckmgr.pipeline.UpdateSettings(settings)
+	} else {
+		argsList = append(argsList, globalPairs)
+		argsList = append(argsList, isRollBack)
+		settings[metadata.GlobalBrokenMappingUpdateKey] = argsList
+		ckmgr.pipeline.UpdateSettings(settings)
+	}
+
+	// Restore to brokenmap histories
+	ckmgr.cachedBrokenMap.lock.Lock()
+	defer ckmgr.cachedBrokenMap.lock.Unlock()
+	if traditionalPair.BrokenMap != nil || traditionalPair.ManifestId != 0 {
+		// Traditional restore
+		ckmgr.restoreBrokenMapHistoryNoLock(traditionalPair)
+	} else {
+		// Global restore
+		for _, onePair := range globalPairs {
+			ckmgr.restoreBrokenMapHistoryNoLock(onePair)
+		}
+	}
+}
+
+// write lock must be held
+func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata.ManifestIdAndBrokenMapPair) {
+	if onePair.ManifestId == 0 {
+		// Not a valid brokenmap to restore
+		return
+	}
+
+	if ckptMgr.cachedBrokenMap.correspondingTargetManifest == onePair.ManifestId {
+		// Consolidate
+		if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
+			ckptMgr.cachedBrokenMap.brokenMap.Consolidate(*onePair.BrokenMap)
+		}
+	} else if onePair.ManifestId < ckptMgr.cachedBrokenMap.correspondingTargetManifest {
+		// Put in history
+		brokenMapHistory, historyExists := ckptMgr.cachedBrokenMap.brokenMapHistories[onePair.ManifestId]
+		if historyExists {
+			if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
+				brokenMapHistory.Consolidate(*onePair.BrokenMap)
+			}
+		} else {
+			ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
+			ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+		}
+	} else {
+		// Latest one we've seen so far
+		ckptMgr.cachedBrokenMap.brokenMapHistories[ckptMgr.cachedBrokenMap.correspondingTargetManifest] = ckptMgr.cachedBrokenMap.brokenMap.Clone()
+		ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
+		ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+	}
 }
 
 func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc, waitGrp *sync.WaitGroup, err_ch chan interface{}, sharedLowestSuccessfulManifestId *uint64, vbtsStartedNon0 *uint32, preReplicateCacheCtx *globalCkptPrereplicateCacheCtx) {
@@ -1463,7 +1519,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 
 	for _, vbno := range listOfVbs {
 		seqnoMax := ckmgr.getMaxSeqno(vbno)
-		vbts, vbStats, brokenMapping, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCacheCtx)
+		vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCacheCtx)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
@@ -1476,8 +1532,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			err_ch <- err_info
 			return
 		}
-		fmt.Printf("NEIL DEBUG restoring targetManifestId %v brokenmapping %v\n", targetManifestId, brokenMapping)
-		ckmgr.restoreBrokenMappingManifestsToRouters(brokenMapping, targetManifestId, false /*isRollBack*/)
+		ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false /*isRollBack*/)
 		err = ckmgr.setTimestampForVB(vbno, vbts)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
@@ -1577,7 +1632,7 @@ func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, global
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, base.VBCountMetric, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, base.VBCountMetric, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -1632,7 +1687,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		if targetTimestamp != nil || globalTargetTimestamp != nil {
 			bMatch, err := ckmgr.validateTargetTimestampForResume(vbno, targetTimestamp, globalTargetTimestamp, ctx)
 			if err != nil {
-				return nil, nil, nil, 0, 0, err
+				return nil, nil, 0, metadata.ManifestIdAndBrokenMapPair{}, nil, err
 			}
 
 			if bMatch {
@@ -1647,12 +1702,12 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		} // end if targetTimestamp
 	}
 POPULATE:
-	vbts, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.populateDataFromCkptDoc(ckptDoc, agreedIndex, vbno, ctx)
+	vbts, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingPair, err := ckmgr.populateDataFromCkptDoc(ckptDoc, agreedIndex, vbno, ctx)
 	if err != nil {
-		return vbts, nil, nil, 0, 0, err
+		return vbts, nil, 0, traditionalPair, nil, err
 	}
 	vbStatMap := NewVBStatsMapFromCkpt(ckptDoc, agreedIndex)
-	return vbts, vbStatMap, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err
+	return vbts, vbStatMap, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingPair, nil
 }
 
 func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *globalCkptPrereplicateCacheCtx) (bool, error) {
@@ -1784,13 +1839,31 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 	return ckmgr.checkpoints_svc.CheckpointsDoc(ckmgr.pipeline.FullTopic(), vbno)
 }
 
-func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+// For global timestamp to resume, each source VB will have > 1 target VBs
+// Each target VB (from the source VB's perspective) will have individual VB's manifests
+// and brokenmaps to resume from
+// At this point, though it's true that a set of source VBs may all share the same
+// target VBs' "point in time" manifests and broken maps, we should ensure the code
+// is conceptually and semantically correct
+type globalCkptResumeData struct {
+	srcVb              uint16
+	globalTsManifests  map[uint16]uint64
+	globalTsBrokenMaps map[uint16]metadata.CollectionNamespaceMapping
+}
+
+func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
-	var brokenMapping *metadata.CollectionNamespaceMapping
-	var brokenMappings metadata.ShaToCollectionNamespaceMap
+	if ckmgr.isVariableVBMode() {
+		vbts.ManifestIDs.GlobalTargetManifestIds = make(map[uint16]uint64)
+	}
+	var brokenMappingsToLoadInCkptObj metadata.ShaToCollectionNamespaceMap
 	var targetManifestId uint64
 	var backfillBypassAgreedIndex bool
+
+	var traditionalPair metadata.ManifestIdAndBrokenMapPair
+	var globalMappingsPair map[uint16]metadata.ManifestIdAndBrokenMapPair
 	var lastSucccessfulBackfillMgrSrcManifestId uint64
+	var globalTsAgreed metadata.GlobalTimestamp
 	if agreedIndex > -1 {
 		ckpt_records := ckptDoc.GetCheckpointRecords()
 		if len(ckpt_records) < agreedIndex+1 {
@@ -1813,18 +1886,32 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			}
 
 			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifestForDCP
-			vbts.ManifestIDs.TargetManifestId = ckpt_record.TargetManifest
 
 			lastSucccessfulBackfillMgrSrcManifestId = ckpt_record.SourceManifestForBackfillMgr
 
-			var err error
-			targetManifestId, brokenMapping, err = extractBrokenMappingAndManifest(ckpt_record)
-			if err != nil {
-				return nil, nil, 0, 0, err
+			// Meant to be loaded into ckmgr cache... whereas "brokenMapping" above is used as part of populate
+			traditionalPair, globalMappingsPair = ckpt_record.BrokenMappingsAndManifestIds()
+
+			if ckpt_record.IsTraditional() {
+				vbts.ManifestIDs.TargetManifestId = traditionalPair.ManifestId
+			} else {
+				var maxManifest uint64
+				for _, onePair := range globalMappingsPair {
+					if onePair.ManifestId > maxManifest {
+						maxManifest = onePair.ManifestId
+					}
+				}
+				// Restore the biggest timestamp
+				vbts.ManifestIDs.TargetManifestId = maxManifest
+
+				// Also populate global vbts manifests
+				for tgtVb, pair := range globalMappingsPair {
+					vbts.ManifestIDs.GlobalTargetManifestIds[tgtVb] = pair.ManifestId
+				}
 			}
 
-			// Meant to be loaded into ckmgr cache... whereas "brokenMapping" above is used as part of populate
-			brokenMappings = ckpt_record.BrokenMappings()
+			brokenMappingsToLoadInCkptObj = ckpt_record.BrokenMappings()
+			globalTsAgreed = ckpt_record.GlobalTimestamp
 		}
 	} else if ckmgr.pipeline.Type() == common.BackfillPipeline {
 		// Check to see if there's a starting point to use instead of 0
@@ -1838,6 +1925,9 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			vbts.SnapshotStart = startingTs.SnapshotStart
 			vbts.SnapshotEnd = startingTs.SnapshotEnd
 			vbts.ManifestIDs = startingTs.ManifestIDs
+			// Backfill pipelines don't need the granularity of using manifestID.GlobalTargetManifestIds given
+			// that backfill pipelins are not meant to capture target manifest ID bumps (and to create backfills),
+			// which is already main pipeline's job
 		}
 		// Usually, in the cases of Main pipelines, when there are no checkpoints (or no agreeable checkpoints)
 		// the checkpoint manager will start at seqno 0, which is clean and guarantees no data loss
@@ -1861,59 +1951,21 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			obj.ckpt.Dcp_snapshot_seqno = vbts.SnapshotStart
 			obj.ckpt.Dcp_snapshot_end_seqno = vbts.SnapshotEnd
 			obj.ckpt.Seqno = vbts.Seqno
-			if brokenMappings != nil {
-				obj.ckpt.LoadBrokenMapping(brokenMappings)
+			if !ckmgr.isVariableVBMode() {
+				if brokenMappingsToLoadInCkptObj != nil {
+					obj.ckpt.LoadBrokenMapping(brokenMappingsToLoadInCkptObj)
+				}
+				obj.ckpt.TargetManifest = targetManifestId
+			} else {
+				obj.ckpt.GlobalTimestamp = globalTsAgreed
 			}
-			obj.ckpt.TargetManifest = targetManifestId
 		}
 	} else {
 		err := fmt.Errorf("%v %v Calling populateDataFromCkptDoc on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 		ckmgr.handleGeneralError(err)
-		return nil, nil, 0, 0, err
+		return nil, 0, traditionalPair, globalMappingsPair, err
 	}
-	return vbts, brokenMapping, targetManifestId, lastSucccessfulBackfillMgrSrcManifestId, nil
-}
-
-func extractBrokenMappingAndManifest(ckptRecord *metadata.CheckpointRecord) (manifestId uint64, brokenMap *metadata.CollectionNamespaceMapping, err error) {
-	if ckptRecord.IsTraditional() {
-		brokenMappings := ckptRecord.BrokenMappings()
-		if len(brokenMappings) > 1 {
-			return 0, nil, fmt.Errorf("legacy broken map shown as global")
-		}
-		for _, v := range brokenMappings {
-			if v != nil && len(*v) > 0 {
-				brokenMap = v
-			}
-		}
-		manifestId = ckptRecord.TargetManifest
-	} else {
-		// Global checkpoint, first get all the global entries
-		allManifestsAndBrokenMaps := ckptRecord.BrokenMappingsAndManifestIds()
-
-		// The way checkpoint manager currently does capturing of broken mapping and target manifest is done
-		// and documented under "ckptMgr.OnEvent()" under the BrokenRountingUpdates section
-		// Restoration of the manifest and broken map will utilize the similar concept, which is:
-		// 1. Should restore the latest target manifest
-		// 2. Among all the brokenmaps within the same latest target manifest,
-		//    restore the "consolidated" (i.e. largest fishing net) of broken mappings
-		var maxTargetManifestId uint64
-		for _, onePair := range allManifestsAndBrokenMaps {
-			if onePair.ManifestId > maxTargetManifestId {
-				maxTargetManifestId = maxTargetManifestId
-			}
-		}
-
-		// Only consider the largest manifest ID broken maps
-		compiledMap := make(metadata.CollectionNamespaceMapping)
-		for _, onePair := range allManifestsAndBrokenMaps {
-			if onePair.ManifestId == maxTargetManifestId && onePair.BrokenMap != nil {
-				compiledMap.Consolidate(*onePair.BrokenMap)
-			}
-		}
-		manifestId = maxTargetManifestId
-		brokenMap = &compiledMap
-	}
-	return
+	return vbts, lastSucccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingsPair, nil
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
@@ -2027,7 +2079,6 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 	// get through seqnos for all vbuckets in the pipeline
 	through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
-	fmt.Printf("NEIL DEBUG tgtManifestIds as part of checkpoint %v\n", tgtManifestIds)
 	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
 	vbSeqnoMap := base.VbSeqnoMapType(through_seqno_map)
 	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential modification
@@ -2115,7 +2166,6 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		return
 	}
 
-	fmt.Printf("NEIL DEBUG tgtManifestIds as part of checkpoint %v\n", tgtManifestIds)
 	var total_committing_time int64
 
 	if ckmgr.collectionEnabled() {
@@ -2487,7 +2537,6 @@ func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifest
 		} else {
 			useLatestCached = false
 			brokenMapping = ckmgr.cachedBrokenMap.brokenMapHistories[tgtManifestId].Clone()
-			fmt.Printf("NEIL DEBUG not use latest vbno %v tgtManifestId %v brokenMap %v\n", vbno, tgtManifestId, brokenMapping)
 		}
 	}
 
@@ -2498,7 +2547,6 @@ func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifest
 		// manifestID so future backfill will be created
 		brokenMapping = ckmgr.cachedBrokenMap.brokenMap.Clone()
 		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
-		fmt.Printf("NEIL DEBUG use latest cached for tgtVB %v brokenMap %v\n", vbno, brokenMapping.String())
 	}
 	return brokenMapping, tgtManifestId
 }
@@ -2891,14 +2939,15 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 		// If one VB starts rollback, it'll affect many other VBs in the same timeframe. Get a single instance of rollback context
 		rollbackCtx = ckmgr.getRollbackCtx()
 	}
-	vbts, vbStats, brokenMappings, targetManifestId, lastsuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackCtx)
+	//vbts, vbStats, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackCtx)
+	vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	pipeline_startSeqnos_map[vbno] = vbts
 
-	ckmgr.restoreBrokenMappingManifestsToRouters(brokenMappings, targetManifestId, true /*isRollBack*/)
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, true /*isRollBack*/)
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno, vbts.ManifestIDs)
@@ -2908,7 +2957,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	}
 
 	if ckmgr.pipeline.Type() == common.MainPipeline {
-		go ckmgr.getBackfillMgr().SetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic(), lastsuccessfulBackfillMgrSrcManifestId, true, ckmgr.finish_ch)
+		go ckmgr.getBackfillMgr().SetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic(), lastSuccessfulBackfillMgrSrcManifestId, true, ckmgr.finish_ch)
 	}
 
 	ckmgr.logger.Infof("Rolled back startSeqno to %v for vb=%v\n", vbts.Seqno, vbno)

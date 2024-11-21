@@ -879,18 +879,18 @@ type ManifestIdAndBrokenMapPair struct {
 	BrokenMap  *CollectionNamespaceMapping
 }
 
-func (c *CheckpointRecord) BrokenMappingsAndManifestIds() []ManifestIdAndBrokenMapPair {
+func (c *CheckpointRecord) BrokenMappingsAndManifestIds() (ManifestIdAndBrokenMapPair, map[uint16]ManifestIdAndBrokenMapPair) {
 	if c.IsTraditional() {
 		c.brokenMappingsMtx.RLock()
 		defer c.brokenMappingsMtx.RUnlock()
 		clonedMapping := c.brokenMappings.Clone()
-		return []ManifestIdAndBrokenMapPair{
-			{BrokenMap: &clonedMapping,
-				ManifestId: c.TargetVBTimestamp.TargetManifest},
-		}
+		var traditionalPair ManifestIdAndBrokenMapPair
+		traditionalPair.BrokenMap = &clonedMapping
+		traditionalPair.ManifestId = c.TargetVBTimestamp.TargetManifest
+		return traditionalPair, nil
 	} else {
-		var listToReturn []ManifestIdAndBrokenMapPair
-		for _, oneGlobalTs := range c.GlobalTimestamp {
+		globalMap := make(map[uint16]ManifestIdAndBrokenMapPair)
+		for tgtVb, oneGlobalTs := range c.GlobalTimestamp {
 			var brokenMapToReturn *CollectionNamespaceMapping
 			oneGlobalTs.brokenMappingsMtx.RLock()
 			if oneGlobalTs.brokenMappings != nil && len(oneGlobalTs.brokenMappings) > 0 {
@@ -898,12 +898,12 @@ func (c *CheckpointRecord) BrokenMappingsAndManifestIds() []ManifestIdAndBrokenM
 				brokenMapToReturn = &clonedMapping
 			}
 			oneGlobalTs.brokenMappingsMtx.RUnlock()
-			listToReturn = append(listToReturn, ManifestIdAndBrokenMapPair{
+			globalMap[tgtVb] = ManifestIdAndBrokenMapPair{
 				BrokenMap:  brokenMapToReturn,
 				ManifestId: oneGlobalTs.TargetManifest,
-			})
+			}
 		}
-		return listToReturn
+		return ManifestIdAndBrokenMapPair{}, globalMap
 	}
 }
 

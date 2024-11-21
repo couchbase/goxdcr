@@ -29,7 +29,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
@@ -151,7 +151,7 @@ func TestMergeTask(t *testing.T) {
 	namespace2 := &base.CollectionNamespace{ScopeName: "dummy", CollectionName: "dummy"}
 	namespaceMapping2.AddSingleMapping(namespace2, namespace2)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
@@ -214,7 +214,7 @@ func TestMergeTasks(t *testing.T) {
 	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
@@ -293,7 +293,7 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	superSetMapping := namespaceMapping.Clone()
 	superSetMapping.AddSingleMapping(namespace3, namespace3)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
@@ -536,7 +536,7 @@ func TestRollbackTo0(t *testing.T) {
 	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
@@ -642,7 +642,7 @@ func TestMergeTasksIntoSpecWithNilTask(t *testing.T) {
 	superSetMapping := namespaceMapping.Clone()
 	superSetMapping.AddSingleMapping(namespace3, namespace3)
 
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 	ts0 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 0, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 6000, manifestsIdPair},

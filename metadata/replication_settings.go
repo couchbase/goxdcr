@@ -68,7 +68,8 @@ const (
 	// Allow mobile at both source and target. Don't overwrite target mobile metadata docs and XATTRs
 	MobileCompatibleKey = base.MobileCompatibleKey
 
-	BrokenMappingsUpdateKey = "BrokenMappingsUpdate"
+	BrokenMappingsUpdateKey      = "BrokenMappingsUpdate"
+	GlobalBrokenMappingUpdateKey = "GlobalBrokenMappingUpdate"
 
 	// Have a single key for replication settings struct, multiple keys for REST endpoints
 	CollectionsMgtMultiKey   = "CollectionsMgtMulti"
