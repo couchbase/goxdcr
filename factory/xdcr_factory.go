@@ -1448,12 +1448,12 @@ func createMigrationVBTasksMap() interface{} {
 		startTs := &base.VBTimestamp{
 			Vbno:        vbno,
 			Seqno:       0,
-			ManifestIDs: base.CollectionsManifestIdPair{},
+			ManifestIDs: base.CollectionsManifestIdsTimestamp{},
 		}
 		endTs := &base.VBTimestamp{
 			Vbno:        vbno,
 			Seqno:       base.DcpSeqnoEnd,
-			ManifestIDs: base.CollectionsManifestIdPair{},
+			ManifestIDs: base.CollectionsManifestIdsTimestamp{},
 		}
 		defaultMigrationMapping := metadata.NewDefaultCollectionMigrationMapping()
 		task := metadata.NewBackfillTask(&metadata.BackfillVBTimestamps{
@@ -1492,6 +1492,11 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	brokenMappingsPair, ok := settings[metadata.BrokenMappingsUpdateKey]
 	if ok {
 		routerSettings[metadata.BrokenMappingsUpdateKey] = brokenMappingsPair
+	}
+
+	globalBrokenMappingPairs, ok := settings[metadata.GlobalBrokenMappingUpdateKey]
+	if ok {
+		routerSettings[metadata.GlobalBrokenMappingUpdateKey] = globalBrokenMappingPairs
 	}
 
 	collectionsMgtMode, ok := settings[metadata.CollectionsMgtMultiKey]

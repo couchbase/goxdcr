@@ -375,7 +375,7 @@ func getBackfillTask() *metadata.BackfillTask {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
 	defaultNamespace := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
-	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	manifestsIdPair := base.CollectionsManifestIdsTimestamp{0, 0, nil}
 
 	ts0 := &metadata.BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 5, 5, manifestsIdPair},

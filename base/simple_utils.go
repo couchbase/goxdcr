@@ -153,6 +153,26 @@ func CloneStringList(list []string) []string {
 	return cloneList
 }
 
+func CloneVbSeqnoMap(incoming map[uint16]uint64) map[uint16]uint64 {
+	clonedMap := make(map[uint16]uint64)
+	for k, v := range incoming {
+		clonedMap[k] = v
+	}
+	return clonedMap
+}
+
+func AreVbSeqnoMapsSame(map1, map2 map[uint16]uint64) bool {
+	if len(map1) != len(map2) {
+		return false
+	}
+	for k, v := range map1 {
+		if map2[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // type to facilitate the sorting of uint16 lists
 type Uint16List []uint16
 

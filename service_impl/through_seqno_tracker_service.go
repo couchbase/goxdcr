@@ -1792,7 +1792,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair) {
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdsTimestamp) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
 	obj, _ := tsTracker.through_seqno_map[vbno]
 	obj.SetSeqno(seqno)
@@ -1803,7 +1803,23 @@ func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64
 	// because the source + target manifest pairs are only used as part of GetThroughSeqnos
 	// and after the above Set call, the "seqno" will be the new starting point
 	tsTracker.setSourceSeqnoManifestIdPair(vbno, seqno, manifestIds.SourceManifestId)
-	tsTracker.setTargetSeqnoManifestIdPair(vbno, seqno, manifestIds.TargetManifestId)
+
+	if len(manifestIds.GlobalTargetManifestIds) > 0 {
+		// Note that for rollback scenario, there's no way right now to really "rollback" the target manifest ID for
+		// a given target VB given that all the target VBs are all intertwined for every source VB
+		// For global timestamp, we cannot use "setTargetSeqnoAndManifestPair" because it is possible that while
+		// one source VB (i.e. vb 1) experiences a rollback, and need to reset the starting timestamp, other source VBs
+		// could continue to run and it'll be incorrect to "set" a single entry in the tgtSeqnoManifestMap given
+		// all the VBs are mixed together
+		for tgtVbno, gtsManifest := range manifestIds.GlobalTargetManifestIds {
+			err := tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(tgtVbno, seqno, gtsManifest)
+			if err != nil {
+				tsTracker.logger.Warnf(err.Error())
+			}
+		}
+	} else {
+		tsTracker.setTargetSeqnoManifestIdPair(vbno, seqno, manifestIds.TargetManifestId)
+	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
