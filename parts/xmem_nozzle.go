@@ -25,7 +25,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
@@ -734,6 +733,8 @@ type XmemNozzle struct {
 	counter_locked              uint64 // counter of times LOCKED status is returned by KV
 	counterGuardrailHit         uint64
 	counterUnknownStatus        uint64
+	counterNumGetEx             uint64
+	counterNumGetCompressed     uint64
 
 	receive_token_ch chan int
 
@@ -1426,9 +1427,9 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			case RetryTargetCasChanged:
 				go func() {
 					additionalInfo := SentCasChangedEventAdditional{
-						Opcode: item.Req.Opcode,
+						IsGetDoc: true,
 					}
-					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, nil, additionalInfo))
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.Req.VBucket, item.Seqno}, additionalInfo))
 					xmem.retryAfterCasLockingFailure(item)
 				}()
 			case RetryTargetLocked:
@@ -1656,7 +1657,6 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 				return
 			} else {
 				isGetMeta := response.Opcode == base.GET_WITH_META
-				isGetEx := response.Opcode == mc.GETEX
 				keySeqno, ok := opaque_keySeqno_map[response.Opaque]
 				if ok {
 					//success
@@ -1672,21 +1672,21 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 							Specs: specs,
 							Resp:  response,
 						}
-						if isGetEx {
-							// for the GetEx command SnappyEverywhere is enabled, the response body might be compressed
-							// and the snappy datatype bit will be set.
-							err := xmem.uncompressResponseBody(wrappedResp)
-							if err != nil {
-								xmem.Logger().Errorf("%v error uncompressing in getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v, body=%v%v%v, datatype=%v", xmem.Id(),
-									base.UdTagBegin, key, base.UdTagEnd, seqno,
-									base.UdTagBegin, response, base.UdTagEnd,
-									base.UdTagBegin, specs, base.UdTagEnd,
-									base.UdTagBegin, wrappedResp.Resp.Body, base.UdTagEnd,
-									wrappedResp.Resp.DataType,
-								)
-								return
-							}
+
+						// for the GetEx command SnappyEverywhere is enabled, the response body might be compressed
+						// and the snappy datatype bit will be set.
+						err := xmem.uncompressResponseBody(wrappedResp)
+						if err != nil {
+							xmem.Logger().Errorf("%v error uncompressing in getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v, body=%v%v%v, datatype=%v", xmem.Id(),
+								base.UdTagBegin, key, base.UdTagEnd, seqno,
+								base.UdTagBegin, response, base.UdTagEnd,
+								base.UdTagBegin, specs, base.UdTagEnd,
+								base.UdTagBegin, wrappedResp.Resp.Body, base.UdTagEnd,
+								wrappedResp.Resp.DataType,
+							)
+							return
 						}
+
 						respMap[key] = wrappedResp
 
 						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
@@ -1740,7 +1740,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 				}
 			}
 
-			//*count < len(respMap) means write is still in session, can't return
+			// *count < len(respMap) means write is still in session, can't return
 			if len(respMap) >= count {
 				logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
 				return
@@ -1812,6 +1812,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 	numOfReqsInReqBytesBatch := 0
 	totalNumOfReqsForSubdocGet := 0
 	totalNumOfReqsForGetMeta := 0
+	totalNumOfReqsForGetEx := 0
 
 	// Establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
 	opaque := base.GetOpaque(0, uint16(time.Now().UnixNano()))
@@ -1863,6 +1864,8 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 			}
 			if req.Opcode == base.GET_WITH_META {
 				totalNumOfReqsForGetMeta++
+			} else if req.Opcode == mc.GETEX {
+				totalNumOfReqsForGetEx++
 			} else {
 				totalNumOfReqsForSubdocGet++
 			}
@@ -1879,7 +1882,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 
 	//send the requests
 	for _, packet := range reqs_bytes_list {
-		if totalNumOfReqsForSubdocGet == 0 {
+		if totalNumOfReqsForSubdocGet == 0 && totalNumOfReqsForGetEx == 0 {
 			// We are doing getMeta only. Failure is tolerated.
 			err, _ = xmem.writeToClient(xmem.client_for_getMeta, packet, true, gcList)
 		} else {
@@ -1897,6 +1900,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 	}
 	if totalNumOfReqsForSubdocGet > 0 {
 		atomic.AddUint64(&xmem.counterNumSubdocGet, uint64(totalNumOfReqsForSubdocGet))
+	}
+	if totalNumOfReqsForGetEx > 0 {
+		atomic.AddUint64(&xmem.counterNumGetEx, uint64(totalNumOfReqsForGetEx))
 	}
 	//wait for receiver to finish
 	<-receiver_return_ch
@@ -1930,46 +1936,15 @@ func (xmem *XmemNozzle) SetConflictLogger(logger interface{}) error {
 	return nil
 }
 
-func getBodyAndXattrSpecs(xtoc []byte) (base.SubdocLookupPathSpecs, error) {
-	var specs base.SubdocLookupPathSpecs
-	var len int
-
-	xi, err := base.NewXTOCIterator(xtoc)
-	if err != nil {
-		return nil, fmt.Errorf("error initialising new xtoc iterator, xtoc=%v, err=%v", xtoc, err)
-	}
-
-	len, err = xi.Len()
-	if err != nil {
-		return nil, fmt.Errorf("error getting xtoc len, xtoc=%v, err=%v", xtoc, err)
-	}
-
-	specs = make(base.SubdocLookupPathSpecs, 0, len+1)
-
-	for xi.HasNext() {
-		xattrKey, err := xi.Next()
-		if err != nil {
-			return nil, fmt.Errorf("error getting xtoc next, xtoc=%v, err=%v", xtoc, err)
-		}
-
-		spec := base.SubdocLookupPathSpec{
-			Opcode: gomemcached.SUBDOC_GET,
-			Flags:  gomemcached.SUBDOC_FLAG_XATTR_PATH,
-			Path:   xattrKey,
-		}
-		specs = append(specs, spec)
-	}
-
-	specs = append(specs, base.BodySpec)
-
-	return specs, nil
+func (xmem *XmemNozzle) GetConflictLogger() interface{} {
+	return xmem.conflictLogger
 }
 
 func (xmem *XmemNozzle) conflictLoggingEnabled() bool {
 	return xmem.conflictLogger != nil
 }
 
-func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, preserveSync, isSource bool) (hlv, mou, sync string, err error) {
+func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, preserveSync bool) (hlv, mou, sync string, err error) {
 	if base.HasXattr(datatype) {
 		xattrIter, err1 := base.NewXattrIterator(body)
 		if err1 != nil {
@@ -2002,7 +1977,7 @@ func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, pres
 func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) {
 	err := xmem.logConflict(req, resp)
 	if err != baseclog.ErrLoggerClosed {
-		xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, nil, err))
+		xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.Req.VBucket, req.Seqno}, err))
 		if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
 			xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 				xmem.Id(),
@@ -2044,7 +2019,7 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 	// parse the source metadata for dcp mutation
 	sourceDoc := base.DecodeSetMetaReq(req)
 
-	sourceHlvClone, sourceMouClone, sourceSyncClone, err := parseHlvMouAndSyncXattrsFromBody(req.Req.Body, req.Req.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync, true)
+	sourceHlvClone, sourceMouClone, sourceSyncClone, err := parseHlvMouAndSyncXattrsFromBody(req.Req.Body, req.Req.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync)
 	if err != nil {
 		return err
 	}
@@ -2082,7 +2057,7 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 		targetMouClone = cLogOpts.TargetMou
 	} else {
 		// the response body should be already uncompressed in getMeta handler.
-		targetHlvClone, targetMouClone, targetSyncClone, err = parseHlvMouAndSyncXattrsFromBody(resp.Resp.Body, resp.Resp.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync, false)
+		targetHlvClone, targetMouClone, targetSyncClone, err = parseHlvMouAndSyncXattrsFromBody(resp.Resp.Body, resp.Resp.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync)
 		if err != nil {
 			return err
 		}
@@ -2227,7 +2202,7 @@ func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLooku
 	casNow := currLookup.Resp.Cas
 	statusNow := currLookup.Resp.Status
 	if statusNow == mc.KEY_ENOENT {
-		// could mean that the target doc is either a tombstone or doesnot exist.
+		// could mean that the target doc is either a tombstone or does not exist.
 		if statusEarlier == mc.KEY_ENOENT || base.IsDeletedSubdocLookupResponse(prevLookup.Resp) {
 			err := getLookupMap.registerLookup(uniqueKey, currLookup)
 			if err != nil {
@@ -2631,6 +2606,8 @@ func (xmem *XmemNozzle) uncompressResponseBody(resp *base.WrappedMCResponse) err
 
 	resp.Resp.Body = body
 	resp.Resp.DataType = resp.Resp.DataType &^ mcc.SnappyDataType
+	atomic.AddUint64(&xmem.counterNumGetCompressed, 1)
+
 	return nil
 }
 
@@ -4250,7 +4227,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v, numGetEx=%v, numGetComp=%v",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -4262,7 +4239,9 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
 			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta), atomic.LoadUint64(&xmem.counterNumSubdocGet),
 			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
-			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus), xmem.conflictLoggingEnabled())
+			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus),
+			xmem.conflictLoggingEnabled(), atomic.LoadUint64(&xmem.counterNumGetEx), atomic.LoadUint64(&xmem.counterNumGetCompressed),
+		)
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}

@@ -857,7 +857,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 		}
 		atomic.StoreUint32(&b.backfillPipelineAttached, 1)
 	} else if pipeline.Type() == common.MainPipeline {
-		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
+		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 		pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
 	}
 

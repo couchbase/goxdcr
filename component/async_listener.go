@@ -32,8 +32,10 @@ type AsyncComponentEventListenerImpl struct {
 	pipelineType common.ListenerPipelineType
 }
 
-func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.LoggerContext,
-	event_chan_length int, pipelineType common.PipelineType) *AsyncComponentEventListenerImpl {
+func NewAsyncComponentEventListenerImpl(id, fullTopic string, logger_context *log.LoggerContext,
+	event_chan_length int) *AsyncComponentEventListenerImpl {
+
+	topic, pipelineType := common.DecomposeFullTopic(fullTopic)
 	al := &AsyncComponentEventListenerImpl{
 		id:         id,
 		topic:      topic,
@@ -56,9 +58,8 @@ func NewAsyncComponentEventListenerImpl(id, topic string, logger_context *log.Lo
 	return al
 }
 
-func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
-	logger_context *log.LoggerContext, pipelineType common.PipelineType) *AsyncComponentEventListenerImpl {
-	return NewAsyncComponentEventListenerImpl(id, topic, logger_context, base.EventChanSize, pipelineType)
+func NewDefaultAsyncComponentEventListenerImpl(id, fullTopic string, logger_context *log.LoggerContext) *AsyncComponentEventListenerImpl {
+	return NewAsyncComponentEventListenerImpl(id, fullTopic, logger_context, base.EventChanSize)
 }
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {

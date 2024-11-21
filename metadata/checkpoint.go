@@ -53,6 +53,13 @@ const (
 	DocsSentWithPoisonedCasErrorMode   string = "docs_sent_with_poisoned_cas_error_mode"
 	DocsSentWithPoisonedCasReplaceMode string = "docs_sent_with_poisoned_cas_replace_mode"
 	CasPoisonCnt                       string = "cas_poison_cnt"
+	SrcConflictDocsWritten             string = "clog_src_docs_written"
+	TgtConflictDocsWritten             string = "clog_tgt_docs_written"
+	CRDConflictDocsWritten             string = "clog_crd_docs_written"
+	TrueConflictsDetected              string = "true_conflicts_detected"
+	FilteredConflictDocs               string = "clog_docs_filtered_cnt"
+	CLogHibernatedCnt                  string = "clog_hibernated_cnt"
+	GetDocsCasChangedCnt               string = "get_docs_cas_changed_cnt"
 )
 
 type CheckpointRecord struct {
@@ -114,6 +121,14 @@ type CheckpointRecord struct {
 	// Docs sent with a poisoned CAS value
 	DocsSentWithPoisonedCasErrorMode   uint64 `json:"docs_sent_with_poisoned_cas_error_mode"`
 	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
+	// conflict logger stats
+	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
+	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
+	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
+	TrueConflictsDetected  uint64 `json:"true_conflicts_detected"`
+	FilteredConflictDocs   uint64 `json:"clog_docs_filtered_cnt"`
+	CLogHibernatedCnt      uint64 `json:"clog_hibernated_cnt"`
+	GetDocsCasChangedCnt   uint64 `json:"get_docs_cas_changed_cnt"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -162,6 +177,13 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 	casPoisonItems := uint64(vbCountMetrics[base.DocsCasPoisoned])
 	docsSentWithPoisonedCasErrorMode := uint64(vbCountMetrics[base.DocsSentWithPoisonedCasErrorMode])
 	docsSentWithPoisonedCasReplaceMode := uint64(vbCountMetrics[base.DocsSentWithPoisonedCasReplaceMode])
+	srcConflictDocsWritten := uint64(vbCountMetrics[base.SrcConflictDocsWritten])
+	tgtConflictDocsWritten := uint64(vbCountMetrics[base.TgtConflictDocsWritten])
+	crdConflictDocsWritten := uint64(vbCountMetrics[base.CRDConflictDocsWritten])
+	trueConflictsDetected := uint64(vbCountMetrics[base.TrueConflictsDetected])
+	conflictDocsFiltered := uint64(vbCountMetrics[base.ConflictDocsFiltered])
+	clogHibernatedCnt := uint64(vbCountMetrics[base.CLogHibernatedCount])
+	getDocsCasChangedCnt := uint64(vbCountMetrics[base.GetDocsCasChangedCount])
 
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
@@ -194,6 +216,13 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		CasPoisonCnt:                       casPoisonItems,
 		DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
 		DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
+		SrcConflictDocsWritten:             srcConflictDocsWritten,
+		TgtConflictDocsWritten:             tgtConflictDocsWritten,
+		CRDConflictDocsWritten:             crdConflictDocsWritten,
+		TrueConflictsDetected:              trueConflictsDetected,
+		FilteredConflictDocs:               conflictDocsFiltered,
+		CLogHibernatedCnt:                  clogHibernatedCnt,
+		GetDocsCasChangedCnt:               getDocsCasChangedCnt,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -255,7 +284,14 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.DocsSentWithSubdocSetCnt == newRecord.DocsSentWithSubdocSetCnt &&
 		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt &&
 		ckptRecord.DocsSentWithPoisonedCasErrorMode == newRecord.DocsSentWithPoisonedCasErrorMode &&
-		ckptRecord.DocsSentWithPoisonedCasReplaceMode == newRecord.DocsSentWithPoisonedCasReplaceMode {
+		ckptRecord.DocsSentWithPoisonedCasReplaceMode == newRecord.DocsSentWithPoisonedCasReplaceMode &&
+		ckptRecord.SrcConflictDocsWritten == newRecord.SrcConflictDocsWritten &&
+		ckptRecord.TgtConflictDocsWritten == newRecord.TgtConflictDocsWritten &&
+		ckptRecord.CRDConflictDocsWritten == newRecord.CRDConflictDocsWritten &&
+		ckptRecord.TrueConflictsDetected == newRecord.TrueConflictsDetected &&
+		ckptRecord.FilteredConflictDocs == newRecord.FilteredConflictDocs &&
+		ckptRecord.CLogHibernatedCnt == newRecord.CLogHibernatedCnt &&
+		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt {
 		return true
 	} else {
 		return false
@@ -297,6 +333,13 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.CasPoisonCnt = other.CasPoisonCnt
 	ckptRecord.DocsSentWithPoisonedCasErrorMode = other.DocsSentWithPoisonedCasErrorMode
 	ckptRecord.DocsSentWithPoisonedCasReplaceMode = other.DocsSentWithPoisonedCasReplaceMode
+	ckptRecord.SrcConflictDocsWritten = other.SrcConflictDocsWritten
+	ckptRecord.TgtConflictDocsWritten = other.TgtConflictDocsWritten
+	ckptRecord.CRDConflictDocsWritten = other.CRDConflictDocsWritten
+	ckptRecord.TrueConflictsDetected = other.TrueConflictsDetected
+	ckptRecord.FilteredConflictDocs = other.FilteredConflictDocs
+	ckptRecord.CLogHibernatedCnt = other.CLogHibernatedCnt
+	ckptRecord.GetDocsCasChangedCnt = other.GetDocsCasChangedCnt
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -465,13 +508,50 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	if ok {
 		ckptRecord.CasPoisonCnt = uint64(casPoisonCnt.(float64))
 	}
+
 	docsSentWithPoisonedCasError, ok := fieldMap[DocsSentWithPoisonedCasErrorMode]
 	if ok {
 		ckptRecord.DocsSentWithPoisonedCasErrorMode = uint64(docsSentWithPoisonedCasError.(float64))
 	}
+
 	docsSentWithPoisonedCasReplace, ok := fieldMap[DocsSentWithPoisonedCasReplaceMode]
 	if ok {
 		ckptRecord.DocsSentWithPoisonedCasReplaceMode = uint64(docsSentWithPoisonedCasReplace.(float64))
+	}
+
+	srcConflictDocsWritten, ok := fieldMap[SrcConflictDocsWritten]
+	if ok {
+		ckptRecord.SrcConflictDocsWritten = uint64(srcConflictDocsWritten.(float64))
+	}
+
+	tgtConflictDocsWritten, ok := fieldMap[TgtConflictDocsWritten]
+	if ok {
+		ckptRecord.TgtConflictDocsWritten = uint64(tgtConflictDocsWritten.(float64))
+	}
+
+	crdConflictDocsWritten, ok := fieldMap[CRDConflictDocsWritten]
+	if ok {
+		ckptRecord.CRDConflictDocsWritten = uint64(crdConflictDocsWritten.(float64))
+	}
+
+	trueConflictsDetected, ok := fieldMap[TrueConflictsDetected]
+	if ok {
+		ckptRecord.TrueConflictsDetected = uint64(trueConflictsDetected.(float64))
+	}
+
+	conflictDocsFiltered, ok := fieldMap[FilteredConflictDocs]
+	if ok {
+		ckptRecord.FilteredConflictDocs = uint64(conflictDocsFiltered.(float64))
+	}
+
+	cLogHibernatedCnt, ok := fieldMap[CLogHibernatedCnt]
+	if ok {
+		ckptRecord.CLogHibernatedCnt = uint64(cLogHibernatedCnt.(float64))
+	}
+
+	getDocsCasChangedCnt, ok := fieldMap[GetDocsCasChangedCnt]
+	if ok {
+		ckptRecord.GetDocsCasChangedCnt = uint64(getDocsCasChangedCnt.(float64))
 	}
 
 	return nil
@@ -1101,6 +1181,13 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		CasPoisonCnt:                       c.CasPoisonCnt,
 		DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
 		DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
+		SrcConflictDocsWritten:             c.SrcConflictDocsWritten,
+		TgtConflictDocsWritten:             c.TgtConflictDocsWritten,
+		CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
+		TrueConflictsDetected:              c.TrueConflictsDetected,
+		FilteredConflictDocs:               c.FilteredConflictDocs,
+		CLogHibernatedCnt:                  c.CLogHibernatedCnt,
+		GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
 	}
 	return retVal
 }

@@ -45,4 +45,5 @@ type OutNozzle interface {
 	SetUpstreamErrReporter(func(interface{}))
 
 	SetConflictLogger(interface{}) error
+	GetConflictLogger() interface{}
 }

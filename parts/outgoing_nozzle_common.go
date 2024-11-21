@@ -163,7 +163,8 @@ type DataFilteredAdditional struct {
 }
 
 type SentCasChangedEventAdditional struct {
-	Opcode mc.CommandCode
+	Opcode   mc.CommandCode
+	IsGetDoc bool
 }
 
 // does not return error since the assumption is that settings have been validated prior

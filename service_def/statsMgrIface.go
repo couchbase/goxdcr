@@ -39,6 +39,7 @@ const (
 	SET_DOCS_CAS_CHANGED_METRIC        = "set_docs_cas_changed"
 	ADD_DOCS_CAS_CHANGED_METRIC        = "add_docs_cas_changed"
 	SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC = "subdoc_cmd_docs_cas_changed"
+	GET_DOCS_CAS_CHANGED_METRIC        = base.GetDocsCasChangedCount
 	// To avoid cas rollback for a specific mobile/xdcr case, we send the doc using subdoc command
 	DOCS_SENT_WITH_SUBDOC_SET    = base.DocsSentWithSubdocSet
 	DOCS_SENT_WITH_SUBDOC_DELETE = base.DocsSentWithSubdocDelete
@@ -76,7 +77,7 @@ const (
 	DOCS_FILTERED_USER_DEFINED_METRIC  = base.DocsFilteredOnUserDefinedFilter
 	DOCS_FILTERED_MOBILE_METRIC        = base.MobileDocsFiltered
 	DOCS_FILTERED_CAS_POISONING_METRIC = base.DocsCasPoisoned
-	DOCS_FILTERED_CLOG_METRIC          = base.DocsOfCLog
+	DOCS_FILTERED_CLOG_METRIC          = base.ConflictDocsFiltered
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -180,18 +181,19 @@ const (
 
 	// conflict logging stats
 	// xmem's clog stats
-	TRUE_CONFLICTS_DETECTED = "true_conflicts_detected"
+	TRUE_CONFLICTS_DETECTED = base.TrueConflictsDetected
 	CLOG_QUEUE_FULL         = "clog_queue_full"
-	CLOG_HIBERNATED         = "clog_hibernated"
+	CLOG_HIBERNATED_COUNT   = base.CLogHibernatedCount
 	CLOG_THROTTLED          = "clog_throttled"
 	CLOG_WRITE_TIMEDOUT     = "clog_write_timedout"
 	CLOG_POOL_GET_TIMEDOUT  = "clog_pool_get_timedout"
+	CLOG_WAIT_TIME          = "clog_wait_time"
 
 	// clogger stats
-	CONFLICT_DOCS_WRITTEN         = "conflict_docs_written"
-	SRC_CONFLICT_DOCS_WRITTEN     = "src_conflict_docs_written"
-	TGT_CONFLICT_DOCS_WRITTEN     = "tgt_conflict_docs_written"
-	CRD_CONFLICT_DOCS_WRITTEN     = "crd_conflict_docs_written"
+	CONFLICT_DOCS_WRITTEN         = base.ConflictDocsWritten
+	SRC_CONFLICT_DOCS_WRITTEN     = base.SrcConflictDocsWritten
+	TGT_CONFLICT_DOCS_WRITTEN     = base.TgtConflictDocsWritten
+	CRD_CONFLICT_DOCS_WRITTEN     = base.CRDConflictDocsWritten
 	CLOG_NW_ERROR_COUNT           = "clog_nw_errors"
 	CLOG_TMPFAIL_COUNT            = "clog_tmpfails"
 	CLOG_NOT_MY_VB_COUNT          = "clog_not_my_vbs"
@@ -202,7 +204,7 @@ const (
 	CLOG_GUARDRAIL_HIT_COUNT      = "clog_guardrail_hits"
 	CLOG_UNKNOWN_RESP_COUNT       = "clog_unknown_resps"
 	CLOG_OTHER_ERRORS             = "clog_other_errors"
-	CLOG_WAIT_TIME                = "clog_wait_time"
+	CLOG_STATUS                   = "clog_status"
 )
 
 const (
@@ -470,6 +472,7 @@ var (
 	PipelineStatusLabel    = StatsLabel{Name: PrometheusPipelineStatusLabel}
 	SourceClusterUUIDLabel = StatsLabel{Name: PrometheusSourceClusterUUIDLabel}
 	SourceClusterNameLabel = StatsLabel{Name: PrometheusSourceClusterNameLabel}
+	CLogStatusLabel        = StatsLabel{Name: PrometheusCLogStatusLabel}
 )
 
 func (s StatsLabel) IsSourceClusterStats() bool {
@@ -500,6 +503,14 @@ var SourceClusterV1ReplLabels = StatsLabels{
 	SourceClusterUUIDLabel,
 	SourceClusterNameLabel,
 	PipelineStatusLabel,
+}
+
+var CLogStatusLabels = StatsLabels{
+	SourceBucketNameLabel,
+	TargetClusterUUIDLabel,
+	TargetBucketNameLabel,
+	PipelineTypeLabel,
+	CLogStatusLabel,
 }
 
 // See: https://docs.google.com/document/d/183VfS6fi-Tn0lHc6oEHPFQgOmYOgnwbM28zWtGbyTUg/edit#
@@ -1557,7 +1568,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CONFLICT_DOCS_WRITTEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1565,7 +1576,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	TRUE_CONFLICTS_DETECTED: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of true conflicts detected when the conflict logging feature is turned on. Logging of all these conflicts to a conflict bucket is best-effort, based on the system's state.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1573,15 +1584,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_QUEUE_FULL: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of docs which were identified as conflicts, but could not be logged because the logging queue was full.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
-	CLOG_HIBERNATED: StatsProperty{
+	CLOG_HIBERNATED_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of docs which were identified as conflicts, but could not be logged because the conflict logger was hibernated.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1589,7 +1600,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	SRC_CONFLICT_DOCS_WRITTEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of source conflict docs written to the conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1597,7 +1608,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	TGT_CONFLICT_DOCS_WRITTEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of target conflict docs written to the conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1605,7 +1616,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CRD_CONFLICT_DOCS_WRITTEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of CRDs written to the conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1613,7 +1624,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_THROTTLED: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of conflict records which were throttled due to resource management and hence not written to conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1621,7 +1632,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_WRITE_TIMEDOUT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of conflict records for which the write to conflict bucket was timed out.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1629,7 +1640,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_POOL_GET_TIMEDOUT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of conflict records for which the conflict logger had trouble getting a connection to the conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1637,7 +1648,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_NW_ERROR_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of network errors encountered while writing the conflict records to the conflict bucket.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1645,7 +1656,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_TMPFAIL_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of TMPFAIL errors encountered while writing the conflict records to the conflict bucket. It indicates that the data service was temporarily busy and could not process the incoming write.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1653,7 +1664,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_NOT_MY_VB_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of NOT_MY_VBUCKET errors encountered while writing the conflict records to the conflict bucket. It mostly is an indicator of topology changes.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1661,7 +1672,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_UNKNOWN_COLLECTION_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of UNKNOWN_COLLECTION errors encountered while writing the conflict records to the conflict bucket. It indicates that where was a change to the collections setup which affected the conflict writes.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1669,7 +1680,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_IMPOSSIBLE_RESP_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of errors which by design should not have been returned, encountered while writing the conflict records to the conflict bucket. It includes EEXISTS, ENOENT and LOCKED errors.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1677,7 +1688,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_FATAL_RESP_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of fatal errors encountered while writing the conflict records to the conflict bucket. It includes EINVAL and XATTR_EINVAL.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1685,7 +1696,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_EACCESS_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of EACCESS errors encountered while writing the conflict records to the conflict bucket. It is likely that something has gone wrong with the previliges of the user used for conflict writing",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1693,7 +1704,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_GUARDRAIL_HIT_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of guardrail hit errors encountered while writing the conflict records to the conflict bucket. It includes resident ratio, data size and disk space guardrail errors.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1701,7 +1712,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_UNKNOWN_RESP_COUNT: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of unknown responses returned by the source KV while writing the conflict records to the conflict bucket. One should turn on debug logging for the replication to catch the unknown response.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1709,7 +1720,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_OTHER_ERRORS: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of unidentified errors encountered while writing the conflict records to the conflict bucket. One should turn on debug logging for the replication to catch the unknown response.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
@@ -1717,10 +1728,35 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	CLOG_WAIT_TIME: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSrcHeartbeatSupport,
+		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Rolling average of time the replication to target cluster was delayed due to conflict logging.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
+	},
+	CLOG_STATUS: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNonCumulativeNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCLoggerSupport,
+		Description:  "Indicates if the conflict logger of the replication is running or hibernated or if it does not exist.",
+		Stability:    Committed,
+		Labels:       CLogStatusLabels,
+	},
+	DOCS_FILTERED_CLOG_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCLoggerSupport,
+		Description:  "Number of conflict records filtered.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	GET_DOCS_CAS_CHANGED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCLoggerSupport,
+		Description:  "Number of get operations that were retried because the CAS on the target changed",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+		Notes:        "Represents the number of docs which were in conflict, but it's target CAS changed before fetching target body for further processing for conflict logging or merging of the conflicting source and target docs.",
 	},
 }
 
@@ -1732,4 +1768,5 @@ const (
 	PrometheusPipelineStatusLabel    = "status"
 	PrometheusSourceClusterUUIDLabel = "sourceClusterUUID"
 	PrometheusSourceClusterNameLabel = "sourceClusterName"
+	PrometheusCLogStatusLabel        = "status"
 )

@@ -111,7 +111,6 @@ function testReplicationWithConflictLogging {
 	echo runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "conflict"
 	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "" "conflict"
 
-
 	echo runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "conflict"
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "" "conflict"
 
@@ -143,7 +142,7 @@ function testReplicationWithConflictLogging {
 
 	grepForAbnormalities
 
-	verifyPromStats $(( $numItems * 2 ))
+	verifyPromStats $(($numItems * 2))
 }
 
 function runTestCase {

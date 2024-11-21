@@ -34,6 +34,7 @@ import (
 	"time"
 	"unicode"
 
+	gocbcoreMemd "github.com/couchbase/gocbcore/v9/memd"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -2529,33 +2530,6 @@ func SelectBucketErrBucketDNE(err error) bool {
 // this is used to decompose a collection ID prefixed document key
 // into two parts - collection ID and document key.
 // returns (collection ID, start index of doc key, error if any)
-func DecodeULEB128PrefixedKey(b []byte) (uint32, int, error) {
-	if len(b) == 0 {
-		return 0, 0, errors.New("no data provided")
-	}
-	var u uint64
-	var n int
-	for i := 0; ; i++ {
-		if i >= len(b) {
-			return 0, 0, errors.New("encoded number is longer than provided data")
-		}
-		if i*7 > 32 {
-			// oversize and then break to get caught below
-			u = 0xffffffffffffffff
-			break
-		}
-
-		u |= uint64(b[i]&0x7f) << (i * 7)
-
-		if b[i]&0x80 == 0 {
-			n = i + 1
-			break
-		}
-	}
-
-	if u > 0xffffffff {
-		return 0, 0, errors.New("encoded data is longer than 32 bits")
-	}
-
-	return uint32(u), n, nil
+func DecodeULEB128PrefixedKey(key []byte) (uint32, int, error) {
+	return gocbcoreMemd.DecodeULEB128_32(key)
 }

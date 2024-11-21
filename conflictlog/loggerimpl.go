@@ -507,6 +507,10 @@ func (l *LoggerImpl) writeDocsWithTimeout(req logRequest, target baseclog.Target
 }
 
 func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err error) {
+
+	srcVbSeqnoPair := []interface{}{req.conflictRec.Source.VBNo, req.conflictRec.Source.Seqno}
+	pipelineType := req.conflictRec.OriginatingPipeline
+
 	// Write source document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
 		err := conn.SetMeta(req.conflictRec.Source.Id, req.conflictRec.Source.Body, req.conflictRec.Source.Datatype, target)
@@ -517,7 +521,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		// we let the callers deal with it
 		return err
 	}
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, nil, nil), req.conflictRec.OriginatingPipeline)
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, srcVbSeqnoPair, nil), pipelineType)
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -527,7 +531,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, nil, nil), req.conflictRec.OriginatingPipeline)
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, srcVbSeqnoPair, nil), pipelineType)
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -537,7 +541,7 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 	if err != nil {
 		return err
 	}
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, nil, nil), req.conflictRec.OriginatingPipeline)
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, srcVbSeqnoPair, nil), pipelineType)
 
 	return
 }
@@ -875,6 +879,11 @@ func (l *LoggerImpl) Attach(_ common.Pipeline) error {
 
 func (l *LoggerImpl) Start(_ metadata.ReplicationSettingsMap) error {
 	l.logger.Infof("spawning conflict logger workers replId=%s count=%d id=%s", l.replId, l.opts.workerCount, l.id)
+
+	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
+	// to mark the prometheus stat as unhibernated or running
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerRunning, l, nil, false))
+
 	for i := 0; i < l.opts.workerCount; i++ {
 		l.startWorker()
 	}
@@ -1059,7 +1068,7 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 // If a service can be shared by more than one pipeline in the same replication.
 // Yes - logger is shared between main and backfill pipeline.
 func (l *LoggerImpl) IsSharable() bool {
-	return false
+	return true
 }
 
 // If sharable, allow service to be detached
@@ -1079,41 +1088,36 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 	l.hibernationLock.Lock()
 	defer l.hibernationLock.Unlock()
 
-	if l.isClosed() {
-		return
-	}
-
-	if l.hibernated.Load() {
-		// already hibernated
+	if l.isClosed() || l.hibernated.Load() {
+		// already hibernated or logger closed.
 		return
 	}
 
 	var needToHibernate bool
 
-	if err == baseclog.ErrRules {
-		needToHibernate = true
-	} else if err == baseclog.ErrThrottle || err == baseclog.ErrTimeout {
-		timeNow := time.Now()
-		if l.errorCnt == 0 {
-			// first occurance of the error
-			l.errorStartTime = &timeNow
-			l.errorCnt = 1
-		} else if l.errorStartTime != nil && timeNow.Sub(*l.errorStartTime) <= l.opts.errorTimeWindow {
-			// error inside the timeframe of the first error
-			l.errorCnt++
-			if l.errorCnt == uint64(l.opts.maxErrorCount) {
-				needToHibernate = true
-			}
-		} else {
-			// error outside the timeframe of the first error. Reset the count.
-			l.errorCnt = 0
-			l.errorStartTime = nil
+	timeNow := time.Now()
+	if l.errorCnt == 0 {
+		// first occurance of the error
+		l.errorStartTime = &timeNow
+		l.errorCnt = 1
+	} else if l.errorStartTime != nil && timeNow.Sub(*l.errorStartTime) <= l.opts.errorTimeWindow {
+		// error inside the timeframe of the first error
+		l.errorCnt++
+		if l.errorCnt == uint64(l.opts.maxErrorCount) {
+			needToHibernate = true
 		}
+	} else {
+		// error outside the timeframe of the first error. Reset the count.
+		l.errorCnt = 0
+		l.errorStartTime = nil
 	}
 
 	if !needToHibernate || l.opts.reattemptDuration == 0 {
 		return
 	}
+
+	// raise an event for both main and backfill (if exists) pipelines.
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerHibernated, l, nil, false))
 
 	// hibernate the logger
 	defer l.logger.Infof("Conflict logger hibernated rid=%s lid=%s", l.replId, l.id)
@@ -1129,12 +1133,8 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 	eventId := l.eventsProducer.AddEvent(base.LowPriorityMsg, uiMessage, base.EventsMap{}, nil)
 	l.hibernationEventId = eventId
 
+	// unhibernate the logger eventually
 	time.AfterFunc(l.opts.reattemptDuration, func() {
-		// unhibernate the logger eventually
-		if l.isClosed() {
-			return
-		}
-
 		l.unhibernate()
 	})
 }
@@ -1142,6 +1142,15 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 func (l *LoggerImpl) unhibernate() {
 	l.hibernationLock.Lock()
 	defer l.hibernationLock.Unlock()
+
+	if l.isClosed() || !l.hibernated.Load() {
+		// if logger is closed or logger is already unhibernated.
+		return
+	}
+
+	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
+	// to mark the prometheus stat as unhibernated
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerRunning, l, nil, false))
 
 	l.hibernated.Store(false)
 	l.errorCnt = 0

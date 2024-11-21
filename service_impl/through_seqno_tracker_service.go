@@ -777,7 +777,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	tsTracker.initialize(pipeline)
 
-	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline, nil)
+	asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataSentEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)

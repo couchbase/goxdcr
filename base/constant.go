@@ -520,7 +520,7 @@ var XDCR_EXPVAR_ROOT = "XDCR_Replications"
 const ChangesLeftStats = "changes_left"
 const DocsFromDcpStats = "docs_received_from_dcp"
 const DocsRepQueueStats = "docs_rep_queue"
-const ConflictDocsWritten = "conflict_docs_written"
+const ConflictDocsWritten = "clog_docs_written"
 
 // constants for replication docs
 const (
@@ -725,7 +725,7 @@ var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 var VersionForMobileSupport = ServerVersion{7, 6, 4}
 var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
-var VersionForCLoggingSupport = ServerVersion{8, 0, 0}
+var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1832,7 +1832,13 @@ const (
 	DocsSentWithPoisonedCasErrorMode   = "docs_sent_with_poisonedCas_errorMode"
 	DocsSentWithPoisonedCasReplaceMode = "docs_sent_with_poisonedCas_replaceMode"
 	DocsCasPoisoned                    = "docs_cas_poisoned"
-	DocsOfCLog                         = "clog_docs_filtered"
+	ConflictDocsFiltered               = "clog_docs_filtered"
+	SrcConflictDocsWritten             = "clog_src_docs_written"
+	TgtConflictDocsWritten             = "clog_tgt_docs_written"
+	CRDConflictDocsWritten             = "clog_crd_docs_written"
+	TrueConflictsDetected              = "true_conflicts_detected"
+	CLogHibernatedCount                = "clog_hibernated_count"
+	GetDocsCasChangedCount             = "get_docs_cas_changed"
 )
 
 var ValidJsonEnds []byte = []byte{

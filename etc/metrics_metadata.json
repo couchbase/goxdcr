@@ -86,6 +86,42 @@
         ],
         "stability": "committed"
     },
+    "xdcr_clog_crd_docs_written_total": {
+        "type": "counter",
+        "help": "Number of CRDs written to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_docs_filtered_total": {
+        "type": "counter",
+        "help": "Number of conflict records filtered.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_docs_written_total": {
+        "type": "counter",
+        "help": "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_clog_eaccesses_total": {
         "type": "counter",
         "help": "Number of EACCESS errors encountered while writing the conflict records to the conflict bucket. It is likely that something has gone wrong with the previliges of the user used for conflict writing",
@@ -122,7 +158,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_clog_hibernated_total": {
+    "xdcr_clog_hibernated_count_total": {
         "type": "counter",
         "help": "Number of docs which were identified as conflicts, but could not be logged because the conflict logger was hibernated.",
         "added": "8.0.0",
@@ -206,6 +242,43 @@
         ],
         "stability": "committed"
     },
+    "xdcr_clog_src_docs_written_total": {
+        "type": "counter",
+        "help": "Number of source conflict docs written to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_status": {
+        "type": "gauge",
+        "help": "Indicates if the conflict logger of the replication is running or hibernated or if it does not exist.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType",
+            "status"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_clog_tgt_docs_written_total": {
+        "type": "counter",
+        "help": "Number of target conflict docs written to the conflict bucket.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_clog_throttled_total": {
         "type": "counter",
         "help": "Number of conflict records which were throttled due to resource management and hence not written to conflict bucket.",
@@ -270,30 +343,6 @@
     "xdcr_clog_write_timedout_total": {
         "type": "counter",
         "help": "Number of conflict records for which the write to conflict bucket was timed out.",
-        "added": "8.0.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
-    "xdcr_conflict_docs_written_total": {
-        "type": "counter",
-        "help": "Total number of conflict docs written. This counter includes all three types of conflict doc - source doc, target doc and CRD for the conflict detected.",
-        "added": "8.0.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
-    "xdcr_crd_conflict_docs_written_total": {
-        "type": "counter",
-        "help": "Number of CRDs written to the conflict bucket.",
         "added": "8.0.0",
         "labels": [
             "sourceBucketName",
@@ -878,6 +927,19 @@
         ],
         "stability": "internal"
     },
+    "xdcr_get_docs_cas_changed_total": {
+        "type": "counter",
+        "help": "Number of get operations that were retried because the CAS on the target changed",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "notes": "Represents the number of docs which were in conflict, but it's target CAS changed before fetching target body for further processing for conflict logging or merging of the conflicting source and target docs.",
+        "stability": "internal"
+    },
     "xdcr_guardrail_data_size_total": {
         "type": "counter",
         "help": "The number of writes that target rejected because each target data node is holding too much data",
@@ -1198,18 +1260,6 @@
         ],
         "stability": "committed"
     },
-    "xdcr_src_conflict_docs_written_total": {
-        "type": "counter",
-        "help": "Number of source conflict docs written to the conflict bucket.",
-        "added": "8.0.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
     "xdcr_subdoc_cmd_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Subdoc sets and delete operations that failed because the CAS on the Target changed",
@@ -1287,18 +1337,6 @@
         "type": "counter",
         "help": "The total number of writes to target data service that returned with a status code that XDCR cannot comprehend",
         "added": "7.6.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
-    "xdcr_tgt_conflict_docs_written_total": {
-        "type": "counter",
-        "help": "Number of target conflict docs written to the conflict bucket.",
-        "added": "8.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",

@@ -872,6 +872,21 @@ func NewPrometheusLabelsTable(labelName string) PrometheusLabels {
 				valueInt64Common: &valueInt64Common{},
 			},
 		}
+	case service_def.CLOG_STATUS:
+		return PrometheusLabels{
+			base.NoCLog.String(): &NoCLogExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"DNE\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+			base.CLogHibernated.String(): &CLogHibernatedExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Hibernated\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+			base.CLogRunning.String(): &CLogRunningExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Running\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+		}
 	default:
 		return nil
 	}
@@ -943,4 +958,46 @@ type IncomingReplicationCountExtractor struct {
 func (i *IncomingReplicationCountExtractor) LoadValue(value interface{}) {
 	incomingVal := value.(int)
 	i.Value = int64(incomingVal)
+}
+
+type CLogHibernatedExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *CLogHibernatedExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.CLogHibernated) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
+}
+
+type CLogRunningExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *CLogRunningExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.CLogRunning) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
+}
+
+type NoCLogExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *NoCLogExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.NoCLog) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
 }

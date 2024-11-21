@@ -3354,10 +3354,6 @@ func (xti *XTOCIterator) Next() (value []byte, err error) {
 
 func (xi *XTOCIterator) Len() (int, error) {
 	var length int
-	pos := xi.pos
-	defer func() {
-		xi.pos = pos
-	}()
 
 	l, err := NewXTOCIterator(xi.xtoc)
 	if err != nil {
@@ -3383,7 +3379,7 @@ var ConflictLoggingOff ConflictLoggingMappingInput = ConflictLoggingMappingInput
 // ignores unrecognised keys from comparision.
 // recognisedKeys should be a map of keys to compare for equality and
 // the datatype of their values to assert before comparision. Note that a value with a given type
-// and an another value which is a pointer to the same type is not considered as equal.
+// and an another value which is a pointer to the value of same type are not considered as equal.
 func EqualMapsWithKeys(clm1, clm2 map[string]interface{}, recognisedKeys map[string]reflect.Kind) bool {
 	if clm1 == nil || clm2 == nil {
 		return clm1 == nil && clm2 == nil
@@ -3545,3 +3541,25 @@ const (
 	BackfillSpecUpdateComplete   BackfillSpecUpdateStatus = iota //indicates that there are no pending metaKV ops
 	BackfillSpecUpdateInProgress BackfillSpecUpdateStatus = iota //indicates the presence of a pending metaKV op
 )
+
+type CLogHibernationStatusGauge int
+
+const (
+	NoCLog         CLogHibernationStatusGauge = iota
+	CLogRunning    CLogHibernationStatusGauge = iota
+	CLogHibernated CLogHibernationStatusGauge = iota
+	CLogUnknown    CLogHibernationStatusGauge = iota // Boundary
+)
+
+func (p CLogHibernationStatusGauge) String() string {
+	switch p {
+	case NoCLog:
+		return "DNE"
+	case CLogRunning:
+		return "Running"
+	case CLogHibernated:
+		return "Hibernated"
+	default:
+		return ""
+	}
+}

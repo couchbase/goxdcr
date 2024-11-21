@@ -144,6 +144,7 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("Sources").Return(sourcesMap)
+	pipeline.On("Targets").Return(map[string]commonReal.Nozzle{})
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	pipeline.On("State").Return(pipelineState)
 	pipeline.On("RuntimeContext").Return(ctx)
@@ -155,6 +156,7 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 
 	backfillPipeline.On("GetAsyncListenerMap").Return(nil)
 	backfillPipeline.On("Sources").Return(sourcesMap)
+	pipeline.On("Targets").Return(map[string]commonReal.Nozzle{})
 	backfillPipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	backfillPipeline.On("State").Return(pipelineState)
 	backfillPipeline.On("RuntimeContext").Return(ctx)

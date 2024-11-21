@@ -71,6 +71,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	pipeline.On("Topic").Return("UnitTest")
 	pipeline.On("FullTopic").Return("UnitTest")
 	pipeline.On("Sources").Return(sourceMap)
+	pipeline.On("Targets").Return(map[string]common.Nozzle{})
 	pipeline.On("InstanceId").Return("UnitTestInst")
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)

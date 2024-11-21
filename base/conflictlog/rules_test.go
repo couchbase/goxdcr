@@ -143,7 +143,7 @@ func TestRules_Parse(t *testing.T) {
 			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
-			name: "[positive] just collection incomplete, should default to _default",
+			name: "[negative] just collection incomplete, incomplete target",
 			jsonStr: `{
 				"bucket":"B1",
 				"collection": "S1.C1",
@@ -154,13 +154,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[base.CollectionNamespace]Target{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "_default"),
-			},
-			expectedTarget: NewTarget("B1", "S1", "C1"),
+			shouldFail: true,
 		},
 		{
-			name: "[positive] fallback target collection missing, should default to _default",
+			name: "[negative] fallback target collection missing, incomplete target",
 			jsonStr: `{
 				"bucket":"B1",
 				"collection": "S1",
@@ -171,13 +168,10 @@ func TestRules_Parse(t *testing.T) {
 					}
 				}
 			}`,
-			expectedMapping: map[base.CollectionNamespace]Target{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "C1"),
-			},
-			expectedTarget: NewTarget("B1", "S1", "_default"),
+			shouldFail: true,
 		},
 		{
-			name: "[positive] fallback target scope and collection missing, should default to _default",
+			name: "[positive] fallback target scope and collection missing, should default to _default._default",
 			jsonStr: `{
 				"bucket":"B1",
 				"loggingRules": {
@@ -254,7 +248,7 @@ func TestRules_Parse(t *testing.T) {
 			expectedTarget: NewTarget("B1", "S1", "C1"),
 		},
 		{
-			name: "[positive] target collection missing, default to be used",
+			name: "[negative] target collection missing, incomplete target",
 			jsonStr: `{
 					"bucket":"B1",
 					"collection": "S1",
@@ -267,12 +261,7 @@ func TestRules_Parse(t *testing.T) {
 						}
 					}
 				}`,
-			expectedMapping: map[base.CollectionNamespace]Target{
-				{ScopeName: "US", CollectionName: "Ohio"}: NewTarget("B2", "S2", "_default"),
-				{ScopeName: "US", CollectionName: ""}:     BlacklistTarget(),
-				{ScopeName: "India", CollectionName: ""}:  NewTarget("B1", "S1", "_default"),
-			},
-			expectedTarget: NewTarget("B1", "S1", "_default"),
+			shouldFail: true,
 		},
 	}
 

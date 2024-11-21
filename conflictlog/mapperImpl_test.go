@@ -63,57 +63,7 @@ func Test_conflictMapper_Map(t *testing.T) {
 			},
 		},
 		{
-			name: "[positive] just collection incomplete, should default to _default",
-			jsonStr: `{
-				"bucket":"B1",
-				"collection": "S1.C1",
-				"loggingRules": {
-					"US.Ohio": {
-						"bucket": "B2",
-						"collection": "S2"
-					}
-				}
-			}`,
-			conflicts: []testSource{
-				newTestSource("_default", "_default"),
-				newTestSource("S3", "C3"),
-				newTestSource("US", "Ohio"),
-				newTestSource("US", "NY"),
-			},
-			expectedTargets: []baseclog.Target{
-				baseclog.NewTarget("B1", "S1", "C1"),
-				baseclog.NewTarget("B1", "S1", "C1"),
-				baseclog.NewTarget("B2", "S2", "_default"),
-				baseclog.NewTarget("B1", "S1", "C1"),
-			},
-		},
-		{
-			name: "[positive] fallback target collection missing, should default to _default",
-			jsonStr: `{
-				"bucket":"B1",
-				"collection": "S1",
-				"loggingRules": {
-					"US.Ohio": {
-						"bucket": "B2",
-						"collection": "S2.C1"
-					}
-				}
-			}`,
-			conflicts: []testSource{
-				newTestSource("_default", "_default"),
-				newTestSource("S3", "C3"),
-				newTestSource("US", "Ohio"),
-				newTestSource("US", "NY"),
-			},
-			expectedTargets: []baseclog.Target{
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B2", "S2", "C1"),
-				baseclog.NewTarget("B1", "S1", "_default"),
-			},
-		},
-		{
-			name: "[positive] fallback target scope and collection missing, should default to _default",
+			name: "[positive] fallback target scope and collection missing, should default to _default._default",
 			jsonStr: `{
 				"bucket":"B1",
 				"loggingRules": {
@@ -254,41 +204,6 @@ func Test_conflictMapper_Map(t *testing.T) {
 				baseclog.NewTarget("B1", "S1", "C1"),
 				baseclog.NewTarget("B1", "S1", "C1"),
 				baseclog.NewTarget("B1", "S1", "C1"),
-			},
-		},
-		{
-			name: "[positive] target collection missing, default to be used",
-			jsonStr: `{
-					"bucket":"B1",
-					"collection": "S1",
-					"loggingRules": {
-						"US": null,
-						"India": {},
-						"US.Ohio": {
-							"bucket": "B2",
-							"collection": "S2"
-						}
-					}
-				}`,
-			conflicts: []testSource{
-				newTestSource("_default", "_default"),
-				newTestSource("S3", "C3"),
-				newTestSource("US", "Ohio"),
-				newTestSource("US", "NY"),
-				newTestSource("US", "Texas"),
-				newTestSource("India", "Mumbai"),
-				newTestSource("India", "Bengaluru"),
-				newTestSource("India", "_default"),
-			},
-			expectedTargets: []baseclog.Target{
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B2", "S2", "_default"),
-				baseclog.BlacklistTarget(),
-				baseclog.BlacklistTarget(),
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B1", "S1", "_default"),
-				baseclog.NewTarget("B1", "S1", "_default"),
 			},
 		},
 		{

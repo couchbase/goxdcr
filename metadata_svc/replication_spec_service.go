@@ -718,7 +718,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation for CLogging: %v", err)
 			return err
 		}
-		if !base.IsClusterCompatible(clusterCompat, base.VersionForCLoggingSupport) {
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForCLoggerSupport) {
 			return base.ErrorCLoggingMixedModeUnsupported
 		}
 

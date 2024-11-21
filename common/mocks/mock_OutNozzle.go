@@ -161,6 +161,53 @@ func (_c *OutNozzle_Connector_Call) RunAndReturn(run func() common.Connector) *O
 	return _c
 }
 
+// GetConflictLogger provides a mock function with given fields:
+func (_m *OutNozzle) GetConflictLogger() interface{} {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetConflictLogger")
+	}
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func() interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	return r0
+}
+
+// OutNozzle_GetConflictLogger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetConflictLogger'
+type OutNozzle_GetConflictLogger_Call struct {
+	*mock.Call
+}
+
+// GetConflictLogger is a helper method to define mock.On call
+func (_e *OutNozzle_Expecter) GetConflictLogger() *OutNozzle_GetConflictLogger_Call {
+	return &OutNozzle_GetConflictLogger_Call{Call: _e.mock.On("GetConflictLogger")}
+}
+
+func (_c *OutNozzle_GetConflictLogger_Call) Run(run func()) *OutNozzle_GetConflictLogger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *OutNozzle_GetConflictLogger_Call) Return(_a0 interface{}) *OutNozzle_GetConflictLogger_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *OutNozzle_GetConflictLogger_Call) RunAndReturn(run func() interface{}) *OutNozzle_GetConflictLogger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Id provides a mock function with given fields:
 func (_m *OutNozzle) Id() string {
 	ret := _m.Called()

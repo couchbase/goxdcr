@@ -141,7 +141,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, base.ErrorReplicationSpecNotActive
 	}
 
-	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, common.MainPipeline, spec, progress_recorder, nil)
+	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, common.MainPipeline, spec, progress_recorder)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
-	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, pipelineType, spec, progress_recorder, primaryPipeline)
+	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, pipelineType, spec, progress_recorder)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 
 var factoryIterationId uint32
 
-func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.PipelineType, spec *metadata.ReplicationSpecification, progress_recorder common.PipelineProgressRecorder, parentPipeline common.Pipeline) (common.Pipeline, func(*common.Pipeline) error, error) {
+func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.PipelineType, spec *metadata.ReplicationSpecification, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, func(*common.Pipeline) error, error) {
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 	replicationLogCtx := map[string]string{base.PipelineFullTopic: common.ComposeFullTopic(topic, pipelineType)}
@@ -338,38 +338,20 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	progress_recorder(common.ProgressNozzlesWired)
 
 	// construct and initializes the pipeline
-	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
+	pipeline, err := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.PrometheusStatusUpdater)
-
-	// create a new conflict logger if necessary.
-	// main and backfill pipelines shares the same conflict logger.
-	var conflictLogger baseclog.Logger
-	if pipelineType == common.MainPipeline {
-		conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
-		eventsProducer, err := xdcrf.GetEventsProducer(topic)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		conflictLogger, err = conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, logger_ctx, xdcrf.logger, eventsProducer)
-		if err != nil && err != baseclog.ErrConflictLoggingIsOff {
-			xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
-			return nil, nil, err
-		}
-	} else {
-		parentCtx := parentPipeline.RuntimeContext()
-		conflictLogger = baseclog.LoggerFromService(parentCtx.Service(base.CONFLICT_LOGGER))
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.PrometheusStatusUpdater, xdcrf.ConstructConflictLogger)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
 	xdcrf.registerAsyncListenersOnTargets(pipeline, logger_ctx)
-	xdcrf.registerAsyncListenersOnConflictLoggerIfNeeded(pipeline, logger_ctx, conflictLogger)
 
 	// initialize component event listener map of the pipeline
-	pp.GetAllAsyncComponentEventListeners(pipeline, conflictLogger)
+	pp.GetAllAsyncComponentEventListeners(pipeline)
 
 	pipelineContext, err := pctx.NewWithSettingConstructor(pipeline, xdcrf.ConstructSettingsForService, xdcrf.ConstructUpdateSettingsForService, logger_ctx)
 	if err != nil {
@@ -381,12 +363,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
 		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName,
-			target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode, conflictLogger)
-	}
-
-	for _, nozzle := range outNozzles {
-		outNozzle := nozzle.(common.OutNozzle)
-		outNozzle.SetConflictLogger(conflictLogger)
+			target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode)
 	}
 
 	return pipeline, registerCb, nil
@@ -419,22 +396,22 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 	for i := 0; i < num_of_listeners; i++ {
 		data_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataReceivedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_processed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataProcessedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_filtered_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFilteredEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_throughput_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThroughputThrottledEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		collection_routing_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CollectionRoutingEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_cloned_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataClonedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			// Get the source DCP nozzle
@@ -461,7 +438,8 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 	}
 }
 
-// construct and register async componet event listeners on target nozzles
+// construct and register async componet event listeners on target nozzles.
+// This routine also registers the async listeners for conflict logger, if it present.
 func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
 	targets := getNozzleList(pipeline.Targets())
 	num_of_targets := len(targets)
@@ -472,37 +450,37 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 	for i := 0; i < num_of_listeners; i++ {
 		data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFailedCREventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		target_data_skipped_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TargetDataSkippedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		get_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetReceivedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThrottledEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		data_sent_cas_changed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentCasChangedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		dataSentFailedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentFailedListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		sourceSyncXattrRemovedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.SrcSyncXattrRemovedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		targetSyncXattrPreservedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TgtSyncXattrPreservedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		hlvPrunedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvPrunedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 		hlvUpdatedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvUpdatedEventListener, i),
-			pipeline.Topic(), logger_ctx, pipeline.Type())
+			pipeline.FullTopic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -522,11 +500,16 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
 		}
 	}
+
+	// construct the async listeners for the conflict logger
+	// which is attached to the pipeline targets.
+	xdcrf.registerAsyncListenersOnConflictLoggerIfNeeded(pipeline, logger_ctx)
 }
 
 // construct and register async componet event listeners on conflictLogger,
 // only if a conflict logger exists.
-func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipeline common.Pipeline, logger_ctx *log.LoggerContext, conflictLogger baseclog.Logger) {
+func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipeline common.Pipeline, logger_ctx *log.LoggerContext) {
+	conflictLogger := pp.GetConflictLoggerFromPipeline(pipeline)
 	if conflictLogger == nil {
 		// no conflict logger, which is okay
 		return
@@ -536,10 +519,10 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnConflictLoggerIfNeeded(pipelin
 
 	cLogDocsWrittenEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 		pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CLogDocsWrittenEventListener, 0),
-		pipeline.Topic(), logger_ctx, pipeline.Type())
+		pipeline.FullTopic(), logger_ctx)
 	cLogWriteStatusEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 		pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CLogWriteStatusEventListener, 0),
-		pipeline.Topic(), logger_ctx, pipeline.Type())
+		pipeline.FullTopic(), logger_ctx)
 
 	conflictLogger.RegisterComponentEventListener(common.CLogDocsWritten, cLogDocsWrittenEventListener)
 	conflictLogger.RegisterComponentEventListener(common.CLogWriteStatus, cLogWriteStatusEventListener)
@@ -1438,14 +1421,14 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode,
-	conflictLogger baseclog.Logger) error {
+	targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
 	if mainPipeline != nil {
 		parentCtx = (*mainPipeline).RuntimeContext()
 	}
+	conflictLogger := pp.GetConflictLoggerFromPipeline(pipeline)
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
@@ -1918,4 +1901,57 @@ func (xdcrf *XDCRFactory) GetEventsProducer(topic string) (common.PipelineEvents
 	}
 	eventsProducer := replStatus.GetEventsProducer()
 	return eventsProducer, nil
+}
+
+// create a new conflict logger if necessary.
+// main and backfill pipelines shares the same conflict logger.
+func (xdcrf *XDCRFactory) ConstructConflictLogger(pipeline common.Pipeline, loggerCtx *log.LoggerContext) error {
+	topic := pipeline.Topic()
+	pipelineType := pipeline.Type()
+	var conflictLogger baseclog.Logger
+
+	if pipelineType == common.MainPipeline {
+		spec := pipeline.Specification().GetReplicationSpec()
+
+		conflictLoggingMap := spec.Settings.GetConflictLoggingMapping()
+		eventsProducer, err := xdcrf.GetEventsProducer(topic)
+		if err != nil {
+			return err
+		}
+
+		conflictLogger, err = conflictlog.NewLoggerWithRules(conflictLoggingMap, spec.UniqueId(), spec.Settings, loggerCtx, xdcrf.logger, eventsProducer)
+		if err != nil && err != baseclog.ErrConflictLoggingIsOff {
+			xdcrf.logger.Errorf("Error initialising new logger for conflict logging with input=%v, err=%v", conflictLoggingMap, err)
+			return err
+		}
+	} else {
+		// reuse the conflict logger from the main pipeline.
+		replStatus, err := xdcrf.replStatusGetter(topic)
+		if err != nil {
+			xdcrf.logger.Errorf("Error getting main pipeline for conflict logger, err=%v", err)
+			return err
+		}
+
+		parentPipeline := replStatus.Pipeline()
+		if parentPipeline == nil {
+			err := fmt.Errorf("parent pipeline is nil for backfill pipeline")
+			xdcrf.logger.Errorf("Error getting main pipeline for conflict logger, err=%v", err)
+			return err
+		}
+
+		parentCtx := parentPipeline.RuntimeContext()
+		conflictLogger = baseclog.LoggerFromService(parentCtx.Service(base.CONFLICT_LOGGER))
+	}
+
+	// register the conflict logger to the outnozzle
+	// i.e. in the xmem nozzles.
+	targets := pipeline.Targets()
+	for _, target := range targets {
+		err := target.(common.OutNozzle).SetConflictLogger(conflictLogger)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

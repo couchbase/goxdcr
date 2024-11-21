@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
@@ -62,6 +63,8 @@ type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterChe
 type MergeVBMasterRespCkptsFunc func(common.Pipeline, peerToPeer.PeersVBMasterCheckRespMap) error
 
 type PrometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error
+
+type ConflictLoggerCtor func(pipeline common.Pipeline, loggerCtx *log.LoggerContext) error
 
 // GenericPipeline is the generic implementation of a data processing pipeline
 //
@@ -252,7 +255,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 // returns if ECCV is enabled on source bucket, pruning window, source vbMaxCasMap, error if any
 func (genericPipeline *GenericPipeline) getLocalHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, int, []interface{}, error) {
 	var hlvVbMaxCas []interface{}
-	stopwatch := genericPipeline.utils.StartDiagStopwatch("getHlvVbMaxCasLocal", base.DiagInternalThreshold)
+	stopwatch := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v - getHlvVbMaxCasLocal", spec.UniqueId()), base.DiagInternalThreshold)
 	defer stopwatch()
 
 	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
@@ -267,7 +270,7 @@ func (genericPipeline *GenericPipeline) getLocalHlvInfo(spec *metadata.Replicati
 		defer latestNotification.Recycle()
 	case <-finCh:
 		// should be timed out
-		return false, 0, nil, fmt.Errorf("getLocalHlvInfo closed")
+		return false, 0, nil, fmt.Errorf("getLocalHlvInfo closed for %v", spec.UniqueId())
 	}
 
 	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
@@ -281,7 +284,7 @@ func (genericPipeline *GenericPipeline) getLocalHlvInfo(spec *metadata.Replicati
 // returns if ECCV is enabled on target bucket, target vbMaxCasMap, error if any
 func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, []interface{}, error) {
 	var targetHlvVbMaxCas []interface{}
-	stopwatch := genericPipeline.utils.StartDiagStopwatch("getHlvVbMaxCasRemote", base.DiagNetworkThreshold)
+	stopwatch := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v - getHlvVbMaxCasRemote", spec.UniqueId()), base.DiagNetworkThreshold)
 	defer stopwatch()
 
 	targetNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, genPipelineId)
@@ -296,7 +299,7 @@ func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.Replicat
 		defer latestTargetNotification.Recycle()
 	case <-finCh:
 		// should be timed out
-		return false, nil, fmt.Errorf("getRemoteHlvInfo closed")
+		return false, nil, fmt.Errorf("getRemoteHlvInfo closed for %v", spec.UniqueId())
 	}
 
 	targetHlvEnable := latestTargetNotification.GetTargetEnableCrossClusterVersioning()
@@ -437,7 +440,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	go genericPipeline.startingSeqno_constructor(genericPipeline)
 
 	// start async event listeners
-	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline, nil) {
+	for _, async_event_listener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		async_event_listener.Start()
 	}
 
@@ -852,7 +855,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	genericPipeline.checkpoint_func(genericPipeline)
 
 	// stop async event listeners so that RaiseEvent() would not block
-	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline, nil) {
+	for _, asyncEventListener := range GetAllAsyncComponentEventListeners(genericPipeline) {
 		asyncEventListener.Stop()
 	}
 	genericPipeline.logger.Infof("%v %v Async listeners have been stopped", genericPipeline.Type(), genericPipeline.InstanceId())
@@ -930,7 +933,7 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 	connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
-	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error) *GenericPipeline {
+	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLoggerCtor ConflictLoggerCtor) (*GenericPipeline, error) {
 
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
@@ -956,11 +959,17 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		prometheusStatusUpdater:            prometheusStatusUpdater,
 	}
 
+	// construct the conflict logger for the pipeline
+	err := conflictLoggerCtor(pipeline, logger_context)
+	if err != nil {
+		return nil, err
+	}
+
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
-	return pipeline
+	return pipeline, nil
 }
 
 // intialize all maps
@@ -1032,7 +1041,7 @@ func addConnectorToMap(connector common.Connector, connectorsMap map[string]comm
 // Hence there are no real concurrency issues.
 // conflictLogger can be nil if this is not the first time this function is called before for p.
 // i.e. SetAsyncListenerMap is called for p.
-func GetAllAsyncComponentEventListeners(p common.Pipeline, conflictLogger baseclog.Logger) map[string]common.AsyncComponentEventListener {
+func GetAllAsyncComponentEventListeners(p common.Pipeline) map[string]common.AsyncComponentEventListener {
 	asyncListenerMap := p.GetAsyncListenerMap()
 	if asyncListenerMap == nil {
 		asyncListenerMap = make(map[string]common.AsyncComponentEventListener)
@@ -1042,24 +1051,36 @@ func GetAllAsyncComponentEventListeners(p common.Pipeline, conflictLogger basecl
 			addAsyncListenersToMap(source, asyncListenerMap, partsMap)
 		}
 
-		// Now initialise the map with conflict logger listeners.
-		// Since conflict logger is shared between pipelines,
-		// just pick and set the ones that are listeners of this pipeline.
-		if conflictLogger != nil {
-			allPipelinesCLogListeners := conflictLogger.AsyncComponentEventListeners()
-			for listenerId, listener := range allPipelinesCLogListeners {
-				if listener == nil ||
-					listener.ListenerPipelineType() != p.Type().ListenerPipelineType() {
-					continue
-				}
+		// add async listeners on conflict logger, if present.
+		addCLoggerAsyncListenersToMap(p, asyncListenerMap)
 
-				asyncListenerMap[listenerId] = listener
-			}
-		}
-
+		// this is the first time the function is called. Cache it for
+		// subsequent calls.
 		p.SetAsyncListenerMap(asyncListenerMap)
 	}
 	return asyncListenerMap
+}
+
+// returns the conflict logger from p.
+func GetConflictLoggerFromPipeline(p common.Pipeline) baseclog.Logger {
+	// all the targets will have the same instance of the conflict logger.
+	// Get one of them.
+	targets := p.Targets()
+	for _, target := range targets {
+		cLogger := target.(common.OutNozzle).GetConflictLogger()
+		if cLogger == nil {
+			return nil
+		}
+
+		conflictLogger, ok := cLogger.(*conflictlog.LoggerImpl)
+		if !ok || conflictLogger == nil {
+			return nil
+		}
+
+		return conflictLogger
+	}
+
+	return nil
 }
 
 // Modifies and adds to "listenersMap"
@@ -1079,6 +1100,26 @@ func addAsyncListenersToMap(part common.Part, listenersMap map[string]common.Asy
 				}
 			}
 		}
+	}
+}
+
+// Modifies and adds to "listenersMap"
+// Initialise the map with conflict logger listeners. Since conflict logger is shared
+// between pipelines, just pick and set the ones that are listeners of this pipeline.
+func addCLoggerAsyncListenersToMap(p common.Pipeline, listenersMap map[string]common.AsyncComponentEventListener) {
+	conflictLogger := GetConflictLoggerFromPipeline(p)
+	if conflictLogger == nil {
+		return
+	}
+
+	allPipelinesCLogListeners := conflictLogger.AsyncComponentEventListeners()
+	for listenerId, listener := range allPipelinesCLogListeners {
+		if listener == nil ||
+			listener.ListenerPipelineType() != p.Type().ListenerPipelineType() {
+			continue
+		}
+
+		listenersMap[listenerId] = listener
 	}
 }
 

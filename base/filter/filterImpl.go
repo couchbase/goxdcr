@@ -31,7 +31,8 @@ const (
 	FilteredOnUserDefinedFilter base.FilteringStatusType = iota
 	FilteredOnMobileRecord      base.FilteringStatusType = iota
 	FilteredOnConflictLogRecord base.FilteringStatusType = iota
-	// could be filtered because of error, binary doc, expiry, deletion etc which do not need to be explicitly distinguished
+	// could be filtered because of error, binary doc, expiry, deletion etc
+	// which do not need to be explicitly distinguished.
 	FilteredOnOthers base.FilteringStatusType = iota
 )
 

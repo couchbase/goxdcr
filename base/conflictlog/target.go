@@ -78,7 +78,8 @@ func (t Target) IsSystemTarget() bool {
 	return false
 }
 
-// The function defaults the collection and scope names to _default if not set.
+// The function defaults the collection to _default._default if none of
+// scope and collection are set.
 func (t *Target) Sanitize() {
 	if t == nil {
 		return
@@ -89,11 +90,9 @@ func (t *Target) Sanitize() {
 		return
 	}
 
-	if t.NS.ScopeName == "" {
+	if t.NS.ScopeName == "" && t.NS.CollectionName == "" {
+		// use the default collection i.e. _default._default
 		t.NS.ScopeName = base.DefaultScopeCollectionName
-	}
-
-	if t.NS.CollectionName == "" {
 		t.NS.CollectionName = base.DefaultScopeCollectionName
 	}
 }

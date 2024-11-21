@@ -154,7 +154,7 @@ func ParseTarget(m map[string]interface{}) (t Target, err error) {
 	if ok {
 		ok, s := base.ParseString(collectionObj)
 		if ok {
-			t.NS, err = base.NewOptionalCollectionNamespaceFromString(s)
+			t.NS, err = base.NewCollectionNamespaceFromString(s)
 			if err != nil {
 				return
 			}
