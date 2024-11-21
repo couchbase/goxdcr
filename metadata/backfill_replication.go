@@ -1248,7 +1248,7 @@ func (b *BackfillTasks) RollbackTo0(vbno uint16) {
 			Seqno:         0,
 			SnapshotStart: 0,
 			SnapshotEnd:   0,
-			ManifestIDs:   base.CollectionsManifestIdPair{},
+			ManifestIDs:   base.CollectionsManifestIdsTimestamp{},
 		},
 		EndingTimestamp: &base.VBTimestamp{
 			Vbno:          vbno,
@@ -1256,7 +1256,7 @@ func (b *BackfillTasks) RollbackTo0(vbno uint16) {
 			Seqno:         maxEndSeqno,
 			SnapshotStart: 0,
 			SnapshotEnd:   maxEndSeqno,
-			ManifestIDs:   base.CollectionsManifestIdPair{},
+			ManifestIDs:   base.CollectionsManifestIdsTimestamp{},
 		},
 	}, nil)
 

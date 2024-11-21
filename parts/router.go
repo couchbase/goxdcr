@@ -1383,6 +1383,15 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.C
 	}
 }
 
+func (c CollectionsRoutingMap) UpdateGlobalManifestsAndBrokenMaps(globalPairs map[uint16]metadata.ManifestIdAndBrokenMapPair, isRollBack bool) {
+	// Collections router will continue to just have a single consolidated map. This hasn't changed yet and correctness wise should be ok
+	for _, oneTgtManifestIdBrokenMapPair := range globalPairs {
+		for _, collectionsRouter := range c {
+			collectionsRouter.UpdateBrokenMappingsPair(oneTgtManifestIdBrokenMapPair.BrokenMap, oneTgtManifestIdBrokenMapPair.ManifestId, isRollBack)
+		}
+	}
+}
+
 /**
  * Note
  * A router (for now) is created per source nozzle.
@@ -2103,6 +2112,15 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		isRollBack, ok3 := pair[2].(bool)
 		if ok && ok2 && ok3 && router.Router.IsStartable() {
 			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappingsRO, targetManifestId, isRollBack)
+		}
+	}
+
+	globalPairs, ok := settings[metadata.GlobalBrokenMappingUpdateKey].([]interface{})
+	if ok && len(globalPairs) == 2 {
+		globalManifestsAndBrokenMaps, ok := globalPairs[0].(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+		isRollBack, ok2 := globalPairs[1].(bool)
+		if ok && ok2 && router.IsStartable() {
+			router.collectionsRouting.UpdateGlobalManifestsAndBrokenMaps(globalManifestsAndBrokenMaps, isRollBack)
 		}
 	}
 

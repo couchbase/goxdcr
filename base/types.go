@@ -80,13 +80,15 @@ func (se SettingsError) Add(key string, err error) {
 	se.err_map[key] = err
 }
 
-type CollectionsManifestIdPair struct {
-	SourceManifestId uint64
-	TargetManifestId uint64
+// In a given point in time, this struct represents the manifest IDs used for resuming, checkpointing, etc
+type CollectionsManifestIdsTimestamp struct {
+	SourceManifestId        uint64
+	TargetManifestId        uint64
+	GlobalTargetManifestIds map[uint16]uint64
 }
 
 // Ensure that this current c can accomodate the other range
-func (c *CollectionsManifestIdPair) Accomodate(other CollectionsManifestIdPair) {
+func (c *CollectionsManifestIdsTimestamp) Accomodate(other CollectionsManifestIdsTimestamp) {
 	if c.SourceManifestId > other.SourceManifestId {
 		c.SourceManifestId = other.SourceManifestId
 	}
@@ -102,18 +104,18 @@ type VBTimestamp struct {
 	Seqno         uint64
 	SnapshotStart uint64
 	SnapshotEnd   uint64
-	ManifestIDs   CollectionsManifestIdPair
+	ManifestIDs   CollectionsManifestIdsTimestamp
 }
 
 var emptyVBts VBTimestamp
 
 func (vbts *VBTimestamp) String() string {
-	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v, srcManId=%v, tgtManId=%v]",
-		vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd, vbts.ManifestIDs.SourceManifestId, vbts.ManifestIDs.TargetManifestId)
+	return fmt.Sprintf("[vbno=%v, uuid=%v, seqno=%v, sn_start=%v, sn_end=%v, srcManId=%v, tgtManId=%v, gllobalTgtMans=%v]",
+		vbts.Vbno, vbts.Vbuuid, vbts.Seqno, vbts.SnapshotStart, vbts.SnapshotEnd, vbts.ManifestIDs.SourceManifestId, vbts.ManifestIDs.TargetManifestId, vbts.ManifestIDs.GlobalTargetManifestIds)
 }
 
 func (vbts VBTimestamp) IsEmpty() bool {
-	return vbts == emptyVBts
+	return vbts.SameAs(&emptyVBts)
 }
 
 func (vbts *VBTimestamp) SameAs(other *VBTimestamp) bool {
@@ -128,7 +130,8 @@ func (vbts *VBTimestamp) SameAs(other *VBTimestamp) bool {
 	return vbts.Vbno == other.Vbno && vbts.Vbuuid == other.Vbuuid && vbts.Seqno == other.Seqno &&
 		vbts.SnapshotStart == other.SnapshotStart && vbts.SnapshotEnd == other.SnapshotEnd &&
 		vbts.ManifestIDs.SourceManifestId == other.ManifestIDs.SourceManifestId &&
-		vbts.ManifestIDs.TargetManifestId == other.ManifestIDs.TargetManifestId
+		vbts.ManifestIDs.TargetManifestId == other.ManifestIDs.TargetManifestId &&
+		AreVbSeqnoMapsSame(vbts.ManifestIDs.GlobalTargetManifestIds, other.ManifestIDs.GlobalTargetManifestIds)
 }
 
 func (vbts VBTimestamp) Clone() VBTimestamp {
@@ -140,6 +143,7 @@ func (vbts VBTimestamp) Clone() VBTimestamp {
 	clonedTs.SnapshotEnd = vbts.SnapshotEnd
 	clonedTs.ManifestIDs.SourceManifestId = vbts.ManifestIDs.SourceManifestId
 	clonedTs.ManifestIDs.TargetManifestId = vbts.ManifestIDs.TargetManifestId
+	clonedTs.ManifestIDs.GlobalTargetManifestIds = CloneVbSeqnoMap(vbts.ManifestIDs.GlobalTargetManifestIds)
 	return clonedTs
 }
 
