@@ -1838,6 +1838,7 @@ const (
 	XDCRSourceClustersPath      = XDCRPrefix + "/sourceClusters"
 	SrcHeartbeatExpiryFactor    = 2
 	SrcHeartbeatSummaryInterval = 5 * time.Minute
+	UnknownSourceClusterName    = "<Unknown>"
 )
 
 func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequency

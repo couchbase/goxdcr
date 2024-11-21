@@ -4206,6 +4206,9 @@ func (agent *RemoteClusterAgent) generateHeartbeatMetadata(clonedRef *metadata.R
 	if sourceClusterName, err = agent.topologySvc.MyClusterName(); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(sourceClusterName) == "" {
+		sourceClusterName = base.UnknownSourceClusterName
+	}
 
 	specs, err := agent.specsReader.AllReplicationSpecsWithRemote(clonedRef)
 	if err != nil {
