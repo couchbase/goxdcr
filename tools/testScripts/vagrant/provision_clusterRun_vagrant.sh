@@ -80,6 +80,14 @@ function setupSGW {
 	vagrantStartSGW "$clusterName"
 }
 
+if (($(vagrant plugin list | grep -c scp) == 0)); then
+	vagrant plugin install vagrant-scp
+fi
+
+if (($(vagrant plugin list | grep -c parallels) == 0)); then
+	vagrant plugin install vagrant-parallels
+fi
+
 #MAIN
 vagrantUp
 if (($? != 0)); then
