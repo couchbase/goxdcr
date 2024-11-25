@@ -37,7 +37,7 @@ func TestPool_EmptyPool(t *testing.T) {
 	pool := NewConnPool(logger, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		newConnFn)
+		newConnFn, nil)
 	pool.UpdateGCInterval(1 * time.Second)
 	pool.UpdateReapInterval(2 * time.Second)
 
@@ -62,7 +62,7 @@ func TestPool_GC(t *testing.T) {
 	pool := NewConnPool(logger, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		newConnFn)
+		newConnFn, nil)
 	pool.UpdateGCInterval(1 * time.Second)
 	pool.UpdateReapInterval(3 * time.Second)
 

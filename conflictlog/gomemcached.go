@@ -265,12 +265,9 @@ func (m *MemcachedConn) setMeta(conn mcc.ClientIface, key string, vbNo uint16, b
 
 	rsp, err := conn.Send(req)
 	err2 := m.handleResponse(key, rsp, opaque)
-	if err2 != nil {
-		return err2
-	}
-
-	if err != nil {
-		return
+	if err != nil || err2 != nil {
+		newErr := fmt.Errorf("error in setMeta: err=%v, err2=%v", err, err2)
+		return newErr
 	}
 	return
 }

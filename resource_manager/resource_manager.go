@@ -186,7 +186,7 @@ func (s *State) String() string {
 type ResourceManager struct {
 	pipelineMgr            pipeline_manager.PipelineMgrIface
 	repl_spec_svc          service_def.ReplicationSpecSvc
-	kvNodeGetter           service_def.XDCRCompTopologySvc
+	topoSvc                service_def.XDCRCompTopologySvc
 	replStatsGetter        ReplStatsGetter
 	throughputThrottlerSvc throttlerSvc.ThroughputThrottlerSvc
 	logger                 *log.CommonLogger
@@ -268,7 +268,7 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 	resourceMgrRetVar := &ResourceManager{
 		pipelineMgr:                pipelineMgr,
 		repl_spec_svc:              repl_spec_svc,
-		kvNodeGetter:               xdcr_topology_svc,
+		topoSvc:                    xdcr_topology_svc,
 		logger:                     log.NewLogger(base.ResourceMgrKey, logger_context),
 		finch:                      make(chan bool),
 		ongoingReplMap:             make(map[string]bool),
@@ -291,6 +291,8 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 	return resourceMgrRetVar
 }
 
+// SetReplStatsGetter sets the stats getter.
+// Note: this was added mainly for unit testing
 func (rm *ResourceManager) SetReplStatsGetter(getter ReplStatsGetter) {
 	rm.replStatsGetter = getter
 }
@@ -324,7 +326,7 @@ func (rm *ResourceManager) checkForKVService() {
 	// When a node first starts up and before it is a "cluster" IsKVNode() will return 404
 	// XDCR must retry until it gets a successful lookup of services
 	for {
-		isKVNode, err := rm.kvNodeGetter.IsKVNode()
+		isKVNode, err := rm.topoSvc.IsKVNode()
 		if err != nil {
 			time.Sleep(base.ResourceMgrKVDetectionRetryInterval)
 		} else {
@@ -535,8 +537,6 @@ func (rm *ResourceManager) manageResources() {
 }
 
 func (rm *ResourceManager) manageResourcesOnce() error {
-	isClogEnabled := false
-
 	specs, err := rm.repl_spec_svc.AllActiveReplicationSpecsReadOnly()
 	if err != nil {
 		rm.logger.Infof("Skipping resource management actions because of err = %v\n", err)
@@ -545,9 +545,6 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	backfillSpecs, err := rm.backfillReplSvc.AllActiveBackfillSpecsReadOnly()
 	rm.managedResourceOnceSpecMap = make(map[string]*metadata.GenericSpecification)
 	for _, spec := range specs {
-		if !isClogEnabled && !spec.Settings.GetConflictLoggingMapping().Disabled() {
-			isClogEnabled = true
-		}
 		genSpec := metadata.GenericSpecification(spec)
 		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
 	}
@@ -571,7 +568,6 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	previousState := rm.getPreviousState()
 
 	state := rm.computeState(specReplStatsMap, previousState)
-	state.isConflictLoggingEnabled = isClogEnabled
 
 	rm.computeActionsToTake(previousState, state)
 
@@ -699,6 +695,14 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSp
 			state.highPriorityReplExist = true
 		} else {
 			state.lowPriorityReplExist = true
+		}
+
+		if !state.isConflictLoggingEnabled {
+			if rspec := spec.GetReplicationSpec(); rspec != nil {
+				if !rspec.Settings.GetConflictLoggingMapping().Disabled() {
+					state.isConflictLoggingEnabled = true
+				}
+			}
 		}
 
 		state.replStatsMap[spec.GetFullId()] = replStats
@@ -908,6 +912,8 @@ func (rm *ResourceManager) computeTokens(state *State, maxThroughput, throughput
 	// assign remaining tokens, which serves as a throughput limit, to low priority replications
 	lowPriorityTokens := maxThroughput * int64(base.RMTokenDistribution[base.RMDistLowRepl]) / int64(base.ResourceManagementRatioBase)
 
+	// totalThroughputNeeded is a theoretical throughput needed based on total changes left to clear the backlog.
+	// maxReassignableTokens = min(HighTokens + LowTokens, totalThroughputNeeded)
 	maxReassignableTokens = state.totalThroughputNeeded - int64(rm.overallThroughputSamples.Mean())
 	if maxReassignableTokens < 0 {
 		maxReassignableTokens = 0
@@ -1229,7 +1235,9 @@ func (rm *ResourceManager) setDcpPriority(spec metadata.GenericSpecification, pr
 
 func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecification) (*ReplStats, error) {
 	if atomic.LoadUint32(&rm.isKVNode) == 0 {
-		return &ReplStats{0, 0, 0, 0, 0, time.Now().UnixNano(), 0}, nil
+		return &ReplStats{
+			timestamp: time.Now().UnixNano(),
+		}, nil
 	}
 
 	var pipelineType common.PipelineType
@@ -1287,7 +1295,14 @@ func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecific
 	clogQueueSize := rm.getClogQueueSize(rs)
 
 	// throughput will be computer later and is temporarily set to 0 for now
-	return &ReplStats{changesLeft, docsFromDcp, docsRepQueue, clogDocsWritten, clogQueueSize, timestamp, 0}, nil
+	return &ReplStats{
+		changesLeft:         changesLeft,
+		docsReceivedFromDcp: docsFromDcp,
+		docsRepQueue:        docsRepQueue,
+		clogDocsWritten:     clogDocsWritten,
+		clogQueueSize:       clogQueueSize,
+		timestamp:           timestamp,
+	}, nil
 }
 
 func (rm *ResourceManager) getClogQueueSize(rs pipeline.ReplicationStatusIface) int64 {

@@ -13,6 +13,10 @@ import (
 
 var _ ConnPool = (*ConnPoolImpl)(nil)
 
+// DeleteBucketCallbackFn is a callback function which is called when bucket is being deleted.
+// The function must be infallible and is expected to be fast. Hence any I/O should be avoided.
+type DeleteBucketCallbackFn func(bucket string)
+
 var (
 	ErrClosedConnPool     error = errors.New("use of closed connection pool")
 	ErrConnPoolGetTimeout error = errors.New("conflict logging pool get timedout")
@@ -96,6 +100,9 @@ type ConnPoolImpl struct {
 	limiter *base.Semaphore
 
 	finch chan bool
+
+	// delete bucket callback function. This is optional and can be nil
+	delCallback DeleteBucketCallbackFn
 }
 
 // connList is the list of actual objects which are pooled
@@ -154,7 +161,7 @@ func (l *connList) closeAll() {
 }
 
 // NewConnPool creates a new connection pool
-func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval time.Duration, newConnFn func(bucketName string) (io.Closer, error)) *ConnPoolImpl {
+func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval time.Duration, newConnFn func(bucketName string) (io.Closer, error), delCallback DeleteBucketCallbackFn) *ConnPoolImpl {
 	p := &ConnPoolImpl{
 		logger:       logger,
 		buckets:      map[string]*connList{},
@@ -164,6 +171,7 @@ func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval t
 		reapInterval: reapInterval,
 		finch:        make(chan bool, 1),
 		limiter:      base.NewSemaphore(limit),
+		delCallback:  delCallback,
 	}
 
 	go p.gc()
@@ -366,6 +374,9 @@ func (pool *ConnPoolImpl) reapConnList(force bool) []*connList {
 	for _, bucketName := range reapedBuckets {
 		pool.logger.Debugf("reaping connections for bucket=%s", bucketName)
 		delete(pool.buckets, bucketName)
+		if pool.delCallback != nil {
+			pool.delCallback(bucketName)
+		}
 	}
 
 	return connListList

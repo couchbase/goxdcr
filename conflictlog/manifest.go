@@ -84,3 +84,11 @@ func (m *ManifestCache) UpdateManifest(bucket string, man *metadata.CollectionsM
 	obj.man = man
 	obj.rw.Unlock()
 }
+
+// Delete removes the specified bucket from cache
+func (m *ManifestCache) Delete(bucket string) {
+	m.rw.Lock()
+	defer m.rw.Unlock()
+
+	delete(m.buckets, bucket)
+}

@@ -108,11 +108,6 @@ func (m *managerImpl) SetConnLimit(limit int) {
 	m.connPool.SetLimit(limit)
 }
 
-func (m *managerImpl) SetSkipTlsVerify(v bool) {
-	m.logger.Infof("setting tls skip verify=%v", v)
-	m.skipTlsVerify = v
-}
-
 func (m *managerImpl) SetIOPSLimit(limit int64) {
 	m.logger.Infof("setting IOPS limit = %d", limit)
 	m.throttlerSvc.UpdateSettings(map[string]interface{}{
@@ -123,7 +118,12 @@ func (m *managerImpl) SetIOPSLimit(limit int64) {
 func (m *managerImpl) setConnPool() {
 	m.logger.Infof("creating conflict manager gomemcached connection pool, connLimit=%v", m.connLimit)
 
-	m.connPool = iopool.NewConnPool(m.logger, m.connLimit, m.poolGCInterval, m.poolReapInterval, m.newMemcachedConn)
+	m.connPool = iopool.NewConnPool(m.logger,
+		m.connLimit,
+		m.poolGCInterval,
+		m.poolReapInterval,
+		m.newMemcachedConn,
+		m.connPoolBucketDelFn)
 }
 
 func (m *managerImpl) ConnPool() iopool.ConnPool {
@@ -139,4 +139,11 @@ func (m *managerImpl) newMemcachedConn(bucketName string) (conn io.Closer, err e
 
 	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, m.skipTlsVerify)
 	return
+}
+
+// connPoolBucketDelFn is a callback which is called from connection pool
+// The pool will call when bucket is being deleted. This happens when the bucket is not used for
+// a defined interval.
+func (m *managerImpl) connPoolBucketDelFn(bucket string) {
+	m.manifestCache.Delete(bucket)
 }

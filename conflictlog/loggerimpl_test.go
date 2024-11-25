@@ -56,7 +56,8 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
 			}, nil
-		})
+		},
+		nil)
 
 	fakeConnectionSleep = 1 * time.Second
 
@@ -128,7 +129,7 @@ func TestLoggerImpl_basicClose(t *testing.T) {
 	pool := iopool.NewConnPool(nil, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		newFakeConnection)
+		newFakeConnection, nil)
 
 	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil)
 	require.Nil(t, err)
@@ -151,7 +152,8 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
 			}, nil
-		})
+		},
+		nil)
 
 	fakeConnectionSleep = 1 * time.Second
 
@@ -203,7 +205,8 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
 			}, nil
-		})
+		},
+		nil)
 
 	fakeConnectionSleep = 1 * time.Second
 

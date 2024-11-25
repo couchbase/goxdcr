@@ -2485,19 +2485,23 @@ func ParseRMTokenDistStr(orig string) (dist []int, err error) {
 	}
 
 	arr := strings.Split(s, ":")
-	if len(arr) != 3 {
-		err = fmt.Errorf("RM token dist string must have 3 parts s=%s", s)
+	if len(arr) != RMTokenDistributionPartsCount {
+		err = fmt.Errorf("RM token dist string must have %d parts s=%s", RMTokenDistributionPartsCount, s)
 		return
 	}
-	dist = []int{0, 0, 0}
+	dist = []int{}
 
-	for i, e := range arr {
+	for _, e := range arr {
 		n, err := strconv.Atoi(e)
 		if err != nil {
 			err = fmt.Errorf("failed to parse RM dist string: s=%s, err=%v", s, err)
 			return nil, err
 		}
-		dist[i] = n
+		if n < 0 {
+			err = fmt.Errorf("failed to parse RM dist string: s=%s, negative number not allowed (n=%d)", s, n)
+			return nil, err
+		}
+		dist = append(dist, n)
 	}
 
 	total := 0

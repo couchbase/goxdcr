@@ -1943,6 +1943,11 @@ func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequ
 // 3 for all the conflict loggers in the system.
 var RMTokenDistributionStr string = "89:9:3"
 
+// RMTokenDistributionPartsCount is the number of parts in a token distribution string
+// The reason this is not derived from RMTokenDistribution is because it self
+// can be modified when the RMTokenDistributionStr is parsed
+var RMTokenDistributionPartsCount int = 3
+
 // RMTokenDistribution for different resource consumers
 var RMTokenDistribution = []int{
 	89, // High priority replication %
