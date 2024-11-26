@@ -1294,12 +1294,12 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 
 	if err == nil {
 		agent.refMtx.RLock()
-		agentId := agent.pendingRef.Id()
-		agentName := agent.pendingRef.Name()
-		agentUuid := agent.pendingRef.Uuid()
-		agentHost := agent.pendingRef.HostName()
+		agentId := newRef.Id()
+		agentName := newRef.Name()
+		agentUuid := newRef.Uuid()
+		agentHost := newRef.HostName()
 		agent.refMtx.RUnlock()
-		agent.logger.Infof("Agent %v %v started for cluster: %v synchronously? %v", agentId, agentName, agentUuid, userInitiated)
+		agent.logger.Infof("Agent %v %v started for cluster: %v (%v) synchronously? %v", agentId, agentName, agentUuid, agentHost, userInitiated)
 
 		agent.agentWaitGrp.Add(1)
 		go agent.runPeriodicRefresh()
