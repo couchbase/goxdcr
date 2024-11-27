@@ -695,7 +695,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 				return err
 			}
 			if !crossClusterVer {
-				return fmt.Errorf("mobile must be off when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+				errorMap[base.MobileCompatibleKey] = fmt.Errorf("mobile must be off when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+				return nil
 			}
 		}
 	}
@@ -756,7 +757,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMa
 				return err
 			}
 			if !crossClusterVer {
-				return fmt.Errorf("mobile must be off when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+				errorMap[base.MobileCompatibleKey] = fmt.Errorf("mobile must be off when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+				return nil
 			}
 		}
 	}
