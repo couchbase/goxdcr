@@ -712,6 +712,16 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 
 	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.CLogKey])
 	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
+		// Ensure that all nodes in the source cluster can handle the conflict logging feature
+		clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+		if err != nil {
+			service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation for CLogging: %v", err)
+			return err
+		}
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForCLoggingSupport) {
+			return base.ErrorCLoggingMixedModeUnsupported
+		}
+
 		// Conflict logging is on. Make sure source bucket enableCrossClusterVersioning is true.
 		connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
 		if err != nil {
@@ -731,7 +741,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			return err
 		}
 		if !crossClusterVer {
-			return fmt.Errorf("conflictLogging must be {} when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+			errorMap[metadata.CLogKey] = fmt.Errorf("conflictLogging must be disabled when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+			return nil
 		}
 	}
 
@@ -798,7 +809,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMa
 			return err
 		}
 		if !crossClusterVer {
-			return fmt.Errorf("conflictLogging must be {} when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+			errorMap[metadata.CLogKey] = fmt.Errorf("conflictLogging must be disabled when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+			return nil
 		}
 	}
 

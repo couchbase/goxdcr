@@ -377,6 +377,7 @@ var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time 
 var ErrorHostNameEmpty = errors.New("Hostname is empty")
 var ErrorConflictLoggingInputInvalid = errors.New("conflict logging input json object should either contain nothing (considered to turn off) or should compulsory contain \"bucket\" and \"collection\" keys")
 var ErrorReplicationSpecNotActive = errors.New("replication specification not found or no longer active")
+var ErrorCLoggingMixedModeUnsupported = errors.New("not all nodes support conflict logging feature")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -714,6 +715,7 @@ var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 var VersionForMobileSupport = ServerVersion{7, 6, 4}
 var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
+var VersionForCLoggingSupport = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
