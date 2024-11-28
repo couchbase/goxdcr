@@ -59,7 +59,7 @@ func (f *FilterUtilsImpl) ProcessUprEventForFiltering(uprEvent *memcached.UprEve
 					return nil, err, additionalErrDesc, totalFailedCnt
 				}
 			} else {
-				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased)
+				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = getBodySlice(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, dataTypeIsJson)
 				if err != nil {
 					return nil, err, additionalErrDesc, totalFailedCnt
 				}
@@ -272,13 +272,13 @@ func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBe
 
 // Decompresses the input snappy-compressed document body into a buffer slice obtained from the passed data pool.
 // Also allocates extra bytes at the end of the buffer slice for appending the document key (as required when filtering on key), to avoid reallocation later on.
-func getBodySlice(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
+func getBodySlice(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased *[][]byte, isJson bool) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	var incomingBodyLen int = len(incomingBody)
 	lastBodyPos := incomingBodyLen - 1
 	bodySize := uint64(incomingBodyLen + len(key) + base.AddFilterKeyExtraBytes)
 
-	if !base.IsJsonEndValid(incomingBody, lastBodyPos) {
+	if isJson && !base.IsJsonEndValid(incomingBody, lastBodyPos) {
 		return nil, base.ErrorInvalidInput, fmt.Sprintf("Document %v%v%v body is not a valid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
 	}
 
