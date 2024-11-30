@@ -13,14 +13,15 @@ package filter
 import (
 	"encoding/json"
 	"fmt"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/golang/snappy"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
+
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
+	"github.com/stretchr/testify/assert"
 )
 
 var filterId string = "testFilter"
@@ -909,4 +910,62 @@ func TestBinaryFilter(t *testing.T) {
 	result, err, _, _ = filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+}
+
+func TestXattrFilters(t *testing.T) {
+	fmt.Println("============== Test case end: TestXattrFilters =================")
+	assert := assert.New(t)
+	binDocWithMiscXattrs1 := "./testdata/BinDocWithMiscXattrs1.json"
+	binDocWithMiscXattrs2 := "./testdata/BinDocWithMiscXattrs2.json"
+	binDocWithNoXattrs := "./testdata/BinDocWithNoXattrs.json"
+	binDocXattrThatPasses := "./testdata/BinDocWithXattrThatPasses.json"
+	binDocXattrThatFails := "./testdata/BinDocWithXattrThatFails.json"
+
+	jsonDocWithMiscXattrs1 := "./testdata/JsonDocWithMiscXattrs1.json"
+	jsonDocWithMiscXattrs2 := "./testdata/JsonDocWithMiscXattrs2.json"
+	jsonDocWithNoXattrs := "./testdata/JsonDocWithNoXattrs.json"
+	jsonDocXattrThatPasses := "./testdata/JsonDocWithXattrThatPasses.json"
+	jsonDocXattrThatFails := "./testdata/JsonDocWithXattrThatFails.json"
+
+	files := []string{binDocWithMiscXattrs1, binDocWithMiscXattrs2, binDocWithNoXattrs, binDocXattrThatPasses, binDocXattrThatFails,
+		jsonDocWithMiscXattrs1, jsonDocWithMiscXattrs2, jsonDocWithNoXattrs, jsonDocXattrThatPasses, jsonDocXattrThatFails}
+	passes := []bool{false, false, false, true, false, false, false, false, true, false}
+
+	// tests MB-64430
+	filter, err := NewFilter(filterId, `META().xattrs.foo=TRUE`, realUtil, 0)
+	assert.Nil(err)
+	assert.NotNil(filter)
+
+	for i := 0; i < len(files); i++ {
+		uprEvent, err := base.RetrieveUprJsonAndConvert(files[i])
+		assert.Nil(err)
+		assert.NotNil(uprEvent)
+		for j := 0; j < 2; j++ {
+			if j == 0 {
+				// testing compressed docs
+				assert.Equal(uprEvent.UprEvent.DataType&base.SnappyDataType > 0, true)
+			} else {
+				// testing uncompressed docs
+				decodedLen, err := snappy.DecodedLen(uprEvent.UprEvent.Value)
+				assert.Nil(err)
+				newBody := make([]byte, decodedLen)
+				newBody, err = snappy.Decode(newBody, uprEvent.UprEvent.Value)
+				assert.Nil(err)
+				uprEvent.UprEvent.Value = newBody
+				assert.NotEqual(len(uprEvent.UprEvent.Value), 0)
+				uprEvent.UprEvent.DataType &= ^mcc.SnappyDataType
+				assert.Equal(uprEvent.UprEvent.DataType&base.SnappyDataType > 0, false)
+			}
+
+			match, err, _, _ := filter.FilterUprEvent(uprEvent)
+			assert.Nil(err)
+			if passes[i] {
+				assert.True(match)
+			} else {
+				assert.False(match)
+			}
+		}
+	}
+
+	fmt.Println("============== Test case end: TestXattrFilters =================")
 }
