@@ -1151,7 +1151,7 @@ func TestXattrFilters(t *testing.T) {
 	passes := []bool{false, false, false, true, false, false, false, false, true, false}
 
 	// tests MB-64430
-	filter, err := NewFilter(filterId, `META().xattrs.foo=TRUE`, realUtil, 0, base.MobileCompatibilityOff)
+	filter, err := NewFilter(filterId, `META().xattrs.foo=TRUE`, realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 
@@ -1172,18 +1172,16 @@ func TestXattrFilters(t *testing.T) {
 				assert.Nil(err)
 				uprEvent.UprEvent.Value = newBody
 				assert.NotEqual(len(uprEvent.UprEvent.Value), 0)
-				uprEvent.UprEvent.DataType &= ^base.SnappyDataType
+				uprEvent.UprEvent.DataType &= ^mcc.SnappyDataType
 				assert.Equal(uprEvent.UprEvent.DataType&base.SnappyDataType > 0, false)
 			}
 
-			match, err, _, _, status := filter.FilterUprEvent(uprEvent)
+			match, err, _, _ := filter.FilterUprEvent(uprEvent)
 			assert.Nil(err)
 			if passes[i] {
 				assert.True(match)
-				assert.Equal(status, NotFiltered)
 			} else {
 				assert.False(match)
-				assert.Equal(status, FilteredOnUserDefinedFilter)
 			}
 		}
 	}
