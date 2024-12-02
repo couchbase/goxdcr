@@ -42,7 +42,7 @@ type ConnPool interface {
 	// Get returns an object from the pool. If there is none then it creates
 	// one by calling newConnFn() and returns it. It is guaranteed that either
 	// an error or a non-nil connection object will be returned
-	Get(bucketName string, timeout time.Duration) (conn io.Closer, err error)
+	Get(bucketName string, timeout time.Duration, params interface{}) (conn io.Closer, err error)
 
 	// Put releases the connection back to the pool for reuse. It is caller's job
 	// to ensure that right bucket name is passed here. The damaged == true tells the pool
@@ -87,7 +87,7 @@ type ConnPoolImpl struct {
 
 	// function to create new pool objects. This is called when
 	// there are no objects to return
-	newConnFn func(bucketName string) (io.Closer, error)
+	newConnFn func(bucketName string, params interface{}) (io.Closer, error)
 
 	// gcTicker controls the periodicity with which reaping of idle connections is attempted
 	gcTicker *time.Ticker
@@ -161,7 +161,7 @@ func (l *connList) closeAll() {
 }
 
 // NewConnPool creates a new connection pool
-func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval time.Duration, newConnFn func(bucketName string) (io.Closer, error), delCallback DeleteBucketCallbackFn) *ConnPoolImpl {
+func NewConnPool(logger *log.CommonLogger, limit int, gcInterval, reapInterval time.Duration, newConnFn func(bucketName string, params interface{}) (io.Closer, error), delCallback DeleteBucketCallbackFn) *ConnPoolImpl {
 	p := &ConnPoolImpl{
 		logger:       logger,
 		buckets:      map[string]*connList{},
@@ -254,7 +254,7 @@ func (pool *ConnPoolImpl) UpdateReapInterval(d time.Duration) {
 // Get returns an object from the pool. If there is none then it creates
 // one by calling newConnFn() and returns it. It is guaranteed that either
 // an error or a non-nil connection object will be returned
-func (pool *ConnPoolImpl) Get(bucketName string, timeout time.Duration) (conn io.Closer, err error) {
+func (pool *ConnPoolImpl) Get(bucketName string, timeout time.Duration, connParams interface{}) (conn io.Closer, err error) {
 	if pool.isClosed() {
 		err = ErrClosedConnPool
 		return
@@ -270,7 +270,7 @@ func (pool *ConnPoolImpl) Get(bucketName string, timeout time.Duration) (conn io
 		return
 	}
 
-	conn, err = pool.newConnFn(bucketName)
+	conn, err = pool.newConnFn(bucketName, connParams)
 	if err != nil {
 		pool.limiter.Release()
 	}

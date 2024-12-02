@@ -14,6 +14,7 @@ import (
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
@@ -51,6 +52,11 @@ type LoggerImpl struct {
 
 	// throttlerSvc is the IOPS throttler
 	throttlerSvc throttlerSvc.ThroughputThrottlerSvc
+
+	// topSvc is mainly used for getting host & creds to query ns_server
+	topSvc service_def.XDCRCompTopologySvc
+
+	security SecurityInfo
 
 	// number of attempts to try for throttler
 	throttlerAttempts int
@@ -90,6 +96,8 @@ type LoggerImpl struct {
 	hibernated         atomic.Bool
 	hibernationLock    sync.Mutex
 	hibernationEventId int64
+
+	manifestCache *ManifestCache
 }
 
 type logRequest struct {
@@ -134,7 +142,7 @@ func calcThrottlerAttempts(setMetaTimeout time.Duration) int {
 
 // newLoggerImpl creates a new logger impl instance.
 // throttlerSvc is allowed to be nil, which means no throttling
-func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, connPool iopool.ConnPool, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l *LoggerImpl, err error) {
+func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, security SecurityInfo, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, topSvc service_def.XDCRCompTopologySvc, connPool iopool.ConnPool, eventsProducer common.PipelineEventsProducer, mcache *ManifestCache, opts ...LoggerOpt) (l *LoggerImpl, err error) {
 	// set the defaults
 	options := LoggerOptions{
 		rules:                nil,
@@ -173,6 +181,8 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		opts:               options,
 		lock:               sync.RWMutex{},
 		throttlerSvc:       throttlerSvc,
+		topSvc:             topSvc,
+		security:           security,
 		throttlerAttempts:  throttlerAttempts,
 		logReqCh:           make(chan logRequest, options.logQueueCap),
 		finch:              make(chan bool, 1),
@@ -181,7 +191,17 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		AbstractComponent:  component.NewAbstractComponentWithLogger(loggerId, logger),
 		eventsProducer:     eventsProducer,
 		hibernationEventId: -1,
+		manifestCache:      mcache,
 	}
+
+	now := time.Now()
+	err = l.updateBucketUUIDFromRules(l.opts.rules, true)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Infof("updated bucket UUID from rules for replId=%s. Time elapsed=%v",
+		replId, time.Now().Sub(now))
 
 	return
 }
@@ -395,7 +415,14 @@ func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 
 	l.opts.rules = r
 
-	l.logger.Infof("conflict logger rules=%v updated id=%s", r, l.id)
+	now := time.Now()
+	err = l.updateBucketUUIDFromRules(l.opts.rules, false)
+	if err != nil {
+		return
+	}
+
+	l.logger.Infof("conflict logger rules=%v updated id=%s, time elapsed for uuid update=%v",
+		r, l.id, time.Now().Sub(now))
 	return
 }
 
@@ -441,10 +468,16 @@ func (l *LoggerImpl) getTarget(rec *ConflictRecord) (t baseclog.Target, err erro
 	return
 }
 
-func (l *LoggerImpl) getFromPool(bucketName string) (conn Connection, err error) {
+func (l *LoggerImpl) getFromPool(bucketName, bucketUUID string, vbCount int) (conn Connection, err error) {
 	now := time.Now()
 
-	obj, err := l.connPool.Get(bucketName, l.opts.poolGetTimeout)
+	params := &connParams{
+		bucketName: bucketName,
+		uuid:       bucketUUID,
+		vbCount:    vbCount,
+	}
+
+	obj, err := l.connPool.Get(bucketUUID, l.opts.poolGetTimeout, params)
 	if err != nil {
 		return
 	}
@@ -548,16 +581,24 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 
 // Processes conflict bucket write errors by raising necessary events.
 // Returns the fatality level of error passed in (needs retry, no retry etc)
-func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common.PipelineType) writeError {
+// It also returns a boolean when true means the caller should fetch the bucketUUID
+// and vbCount.
+func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common.PipelineType) (writeError, bool) {
+	refreshBucketInfo := false
 	if err == nil {
-		return noRetryErr
+		return noRetryErr, refreshBucketInfo
 	}
 
 	nwError := l.utils.IsSeriousNetError(err)
 	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
 
 	if nwError {
-		return networkErr
+		refreshBucketInfo = true
+		return networkErr, refreshBucketInfo
+	}
+
+	if base.NoBucketError(err) {
+		refreshBucketInfo = true
 	}
 
 	switch err {
@@ -566,7 +607,7 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 	case baseclog.ErrNotMyVBucket:
 		fallthrough
 	case baseclog.ErrUnknownCollection:
-		return needRetryErr
+		return needRetryErr, refreshBucketInfo
 	case baseclog.ErrImpossibleResp:
 		fallthrough
 	case baseclog.ErrFatalResp:
@@ -576,20 +617,38 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 	case baseclog.ErrGuardrail:
 		fallthrough
 	case baseclog.ErrUnknownResp:
-		return noRetryErr
+		return noRetryErr, refreshBucketInfo
 	default:
-		return unknownErr
+		return unknownErr, refreshBucketInfo
 	}
 }
 
-// writeDocRetry arranges for a connection from the pool which the supplied function can use. The function
 // wraps the supplied function to check for network errors and appropriately releases the connection back
 // to the pool
 func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) error, originatingPipelineType common.PipelineType) (err error) {
 	var conn Connection
 	var nwError bool
 	for i := 0; i < l.opts.networkRetryCount; i++ {
-		conn, err = l.getFromPool(bucketName)
+		// Step1: Try to get bucketUUID and vbCount from cache
+		// It is possible that its not there and we fetch it live
+		// but we consume one retry count. This is to prevent infinte loop.
+		bucketUUID, vbCount, ok := l.manifestCache.GetBucketInfo(bucketName)
+		if !ok {
+			l.logger.Infof("failed to find bucketUUID bucket=%s, fetching bucket details", bucketName)
+			err = l.manifestCache.UpdateBucketInfoByFn(bucketName, l.fetchBucketUUID)
+			if err != nil {
+				l.logger.Errorf("failed to update bucketUUID bucket=%s, err=%v", bucketName, err)
+				time.Sleep(l.opts.networkRetryInterval)
+			}
+			continue
+		}
+
+		l.logger.Debugf("writeDocRetry using bucketName=%s bucketUUID=%s vbCount=%d", bucketName, bucketUUID, vbCount)
+
+		// Step2: Get connection from the pool
+		// It is possible that bucketUUID does not exists and hence this can fail
+		// So we consume one retry.
+		conn, err = l.getFromPool(bucketName, bucketUUID, vbCount)
 		if err != nil {
 			if base.SelectBucketErrBucketDNE(err) {
 				// the conflict bucket doesn't exist. No need to retry.
@@ -612,17 +671,23 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 				conn.Id(), l.id, bucketName)
 		}
 
+		// Step3: Call the main function which writes the doc.
 		// The call to connPool.Put is not advised to be done in a defer here.
 		// This is because calling defer in a loop accumulates multiple defers
 		// across the iterations and calls all of them when function exits which
 		// will be error prone in this case
 		err = fn(conn)
+		if err != nil {
+			l.logger.Errorf("writeDocRetry failed bucketName=%s bucketUUID=%s vbCount=%d err=%v",
+				bucketName, bucketUUID, vbCount, err)
+		}
+
 		if err == baseclog.ErrScopeColNotFound {
 			err = baseclog.ErrRules
 			return
 		}
 
-		writeErr := l.processWriteError(err, originatingPipelineType)
+		writeErr, refreshBucketInfo := l.processWriteError(err, originatingPipelineType)
 		if err == nil || writeErr.noRetryNeeded() {
 			// there was no network error and the write was a success or
 			// the write returned a status code which cannot be fixed by retry
@@ -635,7 +700,7 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 						conn.Id(), false, err, l.id, bucketName)
 				}
 			}
-			l.connPool.Put(bucketName, conn, false)
+			l.connPool.Put(bucketUUID, conn, false)
 			break
 		}
 
@@ -643,9 +708,19 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 		nwError = writeErr.isNWError()
 		// Errors are not logged, but captured in the form of stats.
 		// One has to turn on debug logging to capture the errors that are not captured by the stats
-		l.logger.Debugf("error in writing doc to conflict bucket err=%v, id=%d lid=%s nwError=%v bucket=%s", err, conn.Id(), l.id, nwError, bucketName)
-		l.connPool.Put(bucketName, conn, nwError)
+		l.connPool.Put(bucketUUID, conn, nwError)
+
+		if refreshBucketInfo {
+			err = l.manifestCache.UpdateBucketInfoByFn(bucketName, l.fetchBucketUUID)
+			if err != nil {
+				// Since bucket info is fetched from ns_server ideally it should cause any
+				// error. So we fail here instead of retrying
+				return err
+			}
+		}
+
 		time.Sleep(l.opts.networkRetryInterval)
+
 	}
 
 	return err
@@ -1166,4 +1241,114 @@ func (l *LoggerImpl) unhibernate() {
 	if err != nil && err != base.ErrorNotFound {
 		l.logger.Errorf("Error dismissing event=%v rid=%s lid=%s", l.hibernationEventId, l.replId, l.id)
 	}
+}
+
+func (l *LoggerImpl) updateBucketUUIDFromRules(r *baseclog.Rules, force bool) (err error) {
+	bucketList := r.GetTargetBuckets()
+	l.logger.Infof("updating bucket UUID from rules. Buckets=%v", bucketList)
+	return l.updateBucketUUID(bucketList, force)
+}
+
+// updateBucketUUID updates the uuid & vbCount for the given list of buckets
+// force = false means bucket info will be fetched only if bucket is not present
+// in the cache. True means details will be fetched always
+func (l *LoggerImpl) updateBucketUUID(bucketList []string, force bool) (err error) {
+
+	for _, bucketName := range bucketList {
+		if !force {
+			_, _, ok := l.manifestCache.GetBucketInfo(bucketName)
+			if ok {
+				continue
+			}
+		}
+
+		uuid, vbCount, err := l.fetchBucketUUID(bucketName)
+		if err != nil {
+			return err
+		}
+
+		l.logger.Debugf("fetched bucket uuid. Bucket=[%s], UUID=%s, vbCount=%d", bucketName, uuid, vbCount)
+		l.manifestCache.UpdateBucketInfo(bucketName, uuid, vbCount)
+	}
+
+	return
+}
+
+// fetchBucketUUID queries ns_server to get the bucket info and extracts bucket UUID and vb count
+func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount int, err error) {
+	authType := base.HttpAuthMechPlain
+	hostname, err := l.topSvc.MyConnectionStr()
+	if err != nil {
+		return
+	}
+
+	var certificates, clientKey, clientCert []byte
+	if l.security.IsClusterEncryptionLevelStrict() {
+		authType = base.HttpAuthMechHttps
+		certificates = l.security.GetCACertificates()
+		if len(certificates) == 0 {
+			err = fmt.Errorf("expected non-empty certificates")
+			return
+		}
+
+		isMandatory, err := l.topSvc.ClientCertIsMandatory()
+		if err == nil && isMandatory {
+			// If n2n encryption is required and client cert is mandatory, then the traditional
+			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
+			// provided by the ns_server
+			clientCert, clientKey = l.security.GetClientCertAndKey()
+		}
+	}
+
+	l.logger.Infof("fetching bucket info to get UUID and vbCount, id=%s, bucket=%s", l.id, bucketName)
+	data, err := l.utils.GetBucketInfo(hostname, bucketName, "", "", authType, certificates, true, clientCert, clientKey, l.logger)
+	if err != nil {
+		return
+	}
+
+	uuid, err = getString(data, base.UUIDKey)
+	if err != nil {
+		return
+	}
+
+	vbCount, err = getInt(data, base.NumVBucketsKey)
+	if err != nil {
+		return
+	}
+
+	return
+}
+
+func getString(m map[string]interface{}, key string) (val string, err error) {
+	data, ok := m[key]
+	if !ok {
+		err = fmt.Errorf("key [%s] not found in map", key)
+		return
+	}
+
+	val, ok = data.(string)
+	if !ok {
+		err = fmt.Errorf("key=[%s] value=[%v] expected string, got=%T", key, data, data)
+		return
+	}
+
+	return
+}
+
+func getInt(m map[string]interface{}, key string) (val int, err error) {
+	data, ok := m[key]
+	if !ok {
+		err = fmt.Errorf("key [%s] not found in map", key)
+		return
+	}
+
+	tmp, ok := data.(float64)
+	if !ok {
+		err = fmt.Errorf("key=[%s] value=[%v] expected float64 got=%T", key, data, data)
+		return
+	}
+
+	val = int(tmp)
+
+	return
 }

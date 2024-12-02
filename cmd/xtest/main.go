@@ -84,19 +84,15 @@ func main() {
 
 	log.DefaultLoggerContext.SetLogLevel(logLevel)
 
-	addrGetter := &MemAddrGetter{
-		addr: cfg.MemcachedAddr,
-	}
-
-	xsvc, err := InitXdcrServices(&cfg)
+	xsvc, err = InitXdcrServices(&cfg)
 	if err != nil {
 		fmt.Printf("error in initing services: %v\n", err)
 		os.Exit(1)
 	}
 
-	utils := utils.NewUtilities()
+	xsvc.Utils = utils.NewUtilities()
 
-	conflictlog.InitManager(log.DefaultLoggerContext, utils, addrGetter, xsvc.SecuritySvc, nil,
+	conflictlog.InitManager(log.DefaultLoggerContext, xsvc.TopSvc, xsvc.Utils, xsvc.SecuritySvc, nil,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
 		base.DefaultCLogPoolConnLimit,
@@ -109,6 +105,8 @@ func main() {
 		err = throttlerTest(cfg)
 	case "cbauthTest":
 		err = cbauthTest(cfg)
+	case "gomemcachedTest":
+		err = gomemcachedTest(cfg)
 	default:
 		fmt.Println("error: unknown config name =", cfg.Name)
 	}

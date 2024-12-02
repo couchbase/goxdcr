@@ -22,7 +22,7 @@ type fakeConnection struct {
 	id    int64
 }
 
-func newFakeConnection(bucketName string) (io.Closer, error) {
+func newFakeConnection(bucketName string, params interface{}) (io.Closer, error) {
 	return &fakeConnection{
 		id: NewConnId(),
 	}, nil
@@ -51,7 +51,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 	pool := iopool.NewConnPool(nil, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		func(bucketName string) (io.Closer, error) {
+		func(bucketName string, params interface{}) (io.Closer, error) {
 			return &fakeConnection{
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
@@ -61,7 +61,10 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 
 	fakeConnectionSleep = 1 * time.Second
 
-	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, nil, pool, nil, WithCapacity(20))
+	mcache := NewManifestCache()
+	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, nil, nil, nil, pool, nil,
+		mcache,
+		WithCapacity(20))
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -131,7 +134,8 @@ func TestLoggerImpl_basicClose(t *testing.T) {
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
 		newFakeConnection, nil)
 
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil)
+	mcache := NewManifestCache()
+	l, err := newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache)
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -147,7 +151,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	pool := iopool.NewConnPool(nil, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		func(bucketName string) (io.Closer, error) {
+		func(bucketName string, params interface{}) (io.Closer, error) {
 			return &fakeConnection{
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
@@ -157,8 +161,9 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 
 	fakeConnectionSleep = 1 * time.Second
 
+	mcache := NewManifestCache()
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(2))
+	l, err := newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -169,7 +174,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(2))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20), WithWorkerCount(2))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -181,7 +186,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20), WithWorkerCount(3))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20), WithWorkerCount(3))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -200,7 +205,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	pool := iopool.NewConnPool(nil, 10,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
-		func(bucketName string) (io.Closer, error) {
+		func(bucketName string, params interface{}) (io.Closer, error) {
 			return &fakeConnection{
 				sleep: &fakeConnectionSleep,
 				id:    NewConnId(),
@@ -215,8 +220,9 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 		assert.Equal(t, cap(l.logReqCh), num)
 	}
 
+	mcache := NewManifestCache()
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
+	l, err := newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -228,7 +234,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -240,7 +246,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithCapacity(20))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithCapacity(20))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
@@ -253,7 +259,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	// 4. non-empty queue - test conflicts are not lost
 	numItems := 100000
 	readCount := 0
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithWorkerCount(0), WithCapacity(numItems))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithWorkerCount(0), WithCapacity(numItems))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.logQueueCap, numItems)
 	assert.Nil(t, l.Start(nil))
@@ -309,7 +315,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 5. test that the worker count remains the same
-	l, err = newLoggerImpl(nil, "1234", utils, nil, pool, nil, WithWorkerCount(10))
+	l, err = newLoggerImpl(nil, "1234", utils, nil, nil, nil, pool, nil, mcache, WithWorkerCount(10))
 	assert.Nil(t, err)
 	assert.Equal(t, l.opts.workerCount, 10)
 	assert.Nil(t, l.Start(nil))

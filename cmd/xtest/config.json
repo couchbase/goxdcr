@@ -1,8 +1,10 @@
 {
-    "name": "conflictLogLoadTest",
+    "name": "gomemcachedTest",
     "logLevel": "Info",
     "debugPort": 7171,
     "memcachedAddr": "127.0.0.1:12000",
+    "sourceKVAdminPort": 9005,
+    "xdcrRestPort": 13005,
 
     "clientCertFile": "/Users/sudeepjathar/cb/clog/ns_server/data/n_0/config/certs/client_chain.pem",
     "clientKeyFile":  "/Users/sudeepjathar/cb/clog/ns_server/data/n_0/config/certs/client_pkey.pem",
@@ -70,19 +72,10 @@
         }
     },
 
-    "gocbcoreTest": {
-        "addr": "127.0.0.1:12000",
-        "target": {
-            "bucket": "B1",
-            "scope": "S1",
-            "collection": "C1"
-        },
-
-        "count": 10,
-        "key": "abc-1",
-        "doc": {
-            "id": "abc-1",
-            "name": "Tony Stark"
-        }
+    "gomemcachedTest": {
+        "bucket": "conflicts",
+        "bucketUUID": "5cdbcb40a0b4c358570eca5990d65dd0",
+        "vbCount": 128,
+        "address": "127.0.0.1:12000"
     }
 }

@@ -44,6 +44,21 @@ type Rules struct {
 	Mapping map[base.CollectionNamespace]Target
 }
 
+func (r *Rules) GetTargetBuckets() (blist []string) {
+	m := map[string]bool{}
+	m[r.Target.Bucket] = true
+
+	for _, target := range r.Mapping {
+		m[target.Bucket] = true
+	}
+
+	for bucket := range m {
+		blist = append(blist, bucket)
+	}
+
+	return
+}
+
 func (r *Rules) Validate() (err error) {
 	if !r.Target.IsComplete() {
 		err = ErrIncompleteTarget

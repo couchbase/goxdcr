@@ -33,6 +33,8 @@ type MemcachedConn struct {
 	logger        *log.CommonLogger
 	securityInfo  SecurityInfo
 	bucketName    string
+	bucketUUID    string
+	vbCount       int
 	connMap       map[string]mcc.ClientIface
 	manifestCache *ManifestCache
 	utilsObj      utils.UtilsIface
@@ -41,7 +43,17 @@ type MemcachedConn struct {
 	skipVerify    bool
 }
 
-func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName string, addr string, securityInfo SecurityInfo, skipVerifiy bool) (m *MemcachedConn, err error) {
+func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName, bucketUUID string, vbCount int, addr string, securityInfo SecurityInfo, skipVerifiy bool) (m *MemcachedConn, err error) {
+	if bucketUUID == "" {
+		err = fmt.Errorf("bucketUUID cannot be empty")
+		return
+	}
+
+	if vbCount == 0 {
+		err = fmt.Errorf("vbCount cannot be zero")
+		return
+	}
+
 	connId := NewConnId()
 
 	user, passwd, err := cbauth.GetMemcachedServiceAuth(addr)
@@ -52,6 +64,8 @@ func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCa
 	m = &MemcachedConn{
 		id:            connId,
 		bucketName:    bucketName,
+		bucketUUID:    bucketUUID,
+		vbCount:       vbCount,
 		addr:          addr,
 		securityInfo:  securityInfo,
 		logger:        logger,
@@ -146,7 +160,8 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 	features.DataType = true
 	// For setMeta, negotiate compression, if it is set
 	features.CompressionType = base.CompressionTypeSnappy
-	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s encStrict=%v tlsSkipVerify=%v features=%+v", m.id, user, addr, isEncStrict, m.skipVerify, features)
+	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s bucket=%s bucketUUID=%s encStrict=%v tlsSkipVerify=%v features=%+v",
+		m.id, user, addr, m.bucketName, m.bucketUUID, isEncStrict, m.skipVerify, features)
 
 	if isEncStrict {
 		conn, err = m.newTLSConn(addr, user, passwd)
@@ -394,7 +409,7 @@ func (m *MemcachedConn) getConnByVB(vbno uint16, replicaNum int) (conn mcc.Clien
 func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target baseclog.Target) (err error) {
 	checkCache := true
 	var collId uint32
-	vbNo := base.GetVBucketNo(key, base.NumberOfVbs)
+	vbNo := base.GetVBucketNo(key, m.vbCount)
 
 	var conn mcc.ClientIface
 

@@ -123,6 +123,7 @@ var NumberOfReplicas = "numReplicas"
 var StorageBackendKey = "storageBackend"
 var OrchestratorNodeKey = "orchestrator"
 var OtpNodeKey = "otpNode"
+var NumVBucketsKey = "numVBuckets"
 
 // Value for StorageBackendKey
 var Magma = "magma"

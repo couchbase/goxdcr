@@ -268,7 +268,11 @@ func main() {
 		}
 
 		thThrottler := throttlerSvcImpl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey))
-		conflictlog.InitManager(log.GetOrCreateContext(base.CLogManagerKey), utils, top_svc, securitySvc, thThrottler,
+		conflictlog.InitManager(log.GetOrCreateContext(base.CLogManagerKey),
+			top_svc,
+			utils,
+			securitySvc,
+			thThrottler,
 			globalSettings.GetCLogPoolGCInterval(), globalSettings.GetCLogPoolReapInterval(), globalSettings.GetCLogPoolConnLimit())
 
 		// start replication manager in normal mode

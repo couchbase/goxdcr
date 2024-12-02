@@ -2531,6 +2531,10 @@ func SelectBucketErrBucketDNE(err error) bool {
 	return strings.Contains(err.Error(), mc.StatusNames[mc.KEY_ENOENT])
 }
 
+func NoBucketError(err error) bool {
+	return strings.Contains(err.Error(), mc.StatusNames[mc.NO_BUCKET])
+}
+
 // this is used to decompose a collection ID prefixed document key
 // into two parts - collection ID and document key.
 // returns (collection ID, start index of doc key, error if any)

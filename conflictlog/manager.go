@@ -10,6 +10,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base/iopool"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
@@ -33,14 +34,6 @@ type SecurityInfo interface {
 	GetClientCertAndKey() ([]byte, []byte)
 }
 
-type MemcachedAddrGetter interface {
-	MyMemcachedAddr() (string, error)
-}
-
-type EncryptionInfoGetter interface {
-	IsMyClusterEncryptionLevelStrict() bool
-}
-
 type managerSingleton struct {
 	once sync.Once
 }
@@ -55,7 +48,7 @@ func GetManager() (Manager, error) {
 }
 
 // InitManager intializes global conflict manager
-func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrGetter MemcachedAddrGetter, securityInfo SecurityInfo, throttler throttlerSvc.ThroughputThrottlerSvc, poolGCInterval, poolReapInterval time.Duration, connLimit int) {
+func InitManager(loggerCtx *log.LoggerContext, topSvc service_def.XDCRCompTopologySvc, utils utils.UtilsIface, securityInfo SecurityInfo, throttler throttlerSvc.ThroughputThrottlerSvc, poolGCInterval, poolReapInterval time.Duration, connLimit int) {
 	singleton.once.Do(func() {
 		logger := log.NewLogger(ConflictManagerLoggerName, loggerCtx)
 
@@ -63,14 +56,14 @@ func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrG
 
 		impl := &managerImpl{
 			logger:           logger,
-			memdAddrGetter:   memdAddrGetter,
 			securityInfo:     securityInfo,
 			utils:            utils,
-			manifestCache:    newManifestCache(),
+			manifestCache:    NewManifestCache(),
 			poolGCInterval:   poolGCInterval,
 			poolReapInterval: poolReapInterval,
 			connLimit:        connLimit,
 			throttlerSvc:     throttler,
+			topSvc:           topSvc,
 		}
 
 		impl.setConnPool()
@@ -79,15 +72,21 @@ func InitManager(loggerCtx *log.LoggerContext, utils utils.UtilsIface, memdAddrG
 	})
 }
 
+type connParams struct {
+	bucketName string
+	uuid       string
+	vbCount    int
+}
+
 // managerImpl implements conflict manager
 type managerImpl struct {
-	logger         *log.CommonLogger
-	memdAddrGetter MemcachedAddrGetter
-	securityInfo   SecurityInfo
-	utils          utils.UtilsIface
-	connPool       iopool.ConnPool
-	manifestCache  *ManifestCache
-	throttlerSvc   throttlerSvc.ThroughputThrottlerSvc
+	logger        *log.CommonLogger
+	securityInfo  SecurityInfo
+	utils         utils.UtilsIface
+	connPool      iopool.ConnPool
+	manifestCache *ManifestCache
+	throttlerSvc  throttlerSvc.ThroughputThrottlerSvc
+	topSvc        service_def.XDCRCompTopologySvc
 
 	poolGCInterval   time.Duration
 	poolReapInterval time.Duration
@@ -99,7 +98,7 @@ type managerImpl struct {
 
 func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error) {
 	opts = append(opts, WithSkipTlsVerify(base.CLogSkipTlsVerify))
-	l, err = newLoggerImpl(logger, replId, m.utils, m.throttlerSvc, m.connPool, eventsProducer, opts...)
+	l, err = newLoggerImpl(logger, replId, m.utils, m.securityInfo, m.throttlerSvc, m.topSvc, m.connPool, eventsProducer, m.manifestCache, opts...)
 	return
 }
 
@@ -130,20 +129,25 @@ func (m *managerImpl) ConnPool() iopool.ConnPool {
 	return m.connPool
 }
 
-func (m *managerImpl) newMemcachedConn(bucketName string) (conn io.Closer, err error) {
-	m.logger.Infof("creating new conflict memcached bucket=%s encStrict=%v", bucketName, m.securityInfo.IsClusterEncryptionLevelStrict())
-	addr, err := m.memdAddrGetter.MyMemcachedAddr()
+func (m *managerImpl) newMemcachedConn(bucketUUID string, params interface{}) (conn io.Closer, err error) {
+	connParams := params.(*connParams)
+	m.logger.Infof("creating new conflict memcached bucket=%s bucketUUID=%s vbCount=%d encStrict=%v",
+		connParams.bucketName, connParams.uuid, connParams.vbCount, m.securityInfo.IsClusterEncryptionLevelStrict())
+	addr, err := m.topSvc.MyMemcachedAddr()
 	if err != nil {
 		return
 	}
 
-	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache, bucketName, addr, m.securityInfo, m.skipTlsVerify)
+	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache,
+		connParams.bucketName, connParams.uuid, connParams.vbCount,
+		addr, m.securityInfo, m.skipTlsVerify)
 	return
 }
 
 // connPoolBucketDelFn is a callback which is called from connection pool
 // The pool will call when bucket is being deleted. This happens when the bucket is not used for
 // a defined interval.
-func (m *managerImpl) connPoolBucketDelFn(bucket string) {
-	m.manifestCache.Delete(bucket)
+func (m *managerImpl) connPoolBucketDelFn(bucketUUID string) {
+	m.logger.Infof("deleting bucketUUID=%s from bucket cache", bucketUUID)
+	m.manifestCache.DeleteByUUID(bucketUUID)
 }
