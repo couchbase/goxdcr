@@ -1281,7 +1281,6 @@ func (xmem *XmemNozzle) cleanupBufferedMCRequest(req *bufferedMCRequest) {
 		xmem.recycleDataObj(req.req)
 		resetBufferedMCRequest(req)
 	}
-
 }
 
 func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) error {
@@ -2969,24 +2968,25 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	return nil
 }
 
-// If the change is from targetCluster, we don't need to send it
+// If the change is from targetCluster, we don't need to send it back.
+// In fact, it will eventually lose CR. So we can short-circuit it's lifetime to
+// avoid unnecessary processing down the line.
 func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, error) {
-	if !xmem.isCCR() {
+	if !xmem.usesHlv(req) {
 		return false, nil
 	}
 
-	if req.RetryCRCount == 0 {
-		doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
-		meta, err := doc.GetMetadata(xmem.uncompressBody)
-		if err != nil {
-			return false, err
-		}
-		src := meta.GetHLV().GetCvSrc()
-		if src == xmem.targetActorId {
-			return true, nil
-		}
+	if req.RetryCRCount > 0 {
+		return false, nil
 	}
-	return false, nil
+
+	doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
+	meta, err := doc.GetMetadata(xmem.uncompressBody)
+	if err != nil {
+		return false, err
+	}
+
+	return meta.GetHLV().GetCvSrc() == xmem.targetActorId, nil
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) error {
@@ -3386,8 +3386,18 @@ func (xmem *XmemNozzle) nonOptimisticCROnly(req *base.WrappedMCRequest) bool {
 		return false
 	}
 
-	return xmem.getMobileCompatible() != base.MobileCompatibilityOff ||
-		(xmem.getCrossClusterVers() && req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
+	return xmem.getMobileCompatible() != base.MobileCompatibilityOff || xmem.usesHlv(req)
+
+}
+
+// returns true if HLV can be stamped/updated for this req.
+func (xmem *XmemNozzle) usesHlv(req *base.WrappedMCRequest) bool {
+	if xmem.config.vbHlvMaxCas == nil || req == nil {
+		return false
+	}
+
+	return (xmem.getCrossClusterVers() &&
+		req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
 		xmem.isCCR()
 }
 

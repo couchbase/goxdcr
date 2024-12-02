@@ -299,7 +299,7 @@ func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 	if cvVer > cvCas || cvVer > cas {
 		// ver should never be larger than cvCas.
 		// For server
-		err = fmt.Errorf("cvVer shoud not be greater than cvCas or cas, cvCas=%v,ver=%v,cvCasHex=%v,verHex=%s,pv=%s,mv=%s", cvCas, cvVer, cvCasHex, verHex, pv, mv)
+		err = fmt.Errorf("cvVer shoud not be greater than cvCas or cas: cas=%v,cvCas=%v,ver=%v,cvCasHex=%v,verHex=%s,pv=%s,mv=%s", cas, cvCas, cvVer, cvCasHex, verHex, pv, mv)
 		return
 	}
 	pvMap, err1 = xattrVVtoDeltas(pv)

@@ -32,7 +32,17 @@ func NewSourceDocument(req *base.WrappedMCRequest, source hlv.DocumentSourceId) 
 	}
 }
 
+// This routine caches the result in doc.req to benefit
+// the future callers.
 func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRMetadata, error) {
+	if doc.req.HLVModeOptions.SourceDocMetadata != nil {
+		meta, ok := doc.req.HLVModeOptions.SourceDocMetadata.(*CRMetadata)
+		if ok {
+			// return the cached value.
+			return meta, nil
+		}
+	}
+
 	docMeta := base.DecodeSetMetaReq(doc.req)
 	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev, err := getHlvFromMCRequest(doc.req, uncompressFunc)
 	if err != nil {
@@ -51,6 +61,9 @@ func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRM
 	}
 
 	doc.req.ImportMutation = meta.isImport
+
+	// cache it for future callers to avoid recomputations.
+	doc.req.HLVModeOptions.SourceDocMetadata = &meta
 
 	return &meta, nil
 }
@@ -81,6 +94,9 @@ func NewTargetDocument(key []byte, resp *mc.MCResponse, specs []base.SubdocLooku
 	}, nil
 }
 
+// This routine as of now does not cache the result. Each call to
+// this routine will involve fresh computation. We may think of caching it
+// for CCR, but right now it is called only once in non-CCR code paths.
 func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 	if doc.resp.Resp.Status == mc.KEY_ENOENT {
 		return nil, base.ErrorDocumentNotFound
