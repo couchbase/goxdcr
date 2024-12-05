@@ -163,8 +163,13 @@ function downloadCBServerDeb {
 		return 0
 	fi
 
+	local downloadName="${CBServerLink[$version]:-}"
+	if [[ $(uname -m) == "x86_64" ]]; then
+		downloadName=$(echo $downloadName | sed 's/arm64/amd64/g')
+	fi
+
 	checkBuildServerAccessibility
-	wgetWithProgress "${CBServerLink[$version]}" "$localFileName"
+	wgetWithProgress "$downloadName" "$localFileName"
 }
 
 function downloadSGWDeb {
