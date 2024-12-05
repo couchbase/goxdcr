@@ -34,9 +34,9 @@ const (
 	GoMaxProcsKey               = "gomaxprocs"
 	GoGCKey                     = "gogc"
 	GenericServicesLogLevelKey  = "genericServicesLogLevel"
-	CLogConnPoolLimitKey        = "CLogConnPoolLimit"
-	CLogConnPoolGCIntervalKey   = "CLogConnPoolGCInterval"
-	CLogConnPoolReapIntervalKey = "CLogConnPoolReapInterval"
+	CLogConnPoolLimitKey        = base.CLogConnPoolLimit
+	CLogConnPoolGCIntervalKey   = base.CLogConnPoolGCInterval
+	CLogConnPoolReapIntervalKey = base.CLogConnPoolReapInterval
 )
 
 var genericServices = []string{base.UtilsKey, base.SecuritySvcKey, base.TopoSvcKey, base.MetadataSvcKey,
