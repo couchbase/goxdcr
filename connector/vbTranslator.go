@@ -106,7 +106,7 @@ func (n *VBTranslatorCommon) GetUpstreamObjRecycler() func(obj interface{}) {
 				recycleObj(ns.GetRecycleVbnoHint(), obj)
 			}
 		case *base.WrappedMCRequest:
-			vbno := obj.(*base.WrappedMCRequest).Req.VBucket
+			vbno := obj.(*base.WrappedMCRequest).GetSourceVB()
 			recycleObj(vbno, obj)
 		default:
 			panic(fmt.Sprintf("Coding bug type is %v", reflect.TypeOf(obj)))
@@ -136,7 +136,7 @@ func NewNoOpTranslator() *NoOpVBTranslator {
 func (n *NoOpVBTranslator) Forward(data interface{}) error {
 	uprEvent, ok := data.(*base.WrappedUprEvent)
 	if !ok {
-		return fmt.Errorf("Incorrect data format: %v", reflect.TypeOf(data))
+		return fmt.Errorf("incorrect data format: %v", reflect.TypeOf(data))
 	}
 
 	return n.forwardDataToDownstream(data, uprEvent.GetTargetVB())
@@ -193,7 +193,7 @@ func (v *VBTranslator) Forward(data interface{}) error {
 	newVB := uint16(CbCrc(wrappedUpr.UprEvent.Key) % uint32(v.tgtNumVBs))
 	wrappedUpr.TranslatedVB = &newVB
 
-	return v.forwardDataToDownstream(data, newVB)
+	return v.forwardDataToDownstream(data, wrappedUpr.GetSourceVB())
 }
 
 func (v *VBTranslator) GetLayoutString(upstreamPart common.Part) string {
