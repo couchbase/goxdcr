@@ -1501,13 +1501,17 @@ func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata
 			}
 		} else {
 			ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
-			ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+			if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
+				ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+			}
 		}
 	} else {
 		// Latest one we've seen so far
 		ckptMgr.cachedBrokenMap.brokenMapHistories[ckptMgr.cachedBrokenMap.correspondingTargetManifest] = ckptMgr.cachedBrokenMap.brokenMap.Clone()
 		ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
-		ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+		if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
+			ckptMgr.cachedBrokenMap.brokenMap = onePair.BrokenMap.Clone()
+		}
 	}
 }
 
