@@ -2478,7 +2478,7 @@ func (v *VBsCkptsDocMap) GetGlobalInfoDoc() (*GlobalInfoCompressedDoc, error) {
 	}
 
 	_, shaMap, err := v.SnappyCompress()
-	// Darshan TODO - the shaMap here contains the broken mappings as well
+	// Darshan TODO - the shaMap here contains the broken mappings as well - Can save some bytes over the wire
 	// Note - Currently brokenMappings are populated seperatly in the payload
 	if err != nil {
 		return nil, err
@@ -2968,7 +2968,7 @@ func (g *GlobalInfoCompressedDoc) SameAs(other *GlobalInfoCompressedDoc) bool {
 
 func (g *GlobalInfoCompressedDoc) ToShaMap() (ShaToGlobalInfoMap, error) {
 	if g == nil {
-		return nil, fmt.Errorf("Calling ToShaMap() on a nil GlobalTimestampCompresedDoc")
+		return nil, fmt.Errorf("calling ToShaMap() on a nil GlobalTimestampCompresedDoc")
 	}
 
 	errorMap := make(base.ErrorMap)
@@ -2982,14 +2982,16 @@ func (g *GlobalInfoCompressedDoc) ToShaMap() (ShaToGlobalInfoMap, error) {
 		gInfoMetaObj := &GlobalInfoMetaObj{}
 		err := gInfoMetaObj.SnappyDecompress(oneRecord.CompressedMapping)
 		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = err
+			if err != ErrorGlobalInfoWrongType {
+				errorMap[oneRecord.Sha256Digest] = err
+			}
 			continue
 		}
 
 		// Sanity check
 		checkSha, err := gInfoMetaObj.Data.Sha256()
 		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("validing SHA failed %v", err)
 			continue
 		}
 		checkShaString := fmt.Sprintf("%x", checkSha[:])
