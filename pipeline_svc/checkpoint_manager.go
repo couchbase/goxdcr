@@ -2521,7 +2521,7 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 
 func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifestIds map[uint16]uint64, vbno uint16) (metadata.CollectionNamespaceMapping, uint64) {
 	tgtManifestId, ok := tgtManifestIds[vbno]
-	if !ok {
+	if !ok { // Darshan TODO - this can be very spammy
 		ckmgr.logger.Warnf("unable to find Target manifest ID for vb %v", vbno)
 	}
 
