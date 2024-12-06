@@ -162,7 +162,7 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 
 func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
 	ckptMgr := &pipeline_svc.CheckpointMgrSvc{}
-	ckptMgr.On("DelSingleVBCheckpoint", unitTestFullTopic, mock.Anything).Return(nil)
+	ckptMgr.On("DelSingleVBCheckpoint", unitTestFullTopic, mock.Anything, mock.Anything).Return(nil)
 	return ckptMgr
 }
 

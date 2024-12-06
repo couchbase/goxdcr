@@ -1,0 +1,99 @@
+packages:
+  github.com/couchbase/goxdcr/service_def:
+    config:
+      recursive: True
+      all: True
+      dir: "service_def/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/pipeline:
+    config:
+      recursive: True
+      all: True
+      dir: "pipeline/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/peerToPeer:
+    config:
+      recursive: True
+      all: True
+      dir: "peerToPeer/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/replication_manager:
+    config:
+      recursive: True
+      all: True
+      dir: "replication_manager/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/metadata_svc:
+    config:
+      recursive: True
+      all: True
+      dir: "metadata_svc/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/utils:
+    config:
+      recursive: True
+      all: True
+      dir: "utils/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/common:
+    config:
+      recursive: True
+      all: True
+      dir: "common/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/parts:
+    config:
+      recursive: True
+      all: True
+      dir: "parts/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/pipeline_svc:
+    config:
+      recursive: True
+      all: True
+      dir: "pipeline_svc/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/pipeline_manager:
+    config:
+      recursive: True
+      all: True
+      dir: "pipeline_manager/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/metadata:
+    config:
+      recursive: True
+      all: True
+      dir: "metadata/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/factory:
+    config:
+      recursive: True
+      all: True
+      dir: "factory/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/base/filter:
+    config:
+      recursive: True
+      all: True
+      dir: "base/filter/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/base/helpers:
+    config:
+      recursive: True
+      all: True
+      dir: "base/helpers/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
