@@ -38,6 +38,7 @@ var ErrorBackfillSpecHasNoVBTasks = errors.New("backfill spec VBTasksMap is empt
 var ErrorNoKVService = errors.New("this node does not have KV service")
 var ErrorBackfillSpecUpdatePending = errors.New("backfill spec update is still pending")
 var ErrorBackfillSpecUpdateStatusNotFound = errors.New("backfill spec update status object not found")
+var ErrorAutoPauseString = "SkipAutoGC is set - forcing it to be paused"
 
 var default_failure_restart_interval = 10
 
@@ -64,6 +65,11 @@ type PipelineManager struct {
 	utils      utilities.UtilsIface
 
 	eventIdWell *int64
+
+	// Replication Spec GC Counters
+	gcMtx    sync.Mutex
+	srcGcMap specGCMap
+	tgtGcMap specGCMap
 }
 
 // External APIs
@@ -157,6 +163,8 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		backfillReplSvc:        backfillReplSvc,
 		eventIdWell:            eventIdWell,
 		getBackfillMgr:         getBackfillMgr,
+		srcGcMap:               make(specGCMap),
+		tgtGcMap:               make(specGCMap),
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -184,6 +192,11 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (pipeline.Re
 
 // Should be called only from serializer to prevent race
 func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error {
+	pipelineMgr.gcMtx.Lock()
+	delete(pipelineMgr.srcGcMap, topic)
+	delete(pipelineMgr.tgtGcMap, topic)
+	pipelineMgr.gcMtx.Unlock()
+
 	rs, err := pipelineMgr.ReplicationStatus(topic)
 	if err != nil {
 		return err
@@ -203,7 +216,6 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -342,7 +354,7 @@ func (pipelineMgr *PipelineManager) validateAndGCSpecs() {
 		spec := rep_status.Spec()
 		if spec != nil {
 			pipelineMgr.logger.Infof("checking pipeline spec=%v, source bucket uuid=%v", spec, spec.SourceBucketUUID)
-			pipelineMgr.repl_spec_svc.ValidateAndGC(spec)
+			pipelineMgr.ValidateAndGC(spec)
 		}
 	}
 }
@@ -2606,5 +2618,173 @@ func (r *PipelineUpdater) checkAndPublishRCError(status metadata.ConnectivitySta
 		case metadata.ConnError:
 			r.rep_status.AddError(fmt.Errorf("%v%v%v", errPrefix, ConnErrorString, ConnErrorCommonSuffix))
 		}
+	}
+}
+
+func (pipelineMgr *PipelineManager) specHasAlreadyAutoPaused(spec *metadata.ReplicationSpecification) bool {
+	// If the spec has already been auto-paused, don't run gc
+	repStatus, err := pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
+	if err != nil {
+		pipelineMgr.logger.Errorf("Unable to get replication status for %v. err=%v\n", spec.Id, err)
+		return false
+	}
+	eventsList := repStatus.GetEventsManager().GetCurrentEvents()
+	if eventsList == nil {
+		return false
+	}
+
+	eventsList.Mutex.RLock()
+	defer eventsList.Mutex.RUnlock()
+	for i := 0; i < eventsList.LenNoLock(); i++ {
+		strToSearch := eventsList.EventInfos[i].GetDescAndExtrasStr()
+		if strings.Contains(strToSearch, ErrorAutoPauseString) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (pipelineMgr *PipelineManager) ValidateAndGC(spec *metadata.ReplicationSpecification) {
+	if spec.Settings.GetSkipAutoGC() && pipelineMgr.specHasAlreadyAutoPaused(spec) {
+		return
+	}
+
+	needToRemove, detailErr := pipelineMgr.gcSourceBucket(spec)
+	if !needToRemove {
+		needToRemove, detailErr = pipelineMgr.gcTargetBucket(spec)
+	}
+
+	if detailErr != nil {
+		pipelineMgr.logger.Warnf("Error validating replication specification %v. error=%v\n", spec.Id, detailErr)
+	}
+
+	if needToRemove {
+		if spec.Settings.GetSkipAutoGC() {
+			autoPauseMsg := fmt.Sprintf("Replication specification %v is no longer valid, but %s. error=%v", spec.Id, ErrorAutoPauseString, detailErr)
+			pipelineMgr.logger.Errorf(autoPauseMsg)
+			autoPauseErr := pipelineMgr.AutoPauseReplication(spec.Id)
+			if autoPauseErr != nil {
+				pipelineMgr.logger.Errorf("Unable to auto-pause replication %v. error=%v\n", spec.Id, autoPauseErr)
+			}
+			repStatus, err := pipelineMgr.GetOrCreateReplicationStatus(spec.Id, nil)
+			if err != nil {
+				pipelineMgr.logger.Errorf("Unable to get replication status for %v. error=%v\n", spec.Id, err)
+			}
+			repStatus.GetEventsProducer().AddEvent(base.PersistentMsg, autoPauseMsg, base.NewEventsMap(), nil)
+		} else {
+			pipelineMgr.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v", spec.Id, detailErr)
+			_, err1 := pipelineMgr.repl_spec_svc.DelReplicationSpecWithReason(spec.Id, detailErr.Error())
+			if err1 != nil {
+				pipelineMgr.logger.Infof("Failed to garbage collect spec %v, err=%v\n", spec.Id, err1)
+			}
+		}
+	}
+}
+
+// Returns true if need to delete the spec, and a non-nil error along with it for the reason why
+func (pm *PipelineManager) gcSourceBucket(spec *metadata.ReplicationSpecification) (bool, error) {
+	if spec == nil {
+		return false, base.ErrorInvalidInput
+	}
+
+	local_connStr, _ := pm.xdcr_topology_svc.MyConnectionStr()
+	if local_connStr == "" {
+		err := fmt.Errorf("XDCRTopologySvc.MyConnectionStr() returned empty string when validating spec %v", spec.Id)
+		return false, err
+	}
+
+	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := pm.xdcr_topology_svc.MyCredentials()
+	if err != nil {
+		pm.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
+		return false, err
+	}
+
+	bucketInfo, err := pm.utils.GetBucketInfo(local_connStr, spec.SourceBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, pm.logger)
+	if err == pm.utils.GetNonExistentBucketError() {
+		shouldDel := pm.incrementGCCnt(pm.srcGcMap, spec.Id)
+		if shouldDel {
+			err = getBucketMissingError(spec.SourceBucketName)
+			return shouldDel, err
+		}
+	} else {
+		pm.gcMtx.Lock()
+		pm.srcGcMap[spec.Id] = 0
+		pm.gcMtx.Unlock()
+	}
+	if err != nil {
+		pm.logger.Warnf("Unable to retrieve bucket info for source bucket %v due to %v", spec.SourceBucketName, err.Error())
+		return false, err
+	}
+
+	if spec.SourceBucketUUID != "" {
+		extractedUuid, err := pm.utils.GetBucketUuidFromBucketInfo(spec.SourceBucketName, bucketInfo, pm.logger)
+		if err != nil {
+			pm.logger.Warnf("Unable to check source bucket %v UUID due to %v", spec.SourceBucketName, err.Error())
+			return false, err
+		}
+
+		if extractedUuid != spec.SourceBucketUUID {
+			return true, getBucketChangedError(spec.SourceBucketName, spec.SourceBucketUUID, extractedUuid)
+		}
+	}
+	return false, nil
+}
+
+// Returns true if GC count hits the max
+func (pm *PipelineManager) incrementGCCnt(gcMap specGCMap, specId string) bool {
+	pm.gcMtx.Lock()
+	defer pm.gcMtx.Unlock()
+	gcMap[specId]++
+	if gcMap[specId] >= base.ReplicationSpecGCCnt {
+		return true
+	}
+	return false
+}
+
+type specGCMap map[string]int
+
+func getBucketMissingError(bucketName string) error {
+	return fmt.Errorf("Bucket %v has been missing for %v times", bucketName, base.ReplicationSpecGCCnt)
+}
+
+func getBucketChangedError(bucketName, origUUID, newUUID string) error {
+	return fmt.Errorf("Bucket %v UUID has changed from %v to %v, indicating a bucket deletion and recreation", bucketName, origUUID, newUUID)
+}
+
+// Returns true if need to delete the spec, and a non-nil error along with it for the reason why
+func (pm *PipelineManager) gcTargetBucket(spec *metadata.ReplicationSpecification) (bool, error) {
+	if spec == nil {
+		return false, base.ErrorInvalidInput
+	}
+
+	ref, err := pm.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
+	if err != nil {
+		pm.logger.Warnf("Unable to retrieve reference from spec %v due to %v", spec.Id, err.Error())
+		return false, err
+	}
+
+	err = pm.utils.VerifyTargetBucket(spec.TargetBucketName, spec.TargetBucketUUID, ref, pm.logger)
+	if err == nil {
+		pm.gcMtx.Lock()
+		pm.tgtGcMap[spec.Id] = 0
+		pm.gcMtx.Unlock()
+		return false, nil
+	}
+
+	pm.logger.Warnf("Error verifying target bucket for %v. err=%v", spec.Id, err)
+
+	if err == pm.utils.GetNonExistentBucketError() {
+		shouldDel := pm.incrementGCCnt(pm.tgtGcMap, spec.Id)
+		if shouldDel {
+			err = getBucketMissingError(spec.TargetBucketName)
+			return shouldDel, err
+		} else {
+			return false, err
+		}
+	} else if err == pm.utils.GetBucketRecreatedError() {
+		return true, err
+	} else {
+		return false, err
 	}
 }

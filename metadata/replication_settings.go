@@ -126,6 +126,9 @@ const (
 	CLogMaxErrorCountKey        = base.CLogMaxErrorCount
 	CLogErrorTimeWindowKey      = base.CLogErrorTimeWindow
 	CLogReattemptDurationKey    = base.CLogReattemptDuration
+
+	// This means the user intentionally wants to keep the replication around even if it's outdated
+	SkipReplSpecAutoGcKey = base.SkipReplSpecAutoGcKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -269,6 +272,8 @@ var CLogMaxErrorCountConfig = &SettingsConfig{base.DefaultCLogMaxErrorCount, &Ra
 var CLogErrorTimeWindowConfig = &SettingsConfig{base.DefaultCLogErrorTimeWindowMs, &Range{1, 30 * 24 * 60 * 60 * 1000 /* 30 days */}}     // the time window in which errors when seen in bulk (maxErrorCount), the conflict logger stops accepting requests.
 var CLogReattemptDurationConfig = &SettingsConfig{base.DefaultCLogReattemptDurationMs, &Range{0, 30 * 24 * 60 * 60 * 1000 /* 30 days */}} // the time duration for which the conflict logger will start accepting requests again after it had seen errors in the past.
 
+var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -334,6 +339,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CLogMaxErrorCountKey:                 CLogMaxErrorCountConfig,
 	CLogErrorTimeWindowKey:               CLogErrorTimeWindowConfig,
 	CLogReattemptDurationKey:             CLogReattemptDurationConfig,
+	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1167,6 +1173,11 @@ func (s *ReplicationSettings) GetConflictLoggingMapping() base.ConflictLoggingMa
 		return base.ConflictLoggingOff
 	}
 	return mapping
+}
+
+func (s *ReplicationSettings) GetSkipAutoGC() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(SkipReplSpecAutoGcKey)
+	return val.(bool)
 }
 
 type ReplicationSettingsMap map[string]interface{}

@@ -2084,6 +2084,8 @@ function getStats {
 	echo "$result"
 }
 
+# returns 1 in status code if paused, 0 if running
+# returns 2 if parsed error
 function isReplicationPaused {
 	local srcClusterName=$1
 	local srcBucketName=$2
@@ -2094,12 +2096,12 @@ function isReplicationPaused {
 	restID=$(getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
 	if (($? != 0)); then
 		echo "Unable to find REST ID"
-		return 1
+		return 2
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$srcClusterName]:-}
 	if [[ -z "$sourcePort" ]]; then
 		echo "Unable to find admin port for cluster $srcClusterName"
-		return 1
+		return 2
 	fi
 
 	pauseRequested=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} | jq '.pauseRequested')
