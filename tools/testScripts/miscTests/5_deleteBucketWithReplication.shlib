@@ -26,6 +26,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ReplWithAutoGCDiabled=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["skipReplSpecAutoGc"]=true)
 
 # Bucket -> Scopes
 # -----------------
@@ -43,7 +44,7 @@ function runDataLoad {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Test streamingEndpoint after deleting bucket with replication"
+	echo "Test streamingEndpoint after deleting bucket with replication and disable autoGC"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -60,7 +61,7 @@ function runTestCase {
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" ReplWithAutoGCDiabled
 	printGlobalScopeAndCollectionInfo
 
 	runDataLoad
@@ -72,6 +73,29 @@ function runTestCase {
 	deleteBucket "C1" "B1"
 	echo "sleeping 60seconds after bucket delete"
 	sleep 60
+
+	echo "Ensuring pipeline auto pauses and error shows up after bucket delete"
+	isReplicationPaused "C1" "B1" "C2" "B2"
+	if (($? == 0)); then
+		echo "Replication should have auto paused but did not"
+		exit 1
+	elif (($? == 2)); then
+		exit 1
+	fi
+	validateNumberOfEvents "C1" 1
+
+	echo "Resuming an invalid replication to ensure it remains invalid"
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 30
+	isReplicationPaused "C1" "B1" "C2" "B2"
+	if (($? == 0)); then
+		echo "Replication should not have restarted but it did"
+		exit 1
+	elif (($? == 2)); then
+		exit 1
+	fi
+	cleanupBucketReplications
+
 	createBucket "C1" "B1"
 	createScope "C1" "B1" "S1"
 	createCollection "C1" "B1" "S1" "col1"

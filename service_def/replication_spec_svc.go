@@ -48,8 +48,6 @@ type ReplicationSpecSvc interface {
 	// Service call back function for replication spec changed event
 	ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error
 
-	ValidateAndGC(spec *metadata.ReplicationSpecification)
-
 	// being used by unit tests only
 	ConstructNewReplicationSpec(sourceBucketName, targetClusterUUID, targetBucketName string) (*metadata.ReplicationSpecification, error)
 

@@ -966,39 +966,6 @@ func (_c *ReplicationSpecSvc_SetReplicationSpec_Call) RunAndReturn(run func(*met
 	return _c
 }
 
-// ValidateAndGC provides a mock function with given fields: spec
-func (_m *ReplicationSpecSvc) ValidateAndGC(spec *metadata.ReplicationSpecification) {
-	_m.Called(spec)
-}
-
-// ReplicationSpecSvc_ValidateAndGC_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAndGC'
-type ReplicationSpecSvc_ValidateAndGC_Call struct {
-	*mock.Call
-}
-
-// ValidateAndGC is a helper method to define mock.On call
-//   - spec *metadata.ReplicationSpecification
-func (_e *ReplicationSpecSvc_Expecter) ValidateAndGC(spec interface{}) *ReplicationSpecSvc_ValidateAndGC_Call {
-	return &ReplicationSpecSvc_ValidateAndGC_Call{Call: _e.mock.On("ValidateAndGC", spec)}
-}
-
-func (_c *ReplicationSpecSvc_ValidateAndGC_Call) Run(run func(spec *metadata.ReplicationSpecification)) *ReplicationSpecSvc_ValidateAndGC_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*metadata.ReplicationSpecification))
-	})
-	return _c
-}
-
-func (_c *ReplicationSpecSvc_ValidateAndGC_Call) Return() *ReplicationSpecSvc_ValidateAndGC_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *ReplicationSpecSvc_ValidateAndGC_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *ReplicationSpecSvc_ValidateAndGC_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ValidateNewReplicationSpec provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation
 func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)

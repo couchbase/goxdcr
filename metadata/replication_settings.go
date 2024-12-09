@@ -114,6 +114,9 @@ const (
 
 	CASDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
+
+	// This means the user intentionally wants to keep the replication around even if it's outdated
+	SkipReplSpecAutoGcKey = base.SkipReplSpecAutoGcKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -245,6 +248,8 @@ var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFre
 var CasDriftThresholdSecsConfig = &SettingsConfig{100, &Range{0, math.MaxInt}}
 var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
+var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -300,6 +305,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	TargetTopologyLogFreqKey:             TargetTopologyLogFrequencyConfig,
 	CASDriftThresholdSecsKey:             CasDriftThresholdSecsConfig,
 	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
+	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1119,6 +1125,11 @@ func (s *ReplicationSettings) GetPreCheckCasDriftThreshold() uint32 {
 
 	hrsInt := val.(int)
 	return uint32(hrsInt)
+}
+
+func (s *ReplicationSettings) GetSkipAutoGC() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(SkipReplSpecAutoGcKey)
+	return val.(bool)
 }
 
 type ReplicationSettingsMap map[string]interface{}
