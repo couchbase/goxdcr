@@ -1656,3 +1656,5 @@ const (
 	HttpServerKey             = "HttpServer"
 	MsgUtilsKey               = "MessageUtils"
 )
+
+const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"

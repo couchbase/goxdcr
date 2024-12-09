@@ -1,0 +1,125 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ReplWithAutoGCDiabled=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["skipReplSpecAutoGc"]=true)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function runDataLoad {
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	waitForBgJobs
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Test streamingEndpoint after deleting bucket with replication and disable autoGC"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ReplWithAutoGCDiabled
+	printGlobalScopeAndCollectionInfo
+
+	runDataLoad
+	echo "sleeping 10 seconds after runDataLoad"
+	sleep 10
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	deleteBucket "C1" "B1"
+	echo "sleeping 60seconds after bucket delete"
+	sleep 60
+
+	echo "Ensuring pipeline auto pauses and error shows up after bucket delete"
+	isReplicationPaused "C1" "B1" "C2" "B2"
+	if (($? == 0)); then
+		echo "Replication should have auto paused but did not"
+		exit 1
+	elif (($? == 2)); then
+		exit 1
+	fi
+	validateNumberOfEvents "C1" 1
+
+	echo "Resuming an invalid replication to ensure it remains invalid"
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 30
+	isReplicationPaused "C1" "B1" "C2" "B2"
+	if (($? == 0)); then
+		echo "Replication should not have restarted but it did"
+		exit 1
+	elif (($? == 2)); then
+		exit 1
+	fi
+	cleanupBucketReplications
+
+	createBucket "C1" "B1"
+	createScope "C1" "B1" "S1"
+	createCollection "C1" "B1" "S1" "col1"
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		echo "createReplication failed after bucket was recreated"
+		exit 1
+	fi
+
+	runDataLoad
+	echo "sleeping 10 seconds after writing a document"
+	sleep 10
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

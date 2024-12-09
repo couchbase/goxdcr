@@ -107,6 +107,7 @@ const (
 	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 	GenericServicesLogLevelKey        = metadata.GenericServicesLogLevelKey
+	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
 )
 
 // constants for parsing create/change/view replication response
@@ -234,6 +235,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
 	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
 	GenericServicesLogLevelKey:        metadata.GenericServicesLogLevelKey,
+	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -297,6 +299,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CASDriftThresholdSecsKey:             CasDriftThresholdSecsKey,
 	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
 	metadata.GenericServicesLogLevelKey:           GenericServicesLogLevelKey,
+	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
