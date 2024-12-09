@@ -88,6 +88,9 @@ pipeline_utils
 service_impl
 streamApiWatcher
 utils
+base/iopool
+resource_manager
+service_impl/throttlerSvcImpl
 )
 
 function killAllBgOnExit {

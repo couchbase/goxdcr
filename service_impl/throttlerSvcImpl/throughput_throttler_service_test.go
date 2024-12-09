@@ -293,8 +293,7 @@ func Test_updateOnce(t *testing.T) {
 			assert.Equal(t, 0, len(th.UpdateSettings(settings)))
 			tt.setQuota(t, th)
 
-			result := th.handleClogReq()
-			assert.Equal(t, tt.CanSendStatus, result)
+			th.updateOnce()
 
 			assert.Equal(t, tt.Expected.HighQuota, th.unused_high_tokens)
 			assert.Equal(t, tt.Expected.LowQuota, th.throughput_quota)
@@ -317,28 +316,26 @@ func Test_CanSend(t *testing.T) {
 			},
 			ThrottlerReq: throttlerSvc.ThrottlerReqCLog,
 		},
-		/*
-			{
-				Name:      "[positive] clog throttler req - from common buckets",
-				ClogLimit: 100,
-				Existing: &quotaVals{
-					ClogQuota:       0,
-					MaxReassignable: 10,
-				},
-				CanSendStatus: true,
-				ThrottlerReq:  throttlerSvc.ThrottlerReqCLog,
+		{
+			Name:      "[positive] clog throttler req - from common buckets",
+			ClogLimit: 100,
+			Existing: &quotaVals{
+				ClogQuota:       0,
+				MaxReassignable: 10,
 			},
-			{
-				Name:      "[positive] clog throttler req - from clog bucket",
-				ClogLimit: 100,
-				Existing: &quotaVals{
-					ClogQuota:       10,
-					MaxReassignable: 0,
-				},
-				CanSendStatus: true,
-				ThrottlerReq:  throttlerSvc.ThrottlerReqCLog,
+			CanSendStatus: true,
+			ThrottlerReq:  throttlerSvc.ThrottlerReqCLog,
+		},
+		{
+			Name:      "[positive] clog throttler req - from clog bucket",
+			ClogLimit: 100,
+			Existing: &quotaVals{
+				ClogQuota:       10,
+				MaxReassignable: 0,
 			},
-		*/
+			CanSendStatus: true,
+			ThrottlerReq:  throttlerSvc.ThrottlerReqCLog,
+		},
 	}
 
 	for _, tt := range testData {

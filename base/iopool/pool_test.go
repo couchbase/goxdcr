@@ -27,7 +27,7 @@ func TestPool_EmptyPool(t *testing.T) {
 		"B2": new(int),
 	}
 
-	newConnFn := func(bucketName string) (io.Closer, error) {
+	newConnFn := func(bucketName string, params interface{}) (io.Closer, error) {
 		count := buckets[bucketName]
 		return &testConn{
 			count: count,
@@ -52,7 +52,7 @@ func TestPool_GC(t *testing.T) {
 		"B2": new(int),
 	}
 
-	newConnFn := func(bucketName string) (io.Closer, error) {
+	newConnFn := func(bucketName string, params interface{}) (io.Closer, error) {
 		count := buckets[bucketName]
 		return &testConn{
 			count: count,
@@ -70,7 +70,7 @@ func TestPool_GC(t *testing.T) {
 	bucket := "B1"
 	connList := []io.Closer{}
 	for i := 0; i < connCount; i++ {
-		conn, err := pool.Get(bucket, 10*time.Millisecond)
+		conn, err := pool.Get(bucket, 10*time.Millisecond, nil)
 		require.Nil(t, err)
 		connList = append(connList, conn)
 	}

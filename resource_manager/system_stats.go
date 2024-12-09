@@ -78,7 +78,7 @@ func NewSystemStats() (*SystemStats, error) {
 
 	var cpu C.sigar_proc_cpu_t
 	if err := C.sigar_proc_cpu_get(h.handle, h.pid, &cpu); err != C.SIGAR_OK {
-		return nil, fmt.Errorf("failed to get CPU, err: %w",
+		return nil, fmt.Errorf("failed to get CPU, err: %v",
 			C.sigar_strerror(h.handle, err))
 	}
 	h.lastCPU = float64(cpu.user + cpu.sys)
