@@ -1162,7 +1162,7 @@ func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo ma
 		if hostAddr == "" {
 			// note that this is the only place where nodeExtMap contains a hostname without port
 			// instead of a host address with port. This represents the internal IP.
-			hostName, err = u.getHostNameWithoutPortFromNodeInfo(connStr, nodeExtMap, logger)
+			hostName, _, err = u.getHostNameWithoutPortFromNodeInfo(connStr, nodeExtMap, logger)
 			if err != nil {
 				return nil, u.BucketInfoParseError(bucketInfo, fmt.Sprintf("%v", err), logger)
 			}
@@ -1254,36 +1254,44 @@ func getInternalOrExternalPort(servicesMap map[string]interface{}, extPorts map[
 
 // Input is the result for pools/default/nodeServices, port keys and a default hostAddr
 // returns hostAddr -> <portKey -> port> mapping and list of hostAddrs (only for KV nodes)
-func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+// Also returns a boolean which indicates if nodes have "hostname" field missing, indicating defaultConnStr was used instead.
+func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, bool, error) {
 	portsMap := make(base.HostPortMapType)
 	hostAddrs := make([]string, 0)
 
 	var hostName string
+	var hasNodeWithMissingHostname bool
 	var err error
 	for _, nodeExt := range nodesList {
+		var missingHostname bool
+
 		nodeExtMap, ok := nodeExt.(map[string]interface{})
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+			return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
 		}
 
 		// Internal key
 		service, ok := nodeExtMap[base.ServicesKey]
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+			return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
 		}
 
 		servicesMap, ok := service.(map[string]interface{})
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+			return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
 		}
 
 		extHostname, extHostnameExists, extPorts, extPortsExists := getExternalInfoFromServicesMap(logger, nodeExtMap)
 
 		// note that this is the only place where nodeExtMap contains a hostname without port
 		// instead of a host address with port
-		hostName, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
+		hostName, missingHostname, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
 		if err != nil {
-			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+			return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
+		}
+
+		if missingHostname {
+			hasNodeWithMissingHostname = true
 		}
 
 		if useExternal && extHostnameExists {
@@ -1310,7 +1318,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}
 		if ok {
 			portFloat, ok := port.(float64)
 			if !ok {
-				return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+				return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
 			}
 			mgmtPort := uint16(portFloat)
 			hostAddr = base.GetHostAddr(hostName, mgmtPort)
@@ -1326,7 +1334,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}
 
 			portFloat, ok := port.(float64)
 			if !ok {
-				return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+				return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
 			}
 
 			portInt = uint16(portFloat)
@@ -1340,8 +1348,8 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}
 
 		hostAddrs = append(hostAddrs, hostAddr)
 	}
-	logger.Infof("Ports=%v, HostAddrs=%v in GetPortsAndHostAddrsFromNodeServices", portsMap, hostAddrs)
-	return portsMap, hostAddrs, nil
+	logger.Infof("Ports=%v, HostAddrs=%v, missingHostname=%v in GetPortsAndHostAddrsFromNodeServices", portsMap, hostAddrs, hasNodeWithMissingHostname)
+	return portsMap, hostAddrs, hasNodeWithMissingHostname, nil
 }
 
 func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, err string, logger *log.CommonLogger) error {
@@ -2324,14 +2332,16 @@ func (u *Utilities) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[s
 
 // this method is called when nodeInfo came from the terse bucket call, pools/default/b/[bucketName]
 // where hostname in nodeInfo is a host name without port rather than a host address with port
-func (u *Utilities) getHostNameWithoutPortFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
+func (u *Utilities) getHostNameWithoutPortFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, bool, error) {
+	var missingHostname bool
 	hostName, err := u.getHostAddrFromNodeInfoInternal(adminHostAddr, nodeInfo, logger)
 	if err == base.ErrorNoHostName {
+		missingHostname = true
 		hostName = base.GetHostName(adminHostAddr)
 		err = nil
 	}
 
-	return hostName, err
+	return hostName, missingHostname, err
 }
 
 // convenient api for rest calls to local cluster

@@ -331,18 +331,7 @@ func (h *ConnectionPreCheckHandler) handleResponse(resp *ConnectionPreCheckRes) 
 		h.logger.Errorf("SetToConnectionPreCheckStore resulted in %v", err)
 	}
 
-	connErrs := resp.ConnectionErrs
-
-	for _, node := range resp.TargetClusterNodes {
-		if connErrs == nil {
-			connErrs = make(base.HostToErrorsMapType)
-		}
-		_, ok := connErrs[node]
-		if !ok || len(connErrs[node]) == 0 {
-			connErrs[node] = []string{base.ConnectionPreCheckMsgs[base.ConnPreChkSuccessful]}
-		}
-	}
-
+	connErrs := FormatConnectionPreCheckResults(resp.ConnectionErrs, resp.TargetClusterNodes, resp.HostnameWasMissing)
 	err = store.SetToConnectionPreCheckStore(resp.TaskId, resp.Sender, connErrs)
 	if err != nil {
 		h.logger.Errorf("ConnectionPreCheck Response Handler: Error while SetToConnectionPreCheckStore=%v", err)
@@ -352,4 +341,30 @@ func (h *ConnectionPreCheckHandler) handleResponse(resp *ConnectionPreCheckRes) 
 	if err != nil {
 		h.logger.Errorf("ConnectionPreCheck Response Handler: Error while SetToConnectionPreCheckStoreSpecificTarget=%v", err)
 	}
+}
+
+func FormatConnectionPreCheckResults(results base.HostToErrorsMapType, targetNodes []string, missingHostname bool) base.HostToErrorsMapType {
+	successMsg := base.ConnectionPreCheckMsgs[base.ConnPreChkSuccessful]
+	if missingHostname && len(targetNodes) == 1 {
+		// In some cases, the pools/default/nodeServices response will not have a "hostname" field when a node is
+		// configured with localhost or 127.0.0.1. This can happen for a fresh single node cluster.
+		// The recommended way to handle this situation is to use the connection string instead -- this is what is done by connection pre-check.
+		// This connection check made in this manner may or may not be accurate based on the "intent" of the user input i.e.
+		// It could so happen that XDCR experiences network errors with this remote cluster reference, but connection pre-check succeeds.
+		// So warn this fact to the user.
+		successMsg = successMsg + " | " + base.ConnectionPreCheckMsgs[base.ConnPreChkWarnForMissingHostname]
+	}
+
+	for _, node := range targetNodes {
+		if results == nil {
+			results = make(base.HostToErrorsMapType)
+		}
+
+		_, ok := results[node]
+		if !ok || len(results[node]) == 0 {
+			results[node] = []string{successMsg}
+		}
+	}
+
+	return results
 }

@@ -1881,6 +1881,7 @@ type ConnectionPreCheckReq struct {
 	TaskId             string
 	PortsMap           base.HostPortMapType
 	SrvLookupResults   []string
+	HostnameWasMissing bool
 
 	// For req.GenerateResponse()
 	ConnectionErrs base.HostToErrorsMapType
@@ -1893,9 +1894,10 @@ type ConnectionPreCheckRes struct {
 	Target             string
 	TargetClusterNodes []string
 	PortsMap           base.HostPortMapType
+	HostnameWasMissing bool
 }
 
-func NewP2PConnectionPreCheckReq(common RequestCommon, targetRef *metadata.RemoteClusterReference, targetNodes, srvLookResults []string, portsMap base.HostPortMapType, taskId string) *ConnectionPreCheckReq {
+func NewP2PConnectionPreCheckReq(common RequestCommon, targetRef *metadata.RemoteClusterReference, targetNodes, srvLookResults []string, portsMap base.HostPortMapType, taskId string, missingHostname bool) *ConnectionPreCheckReq {
 	p2pReq := &ConnectionPreCheckReq{
 		RequestCommon:      common,
 		TargetRef:          targetRef,
@@ -1904,6 +1906,7 @@ func NewP2PConnectionPreCheckReq(common RequestCommon, targetRef *metadata.Remot
 		PortsMap:           portsMap,
 		ConnectionErrs:     nil,
 		SrvLookupResults:   srvLookResults,
+		HostnameWasMissing: missingHostname,
 	}
 	p2pReq.ReqType = ReqConnectionPreCheck
 	return p2pReq
@@ -1935,6 +1938,7 @@ func (c *ConnectionPreCheckReq) GenerateResponse() interface{} {
 		Target:             c.Sender,
 		TargetClusterNodes: c.TargetClusterNodes,
 		PortsMap:           c.PortsMap,
+		HostnameWasMissing: c.HostnameWasMissing,
 	}
 	return resp
 }

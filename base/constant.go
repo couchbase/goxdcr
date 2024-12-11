@@ -1775,7 +1775,7 @@ const FilterBinaryDocs = "filterBinary"
 type ConnPreChkMsgType int
 
 const (
-	ConnPreChkIsCompatibleVersion ConnPreChkMsgType = iota
+	ConnPreChkInCompatibleVersion ConnPreChkMsgType = iota
 	ConnPreChkUnableToFetchUUID
 	ConnPreChkIsIntraClusterReplication
 	ConnPreChkSendingRequest
@@ -1783,10 +1783,11 @@ const (
 	ConnPreChkResponseObtained
 	ConnPreChkP2PSuccessful
 	ConnPreChkSuccessful
+	ConnPreChkWarnForMissingHostname
 )
 
 var ConnectionPreCheckMsgs = map[ConnPreChkMsgType]string{
-	ConnPreChkIsCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
+	ConnPreChkInCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
 	ConnPreChkUnableToFetchUUID:         "Unable to fetch source cluster's UUID",
 	ConnPreChkIsIntraClusterReplication: "Intra-cluster replication detected, skipping connection pre-check",
 	ConnPreChkSendingRequest:            "Sending requests to the peer",
@@ -1794,6 +1795,7 @@ var ConnectionPreCheckMsgs = map[ConnPreChkMsgType]string{
 	ConnPreChkResponseObtained:          "Response obtained from the node, storing the results",
 	ConnPreChkP2PSuccessful:             "P2P protocol successfully executed, no errors",
 	ConnPreChkSuccessful:                "Connection check was successful, no errors",
+	ConnPreChkWarnForMissingHostname:    "WARNING: The result might be inaccurate because the target cluster has only one node, with hostname most likely configured as localhost",
 }
 
 const (
