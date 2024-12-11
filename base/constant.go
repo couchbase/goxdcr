@@ -1672,23 +1672,25 @@ const FilterBinaryDocs = "filterBinary"
 type ConnPreChkMsgType int
 
 const (
-	ConnPreChkIsCompatibleVersion       ConnPreChkMsgType = iota
-	ConnPreChkIsIntraClusterReplication ConnPreChkMsgType = iota
-	ConnPreChkSendingRequest            ConnPreChkMsgType = iota
-	ConnPreChkResponseWait              ConnPreChkMsgType = iota
-	ConnPreChkResponseObtained          ConnPreChkMsgType = iota
-	ConnPreChkP2PSuccessful             ConnPreChkMsgType = iota
-	ConnPreChkSuccessful                ConnPreChkMsgType = iota
+	ConnPreChkInCompatibleVersion ConnPreChkMsgType = iota
+	ConnPreChkIsIntraClusterReplication
+	ConnPreChkSendingRequest
+	ConnPreChkResponseWait
+	ConnPreChkResponseObtained
+	ConnPreChkP2PSuccessful
+	ConnPreChkSuccessful
+	ConnPreChkWarnForMissingHostname
 )
 
 var ConnectionPreCheckMsgs = map[ConnPreChkMsgType]string{
-	ConnPreChkIsCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
+	ConnPreChkInCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
 	ConnPreChkIsIntraClusterReplication: "Intra-cluster replication detected, skipping connection pre-check",
 	ConnPreChkSendingRequest:            "Sending requests to the peer",
 	ConnPreChkResponseWait:              "P2PSend was successful, waiting for the node's response",
 	ConnPreChkResponseObtained:          "Response obtained from the node, storing the results",
 	ConnPreChkP2PSuccessful:             "P2P protocol successfully executed, no errors",
 	ConnPreChkSuccessful:                "Connection check was successful, no errors",
+	ConnPreChkWarnForMissingHostname:    "WARNING: The result might be inaccurate because the target cluster has only one node, with hostname most likely configured as localhost",
 }
 
 const (

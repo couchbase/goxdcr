@@ -4037,7 +4037,7 @@ func (_c *UtilsIface_GetNonExistentBucketError_Call) RunAndReturn(run func() err
 }
 
 // GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodesList, defaultConnStr, useSecurePort, useExternal, logger
-func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, bool, error) {
 	ret := _m.Called(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 
 	if len(ret) == 0 {
@@ -4046,8 +4046,9 @@ func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface
 
 	var r0 base.HostPortMapType
 	var r1 []string
-	var r2 error
-	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
+	var r2 bool
+	var r3 error
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, bool, error)); ok {
 		return rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	}
 	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) base.HostPortMapType); ok {
@@ -4066,13 +4067,19 @@ func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func([]interface{}, string, bool, bool, *log.CommonLogger) error); ok {
+	if rf, ok := ret.Get(2).(func([]interface{}, string, bool, bool, *log.CommonLogger) bool); ok {
 		r2 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
-		r2 = ret.Error(2)
+		r2 = ret.Get(2).(bool)
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func([]interface{}, string, bool, bool, *log.CommonLogger) error); ok {
+		r3 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPortsAndHostAddrsFromNodeServices'
@@ -4097,12 +4104,12 @@ func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Run(run func(nod
 	return _c
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Return(_a0 base.HostPortMapType, _a1 []string, _a2 error) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Return(_a0 base.HostPortMapType, _a1 []string, _a2 bool, _a3 error) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
 	return _c
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, bool, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
 	_c.Call.Return(run)
 	return _c
 }
