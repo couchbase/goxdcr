@@ -883,13 +883,13 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	if !base.IsClusterCompatible(srcClusterCompatibility, base.VersionForConnectionPreCheckSupport) {
 		logger.Infof("Connection Pre-Check exited because: srcClusterCompatibility=%v and VersionForConnectionPreCheckRequest=%v, taskId=%v", srcClusterCompatibility, base.VersionForConnectionPreCheckSupport, taskId)
-		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsCompatibleVersion], taskId, myHostAddr, true, nil, logger)
+		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkInCompatibleVersion], taskId, myHostAddr, true, nil, logger)
 		return
 	}
 
 	srcUUID, err := p.xdcrCompSvc.MyClusterUuid()
 	if err != nil {
-		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting srcUUID, err=%v", err)
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting srcUUID, err=%v, taskId=%v", err, taskId)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
 		return
 	}
@@ -925,12 +925,8 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		return
 	}
 
-	var isExternal bool
-	if remoteRef.HostnameMode() == metadata.HostnameMode_External {
-		// user has network_type set to "external"
-		// so use external mode forcefully.
-		isExternal = true
-	} else {
+	isExternal := remoteRef.HostnameMode() == metadata.HostnameMode_External
+	if remoteRef.HostnameMode() == metadata.HostnameMode_None {
 		// determine user intent for addressing from entered hostname (internal or external addressing)
 		isExternal, err = base.CheckIfHostnameIsAlternate(p.utils.GetExternalMgtHostAndPort, nodesList, connStr, remoteRef.IsHttps(), srvHostnames)
 		if err != nil {
@@ -942,7 +938,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	logger.Infof("User intent for Connection Pre-Check initialised as isExternal=%v, network_type=%v, taskId=%v", isExternal, remoteRef.HostnameMode(), taskId)
 
 	// get appropriate hostnames and ports to connect to based on user intent
-	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodesList, hostname, remoteRef.IsHttps(), isExternal, logger)
+	portsMap, targetNodes, missingHostname, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodesList, hostname, remoteRef.IsHttps(), isExternal, logger)
 	if err != nil {
 		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting ports and hostAddrs from nodeServicesInfo, useSecurePort=%v, err=%v", remoteRef.IsHttps(), err)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
@@ -957,22 +953,15 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
-		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, srvHostnames, portsMap, taskId)
+		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, srvHostnames, portsMap, taskId, missingHostname)
 		return connectionPreCheckReq
 	}
 
 	// Perform connection pre-check.
 	// No need to perform DNS SRV resolution check, since this node is the initiating node.
 	connectionErrs := executeConnectionPreCheck(remoteRef, targetNodes, nil, portsMap, p.utils, logger)
-	for _, node := range targetNodes {
-		if connectionErrs == nil {
-			connectionErrs = make(base.HostToErrorsMapType)
-		}
-		_, ok := connectionErrs[node]
-		if !ok || len(connectionErrs[node]) == 0 {
-			connectionErrs[node] = []string{base.ConnectionPreCheckMsgs[base.ConnPreChkSuccessful]}
-		}
-	}
+
+	connectionErrs = FormatConnectionPreCheckResults(connectionErrs, targetNodes, missingHostname)
 
 	peers, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
 	if err != nil && strings.Contains(err.Error(), service_def.UnknownPoolStr) {
