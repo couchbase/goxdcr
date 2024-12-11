@@ -481,6 +481,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		hlvUpdatedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvUpdatedEventListener, i),
 			pipeline.FullTopic(), logger_ctx)
+		trueConflictsEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TrueConflictsEventListener, i),
+			pipeline.FullTopic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -498,6 +501,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.TargetSyncXattrPreserved, targetSyncXattrPreservedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvPruned, hlvPrunedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.ConflictsDetected, trueConflictsEventListener)
 		}
 	}
 

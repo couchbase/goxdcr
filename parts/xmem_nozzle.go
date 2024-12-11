@@ -1982,26 +1982,28 @@ func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, pres
 // wrapper function to handle conflict (i.e. log conflict) between source (req) and target (resp) docs
 func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) {
 	err := xmem.logConflict(req, resp)
-	if err != baseclog.ErrLoggerClosed {
-		xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.Req.VBucket, req.Seqno}, err))
-		if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
-			xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
-				xmem.Id(),
-				base.UdTagBegin, req.Req.Key, base.UdTagEnd,
-				err,
-			)
-		} else if err != nil {
-			// log and continue to replicate
-			xmem.Logger().Errorf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, err=%v",
-				xmem.Id(),
-				base.UdTagBegin, req.Req.Key, base.UdTagEnd,
-				base.UdTagBegin, req.Req, base.UdTagEnd,
-				base.UdTagBegin, req.Req.Body, base.UdTagEnd,
-				resp.Resp.Opcode,
-				base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
-				err,
-			)
-		}
+	if err == baseclog.ErrLoggerClosed {
+		return
+	}
+
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.Req.VBucket, req.Seqno}, err))
+	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
+		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
+			xmem.Id(),
+			base.UdTagBegin, req.Req.Key, base.UdTagEnd,
+			err,
+		)
+	} else if err != nil {
+		// log and continue to replicate
+		xmem.Logger().Errorf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, err=%v",
+			xmem.Id(),
+			base.UdTagBegin, req.Req.Key, base.UdTagEnd,
+			base.UdTagBegin, req.Req, base.UdTagEnd,
+			base.UdTagBegin, req.Req.Body, base.UdTagEnd,
+			resp.Resp.Opcode,
+			base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
+			err,
+		)
 	}
 }
 

@@ -595,6 +595,7 @@ const (
 	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
 	CLogDocsWrittenEventListener         = "CLogDocsWrittenEventListener"
 	CLogWriteStatusEventListener         = "CLogWriteStatusEventListener"
+	TrueConflictsEventListener           = "TrueConflictsEventListener"
 )
 
 const (

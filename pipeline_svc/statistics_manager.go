@@ -1722,6 +1722,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TgtSyncXattrPreservedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvUpdatedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TrueConflictsEventListener, outNozzle_collector)
 
 	return nil
 }
