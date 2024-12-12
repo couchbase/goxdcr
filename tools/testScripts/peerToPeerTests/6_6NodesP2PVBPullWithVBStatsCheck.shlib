@@ -160,7 +160,17 @@ function pauseAndResumeReplication {
 	sleep 15
 	grepForPanics
 
+	pauseReplication "C1" "B1" "C2" "B1"
+	echo "Waiting 15 seconds for pipeline to really pause"
+	sleep 15
+	grepForPanics
+
 	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 15 seconds for pipeline to really resume"
+	sleep 15
+	grepForPanics
+
+	resumeReplication "C1" "B1" "C2" "B1"
 	echo "Waiting 15 seconds for pipeline to really resume"
 	sleep 15
 	grepForPanics
