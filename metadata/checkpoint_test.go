@@ -13,13 +13,14 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/v8/base"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"math"
 	"sort"
 	"testing"
+
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCheckpointDocMarshaller(t *testing.T) {
@@ -394,7 +395,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			1: &TargetPerVBCounters{},
 		},
 	}
-	assert.Nil(newCkptRecord.PopulateGlobalTimestampSha())
+	assert.Nil(newCkptRecord.PopulateShasForGlobalCheckPoint())
 
 	ns1, err := base.NewCollectionNamespaceFromString("s1.col1")
 	assert.Nil(err)
@@ -450,7 +451,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
-	assert.Nil(ckptRecord2.PopulateGlobalTimestampSha())
+	assert.Nil(ckptRecord2.PopulateShasForGlobalCheckPoint())
 
 	ckpt_doc := NewCheckpointsDoc("testInternalId")
 	added, _ := ckpt_doc.AddRecord(&newCkptRecord)
@@ -465,13 +466,16 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 	assert.Nil(err)
 
 	// Before checking, need to get sha for global timestamp
-	gtsShaMap := make(ShaToGlobalTimestampMap)
+	gInfoShaMap := make(ShaToGlobalInfoMap)
 	for _, record := range ckpt_doc.Checkpoint_records {
 		if record == nil {
 			continue
 		}
 		gts := record.GlobalTimestamp
-		gtsShaMap[record.GlobalTimestampSha256] = &gts
+		gInfoShaMap[record.GlobalTimestampSha256] = &gts
+		gCounters := record.GlobalCounters
+		gInfoShaMap[record.GlobalCountersSha256] = &gCounters
+
 	}
 
 	var checkDoc CheckpointsDoc
@@ -481,7 +485,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 		if record == nil {
 			continue
 		}
-		assert.Nil(record.LoadGlobalTsMapping(gtsShaMap))
+		assert.Nil(record.LoadGlobalInfoMapping(gInfoShaMap))
 	}
 
 	assert.Equal(5, len(checkDoc.Checkpoint_records))

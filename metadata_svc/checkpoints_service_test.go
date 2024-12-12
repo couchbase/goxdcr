@@ -16,6 +16,11 @@ package metadata_svc
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -23,10 +28,6 @@ import (
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *service_def.ReplicationSpecSvc) {
@@ -61,15 +62,15 @@ func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerCont
 	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
 	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Del"])
 	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Add"])
-	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
-	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), mock.Anything).Return(opMap["Del"])
-	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), mock.Anything).Return(opMap["Add"])
+	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalInfoKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
+	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalInfoKey), mock.Anything).Return(opMap["Del"])
+	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalInfoKey), mock.Anything).Return(opMap["Add"])
 
-	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey)).Run(func(args mock.Arguments) {
+	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalInfoKey)).Run(func(args mock.Arguments) {
 		timeInUint := time.Now().UnixMicro()
 		atomic.StoreInt64(&timeAfterGet, timeInUint)
 	}).Return(globalTsDocMarshalled, nil, opMap["Get"])
-	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalTimestampKey), globaTsNewUpsert, mock.Anything).Return(opMap["Set"])
+	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, GlobalInfoKey), globaTsNewUpsert, mock.Anything).Return(opMap["Set"])
 
 	dummyMap := make(map[string]*metadata.ReplicationSpecification)
 	dummyRepl := &metadata.ReplicationSpecification{Id: replId, InternalId: internalId}

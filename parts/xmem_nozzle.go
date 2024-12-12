@@ -1444,7 +1444,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					additionalInfo := SentCasChangedEventAdditional{
 						IsGetDoc: true,
 					}
-					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.Req.VBucket, item.Seqno}, additionalInfo))
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.GetTargetVB(), item.Seqno}, additionalInfo))
 					xmem.retryAfterCasLockingFailure(item)
 				}()
 			case RetryTargetLocked:
@@ -1998,7 +1998,7 @@ func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.Wr
 		return
 	}
 
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.Req.VBucket, req.Seqno}, err))
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetTargetVB(), req.Seqno}, err))
 	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
 		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 			xmem.Id(),
@@ -3603,7 +3603,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.client_for_setMeta.IncrementBackOffFactor()
 						// Don't spam the log. Keep a counter instead
 						atomic.AddUint64(&xmem.counterGuardrailHit, 1)
-						vbno := wrappedReq.Req.VBucket
+						vbno := wrappedReq.GetTargetVB()
 						seqno := wrappedReq.Seqno
 						xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{vbno, seqno}, nil))
 						markThenResend := func(req *bufferedMCRequest, pos uint16) (bool, error) {
@@ -3688,7 +3688,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 				additionalInfo := DataSentEventAdditional{
 					Seqno:                seqno,
-					VbucketCommon:        VbucketCommon{VBucket: req.VBucket},
+					VbucketCommon:        VbucketCommon{VBucket: wrappedReq.GetTargetVB()},
 					IsOptRepd:            xmem.optimisticRep(wrappedReq),
 					Opcode:               req.Opcode,
 					IsExpirySet:          isExpirySet,
@@ -3748,7 +3748,6 @@ func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, re
 		// Note: We shouldn't hit this case in practice
 		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v, isSubDocOp: %v", wrappedReq.Req, len(wrappedReq.Req.Extras), isSubDocOp)
 	}
-
 	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && !isSubDocOp { //replace mode
 		// Currently CAS regeneration takes place in two scenario's
 		// 1. If SubDoc is used

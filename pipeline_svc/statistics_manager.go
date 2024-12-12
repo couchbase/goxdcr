@@ -195,7 +195,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	if ckptDoc.IsTraditional() {
 		return getTraditionalMetrics(record)
 	} else {
-		// TODO global checkpoint
+		// Darshan TODO global checkpoint
 		return nil
 	}
 }
@@ -2390,7 +2390,7 @@ func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, vbCountM
 	if vbCountMetric.IsTraditional() {
 		return h.updateTraditionalVbMetrics(vb, vbCountMetric, currentRegistries)
 	} else {
-		// TODO global checkpoint
+		// Darshan TODO global checkpoint
 		return nil
 	}
 }
