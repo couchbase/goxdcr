@@ -745,15 +745,15 @@ func (v *ReplicationPayload) loadCkptInternal(ckptDocs map[uint16]*metadata.Chec
 	}
 	if isGlobal {
 		vbsCkptDoc := metadata.VBsCkptsDocMap(ckptDocs)
-		globalTimestampDoc, err := vbsCkptDoc.GetGlobalTimestampDoc()
+		globalInfoDoc, err := vbsCkptDoc.GetGlobalInfoDoc()
 		if err != nil {
 			return err
 		}
 
-		if payload.GlobalTimestampDoc == nil {
-			payload.GlobalTimestampDoc = globalTimestampDoc
+		if payload.GlobalInfoDoc == nil {
+			payload.GlobalInfoDoc = globalInfoDoc
 		} else {
-			err = payload.GlobalTimestampDoc.UniqueAppend(globalTimestampDoc)
+			err = payload.GlobalInfoDoc.UniqueAppend(globalInfoDoc)
 			if err != nil {
 				return err
 			}
@@ -836,23 +836,23 @@ func (v *ReplicationPayload) LoadBrokenMappingDoc(brokenMappingDoc metadata.Coll
 
 	payload, found := (*v.payload)[srcBucketName]
 	if !found {
-		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+		return fmt.Errorf("bucket %v not found from response payload", srcBucketName)
 	}
 
 	payload.BrokenMappingDoc = &brokenMappingDoc
 	return nil
 }
 
-func (v *ReplicationPayload) LoadGlobaltimestampDoc(gtsDoc metadata.GlobalTimestampCompressedDoc, srcBucketName string) error {
+func (v *ReplicationPayload) LoadGlobalInfoDoc(gInfoDoc metadata.GlobalInfoCompressedDoc, srcBucketName string) error {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
 
 	payload, found := (*v.payload)[srcBucketName]
 	if !found {
-		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+		return fmt.Errorf("bucket %v not found from response payload", srcBucketName)
 	}
 
-	payload.GlobalTimestampDoc = &gtsDoc
+	payload.GlobalInfoDoc = &gInfoDoc
 	return nil
 }
 
@@ -1221,9 +1221,9 @@ type VBMasterPayload struct {
 	SrcManifests *metadata.ManifestsCache
 	TgtManifests *metadata.ManifestsCache
 
-	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc      // Shallow copied
-	BackfillMappingDoc *metadata.CollectionNsMappingsDoc      // Shallow copied
-	GlobalTimestampDoc *metadata.GlobalTimestampCompressedDoc // Shallow copied
+	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc // Shallow copied
+	BackfillMappingDoc *metadata.CollectionNsMappingsDoc // Shallow copied
+	GlobalInfoDoc      *metadata.GlobalInfoCompressedDoc // Shallow copied
 }
 
 func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload {
@@ -1241,7 +1241,7 @@ func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload
 		TgtManifests:       p.TgtManifests.Clone(),
 		BrokenMappingDoc:   p.BrokenMappingDoc,
 		BackfillMappingDoc: p.BackfillMappingDoc,
-		GlobalTimestampDoc: p.GlobalTimestampDoc,
+		GlobalInfoDoc:      p.GlobalInfoDoc,
 	}
 	return retPayload
 }
@@ -1261,7 +1261,7 @@ func (p *VBMasterPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16) *
 		TgtManifests:       p.TgtManifests.Clone(),
 		BrokenMappingDoc:   p.BrokenMappingDoc,
 		BackfillMappingDoc: p.BackfillMappingDoc,
-		GlobalTimestampDoc: p.GlobalTimestampDoc,
+		GlobalInfoDoc:      p.GlobalInfoDoc,
 	}
 	return retPayload
 }
@@ -1306,7 +1306,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 
 	if p.NotMyVBs != nil {
 		for vb, payload := range *p.NotMyVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
 			if err != nil {
 				return nil, err
 			}
@@ -1315,7 +1315,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 
 	if p.ConflictingVBs != nil {
 		for vb, payload := range *p.ConflictingVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
 			if err != nil {
 				return nil, err
 			}
@@ -1324,7 +1324,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 
 	if p.PushVBs != nil {
 		for vb, payload := range *p.PushVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalTimestampDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
 			if err != nil {
 				return nil, err
 			}
@@ -1333,7 +1333,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 	return retMap, nil
 }
 
-func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16, gtsDoc *metadata.GlobalTimestampCompressedDoc) error {
+func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16, gInfoDoc *metadata.GlobalInfoCompressedDoc) error {
 	switch pipelineType {
 	case common.MainPipeline:
 		if payload.CheckpointsDoc != nil {
@@ -1347,14 +1347,14 @@ func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType,
 		return fmt.Errorf("incorrect type: %T", pipelineType)
 	}
 
-	if gtsDoc != nil {
+	if gInfoDoc != nil {
 		errMap := make(base.ErrorMap)
-		globalTsShaMap, err := gtsDoc.ToShaMap()
+		globalInfoShaMap, err := gInfoDoc.ToShaMap()
 		if err != nil {
 			return err
 		}
 		for _, ckptDoc := range retMap {
-			oneErrMap := ckptDoc.LoadGlobalTimestampFromShaMap(globalTsShaMap)
+			oneErrMap := ckptDoc.LoadGlobalInfoFromShaMap(globalInfoShaMap)
 			base.MergeErrorMaps(errMap, oneErrMap, false)
 		}
 
@@ -1470,7 +1470,7 @@ func (p *VBMasterPayload) SameAs(other *VBMasterPayload) bool {
 		return p.NotMyVBs.SameAs(other.NotMyVBs) && p.ConflictingVBs.SameAs(other.ConflictingVBs) &&
 			p.PushVBs.SameAs(other.PushVBs) && p.SrcManifests.SameAs(other.SrcManifests) &&
 			p.TgtManifests.SameAs(other.TgtManifests) && p.BrokenMappingDoc.SameAs(other.BrokenMappingDoc) &&
-			p.BackfillMappingDoc.SameAs(other.BackfillMappingDoc) && p.GlobalTimestampDoc.SameAs(other.GlobalTimestampDoc)
+			p.BackfillMappingDoc.SameAs(other.BackfillMappingDoc) && p.GlobalInfoDoc.SameAs(other.GlobalInfoDoc)
 	}
 }
 
@@ -2392,10 +2392,10 @@ func GenerateNotMyVBsPayload(vbsList []uint16, brokenMapShaToInsert string) (VBs
 	return notMyVBs, vbToGlobalTs
 }
 
-func GenerateVBMasterPayload(notMyVBsPayload *VBsPayload, brokenMappingDoc *metadata.CollectionNsMappingsDoc, gtsDoc *metadata.GlobalTimestampCompressedDoc) *VBMasterPayload {
+func GenerateVBMasterPayload(notMyVBsPayload *VBsPayload, brokenMappingDoc *metadata.CollectionNsMappingsDoc, gInfoDoc *metadata.GlobalInfoCompressedDoc) *VBMasterPayload {
 	return &VBMasterPayload{
-		NotMyVBs:           notMyVBsPayload,
-		BrokenMappingDoc:   brokenMappingDoc,
-		GlobalTimestampDoc: gtsDoc,
+		NotMyVBs:         notMyVBsPayload,
+		BrokenMappingDoc: brokenMappingDoc,
+		GlobalInfoDoc:    gInfoDoc,
 	}
 }

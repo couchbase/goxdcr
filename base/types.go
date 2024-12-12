@@ -907,6 +907,14 @@ func (req *WrappedMCRequest) ResetCLogOptions() {
 	req.ConflictLoggerOptions.TargetCas = 0
 }
 
+// GetTargetVB returns math.MaxUint16 in an error scenario
+func (req *WrappedMCRequest) GetTargetVB() uint16 {
+	if req == nil || req.Req == nil {
+		return math.MaxUint16
+	}
+	return req.Req.VBucket
+}
+
 // Set options to replicate using HLV.
 func (req *WrappedMCRequest) SetHLVModeOptions(isMobile, isCCR, crossClusterVersioning, conflictLoggingEnabled bool) {
 	if isMobile {
