@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,6 +83,14 @@ type SourceVBTimestamp struct {
 
 	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
 	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
+}
+
+func (s *SourceVBTimestamp) Size() int {
+	if s == nil {
+		return 0
+	}
+	numFields := reflect.TypeOf(*s).NumField()
+	return 8 * numFields
 }
 
 type GlobalVBTimestamp struct {
@@ -245,6 +254,28 @@ func (t *TargetVBTimestamp) Clone() TargetVBTimestamp {
 	return *clonedVal
 }
 
+func (t *TargetVBTimestamp) Size() int {
+	if t == nil {
+		return 0
+	}
+
+	objCounter := reflect.TypeOf(*t)
+	numFields := objCounter.NumField()
+	if numFields > 4 {
+		// Remove:
+		// 1. internal brokenMappings
+		// 2. brokenMapping mutex
+		// 3. brokenmapping sha (counted separately)
+		// target vb opaque
+		numFields -= 4
+	}
+	sizeOfOpaque := 0
+	if t.Target_vb_opaque != nil {
+		sizeOfOpaque += t.Target_vb_opaque.Size()
+	}
+	return numFields*8 + len(t.BrokenMappingSha256) + sizeOfOpaque
+}
+
 type ShaToGlobalTimestampMap map[string]*GlobalTimestamp
 
 func (s *ShaToGlobalTimestampMap) Load(other ShaToGlobalTimestampMap) {
@@ -374,13 +405,13 @@ func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
 }
 
 func (g *GlobalTimestamp) Size() int {
-	var numOfUint64s int
 	var numOfUint16s int
+	var sizeOfAllTargetVBTimestamp int
 	for _, oneGlobalVbTimestamp := range *g {
-		numOfUint64s += int(unsafe.Sizeof(oneGlobalVbTimestamp.Target_vb_opaque)) // Sizeof returns num of references
+		sizeOfAllTargetVBTimestamp += oneGlobalVbTimestamp.Size()
 		numOfUint16s++
 	}
-	return 8*numOfUint64s + 2*numOfUint16s
+	return 2*numOfUint16s + sizeOfAllTargetVBTimestamp
 }
 
 func (g *GlobalTimestamp) Value() interface{} {
@@ -541,6 +572,13 @@ type SourceVBCounters struct {
 	CasPoisonCnt uint64 `json:"cas_poison_cnt"`
 }
 
+func (s *SourceVBCounters) Size() int {
+	if s == nil {
+		return 0
+	}
+	return 8 * reflect.TypeOf(*s).NumField()
+}
+
 func (s *SourceVBCounters) SameAs(other *SourceVBCounters) bool {
 	if s == nil || other == nil {
 		return s == nil && other == nil
@@ -595,7 +633,11 @@ func (t *TargetPerVBCounters) Clone() TargetPerVBCounters {
 }
 
 func (t *TargetPerVBCounters) Size() int {
-	numOfUint64s := int(unsafe.Sizeof(t))
+	if t == nil {
+		return 0
+	}
+	objCountType := reflect.TypeOf(*t)
+	numOfUint64s := objCountType.NumField()
 	return numOfUint64s * 8
 }
 
@@ -939,13 +981,17 @@ func (c *CheckpointRecord) Size() int {
 	}
 
 	var totalSize int
-	totalSize += int(unsafe.Sizeof(*c)) // This seems to return the number of members
+	totalSize += 8 // CreationTime
+
+	// Either traditional or global share the following 2 embedded structs
+	totalSize += c.SourceVBTimestamp.Size()
+	totalSize += c.SourceVBCounters.Size()
+
 	if c.IsTraditional() {
-		totalSize += c.Target_vb_opaque.Size()
-		totalSize += len(c.BrokenMappingSha256)
+		totalSize += c.TargetVBTimestamp.Size()
+		totalSize += c.TargetPerVBCounters.Size()
 	} else {
-		gts := c.GlobalTimestamp
-		totalSize += gts.Size()
+		totalSize += c.GlobalTimestamp.Size()
 		totalSize += c.GlobalCounters.Size()
 		totalSize += len(c.GlobalTimestampSha256)
 	}
