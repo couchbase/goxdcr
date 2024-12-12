@@ -203,8 +203,8 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 func getTraditionalMetrics(record *metadata.CheckpointRecord) base.VBCountMetric {
 	tradMetrics := base.NewTraditionalVBMetrics()
 	vbStatMap := tradMetrics.GetValue().(base.TraditionalVBMetrics)
-	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
-	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
+	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsCnt)
+	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.FilteredFailedCnt)
 	vbStatMap[service_def.EXPIRY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
 	vbStatMap[service_def.DELETION_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnDeletionsCnt)
 	vbStatMap[service_def.SET_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnSetCnt)
