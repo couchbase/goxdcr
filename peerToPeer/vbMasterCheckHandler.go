@@ -10,15 +10,16 @@ package peerToPeer
 
 import (
 	"fmt"
+	"reflect"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"reflect"
-	"sync"
-	"time"
 )
 
 type VBMasterCheckHandler struct {
@@ -118,9 +119,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	var shaMappingDocErr error
 	var brokenMappingDoc metadata.CollectionNsMappingsDoc
-	var globalTimestampDoc metadata.GlobalTimestampCompressedDoc
+	var globalInfoDoc metadata.GlobalInfoCompressedDoc
 	waitGrp.Add(1)
-	go h.fetchShaMappingDocs(req.ReplicationId, &brokenMappingDoc, &globalTimestampDoc, &shaMappingDocErr, waitGrp, finCh)
+	go h.fetchShaMappingDocs(req.ReplicationId, &brokenMappingDoc, &globalInfoDoc, &shaMappingDocErr, waitGrp, finCh)
 
 	var backfillTasksErr error
 	var backfillTaskSrcManifestId uint64
@@ -247,9 +248,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		}
 		h.logger.Errorf("Unable to send resp %v to original req %v (%v) - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
 	} else {
-		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time: %v processing time: %v timeInQueue: %v brokenMapCnt: %v, globalTsMapCnt: %v",
+		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time: %v processing time: %v timeInQueue: %v brokenMapCnt: %v, globaInfoMapCnt: %v",
 			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime), startTime.Sub(req.GetEnqueuedTime()),
-			len(brokenMappingDoc.NsMappingRecords), len(globalTimestampDoc.NsMappingRecords))
+			len(brokenMappingDoc.NsMappingRecords), len(globalInfoDoc.NsMappingRecords))
 	}
 	return
 }
@@ -445,16 +446,17 @@ func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *me
 	*tgtManifests = tgt
 }
 
-func (v *VBMasterCheckHandler) fetchShaMappingDocs(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, globalTsDoc *metadata.GlobalTimestampCompressedDoc, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
+func (v *VBMasterCheckHandler) fetchShaMappingDocs(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, globalInfoDoc *metadata.GlobalInfoCompressedDoc, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
+
 	defer waitGrp.Done()
 
 	var err error
 	var loadedDoc *metadata.CollectionNsMappingsDoc
-	var loadedGtsDoc *metadata.GlobalTimestampCompressedDoc
+	var loadedGInfoDoc *metadata.GlobalInfoCompressedDoc
 	doneCh := make(chan bool)
 
 	go func() {
-		loadedDoc, loadedGtsDoc, err = v.ckptSvc.LoadAllShaMappings(replId)
+		loadedDoc, loadedGInfoDoc, err = v.ckptSvc.LoadAllShaMappings(replId)
 		close(doneCh)
 	}()
 
@@ -477,7 +479,7 @@ func (v *VBMasterCheckHandler) fetchShaMappingDocs(replId string, mappingDoc *me
 		return
 	}
 	*mappingDoc = *loadedDoc
-	*globalTsDoc = *loadedGtsDoc
+	*globalInfoDoc = *loadedGInfoDoc
 }
 
 func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, backfillTaskSrcManifestId *uint64, waitGrp *sync.WaitGroup, finCh chan bool) {

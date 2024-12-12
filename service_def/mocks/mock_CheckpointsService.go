@@ -521,7 +521,7 @@ func (_c *CheckpointsService_GetVbnosFromCheckpointDocs_Call) RunAndReturn(run f
 }
 
 // LoadAllShaMappings provides a mock function with given fields: replicationId
-func (_m *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error) {
+func (_m *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalInfoCompressedDoc, error) {
 	ret := _m.Called(replicationId)
 
 	if len(ret) == 0 {
@@ -529,9 +529,9 @@ func (_m *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadat
 	}
 
 	var r0 *metadata.CollectionNsMappingsDoc
-	var r1 *metadata.GlobalTimestampCompressedDoc
+	var r1 *metadata.GlobalInfoCompressedDoc
 	var r2 error
-	if rf, ok := ret.Get(0).(func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalInfoCompressedDoc, error)); ok {
 		return rf(replicationId)
 	}
 	if rf, ok := ret.Get(0).(func(string) *metadata.CollectionNsMappingsDoc); ok {
@@ -542,11 +542,11 @@ func (_m *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadat
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) *metadata.GlobalTimestampCompressedDoc); ok {
+	if rf, ok := ret.Get(1).(func(string) *metadata.GlobalInfoCompressedDoc); ok {
 		r1 = rf(replicationId)
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*metadata.GlobalTimestampCompressedDoc)
+			r1 = ret.Get(1).(*metadata.GlobalInfoCompressedDoc)
 		}
 	}
 
@@ -577,12 +577,12 @@ func (_c *CheckpointsService_LoadAllShaMappings_Call) Run(run func(replicationId
 	return _c
 }
 
-func (_c *CheckpointsService_LoadAllShaMappings_Call) Return(_a0 *metadata.CollectionNsMappingsDoc, _a1 *metadata.GlobalTimestampCompressedDoc, _a2 error) *CheckpointsService_LoadAllShaMappings_Call {
+func (_c *CheckpointsService_LoadAllShaMappings_Call) Return(_a0 *metadata.CollectionNsMappingsDoc, _a1 *metadata.GlobalInfoCompressedDoc, _a2 error) *CheckpointsService_LoadAllShaMappings_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *CheckpointsService_LoadAllShaMappings_Call) RunAndReturn(run func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)) *CheckpointsService_LoadAllShaMappings_Call {
+func (_c *CheckpointsService_LoadAllShaMappings_Call) RunAndReturn(run func(string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalInfoCompressedDoc, error)) *CheckpointsService_LoadAllShaMappings_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -670,35 +670,35 @@ func (_c *CheckpointsService_LoadBrokenMappings_Call) RunAndReturn(run func(stri
 	return _c
 }
 
-// LoadGlobalTimestampMapping provides a mock function with given fields: replicationId
-func (_m *CheckpointsService) LoadGlobalTimestampMapping(replicationId string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, service_def.IncrementerFunc, bool, error) {
+// LoadGlobalInfoMapping provides a mock function with given fields: replicationId
+func (_m *CheckpointsService) LoadGlobalInfoMapping(replicationId string) (metadata.ShaToGlobalInfoMap, *metadata.GlobalInfoCompressedDoc, service_def.IncrementerFunc, bool, error) {
 	ret := _m.Called(replicationId)
 
 	if len(ret) == 0 {
-		panic("no return value specified for LoadGlobalTimestampMapping")
+		panic("no return value specified for LoadGlobalInfoMapping")
 	}
 
-	var r0 metadata.ShaToGlobalTimestampMap
-	var r1 *metadata.GlobalTimestampCompressedDoc
+	var r0 metadata.ShaToGlobalInfoMap
+	var r1 *metadata.GlobalInfoCompressedDoc
 	var r2 service_def.IncrementerFunc
 	var r3 bool
 	var r4 error
-	if rf, ok := ret.Get(0).(func(string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, service_def.IncrementerFunc, bool, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) (metadata.ShaToGlobalInfoMap, *metadata.GlobalInfoCompressedDoc, service_def.IncrementerFunc, bool, error)); ok {
 		return rf(replicationId)
 	}
-	if rf, ok := ret.Get(0).(func(string) metadata.ShaToGlobalTimestampMap); ok {
+	if rf, ok := ret.Get(0).(func(string) metadata.ShaToGlobalInfoMap); ok {
 		r0 = rf(replicationId)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(metadata.ShaToGlobalTimestampMap)
+			r0 = ret.Get(0).(metadata.ShaToGlobalInfoMap)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) *metadata.GlobalTimestampCompressedDoc); ok {
+	if rf, ok := ret.Get(1).(func(string) *metadata.GlobalInfoCompressedDoc); ok {
 		r1 = rf(replicationId)
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*metadata.GlobalTimestampCompressedDoc)
+			r1 = ret.Get(1).(*metadata.GlobalInfoCompressedDoc)
 		}
 	}
 
@@ -725,30 +725,30 @@ func (_m *CheckpointsService) LoadGlobalTimestampMapping(replicationId string) (
 	return r0, r1, r2, r3, r4
 }
 
-// CheckpointsService_LoadGlobalTimestampMapping_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadGlobalTimestampMapping'
-type CheckpointsService_LoadGlobalTimestampMapping_Call struct {
+// CheckpointsService_LoadGlobalInfoMapping_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadGlobalInfoMapping'
+type CheckpointsService_LoadGlobalInfoMapping_Call struct {
 	*mock.Call
 }
 
-// LoadGlobalTimestampMapping is a helper method to define mock.On call
+// LoadGlobalInfoMapping is a helper method to define mock.On call
 //   - replicationId string
-func (_e *CheckpointsService_Expecter) LoadGlobalTimestampMapping(replicationId interface{}) *CheckpointsService_LoadGlobalTimestampMapping_Call {
-	return &CheckpointsService_LoadGlobalTimestampMapping_Call{Call: _e.mock.On("LoadGlobalTimestampMapping", replicationId)}
+func (_e *CheckpointsService_Expecter) LoadGlobalInfoMapping(replicationId interface{}) *CheckpointsService_LoadGlobalInfoMapping_Call {
+	return &CheckpointsService_LoadGlobalInfoMapping_Call{Call: _e.mock.On("LoadGlobalInfoMapping", replicationId)}
 }
 
-func (_c *CheckpointsService_LoadGlobalTimestampMapping_Call) Run(run func(replicationId string)) *CheckpointsService_LoadGlobalTimestampMapping_Call {
+func (_c *CheckpointsService_LoadGlobalInfoMapping_Call) Run(run func(replicationId string)) *CheckpointsService_LoadGlobalInfoMapping_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *CheckpointsService_LoadGlobalTimestampMapping_Call) Return(_a0 metadata.ShaToGlobalTimestampMap, _a1 *metadata.GlobalTimestampCompressedDoc, _a2 service_def.IncrementerFunc, _a3 bool, _a4 error) *CheckpointsService_LoadGlobalTimestampMapping_Call {
+func (_c *CheckpointsService_LoadGlobalInfoMapping_Call) Return(_a0 metadata.ShaToGlobalInfoMap, _a1 *metadata.GlobalInfoCompressedDoc, _a2 service_def.IncrementerFunc, _a3 bool, _a4 error) *CheckpointsService_LoadGlobalInfoMapping_Call {
 	_c.Call.Return(_a0, _a1, _a2, _a3, _a4)
 	return _c
 }
 
-func (_c *CheckpointsService_LoadGlobalTimestampMapping_Call) RunAndReturn(run func(string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, service_def.IncrementerFunc, bool, error)) *CheckpointsService_LoadGlobalTimestampMapping_Call {
+func (_c *CheckpointsService_LoadGlobalInfoMapping_Call) RunAndReturn(run func(string) (metadata.ShaToGlobalInfoMap, *metadata.GlobalInfoCompressedDoc, service_def.IncrementerFunc, bool, error)) *CheckpointsService_LoadGlobalInfoMapping_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -801,16 +801,16 @@ func (_c *CheckpointsService_PreUpsertBrokenMapping_Call) RunAndReturn(run func(
 	return _c
 }
 
-// PreUpsertGlobalTs provides a mock function with given fields: replicationId, specInternalId, globalTs
-func (_m *CheckpointsService) PreUpsertGlobalTs(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp) error {
+// PreUpsertGlobalInfo provides a mock function with given fields: replicationId, specInternalId, globalTs
+func (_m *CheckpointsService) PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo) error {
 	ret := _m.Called(replicationId, specInternalId, globalTs)
 
 	if len(ret) == 0 {
-		panic("no return value specified for PreUpsertGlobalTs")
+		panic("no return value specified for PreUpsertGlobalInfo")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, *metadata.GlobalTimestamp) error); ok {
+	if rf, ok := ret.Get(0).(func(string, string, metadata.GlobalInfo) error); ok {
 		r0 = rf(replicationId, specInternalId, globalTs)
 	} else {
 		r0 = ret.Error(0)
@@ -819,32 +819,32 @@ func (_m *CheckpointsService) PreUpsertGlobalTs(replicationId string, specIntern
 	return r0
 }
 
-// CheckpointsService_PreUpsertGlobalTs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PreUpsertGlobalTs'
-type CheckpointsService_PreUpsertGlobalTs_Call struct {
+// CheckpointsService_PreUpsertGlobalInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PreUpsertGlobalInfo'
+type CheckpointsService_PreUpsertGlobalInfo_Call struct {
 	*mock.Call
 }
 
-// PreUpsertGlobalTs is a helper method to define mock.On call
+// PreUpsertGlobalInfo is a helper method to define mock.On call
 //   - replicationId string
 //   - specInternalId string
-//   - globalTs *metadata.GlobalTimestamp
-func (_e *CheckpointsService_Expecter) PreUpsertGlobalTs(replicationId interface{}, specInternalId interface{}, globalTs interface{}) *CheckpointsService_PreUpsertGlobalTs_Call {
-	return &CheckpointsService_PreUpsertGlobalTs_Call{Call: _e.mock.On("PreUpsertGlobalTs", replicationId, specInternalId, globalTs)}
+//   - globalTs metadata.GlobalInfo
+func (_e *CheckpointsService_Expecter) PreUpsertGlobalInfo(replicationId interface{}, specInternalId interface{}, globalTs interface{}) *CheckpointsService_PreUpsertGlobalInfo_Call {
+	return &CheckpointsService_PreUpsertGlobalInfo_Call{Call: _e.mock.On("PreUpsertGlobalInfo", replicationId, specInternalId, globalTs)}
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalTs_Call) Run(run func(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp)) *CheckpointsService_PreUpsertGlobalTs_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Run(run func(replicationId string, specInternalId string, globalTs metadata.GlobalInfo)) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(*metadata.GlobalTimestamp))
+		run(args[0].(string), args[1].(string), args[2].(metadata.GlobalInfo))
 	})
 	return _c
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalTs_Call) Return(_a0 error) *CheckpointsService_PreUpsertGlobalTs_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Return(_a0 error) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalTs_Call) RunAndReturn(run func(string, string, *metadata.GlobalTimestamp) error) *CheckpointsService_PreUpsertGlobalTs_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) RunAndReturn(run func(string, string, metadata.GlobalInfo) error) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -898,17 +898,17 @@ func (_c *CheckpointsService_ReplicationSpecChangeCallback_Call) RunAndReturn(ru
 	return _c
 }
 
-// UpsertAndReloadCheckpointCompleteSet provides a mock function with given fields: replicationId, mappingDoc, ckptDoc, internalId, gtsMappingDoc
-func (_m *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gtsMappingDoc *metadata.GlobalTimestampCompressedDoc) error {
-	ret := _m.Called(replicationId, mappingDoc, ckptDoc, internalId, gtsMappingDoc)
+// UpsertAndReloadCheckpointCompleteSet provides a mock function with given fields: replicationId, mappingDoc, ckptDoc, internalId, gInfoMappingDoc
+func (_m *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gInfoMappingDoc *metadata.GlobalInfoCompressedDoc) error {
+	ret := _m.Called(replicationId, mappingDoc, ckptDoc, internalId, gInfoMappingDoc)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpsertAndReloadCheckpointCompleteSet")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string, *metadata.GlobalTimestampCompressedDoc) error); ok {
-		r0 = rf(replicationId, mappingDoc, ckptDoc, internalId, gtsMappingDoc)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string, *metadata.GlobalInfoCompressedDoc) error); ok {
+		r0 = rf(replicationId, mappingDoc, ckptDoc, internalId, gInfoMappingDoc)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -926,14 +926,14 @@ type CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call struct {
 //   - mappingDoc *metadata.CollectionNsMappingsDoc
 //   - ckptDoc map[uint16]*metadata.CheckpointsDoc
 //   - internalId string
-//   - gtsMappingDoc *metadata.GlobalTimestampCompressedDoc
-func (_e *CheckpointsService_Expecter) UpsertAndReloadCheckpointCompleteSet(replicationId interface{}, mappingDoc interface{}, ckptDoc interface{}, internalId interface{}, gtsMappingDoc interface{}) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
-	return &CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call{Call: _e.mock.On("UpsertAndReloadCheckpointCompleteSet", replicationId, mappingDoc, ckptDoc, internalId, gtsMappingDoc)}
+//   - gInfoMappingDoc *metadata.GlobalInfoCompressedDoc
+func (_e *CheckpointsService_Expecter) UpsertAndReloadCheckpointCompleteSet(replicationId interface{}, mappingDoc interface{}, ckptDoc interface{}, internalId interface{}, gInfoMappingDoc interface{}) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
+	return &CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call{Call: _e.mock.On("UpsertAndReloadCheckpointCompleteSet", replicationId, mappingDoc, ckptDoc, internalId, gInfoMappingDoc)}
 }
 
-func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) Run(run func(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gtsMappingDoc *metadata.GlobalTimestampCompressedDoc)) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
+func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) Run(run func(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gInfoMappingDoc *metadata.GlobalInfoCompressedDoc)) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.CollectionNsMappingsDoc), args[2].(map[uint16]*metadata.CheckpointsDoc), args[3].(string), args[4].(*metadata.GlobalTimestampCompressedDoc))
+		run(args[0].(string), args[1].(*metadata.CollectionNsMappingsDoc), args[2].(map[uint16]*metadata.CheckpointsDoc), args[3].(string), args[4].(*metadata.GlobalInfoCompressedDoc))
 	})
 	return _c
 }
@@ -943,7 +943,7 @@ func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) Return(_
 	return _c
 }
 
-func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) RunAndReturn(run func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string, *metadata.GlobalTimestampCompressedDoc) error) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
+func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) RunAndReturn(run func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string, *metadata.GlobalInfoCompressedDoc) error) *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1101,12 +1101,12 @@ func (_c *CheckpointsService_UpsertCheckpointsDone_Call) RunAndReturn(run func(s
 	return _c
 }
 
-// UpsertGlobalTimestamps provides a mock function with given fields: replicationId, specInternalId
-func (_m *CheckpointsService) UpsertGlobalTimestamps(replicationId string, specInternalId string) error {
+// UpsertGlobalInfo provides a mock function with given fields: replicationId, specInternalId
+func (_m *CheckpointsService) UpsertGlobalInfo(replicationId string, specInternalId string) error {
 	ret := _m.Called(replicationId, specInternalId)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpsertGlobalTimestamps")
+		panic("no return value specified for UpsertGlobalInfo")
 	}
 
 	var r0 error
@@ -1119,31 +1119,31 @@ func (_m *CheckpointsService) UpsertGlobalTimestamps(replicationId string, specI
 	return r0
 }
 
-// CheckpointsService_UpsertGlobalTimestamps_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpsertGlobalTimestamps'
-type CheckpointsService_UpsertGlobalTimestamps_Call struct {
+// CheckpointsService_UpsertGlobalInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpsertGlobalInfo'
+type CheckpointsService_UpsertGlobalInfo_Call struct {
 	*mock.Call
 }
 
-// UpsertGlobalTimestamps is a helper method to define mock.On call
+// UpsertGlobalInfo is a helper method to define mock.On call
 //   - replicationId string
 //   - specInternalId string
-func (_e *CheckpointsService_Expecter) UpsertGlobalTimestamps(replicationId interface{}, specInternalId interface{}) *CheckpointsService_UpsertGlobalTimestamps_Call {
-	return &CheckpointsService_UpsertGlobalTimestamps_Call{Call: _e.mock.On("UpsertGlobalTimestamps", replicationId, specInternalId)}
+func (_e *CheckpointsService_Expecter) UpsertGlobalInfo(replicationId interface{}, specInternalId interface{}) *CheckpointsService_UpsertGlobalInfo_Call {
+	return &CheckpointsService_UpsertGlobalInfo_Call{Call: _e.mock.On("UpsertGlobalInfo", replicationId, specInternalId)}
 }
 
-func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) Run(run func(replicationId string, specInternalId string)) *CheckpointsService_UpsertGlobalTimestamps_Call {
+func (_c *CheckpointsService_UpsertGlobalInfo_Call) Run(run func(replicationId string, specInternalId string)) *CheckpointsService_UpsertGlobalInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(string), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) Return(_a0 error) *CheckpointsService_UpsertGlobalTimestamps_Call {
+func (_c *CheckpointsService_UpsertGlobalInfo_Call) Return(_a0 error) *CheckpointsService_UpsertGlobalInfo_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *CheckpointsService_UpsertGlobalTimestamps_Call) RunAndReturn(run func(string, string) error) *CheckpointsService_UpsertGlobalTimestamps_Call {
+func (_c *CheckpointsService_UpsertGlobalInfo_Call) RunAndReturn(run func(string, string) error) *CheckpointsService_UpsertGlobalInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -11,15 +11,16 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"reflect"
+	"strings"
+	"testing"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
-	"reflect"
-	"strings"
-	"testing"
 )
 
 func getManifest() metadata.CollectionsManifest {
@@ -200,19 +201,40 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 				continue
 			}
 			assert.False(record.IsTraditional())
+
+			// Compress GlobalTimestamp
 			gtsCompressedBytes, err := record.GlobalTimestamp.ToSnappyCompressed()
 			assert.Nil(err)
 
+			// Compress GlobalCounters
+			gctrsCompressedBytes, err := record.GlobalCounters.ToSnappyCompressed()
+			assert.Nil(err)
+
+			// Compute sha for GlobalTimestamp
 			chkSha, err := record.GlobalTimestamp.Sha256()
 			assert.Nil(err)
 			gtsBytesChkStr := fmt.Sprintf("%x", chkSha)
 			assert.Equal(record.GlobalTimestampSha256, gtsBytesChkStr)
 
-			gtsMarshalled, err := json.Marshal(record.GlobalTimestamp)
+			// Compute sha for GlobalCounters
+			chkctrsSha, err := record.GlobalCounters.Sha256()
+			assert.Nil(err)
+			gctrsBytesChkStr := fmt.Sprintf("%x", chkctrsSha)
+			assert.Equal(record.GlobalCountersSha256, gctrsBytesChkStr)
+
+			// Marshal GlobalTimestamp - used to validate the Snappy Decompressed value
+			gtsMarshalled, err := record.GlobalTimestamp.CustomJsonMarshaller()
 			assert.Nil(err)
 			checkBytes, err := snappy.Decode(nil, gtsCompressedBytes)
 			assert.Nil(err)
 			assert.True(reflect.DeepEqual(gtsMarshalled, checkBytes))
+
+			// Marshal GlobalTimestamp - used to validate the Snappy Decompressed value
+			gctrsMarshalled, err := record.GlobalCounters.CustomJsonMarshaller()
+			assert.Nil(err)
+			checkBytesctrs, err := snappy.Decode(nil, gctrsCompressedBytes)
+			assert.Nil(err)
+			assert.True(reflect.DeepEqual(gctrsMarshalled, checkBytesctrs))
 
 			// To double check
 			assert.NotEqual("", record.GlobalTimestampSha256)
@@ -220,8 +242,17 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 			err = chkGts.SnappyDecompress(gtsCompressedBytes)
 			assert.Nil(err)
 
+			assert.NotEqual("", record.GlobalCountersSha256)
+			chkGctrs := &metadata.GlobalTargetCounters{}
+			err = chkGctrs.SnappyDecompress(gctrsCompressedBytes)
+			assert.Nil(err)
+
+			// Check if snappy Decompressed is same as the record val
 			assert.True(chkGts.SameAs(&record.GlobalTimestamp))
 			dedupShaBytesMap[record.GlobalTimestampSha256] = gtsCompressedBytes
+
+			assert.True(chkGctrs.SameAs(&record.GlobalCounters))
+			dedupShaBytesMap[record.GlobalCountersSha256] = gctrsCompressedBytes
 		}
 	}
 	var compressedMappingDoc metadata.CompressedMappings
@@ -232,7 +263,7 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 		})
 	}
 
-	gtsCompressedDoc := (*metadata.GlobalTimestampCompressedDoc)(&compressedMappingDoc)
+	gtsCompressedDoc := (*metadata.GlobalInfoCompressedDoc)(&compressedMappingDoc)
 
 	vbMasterpayload := GenerateVBMasterPayload(&notMyVBs, colNsMappingDoc, gtsCompressedDoc)
 	vbMasterCheckResp := &VBMasterCheckResp{
@@ -255,7 +286,7 @@ func TestVBMasterRespGlobalPayloadMap(t *testing.T) {
 	assert.True(b0Found)
 	payload := (*payloadMap)["B0"]
 	assert.NotNil(payload)
-	assert.NotNil(payload.GlobalTimestampDoc)
+	assert.NotNil(payload.GlobalInfoDoc)
 
 	oneNodeVbsCkptMap, err := payload.GetAllCheckpoints(common.MainPipeline)
 	assert.Nil(err)
@@ -564,6 +595,8 @@ func TestReplicationPayload_loadCkptInternalGlobal(t *testing.T) {
 	assert.NotEqual(0, ckptDoc.Len())
 	assert.NotEqual("", ckptDoc.Checkpoint_records[0].GlobalTimestampSha256)
 	assert.NotEqual(0, len(ckptDoc.Checkpoint_records[0].GlobalTimestamp))
+	assert.NotEqual("", ckptDoc.Checkpoint_records[0].GlobalCountersSha256)
+	assert.NotEqual(0, len(ckptDoc.Checkpoint_records[0].GlobalCounters))
 
 	assert.Nil(req.LoadMainReplication(vb0CkptDoc, nil, nil))
 	payloadToCheck := (*req.payload)[bucketName]
@@ -581,13 +614,17 @@ func TestReplicationPayload_loadCkptInternalGlobal(t *testing.T) {
 				shasInCkpt = append(shasInCkpt, record.GlobalTimestampSha256)
 				assert.NotNil(record.GlobalTimestamp)
 			}
+			if record.GlobalCountersSha256 != "" {
+				shasInCkpt = append(shasInCkpt, record.GlobalCountersSha256)
+				assert.NotNil(record.GlobalCounters)
+			}
 		}
 	}
 	assert.NotEqual(0, len(shasInCkpt))
 
-	assert.NotNil(payloadToCheck.GlobalTimestampDoc)
+	assert.NotNil(payloadToCheck.GlobalInfoDoc)
 	var shasInGts []string
-	for _, record := range payloadToCheck.GlobalTimestampDoc.NsMappingRecords {
+	for _, record := range payloadToCheck.GlobalInfoDoc.NsMappingRecords {
 		shasInGts = append(shasInGts, record.Sha256Digest)
 		assert.NotNil(record.CompressedMapping)
 	}

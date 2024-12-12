@@ -24,9 +24,9 @@ type CheckpointsService interface {
 	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
-	PreUpsertGlobalTs(replicationId string, specInternalId string, globalTs *metadata.GlobalTimestamp) error
+	PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo) error
 	UpsertBrokenMapping(replicationId string, specInternalId string) error
-	UpsertGlobalTimestamps(replicationId string, specInternalId string) error
+	UpsertGlobalInfo(replicationId string, specInternalId string) error
 
 	CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 	ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error
@@ -35,13 +35,13 @@ type CheckpointsService interface {
 	GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 
 	LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, IncrementerFunc, bool, error)
-	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gtsMappingDoc *metadata.GlobalTimestampCompressedDoc) error
+	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string, gInfoMappingDoc *metadata.GlobalInfoCompressedDoc) error
 	DisableRefCntDecrement(topic string)
 	EnableRefCntDecrement(topic string)
 
-	LoadGlobalTimestampMapping(replicationId string) (metadata.ShaToGlobalTimestampMap, *metadata.GlobalTimestampCompressedDoc, IncrementerFunc, bool, error)
+	LoadGlobalInfoMapping(replicationId string) (metadata.ShaToGlobalInfoMap, *metadata.GlobalInfoCompressedDoc, IncrementerFunc, bool, error)
 
-	LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalTimestampCompressedDoc, error)
+	LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalInfoCompressedDoc, error)
 }
 
 type IncrementerFunc func(shaString string, valueToCount interface{})

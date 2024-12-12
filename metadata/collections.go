@@ -1214,10 +1214,10 @@ func (c *CollectionNamespaceList) diffOrConsolidate(other CollectionNamespaceLis
 }
 
 type collectionNsMetaObj struct {
-	SourceCollections CollectionNamespaceList `json:SourceCollections`
+	SourceCollections CollectionNamespaceList `json:"SourceCollections"`
 	// keys are integers of the index above
-	IndirectTargetMap      map[uint64]CollectionNamespaceList `json:IndirectTargetMap`
-	SourceNamespaceTypeMap map[uint64]SourceNamespaceType     `json:SourceNamespaceTypeMap`
+	IndirectTargetMap      map[uint64]CollectionNamespaceList `json:"IndirectTargetMap"`
+	SourceNamespaceTypeMap map[uint64]SourceNamespaceType     `json:"SourceNamespaceTypeMap"`
 }
 
 func newCollectionNsMetaObj() *collectionNsMetaObj {
