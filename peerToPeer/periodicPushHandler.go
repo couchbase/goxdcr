@@ -10,16 +10,17 @@ package peerToPeer
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
 )
 
 type PeriodicPushHandler struct {
@@ -109,7 +110,7 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 		var unknownCounter = 1
 		var mainExists bool
 		var backfillExists bool
-		var globalTimestampShasCnt int
+		var globalInfoShasCnt int // represents both GlobalTimestamp and GlobalCounters - need different counters?
 		for _, onePushRequest := range *req.PushRequests {
 			if onePushRequest == nil {
 				continue
@@ -124,14 +125,14 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 				if oneVBMasterPayload == nil {
 					continue
 				}
-				if oneVBMasterPayload.GlobalTimestampDoc != nil {
-					globalTimestampShasCnt += len(oneVBMasterPayload.GlobalTimestampDoc.NsMappingRecords)
+				if oneVBMasterPayload.GlobalInfoDoc != nil {
+					globalInfoShasCnt += len(oneVBMasterPayload.GlobalInfoDoc.NsMappingRecords)
 				}
 			}
 		}
 
-		p.logger.Infof("Received peer-to-peer push requests from %v (opaque %v): main %v backfill %v globalTsShaCnt %v",
-			req.Sender, req.GetOpaque(), mainExists, backfillExists, globalTimestampShasCnt)
+		p.logger.Infof("Received peer-to-peer push requests from %v (opaque %v): main %v backfill %v globalInfoShaCnt %v",
+			req.Sender, req.GetOpaque(), mainExists, backfillExists, globalInfoShasCnt)
 		startTime := time.Now()
 		for _, pushReqPtr := range *req.PushRequests {
 			if pushReqPtr == nil {
