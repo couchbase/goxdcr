@@ -48,8 +48,8 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			brokenMappings:      nil,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:  5,
-			Filtered_Failed_Cnt: 6,
+			FilteredItemsCnt:  5,
+			FilteredFailedCnt: 6,
 		},
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt: 100,
@@ -83,8 +83,8 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 			brokenMappings:      brokenMap,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:  5,
-			Filtered_Failed_Cnt: 6,
+			FilteredItemsCnt:  5,
+			FilteredFailedCnt: 6,
 		},
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt: 50,
@@ -377,8 +377,8 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			SourceManifestForBackfillMgr: 8,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:  5,
-			Filtered_Failed_Cnt: 6,
+			FilteredItemsCnt:  5,
+			FilteredFailedCnt: 6,
 		},
 		GlobalTimestamp: GlobalTimestamp{
 			100: &GlobalVBTimestamp{
@@ -422,8 +422,8 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			SourceManifestForBackfillMgr: 8,
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:  5,
-			Filtered_Failed_Cnt: 6,
+			FilteredItemsCnt:  5,
+			FilteredFailedCnt: 6,
 		},
 		GlobalTimestamp: GlobalTimestamp{
 			100: &GlobalVBTimestamp{

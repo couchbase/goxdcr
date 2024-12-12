@@ -509,9 +509,9 @@ func (g *GlobalTimestamp) CompressToShaCompresedMap(preExistMap ShaMappingCompre
 // components when resuming from a checkpoint
 type SourceFilteredCounters struct {
 	// Number of items filtered
-	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
+	FilteredItemsCnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
-	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
+	FilteredFailedCnt uint64 `json:"filtered_failed_cnt"`
 	// Number of Expirations filtered
 	FilteredItemsOnExpirationsCnt uint64 `json:"expirations_filtered_cnt"`
 	// Number of Deletions that were filtered
@@ -537,6 +537,29 @@ type SourceFilteredCounters struct {
 	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
 	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
 	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
+}
+
+func (s *SourceFilteredCounters) SameAs(other *SourceFilteredCounters) bool {
+	if s == nil || other == nil {
+		return s == nil && other == nil
+	}
+
+	return s.FilteredItemsCnt == other.FilteredItemsCnt &&
+		s.FilteredFailedCnt == other.FilteredFailedCnt &&
+		s.FilteredItemsOnExpirationsCnt == other.FilteredItemsOnExpirationsCnt &&
+		s.FilteredItemsOnDeletionsCnt == other.FilteredItemsOnDeletionsCnt &&
+		s.FilteredItemsOnSetCnt == other.FilteredItemsOnSetCnt &&
+		s.FilteredItemsOnExpiryStrippedCnt == other.FilteredItemsOnExpiryStrippedCnt &&
+		s.FilteredItemsOnBinaryDocsCnt == other.FilteredItemsOnBinaryDocsCnt &&
+		s.FilteredItemsOnATRDocsCnt == other.FilteredItemsOnATRDocsCnt &&
+		s.FilteredItemsOnClientTxnRecordsCnt == other.FilteredItemsOnClientTxnRecordsCnt &&
+		s.FilteredItemsOnTxnXattrsDocsCnt == other.FilteredItemsOnTxnXattrsDocsCnt &&
+		s.FilteredItemsOnMobileRecords == other.FilteredItemsOnMobileRecords &&
+		s.FilteredItemsOnUserDefinedFilters == other.FilteredItemsOnUserDefinedFilters &&
+		s.FilteredConflictDocs == other.FilteredConflictDocs &&
+		s.SrcConflictDocsWritten == other.SrcConflictDocsWritten &&
+		s.TgtConflictDocsWritten == other.TgtConflictDocsWritten &&
+		s.CRDConflictDocsWritten == other.CRDConflictDocsWritten
 }
 
 // TargetPerVBCounters contain a list of counters that are collected throughout a target VB's
@@ -1006,8 +1029,8 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 		},
 		TargetVBTimestamp: *tgtTimestamp,
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:                 filteredItems,
-			Filtered_Failed_Cnt:                filterFailed,
+			FilteredItemsCnt:                   filteredItems,
+			FilteredFailedCnt:                  filterFailed,
 			FilteredItemsOnExpirationsCnt:      filteredExpiredItems,
 			FilteredItemsOnDeletionsCnt:        filteredDelItems,
 			FilteredItemsOnSetCnt:              filteredSetItems,
@@ -1056,9 +1079,9 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 		}
 		switch routerKey {
 		case base.DocsFiltered:
-			srcFilteredCntrs.Filtered_Items_Cnt = uint64(vbCountMap[vbKey])
+			srcFilteredCntrs.FilteredItemsCnt = uint64(vbCountMap[vbKey])
 		case base.DocsUnableToFilter:
-			srcFilteredCntrs.Filtered_Failed_Cnt = uint64(vbCountMap[vbKey])
+			srcFilteredCntrs.FilteredFailedCnt = uint64(vbCountMap[vbKey])
 		case base.ExpiryFiltered:
 			srcFilteredCntrs.FilteredItemsOnExpirationsCnt = uint64(vbCountMap[vbKey])
 		case base.DeletionFiltered:
@@ -1216,18 +1239,7 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.Dcp_snapshot_seqno == newRecord.Dcp_snapshot_seqno &&
 		ckptRecord.Dcp_snapshot_end_seqno == newRecord.Dcp_snapshot_end_seqno &&
 		ckptRecord.TargetVBTimestamp.SameAs(&newRecord.TargetVBTimestamp) &&
-		ckptRecord.Filtered_Failed_Cnt == newRecord.Filtered_Failed_Cnt &&
-		ckptRecord.Filtered_Items_Cnt == newRecord.Filtered_Items_Cnt &&
-		ckptRecord.FilteredItemsOnExpirationsCnt == newRecord.FilteredItemsOnExpirationsCnt &&
-		ckptRecord.FilteredItemsOnDeletionsCnt == newRecord.FilteredItemsOnDeletionsCnt &&
-		ckptRecord.FilteredItemsOnSetCnt == newRecord.FilteredItemsOnSetCnt &&
-		ckptRecord.FilteredItemsOnExpiryStrippedCnt == newRecord.FilteredItemsOnExpiryStrippedCnt &&
-		ckptRecord.FilteredItemsOnBinaryDocsCnt == newRecord.FilteredItemsOnBinaryDocsCnt &&
-		ckptRecord.FilteredItemsOnATRDocsCnt == newRecord.FilteredItemsOnATRDocsCnt &&
-		ckptRecord.FilteredItemsOnClientTxnRecordsCnt == newRecord.FilteredItemsOnClientTxnRecordsCnt &&
-		ckptRecord.FilteredItemsOnTxnXattrsDocsCnt == newRecord.FilteredItemsOnTxnXattrsDocsCnt &&
-		ckptRecord.FilteredItemsOnMobileRecords == newRecord.FilteredItemsOnMobileRecords &&
-		ckptRecord.FilteredItemsOnUserDefinedFilters == newRecord.FilteredItemsOnUserDefinedFilters &&
+		ckptRecord.SourceFilteredCounters.SameAs(&newRecord.SourceFilteredCounters) &&
 		ckptRecord.SourceManifestForDCP == newRecord.SourceManifestForDCP &&
 		ckptRecord.SourceManifestForBackfillMgr == newRecord.SourceManifestForBackfillMgr &&
 		ckptRecord.BrokenMappingSha256 == newRecord.BrokenMappingSha256 &&
@@ -1240,11 +1252,7 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt &&
 		ckptRecord.DocsSentWithPoisonedCasErrorMode == newRecord.DocsSentWithPoisonedCasErrorMode &&
 		ckptRecord.DocsSentWithPoisonedCasReplaceMode == newRecord.DocsSentWithPoisonedCasReplaceMode &&
-		ckptRecord.SrcConflictDocsWritten == newRecord.SrcConflictDocsWritten &&
-		ckptRecord.TgtConflictDocsWritten == newRecord.TgtConflictDocsWritten &&
-		ckptRecord.CRDConflictDocsWritten == newRecord.CRDConflictDocsWritten &&
 		ckptRecord.TrueConflictsDetected == newRecord.TrueConflictsDetected &&
-		ckptRecord.FilteredConflictDocs == newRecord.FilteredConflictDocs &&
 		ckptRecord.CLogHibernatedCnt == newRecord.CLogHibernatedCnt &&
 		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt &&
 		ckptRecord.TargetPerVBCounters.SameAs(&newRecord.TargetPerVBCounters) &&
@@ -1267,8 +1275,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Dcp_snapshot_seqno = other.Dcp_snapshot_seqno
 	ckptRecord.Dcp_snapshot_end_seqno = other.Dcp_snapshot_end_seqno
 	ckptRecord.TargetVBTimestamp = other.TargetVBTimestamp.Clone()
-	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
-	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
+	ckptRecord.FilteredItemsCnt = other.FilteredItemsCnt
+	ckptRecord.FilteredFailedCnt = other.FilteredFailedCnt
 	ckptRecord.FilteredItemsOnExpirationsCnt = other.FilteredItemsOnExpirationsCnt
 	ckptRecord.FilteredItemsOnDeletionsCnt = other.FilteredItemsOnDeletionsCnt
 	ckptRecord.FilteredItemsOnSetCnt = other.FilteredItemsOnSetCnt
@@ -1395,12 +1403,12 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 
 	filteredCnt, ok := fieldMap[FilteredCnt]
 	if ok {
-		ckptRecord.Filtered_Items_Cnt = uint64(filteredCnt.(float64))
+		ckptRecord.FilteredItemsCnt = uint64(filteredCnt.(float64))
 	}
 
 	filteredFailedCnt, ok := fieldMap[FilteredFailedCnt]
 	if ok {
-		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
+		ckptRecord.FilteredFailedCnt = uint64(filteredFailedCnt.(float64))
 	}
 
 	filteredItemsOnExpirationsCnt, ok := fieldMap[FilteredItemsOnExpirationsCnt]
@@ -2392,8 +2400,8 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			brokenMappingsMtx:   sync.RWMutex{},
 		},
 		SourceFilteredCounters: SourceFilteredCounters{
-			Filtered_Items_Cnt:                 c.Filtered_Items_Cnt,
-			Filtered_Failed_Cnt:                c.Filtered_Failed_Cnt,
+			FilteredItemsCnt:                   c.FilteredItemsCnt,
+			FilteredFailedCnt:                  c.FilteredFailedCnt,
 			FilteredItemsOnExpirationsCnt:      c.FilteredItemsOnExpirationsCnt,
 			FilteredItemsOnDeletionsCnt:        c.FilteredItemsOnDeletionsCnt,
 			FilteredItemsOnSetCnt:              c.FilteredItemsOnSetCnt,
