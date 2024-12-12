@@ -1780,7 +1780,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, router.getManifestAdditional()))
 		return result, nil
 	} else if raiseDataNotReplicatedCasDrift {
-		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected}, router.getManifestAdditional()))
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected, mcRequest.Req.VBucket, mcRequest.Seqno}, router.getManifestAdditional()))
 		eventMap := base.NewEventsMap()
 		keyToLog := string(wrappedUpr.UprEvent.Key)
 		// The key for eventsMap doesn't matter - it will get re-keyed

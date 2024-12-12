@@ -3088,9 +3088,8 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
 		return nil
 	case service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
-		mcReq := event.Data.(*base.WrappedMCRequest)
-		vbucket := mcReq.Req.VBucket // denotes the source VB
-		seqno := mcReq.Seqno
+		vbucket := event.DerivedData[1].(uint16) // denotes the source VB
+		seqno := event.DerivedData[2].(uint64)
 		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
