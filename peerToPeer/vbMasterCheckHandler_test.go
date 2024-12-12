@@ -42,7 +42,7 @@ func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.Checkp
 func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec, utils *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, spec *metadata.ReplicationSpecification) {
 	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
 	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
-	globalTsDoc := &metadata.GlobalTimestampCompressedDoc{}
+	globalTsDoc := &metadata.GlobalInfoCompressedDoc{}
 	ckptSvc.On("LoadAllShaMappings", replId).Return(nsMappingDoc, globalTsDoc, nil)
 
 	// For backfill, just return the same thing

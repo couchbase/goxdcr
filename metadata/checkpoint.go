@@ -11,6 +11,7 @@ package metadata
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -68,6 +69,9 @@ const (
 	GlobalTimestampStr                 string = "global_timestamp"
 	GlobalTargetCountersStr            string = "global_target_counters"
 	GlobalTimestampMapSha              string = "globalTimestampMapSha256"
+	GlobalCountersMapSha               string = "globalCountersMapSha256"
+	GlobalInfoTypeStr                  string = "global_info_type"
+	GlobalInfoDataStr                  string = "global_info_data"
 )
 
 // SourceVBTimestamp defines the necessary items to start or resume a source DCP stream in a checkpoint context
@@ -91,6 +95,102 @@ func (s *SourceVBTimestamp) Size() int {
 	}
 	numFields := reflect.TypeOf(*s).NumField()
 	return 8 * numFields
+}
+
+// indicates the type of GlobalInfo
+type GlobalInfoType int
+
+const (
+	GlobalTimestampType     GlobalInfoType = iota
+	GlobalTargetCounterType GlobalInfoType = iota
+)
+
+var (
+	ErrorGlobalInfoWrongType   = errors.New("unable to unmarshal to GlobalInfo")
+	ErrorInvalidGlobalInfoType = errors.New("invalid GlobalInfoType")
+)
+
+type GlobalInfoMetaObj struct {
+	Type GlobalInfoType `json:"global_info_type"`
+	Data GlobalInfo     `json:"global_info_data"`
+}
+
+func newGlobalInfoMetaObj(type_ GlobalInfoType, data GlobalInfo) *GlobalInfoMetaObj {
+	return &GlobalInfoMetaObj{
+		Type: type_,
+		Data: data}
+}
+
+// SnappyDecompress decompresses data using Snappy and unmarshals into the receiver.
+func (gmo *GlobalInfoMetaObj) SnappyDecompress(data []byte) error {
+	if gmo == nil {
+		return base.ErrorNilPtr
+	}
+
+	uncompressedData, err := snappy.Decode(nil, data)
+	if err != nil {
+		return fmt.Errorf("failed to decompress data. err=%v", err)
+	}
+
+	return gmo.UnmarshalJSON(uncompressedData)
+}
+
+// UnmarshalJSON is the custom unmarshaller for `GlobalInfoMetaObj`.
+func (gmo *GlobalInfoMetaObj) UnmarshalJSON(data []byte) error {
+	var serializedMap map[string]interface{}
+	if err := json.Unmarshal(data, &serializedMap); err != nil {
+		return fmt.Errorf("failed to unmarshal JSON. err=%v", err)
+	}
+
+	typeVal, ok := serializedMap[GlobalInfoTypeStr]
+	dataVal, ok1 := serializedMap[GlobalInfoDataStr]
+	if !ok || !ok1 { // If either of them is not present, then the underlying data must be of wrong type
+		return ErrorGlobalInfoWrongType
+	}
+
+	// Validate and populate `Type` field
+	typeFloat, ok := typeVal.(float64)
+	if !ok {
+		return fmt.Errorf("failed to unmarshal. err=On unmarshalling, GlobalInfoType should be of type float64 but is of type %T", typeVal)
+	}
+	gmo.Type = GlobalInfoType(typeFloat)
+
+	// Validate and populate `Data` field
+	genericMap, ok := dataVal.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("failed to unmarshal. err=GlobalInfoMetaObj.Data should be of type map[string]interface{} but got %T", dataVal)
+	}
+	return gmo.populateDataField(genericMap)
+}
+
+// populateDataField handles assigning the correct type to `Data`.
+func (gmo *GlobalInfoMetaObj) populateDataField(genericMap map[string]interface{}) error {
+	switch gmo.Type {
+	case GlobalTimestampType:
+		return gmo.handleGlobalTimestamp(genericMap)
+	case GlobalTargetCounterType:
+		return gmo.handleGlobalTargetCounters(genericMap)
+	default:
+		return ErrorInvalidGlobalInfoType
+	}
+}
+
+func (gmo *GlobalInfoMetaObj) handleGlobalTimestamp(genericMap map[string]interface{}) error {
+	actualMap := make(GlobalTimestamp)
+	if err := actualMap.LoadUnmarshalled(genericMap); err != nil {
+		return fmt.Errorf("failed to load GlobalTimestamp: err=%v", err)
+	}
+	gmo.Data = &actualMap
+	return nil
+}
+
+func (gmo *GlobalInfoMetaObj) handleGlobalTargetCounters(genericMap map[string]interface{}) error {
+	actualMap := make(GlobalTargetCounters)
+	if err := actualMap.LoadUnmarshalled(genericMap); err != nil {
+		return fmt.Errorf("failed to load GlobalTargetCounters: err=%v", err)
+	}
+	gmo.Data = &actualMap
+	return nil
 }
 
 type GlobalVBTimestamp struct {
@@ -276,9 +376,15 @@ func (t *TargetVBTimestamp) Size() int {
 	return numFields*8 + len(t.BrokenMappingSha256) + sizeOfOpaque
 }
 
-type ShaToGlobalTimestampMap map[string]*GlobalTimestamp
+type GlobalInfo interface {
+	GetClone() GlobalInfo
+	ToSnappyCompressable() SnappyCompressableVal
+	Sha256() ([sha256.Size]byte, error)
+}
 
-func (s *ShaToGlobalTimestampMap) Load(other ShaToGlobalTimestampMap) {
+type ShaToGlobalInfoMap map[string]GlobalInfo
+
+func (s *ShaToGlobalInfoMap) Load(other ShaToGlobalInfoMap) {
 	if s == nil {
 		return
 	}
@@ -286,32 +392,31 @@ func (s *ShaToGlobalTimestampMap) Load(other ShaToGlobalTimestampMap) {
 	for k, v := range other {
 		_, exists := (*s)[k]
 		if !exists {
-			gts := v.CloneGlobalTimestamp()
-			(*s)[k] = &gts
+			gts := v.GetClone()
+			(*s)[k] = gts
 		}
 	}
 }
 
-func (s *ShaToGlobalTimestampMap) Clone() ShaToGlobalTimestampMap {
+func (s *ShaToGlobalInfoMap) Clone() ShaToGlobalInfoMap {
 	if s == nil {
 		return nil
 	}
 
-	clonedMap := make(ShaToGlobalTimestampMap)
+	clonedMap := make(ShaToGlobalInfoMap)
 	for k, v := range *s {
-		gts := v.CloneGlobalTimestamp()
-		clonedMap[k] = &gts
+		clonedMap[k] = v.GetClone()
 	}
 	return clonedMap
 }
 
-func (s *ShaToGlobalTimestampMap) ToSnappyCompressableMap() map[string]SnappyCompressableVal {
+func (s *ShaToGlobalInfoMap) ToSnappyCompressableMap() map[string]SnappyCompressableVal {
 	if s == nil {
 		return nil
 	}
 	retMap := make(map[string]SnappyCompressableVal)
 	for k, v := range *s {
-		retMap[k] = v
+		retMap[k] = v.ToSnappyCompressable()
 	}
 	return retMap
 }
@@ -350,35 +455,25 @@ func (g *GlobalTimestamp) Sha256() (result [sha256.Size]byte, err error) {
 }
 
 func (g *GlobalTimestamp) ToSnappyCompressed() ([]byte, error) {
-	marshalledJson, err := json.Marshal(g)
+	marshalledJson, err := g.CustomJsonMarshaller()
 	if err != nil {
 		return nil, err
 	}
 	return snappy.Encode(nil, marshalledJson), nil
 }
 
-var errorGlobalTimestampWrongType = fmt.Errorf("unable to unmarshal to GlobalTimestamp")
-
+// This function is only used for unit tests
 func (g *GlobalTimestamp) SnappyDecompress(data []byte) error {
-	if g == nil {
-		return base.ErrorNilPtr
-	}
-
-	uncompressedData, err := snappy.Decode(nil, data)
+	gInfoMetaObj := &GlobalInfoMetaObj{}
+	err := gInfoMetaObj.SnappyDecompress(data)
 	if err != nil {
 		return err
 	}
-
-	var serializedMap map[string]interface{}
-	err = json.Unmarshal(uncompressedData, &serializedMap)
-	if err != nil {
-		return errorGlobalTimestampWrongType
+	gts, ok := gInfoMetaObj.Data.(*GlobalTimestamp)
+	if !ok {
+		return fmt.Errorf("failed to snappyDecompress. err=GlobalInfoMetaObj.Data should be of type *GlobalTimestamp but got %T", gInfoMetaObj.Data)
 	}
-
-	err = g.LoadUnmarshalled(serializedMap)
-	if err != nil {
-		return errorGlobalTimestampWrongType
-	}
+	*g = *gts
 	return nil
 }
 
@@ -393,6 +488,14 @@ func (g *GlobalTimestamp) CloneGlobalTimestamp() GlobalTimestamp {
 		clonedMap[k] = &clonedVal
 	}
 	return clonedMap
+}
+
+func (g *GlobalTimestamp) GetClone() GlobalInfo {
+	globalTimestampClone := g.CloneGlobalTimestamp()
+	return &globalTimestampClone
+}
+func (g *GlobalTimestamp) ToSnappyCompressable() SnappyCompressableVal {
+	return g
 }
 
 func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
@@ -534,6 +637,12 @@ func (g *GlobalTimestamp) CompressToShaCompresedMap(preExistMap ShaMappingCompre
 	}
 	preExistMap[sha] = compressedBytes
 	return nil
+}
+
+// A custom Json marshaller for GlobalTimestamp
+func (g *GlobalTimestamp) CustomJsonMarshaller() ([]byte, error) {
+	newGlobalInfoMetaObj := newGlobalInfoMetaObj(GlobalTimestampType, g)
+	return json.Marshal(newGlobalInfoMetaObj)
 }
 
 // SourceVBCounters are item counts based on source VB streams and are restored to the source-related
@@ -768,7 +877,95 @@ func (g *GlobalTargetCounters) Clone() GlobalTargetCounters {
 		clonedV := v.Clone()
 		clonedMap[k] = &clonedV
 	}
+
 	return clonedMap
+}
+
+func (g *GlobalTargetCounters) GetClone() GlobalInfo {
+	globalCounterClone := g.Clone()
+	return &globalCounterClone
+}
+
+func (g *GlobalTargetCounters) ToSnappyCompressable() SnappyCompressableVal {
+	return g
+}
+
+func (g *GlobalTargetCounters) Sha256() (result [sha256.Size]byte, err error) {
+	if g == nil {
+		err = fmt.Errorf("Calling Sha256() on a nil GlobalTargetCounter")
+		return
+	}
+
+	marshalledBytes, err := json.Marshal(g)
+	if err != nil {
+		return
+	}
+
+	result = sha256.Sum256(marshalledBytes)
+	return
+}
+
+func (g *GlobalTargetCounters) ToSnappyCompressed() ([]byte, error) {
+	marshalledJson, err := g.CustomJsonMarshaller()
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(nil, marshalledJson), nil
+}
+
+func (g *GlobalTargetCounters) CustomJsonMarshaller() ([]byte, error) {
+	newGlobalInfoMetaObj := newGlobalInfoMetaObj(GlobalTargetCounterType, g)
+	return json.Marshal(newGlobalInfoMetaObj)
+}
+
+func (g *GlobalTargetCounters) CompressToShaCompresedMap(preExistMap ShaMappingCompressedMap) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+
+	if len(*g) == 0 {
+		// Do nothing
+		return nil
+	}
+
+	shaSlice, err := g.Sha256()
+	if err != nil {
+		return err
+	}
+	sha := fmt.Sprintf("%x", shaSlice[:])
+
+	if _, exists := preExistMap[sha]; exists {
+		// Already done
+		return nil
+	}
+	compressedBytes, compressErr := g.ToSnappyCompressed()
+	if compressErr != nil {
+		return fmt.Errorf("unable to snappyCompress %v", *g)
+	}
+	preExistMap[sha] = compressedBytes
+	return nil
+}
+
+// This function is used only by unit tests
+func (g *GlobalTargetCounters) SnappyDecompress(data []byte) error {
+	gInfoMetaObj := &GlobalInfoMetaObj{}
+	err := gInfoMetaObj.SnappyDecompress(data)
+	if err != nil {
+		return err
+	}
+	globalCounters, ok := gInfoMetaObj.Data.(*GlobalTargetCounters)
+	if !ok {
+		return fmt.Errorf("failed to snappyDecompress. err=GlobalInfoMetaObj.Data should be of type *GlobalTargetCounters but got %T", gInfoMetaObj.Data)
+	}
+	*g = *globalCounters
+	return nil
+}
+
+func (g *GlobalTargetCounters) InitializeVb(vb uint16) {
+	if g == nil {
+		return
+	}
+	(*g)[vb] = &TargetPerVBCounters{}
 }
 
 // TargetTimestamp is an interface used within checkpointing operation that can be either
@@ -791,8 +988,9 @@ type CheckpointRecord struct {
 
 	// Global checkpoints will utilize multiple TargetVBTimestamp and TargetVBCounters
 	GlobalTimestamp       GlobalTimestamp      `json:"-"`
-	GlobalCounters        GlobalTargetCounters `json:"global_target_counters,omitempty"`
+	GlobalCounters        GlobalTargetCounters `json:"-"`
 	GlobalTimestampSha256 string               `json:"globalTimestampMapSha256,omitempty"`
+	GlobalCountersSha256  string               `json:"globalCountersMapSha256,omitempty"`
 }
 
 // Generally speaking, brokenMapping should move in tandem in a global checkpoint
@@ -955,18 +1153,24 @@ func (c *CheckpointRecord) GetShaOnlyMap() ShaToCollectionNamespaceMap {
 	return retMap
 }
 
-func (c *CheckpointRecord) GetGlobalTsMap() ShaToGlobalTimestampMap {
+func (c *CheckpointRecord) GetGlobalInfoMap() ShaToGlobalInfoMap {
 	if c == nil {
 		return nil
 	}
 
-	retMap := make(ShaToGlobalTimestampMap)
+	retMap := make(ShaToGlobalInfoMap)
 	if c.IsTraditional() {
 		return retMap
 	}
 
+	// Load GlobalTimestamp sha
 	if c.GlobalTimestampSha256 != "" {
 		retMap[c.GlobalTimestampSha256] = nil
+	}
+
+	// Load GlobalCounters sha
+	if c.GlobalCountersSha256 != "" {
+		retMap[c.GlobalCountersSha256] = nil
 	}
 	return retMap
 }
@@ -994,6 +1198,7 @@ func (c *CheckpointRecord) Size() int {
 		totalSize += c.GlobalTimestamp.Size()
 		totalSize += c.GlobalCounters.Size()
 		totalSize += len(c.GlobalTimestampSha256)
+		totalSize += len(c.GlobalCountersSha256)
 	}
 	return totalSize
 }
@@ -1019,7 +1224,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 		if err != nil {
 			return nil, err
 		}
-		err = record.PopulateGlobalTimestampSha()
+		err = record.PopulateShasForGlobalCheckPoint()
 		if err != nil {
 			return nil, err
 		}
@@ -1251,21 +1456,23 @@ func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
 			}
 		}
 		if len(errMap) > 0 {
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return fmt.Errorf("%s", base.FlattenErrorMap(errMap))
 		}
 	}
 	return nil
 }
 
-func (ckptRecord *CheckpointRecord) PopulateGlobalTimestampSha() error {
+func (ckptRecord *CheckpointRecord) PopulateShasForGlobalCheckPoint() error {
 	if ckptRecord.IsTraditional() {
-		return fmt.Errorf("PopulateGlobalTimestampSha called on a traditional checkpoint")
+		return fmt.Errorf("PopulateShasForGlobalCheckPoint called on a traditional checkpoint")
 	} else {
-		sha256Bytes, err := ckptRecord.GlobalTimestamp.Sha256()
-		if err != nil {
-			return err
+		globalTimestampSha, err1 := ckptRecord.GlobalTimestamp.Sha256()
+		globalCounterSha, err2 := ckptRecord.GlobalCounters.Sha256()
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("error occured while performing sha hash. globalTimestampErr=%v globalCounterSha=%v", err1, err2)
 		}
-		ckptRecord.GlobalTimestampSha256 = fmt.Sprintf("%x", sha256Bytes[:])
+		ckptRecord.GlobalTimestampSha256 = fmt.Sprintf("%x", globalTimestampSha[:])
+		ckptRecord.GlobalCountersSha256 = fmt.Sprintf("%x", globalCounterSha[:])
 	}
 	return nil
 }
@@ -1299,9 +1506,8 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.CLogHibernatedCnt == newRecord.CLogHibernatedCnt &&
 		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt &&
 		ckptRecord.TargetPerVBCounters.SameAs(&newRecord.TargetPerVBCounters) &&
-		ckptRecord.GlobalTimestamp.SameAs(&newRecord.GlobalTimestamp) &&
-		ckptRecord.GlobalCounters.SameAs(&newRecord.GlobalCounters) &&
-		ckptRecord.GlobalTimestampSha256 == newRecord.GlobalTimestampSha256 {
+		ckptRecord.GlobalTimestampSha256 == newRecord.GlobalTimestampSha256 &&
+		ckptRecord.GlobalCountersSha256 == newRecord.GlobalCountersSha256 {
 		return true
 	} else {
 		return false
@@ -1351,6 +1557,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.GlobalCounters = other.GlobalCounters.Clone()
 	ckptRecord.GlobalTimestamp = other.GlobalTimestamp.CloneGlobalTimestamp()
 	ckptRecord.GlobalTimestampSha256 = other.GlobalTimestampSha256
+	ckptRecord.GlobalCountersSha256 = other.GlobalCountersSha256
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCollectionNamespaceMap) error {
@@ -1388,18 +1595,38 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 	}
 }
 
-func (ckptRecord *CheckpointRecord) LoadGlobalTsMapping(allShasToGts ShaToGlobalTimestampMap) error {
+func (ckptRecord *CheckpointRecord) LoadGlobalInfoMapping(allShasToGInfo ShaToGlobalInfoMap) error {
 	if ckptRecord == nil {
-		return fmt.Errorf("nil ckptRecord")
+		return fmt.Errorf("checkpoint record is nil")
 	}
 
+	// Load Global Timestamp if available
 	if ckptRecord.GlobalTimestampSha256 != "" {
-		globalTs, exists := allShasToGts[ckptRecord.GlobalTimestampSha256]
-		if exists && globalTs != nil {
-			ckptRecord.GlobalTimestamp = *globalTs
+		if globalTsIface, exists := allShasToGInfo[ckptRecord.GlobalTimestampSha256]; exists {
+			if globalTs, ok := globalTsIface.(*GlobalTimestamp); ok {
+				ckptRecord.GlobalTimestamp = *globalTs
+			}
+		}
+	}
+
+	// Load Global Counters if available
+	if ckptRecord.GlobalCountersSha256 != "" {
+		if globalCountersIface, exists := allShasToGInfo[ckptRecord.GlobalCountersSha256]; exists {
+			if globalCounters, ok := globalCountersIface.(*GlobalTargetCounters); ok {
+				ckptRecord.GlobalCounters = *globalCounters
+			}
 		}
 	}
 	return nil
+}
+
+// Initializes the global data structures i.e. GlobalTimestamp and GlobalCounters for the specified VB
+func (ckptRecord *CheckpointRecord) InitializeVbForGlobalDS(targetVB uint16) {
+	if ckptRecord == nil {
+		return
+	}
+	ckptRecord.GlobalTimestamp.InitializeVb(targetVB)
+	ckptRecord.GlobalCounters.InitializeVb(targetVB)
 }
 
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
@@ -1625,6 +1852,11 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	globalTimestampSha, ok := fieldMap[GlobalTimestampMapSha]
 	if ok {
 		ckptRecord.GlobalTimestampSha256 = globalTimestampSha.(string)
+	}
+
+	globalCountersSha, ok := fieldMap[GlobalCountersMapSha]
+	if ok {
+		ckptRecord.GlobalCountersSha256 = globalCountersSha.(string)
 	}
 
 	return nil
@@ -1912,6 +2144,7 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 	return fmt.Errorf("error unmarshaling target vb opaque. data=%v", data)
 }
 
+// Darshan TODO - Make changes to accomodate global timestamp
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()
@@ -2239,17 +2472,19 @@ func (v *VBsCkptsDocMap) MergeAndReplace(incoming VBsCkptsDocMap) {
 
 // Given a set of VBs and each one's individual checkpoints, deduplicate and return
 // a single compressed documented that has all the global timestamps compressed and the shas populated
-func (v *VBsCkptsDocMap) GetGlobalTimestampDoc() (*GlobalTimestampCompressedDoc, error) {
+func (v *VBsCkptsDocMap) GetGlobalInfoDoc() (*GlobalInfoCompressedDoc, error) {
 	if v == nil {
 		return nil, base.ErrorNilPtr
 	}
 
 	_, shaMap, err := v.SnappyCompress()
+	// Darshan TODO - the shaMap here contains the broken mappings as well
+	// Note - Currently brokenMappings are populated seperatly in the payload
 	if err != nil {
 		return nil, err
 	}
 
-	retDoc := &GlobalTimestampCompressedDoc{}
+	retDoc := &GlobalInfoCompressedDoc{}
 	err = retDoc.LoadCompressedShaMap(shaMap)
 	if err != nil {
 		return nil, err
@@ -2307,15 +2542,15 @@ func (s *ShaMappingCompressedMap) ToBrokenMapShaMap() (ShaToCollectionNamespaceM
 	return outputMap, nil
 }
 
-func (s *ShaMappingCompressedMap) ToGlobalTs() (ShaToGlobalTimestampMap, error) {
+func (s *ShaMappingCompressedMap) ToGlobalInfoMap() (ShaToGlobalInfoMap, error) {
 	if s == nil {
 		return nil, base.ErrorNilPtr
 	}
-	outputMap := make(ShaToGlobalTimestampMap)
+	outputMap := make(ShaToGlobalInfoMap)
 	for sha, _ := range *s {
-		uncompresedMap, err := s.GetGlobalTsMapping(sha)
+		uncompresedMap, err := s.GetGlobalInfoMapping(sha)
 		if err != nil {
-			if err == errorGlobalTimestampWrongType {
+			if err == ErrorGlobalInfoWrongType {
 				// Could be different types of snappy sha-maps
 				continue
 			}
@@ -2352,7 +2587,7 @@ func (s *ShaMappingCompressedMap) GetCollectionNsMapping(sha string) (*Collectio
 	return retMapping, deCompressErr
 }
 
-func (s *ShaMappingCompressedMap) GetGlobalTsMapping(sha string) (*GlobalTimestamp, error) {
+func (s *ShaMappingCompressedMap) GetGlobalInfoMapping(sha string) (GlobalInfo, error) {
 	if s == nil {
 		return nil, base.ErrorNilPtr
 	}
@@ -2361,9 +2596,14 @@ func (s *ShaMappingCompressedMap) GetGlobalTsMapping(sha string) (*GlobalTimesta
 		return nil, base.ErrorNotFound
 	}
 
-	retMapping := &GlobalTimestamp{}
-	deCompressErr := retMapping.SnappyDecompress((*s)[sha])
-	return retMapping, deCompressErr
+	gInfoMetaObj := &GlobalInfoMetaObj{}
+
+	deCompressErr := gInfoMetaObj.SnappyDecompress((*s)[sha])
+	if deCompressErr != nil {
+		return nil, deCompressErr
+	}
+	return gInfoMetaObj.Data, nil
+
 }
 
 type CheckpointsDoc struct {
@@ -2479,6 +2719,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		GlobalTimestamp:       c.GlobalTimestamp.CloneGlobalTimestamp(),
 		GlobalCounters:        c.GlobalCounters.Clone(),
 		GlobalTimestampSha256: c.GlobalTimestampSha256,
+		GlobalCountersSha256:  c.GlobalCountersSha256,
 	}
 
 	if c.Target_vb_opaque != nil {
@@ -2599,7 +2840,6 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 	}
 
 	snapShaMap := make(ShaMappingCompressedMap)
-	errorMap := make(base.ErrorMap)
 	records := c.GetCheckpointRecords()
 	for _, record := range records {
 		if record == nil {
@@ -2615,15 +2855,12 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 		}
 
 		if !record.IsTraditional() {
-			err = record.GlobalTimestamp.CompressToShaCompresedMap(snapShaMap)
-			if err != nil {
-				return nil, nil, err
+			err1 := record.GlobalTimestamp.CompressToShaCompresedMap(snapShaMap)
+			err2 := record.GlobalCounters.CompressToShaCompresedMap(snapShaMap)
+			if err1 != nil || err2 != nil {
+				return nil, nil, fmt.Errorf("Failed to Compress GlobalInfo. GlobalTimestampErr=%v GlobalTargetCounterErr=%v", err1, err2)
 			}
 		}
-	}
-
-	if len(errorMap) > 0 {
-		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
 	}
 
 	return snappy.Encode(nil, marshalledBytes), snapShaMap, nil
@@ -2665,11 +2902,11 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 		}
 	}
 
-	globalTsShaMap, err := shaCompressedMap.ToGlobalTs()
+	globalInfoShaMap, err := shaCompressedMap.ToGlobalInfoMap()
 	if err != nil {
 		return err
 	}
-	errMap2 := c.LoadGlobalTimestampFromShaMap(globalTsShaMap)
+	errMap2 := c.LoadGlobalInfoFromShaMap(globalInfoShaMap)
 
 	base.MergeErrorMaps(errMap, errMap2, false)
 	if len(errMap) > 0 {
@@ -2678,28 +2915,37 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 	return nil
 }
 
-func (c *CheckpointsDoc) LoadGlobalTimestampFromShaMap(globalTsShaMap ShaToGlobalTimestampMap) base.ErrorMap {
+func (c *CheckpointsDoc) LoadGlobalInfoFromShaMap(globalInfoShaMap ShaToGlobalInfoMap) base.ErrorMap {
 	errMap := make(base.ErrorMap)
-	if len(globalTsShaMap) > 0 {
+	if len(globalInfoShaMap) > 0 {
 		for _, record := range c.GetCheckpointRecords() {
-			if record == nil || record.IsTraditional() || record.GlobalTimestampSha256 == "" {
+			if record == nil || record.IsTraditional() {
 				continue
 			}
-
-			gts, found := globalTsShaMap[record.GlobalTimestampSha256]
-			if !found {
-				errMap[fmt.Sprintf("Global timestamp sha %v", record.GlobalTimestampSha256)] = base.ErrorNotFound
-				continue
+			// Hanlde GlobalTimestamp
+			if record.GlobalTimestampSha256 != "" {
+				if gts, found := globalInfoShaMap[record.GlobalTimestampSha256]; found {
+					record.GlobalTimestamp = *gts.(*GlobalTimestamp)
+				} else {
+					errMap[fmt.Sprintf("Global Timestamp sha %v", record.GlobalTimestampSha256)] = base.ErrorNotFound
+				}
 			}
-			record.GlobalTimestamp = *gts
+			// Hanlde GlobalCounters
+			if record.GlobalCountersSha256 != "" {
+				if gts, found := globalInfoShaMap[record.GlobalCountersSha256]; found {
+					record.GlobalCounters = *gts.(*GlobalTargetCounters)
+				} else {
+					errMap[fmt.Sprintf("Global Target Counter sha %v", record.GlobalTimestampSha256)] = base.ErrorNotFound
+				}
+			}
 		}
 	}
 	if len(errMap) > 0 {
 		var debugKeys []string
-		for k, _ := range globalTsShaMap {
+		for k, _ := range globalInfoShaMap {
 			debugKeys = append(debugKeys, k)
 		}
-		errMap["globalTsShaMap has the following shas:"] = fmt.Errorf(strings.Join(debugKeys, " "))
+		errMap["globalTsShaMap has the following shas:"] = fmt.Errorf("%s", strings.Join(debugKeys, " "))
 	}
 	return errMap
 }
@@ -2713,45 +2959,35 @@ func (c *CheckpointsDoc) IsTraditional() bool {
 	return c.GetCheckpointRecords()[0].IsTraditional()
 }
 
-type GlobalTimestampCompressedDoc CompressedMappings
+// contains compressed mappings of both GlobalTimestamps and GlobalTargetCounters
+type GlobalInfoCompressedDoc CompressedMappings
 
-func (g *GlobalTimestampCompressedDoc) SameAs(other *GlobalTimestampCompressedDoc) bool {
+func (g *GlobalInfoCompressedDoc) SameAs(other *GlobalInfoCompressedDoc) bool {
 	return (*CompressedMappings)(g).SameAs((*CompressedMappings)(other))
 }
 
-func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, error) {
+func (g *GlobalInfoCompressedDoc) ToShaMap() (ShaToGlobalInfoMap, error) {
 	if g == nil {
 		return nil, fmt.Errorf("Calling ToShaMap() on a nil GlobalTimestampCompresedDoc")
 	}
 
 	errorMap := make(base.ErrorMap)
-	shaMap := make(ShaToGlobalTimestampMap)
+	shaMap := make(ShaToGlobalInfoMap)
 	for _, oneRecord := range g.NsMappingRecords {
 		if oneRecord == nil {
 			continue
 		}
 
-		serializedBytes, err := snappy.Decode(nil, oneRecord.CompressedMapping)
+		// Decompress and populate GlobalInfoMetaObj
+		gInfoMetaObj := &GlobalInfoMetaObj{}
+		err := gInfoMetaObj.SnappyDecompress(oneRecord.CompressedMapping)
 		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)
+			errorMap[oneRecord.Sha256Digest] = err
 			continue
 		}
 
-		var serializedMap map[string]interface{}
-		err = json.Unmarshal(serializedBytes, &serializedMap)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling data failed %v", err)
-			continue
-		}
-
-		actualMap := make(GlobalTimestamp)
-		err = actualMap.LoadUnmarshalled(serializedMap)
-		if err != nil {
-			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Unmarshalling failed %v", err)
-			continue
-		}
 		// Sanity check
-		checkSha, err := actualMap.Sha256()
+		checkSha, err := gInfoMetaObj.Data.Sha256()
 		if err != nil {
 			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Validing SHA failed %v", err)
 			continue
@@ -2762,7 +2998,7 @@ func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, erro
 			continue
 		}
 
-		shaMap[oneRecord.Sha256Digest] = &actualMap
+		shaMap[oneRecord.Sha256Digest] = gInfoMetaObj.Data
 	}
 
 	var err error
@@ -2774,7 +3010,7 @@ func (g *GlobalTimestampCompressedDoc) ToShaMap() (ShaToGlobalTimestampMap, erro
 
 }
 
-func (g *GlobalTimestampCompressedDoc) LoadShaMap(shaMap ShaToGlobalTimestampMap) error {
+func (g *GlobalInfoCompressedDoc) LoadShaMap(shaMap ShaToGlobalInfoMap) error {
 	if g == nil {
 		return base.ErrorNilPtr
 	}
@@ -2783,7 +3019,7 @@ func (g *GlobalTimestampCompressedDoc) LoadShaMap(shaMap ShaToGlobalTimestampMap
 	return compressedMapPtr.LoadShaMap(shaMap.ToSnappyCompressableMap())
 }
 
-func (g *GlobalTimestampCompressedDoc) LoadCompressedShaMap(shaMap ShaMappingCompressedMap) error {
+func (g *GlobalInfoCompressedDoc) LoadCompressedShaMap(shaMap ShaMappingCompressedMap) error {
 	if g == nil {
 		return base.ErrorNilPtr
 	}
@@ -2792,7 +3028,7 @@ func (g *GlobalTimestampCompressedDoc) LoadCompressedShaMap(shaMap ShaMappingCom
 	return compressedMapPtr.LoadCompressedShaMap(shaMap)
 }
 
-func (g *GlobalTimestampCompressedDoc) UniqueAppend(other *GlobalTimestampCompressedDoc) error {
+func (g *GlobalInfoCompressedDoc) UniqueAppend(other *GlobalInfoCompressedDoc) error {
 	if g == nil {
 		return base.ErrorNilPtr
 	}
@@ -2807,6 +3043,7 @@ func GenerateGlobalVBsCkptDocMap(vbsList []uint16, brokenMappingShaToInsert stri
 	retMap := make(VBsCkptsDocMap)
 	for _, vb := range vbsList {
 		oneGts := GlobalTimestamp{}
+		oneGctrs := GlobalTargetCounters{}
 		for i := 0; i < base.NumberOfVbs; i++ {
 			oneGts[uint16(i)] = &GlobalVBTimestamp{
 				TargetVBTimestamp{
@@ -2821,6 +3058,7 @@ func GenerateGlobalVBsCkptDocMap(vbsList []uint16, brokenMappingShaToInsert stri
 					BrokenMappingSha256: brokenMappingShaToInsert,
 				},
 			}
+			oneGctrs[uint16(i)] = &TargetPerVBCounters{}
 		}
 
 		oneRecord := &CheckpointRecord{
@@ -2830,8 +3068,9 @@ func GenerateGlobalVBsCkptDocMap(vbsList []uint16, brokenMappingShaToInsert stri
 				Failover_uuid: rand.Uint64(),
 			},
 			GlobalTimestamp: oneGts,
+			GlobalCounters:  oneGctrs,
 		}
-		oneRecord.PopulateGlobalTimestampSha()
+		oneRecord.PopulateShasForGlobalCheckPoint()
 		oneDoc := &CheckpointsDoc{
 			Checkpoint_records: CheckpointRecordsList{oneRecord},
 		}

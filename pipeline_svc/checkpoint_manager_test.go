@@ -461,7 +461,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	ckptSvc.On("UpsertCheckpointsDone", mock.Anything, mock.Anything).Return(upsertCkptsDoneErr)
 	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
-	ckptSvc.On("UpsertGlobalTimestamps", mock.Anything, mock.Anything).Return(nil)
+	ckptSvc.On("UpsertGlobalInfo", mock.Anything, mock.Anything).Return(nil)
 	// Generally speaking, return empty checkpoints
 	// We want to simulate checkpoint service where each call will return a cloned object
 	// If we don't have multiple lines here, it'd return the same object every time and trigger golang concurrent r/w map panic
@@ -635,7 +635,7 @@ func TestCkptMgrPeriodicMerger(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
-	var globalTsMap *metadata.GlobalTimestampCompressedDoc
+	var globalTsMap *metadata.GlobalInfoCompressedDoc
 	respCh := make(chan error)
 
 	mergerCalledWg.Add(1)
@@ -721,7 +721,7 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
-	var globalTsMap *metadata.GlobalTimestampCompressedDoc
+	var globalTsMap *metadata.GlobalInfoCompressedDoc
 
 	respCh := make(chan error)
 	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
@@ -802,7 +802,7 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 	var shaMap metadata.ShaToCollectionNamespaceMap
 	brokenMapppingInternalId := "testInternalId"
 	var manifestCache *metadata.ManifestsCache
-	var globalTsMap *metadata.GlobalTimestampCompressedDoc
+	var globalTsMap *metadata.GlobalInfoCompressedDoc
 
 	respCh := make(chan error)
 	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
@@ -1326,7 +1326,7 @@ func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 	}
 	assert.NotEqual(0, recordWithBrokenmapSha)
 
-	setupStopTheWorldCkptSvcMock(ckptSvc, true, assert, recordWithBrokenmapSha, mergeCkptArgs.BrokenMappingShaMap, mergeCkptArgs.GlobalTimestampShaMap)
+	setupStopTheWorldCkptSvcMock(ckptSvc, true, assert, recordWithBrokenmapSha, mergeCkptArgs.BrokenMappingShaMap, mergeCkptArgs.GlobalInfoShaMap)
 
 	getter := func() *MergeCkptArgs {
 		return mergeCkptArgs
@@ -1337,7 +1337,7 @@ func TestCkptmgrStopTheWorldMergeGlobal(t *testing.T) {
 
 // This is used specific for randomly generated global ckpt
 func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alreadyExist bool, assert *assert.Assertions,
-	brokenMapCntExpected int, brokenMapShaMap metadata.ShaToCollectionNamespaceMap, gtsShaMap metadata.ShaToGlobalTimestampMap) {
+	brokenMapCntExpected int, brokenMapShaMap metadata.ShaToCollectionNamespaceMap, gtsShaMap metadata.ShaToGlobalInfoMap) {
 	dummyIncrfunc := service_def_real.IncrementerFunc(func(string, interface{}) {})
 	mappingDoc := &metadata.CollectionNsMappingsDoc{}
 	emptyShaMap := make(metadata.ShaToCollectionNamespaceMap)
@@ -1368,19 +1368,19 @@ func setupStopTheWorldCkptSvcMock(ckptSvc *service_def.CheckpointsService, alrea
 		checkMappingDoc := args.Get(1).(*metadata.CollectionNsMappingsDoc)
 		assert.Len(checkMappingDoc.NsMappingRecords, 1)
 
-		checkGtsDoc := args.Get(4).(*metadata.GlobalTimestampCompressedDoc)
-		assert.Len(checkGtsDoc.NsMappingRecords, 2) // 2 from doing random generate
+		checkGtsDoc := args.Get(4).(*metadata.GlobalInfoCompressedDoc)
+		assert.Len(checkGtsDoc.NsMappingRecords, 3) // 2 from doing random generate
 	}).Return(nil)
 
-	dummyGtsCompresesdDoc := &metadata.GlobalTimestampCompressedDoc{}
-	ckptSvc.On("LoadGlobalTimestampMapping", mock.Anything).Return(gtsShaMap, dummyGtsCompresesdDoc, dummyIncrfunc, false, nil)
+	dummyGtsCompresesdDoc := &metadata.GlobalInfoCompressedDoc{}
+	ckptSvc.On("LoadGlobalInfoMapping", mock.Anything).Return(gtsShaMap, dummyGtsCompresesdDoc, dummyIncrfunc, false, nil)
 }
 
-func generatePipelinesGlobalCkptDocs(brokenMapShaKeyToInsert string) (VBsCkptsDocMaps, metadata.ShaToGlobalTimestampMap) {
+func generatePipelinesGlobalCkptDocs(brokenMapShaKeyToInsert string) (VBsCkptsDocMaps, metadata.ShaToGlobalInfoMap) {
 	oneDocMap := metadata.GenerateGlobalVBsCkptDocMap([]uint16{0, 1}, brokenMapShaKeyToInsert)
 	var list VBsCkptsDocMaps = VBsCkptsDocMaps{oneDocMap}
 
-	gtsShaMap := make(metadata.ShaToGlobalTimestampMap)
+	gtsShaMap := make(metadata.ShaToGlobalInfoMap)
 	for _, checkpointDoc := range oneDocMap {
 		for _, oneRecord := range checkpointDoc.Checkpoint_records {
 			if oneRecord == nil {
@@ -1389,6 +1389,9 @@ func generatePipelinesGlobalCkptDocs(brokenMapShaKeyToInsert string) (VBsCkptsDo
 
 			if oneRecord.GlobalTimestampSha256 != "" {
 				gtsShaMap[oneRecord.GlobalTimestampSha256] = &oneRecord.GlobalTimestamp
+			}
+			if oneRecord.GlobalCountersSha256 != "" {
+				gtsShaMap[oneRecord.GlobalCountersSha256] = &oneRecord.GlobalCounters
 			}
 		}
 	}
@@ -1424,12 +1427,12 @@ func generateMergeCkptArgs() *MergeCkptArgs {
 		brokenMapShaKey = k
 	}
 
-	vbsCkptDocMaps, gtsShaMap := generatePipelinesGlobalCkptDocs(brokenMapShaKey)
+	vbsCkptDocMaps, gInfoShaMap := generatePipelinesGlobalCkptDocs(brokenMapShaKey)
 
 	retVal := &MergeCkptArgs{
 		PipelinesCkptDocs:       vbsCkptDocMaps,
 		BrokenMappingShaMap:     brokenMapSha,
-		GlobalTimestampShaMap:   gtsShaMap,
+		GlobalInfoShaMap:        gInfoShaMap,
 		BrokenMapSpecInternalId: "",
 		SrcManifests:            nil,
 		TgtManifests:            nil,
