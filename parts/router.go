@@ -1506,7 +1506,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	ignoreRequestFunc := func(req *base.WrappedMCRequest) {
-		ignoreEvent := common.NewEvent(common.DataNotReplicated, req, router, nil, utilities.RecycleObjFunc(router.recycleDataObj))
+		ignoreEvent := common.NewEvent(common.DataNotReplicated, req, router, nil, router.getManifestAdditional())
 		router.RaiseEvent(ignoreEvent)
 	}
 
@@ -1688,6 +1688,13 @@ func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent, filterin
 	}
 }
 
+func (router *Router) getManifestAdditional() interface{} {
+	return ManifestAdditional{
+		ManifestId:  atomic.LoadUint64(&router.lastSuccessfulManifestId),
+		RecycleFunc: router.recycleDataObj,
+	}
+}
+
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
@@ -1734,7 +1741,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	if !needToReplicate || err != nil {
 		if err != nil {
 			// Let pipeline supervisor do the logging
-			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
+			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, router.getDataFilteredAdditional(uprEvent, filteringStatus)))
 		} else {
 			// if data does not need to be replicated, drop it. return empty result
 			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent, filteringStatus)))
@@ -1761,10 +1768,10 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 
 	if raiseDataNotReplicatedColDNE {
 		err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
-		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, nil))
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, router.getManifestAdditional()))
 		return result, nil
 	} else if raiseDataNotReplicatedCasDrift {
-		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected}, nil))
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected}, router.getManifestAdditional()))
 		eventMap := base.NewEventsMap()
 		keyToLog := string(wrappedUpr.UprEvent.Key)
 		// The key for eventsMap doesn't matter - it will get re-keyed

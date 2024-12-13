@@ -197,6 +197,11 @@ type SentCasChangedEventAdditional struct {
 	IsGetDoc bool
 }
 
+type ManifestAdditional struct {
+	ManifestId  uint64
+	RecycleFunc func(obj interface{})
+}
+
 // does not return error since the assumption is that settings have been validated prior
 func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettingsMap) {
 	if val, ok := settings[XMEM_DEV_MAIN_SLEEP_DELAY]; ok {

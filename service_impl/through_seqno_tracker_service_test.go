@@ -12,6 +12,7 @@ package service_impl
 
 import (
 	"fmt"
+	"math/rand"
 	"sync/atomic"
 	"testing"
 
@@ -32,11 +33,7 @@ func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent
 	return retEvent
 }
 
-func setupBoilerPlate() (*commonMock.Pipeline,
-	*commonMock.SourceNozzle,
-	*service_def.ReplicationSpecSvc,
-	*commonMock.PipelineRuntimeContext,
-	*commonMock.PipelineSupervisorSvc) {
+func setupBoilerPlate() (*commonMock.Pipeline, *commonMock.SourceNozzle, *service_def.ReplicationSpecSvc, *commonMock.PipelineRuntimeContext, *commonMock.PipelineSupervisorSvc, *commonMock.OutNozzle) {
 
 	pipelineMock := &commonMock.Pipeline{}
 	replSpecSvcMock := &service_def.ReplicationSpecSvc{}
@@ -44,15 +41,12 @@ func setupBoilerPlate() (*commonMock.Pipeline,
 	pipelineSupervisorSvc := &commonMock.PipelineSupervisorSvc{}
 
 	nozzleMock := &commonMock.SourceNozzle{}
+	targetNozzles := &commonMock.OutNozzle{}
 
-	return pipelineMock, nozzleMock, replSpecSvcMock, runtimeCtxMock, pipelineSupervisorSvc
+	return pipelineMock, nozzleMock, replSpecSvcMock, runtimeCtxMock, pipelineSupervisorSvc, targetNozzles
 }
 
-func setupMocks(pipeline *commonMock.Pipeline,
-	sourceNozzle *commonMock.SourceNozzle,
-	replSpecSvc *service_def.ReplicationSpecSvc,
-	runtimeCtxMock *commonMock.PipelineRuntimeContext,
-	pipelineSupervisorSvc *commonMock.PipelineSupervisorSvc) *ThroughSeqnoTrackerSvc {
+func setupMocks(pipeline *commonMock.Pipeline, sourceNozzle *commonMock.SourceNozzle, replSpecSvc *service_def.ReplicationSpecSvc, runtimeCtxMock *commonMock.PipelineRuntimeContext, pipelineSupervisorSvc *commonMock.PipelineSupervisorSvc, targetNozzles *commonMock.OutNozzle, targetVBListToReplace []uint16) *ThroughSeqnoTrackerSvc {
 
 	var vbList []uint16
 	vbList = append(vbList, 1)
@@ -65,18 +59,31 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	sourceMap := make(map[string]common.SourceNozzle)
 	sourceMap["dummy"] = sourceNozzle
 
+	targetMap := make(map[string]common.Nozzle)
+	targetMap["dummy"] = targetNozzles
+	if len(targetVBListToReplace) > 0 {
+		fmt.Printf("NEIL DEBUG target setup to return %v\n", targetVBListToReplace)
+		targetNozzles.On("ResponsibleVBs").Return(targetVBListToReplace)
+	} else {
+		fmt.Printf("NEIL DEBUG target setup to return %v\n", vbList)
+		targetNozzles.On("ResponsibleVBs").Return(vbList)
+	}
+	targetNozzles.On("Id").Return("TestOutNozzleId")
+	targetNozzles.On("GetConflictLogger").Return(nil)
+
 	runtimeCtxMock.On("Service", base.PIPELINE_SUPERVISOR_SVC).Return(pipelineSupervisorSvc)
 	runtimeCtxMock.On("Service", "ConflictManager").Return(nil)
 
 	pipeline.On("Topic").Return("UnitTest")
 	pipeline.On("FullTopic").Return("UnitTest")
 	pipeline.On("Sources").Return(sourceMap)
-	pipeline.On("Targets").Return(map[string]common.Nozzle{})
+	pipeline.On("Targets").Return(targetMap)
 	pipeline.On("InstanceId").Return("UnitTestInst")
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	pipeline.On("RuntimeContext").Return(runtimeCtxMock)
 	pipeline.On("Type").Return(common.MainPipeline)
+	pipeline.On("Targets").Return(targetMap)
 
 	replSpecSvc.On("GetDerivedObj", mock.Anything).Return(nil, nil)
 
@@ -172,8 +179,8 @@ func TestTruncateFloor(t *testing.T) {
 func TestIgnoredEventThroughSeqno(t *testing.T) {
 	fmt.Println("============== Test case start: TestIgnoredEventThroughSeqno =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	mutationEvent := &mcc.UprEvent{
 		VBucket: 1,
@@ -187,6 +194,10 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	var dataSentAdditional parts.DataSentEventAdditional
 	dataSentAdditional.VBucket = 1
+
+	var manifestAdditional parts.ManifestAdditional
+	manifestAdditional.ManifestId = 1
+	manifestAdditional.RecycleFunc = func(obj interface{}) {}
 
 	mutationEvent.Seqno = 1
 	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
@@ -234,14 +245,14 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 		Seqno: 5,
 		Req:   &gomemcached.MCRequest{VBucket: 1},
 	}
-	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	oldIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
 
 	wrappedMCR.Seqno = 6
-	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	oldIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
@@ -279,21 +290,21 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	wrappedMCR.Seqno = 8
 	wrappedMCR.Req = &gomemcached.MCRequest{VBucket: 1}
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(8), through_seqno)
 
 	wrappedMCR.Seqno = 10
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	//	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(8), through_seqno)
 
 	wrappedMCR.Seqno = 9
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(10), through_seqno)
@@ -304,8 +315,8 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 func TestOutofOrderSent(t *testing.T) {
 	fmt.Println("============== Test case start: TestOutofOrderSent =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var earlySeqno uint64 = 1
 	var laterSeqno uint64 = 2
@@ -344,8 +355,8 @@ func TestClonedData(t *testing.T) {
 	fmt.Println("============== Test case start: TestClonedData =================")
 	defer fmt.Println("============== Test case end: TestClonedData =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	mutationEvent := &mcc.UprEvent{
 		VBucket: 1,
@@ -390,8 +401,8 @@ func TestOsoModeSimple(t *testing.T) {
 	fmt.Println("============== Test case start: TestOsoModeSimple =================")
 	defer fmt.Println("============== Test case end: TestOsoModeSimple =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var osoSnapshotSeqnoCheck uint64
 	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
@@ -469,8 +480,8 @@ func TestOsoModeSimple(t *testing.T) {
 func TestOsoMode(t *testing.T) {
 	fmt.Println("============== Test case start: TestOsoMode =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var osoSnapshotSeqnoCheck uint64
 	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
@@ -636,8 +647,8 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	fmt.Println("============== Test case start: TestOsoModeWaitingForSlowDataSent =================")
 	defer fmt.Println("============== Test case end: TestOsoModeWaitingForSlowDataSent =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var osoSnapshotSeqnoCheck uint64
 	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
@@ -956,8 +967,8 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	fmt.Println("============== Test case start: TestOSOSentFirstOutOfOrder =================")
 	defer fmt.Println("============== Test case end: TestOSOSentFirstOutOfOrder =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var osoSnapshotSeqnoCheck uint64
 	var osoSnapshotRaisedCnt uint32
@@ -1083,8 +1094,8 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	fmt.Println("============== Test case start: TestOSOLargeRangeOutOfOrder =================")
 	defer fmt.Println("============== Test case end: TestOSOLargeRangeOutOfOrder =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	var osoSnapshotSeqnoCheck uint64
 	var osoSnapshotRaisedCnt uint32
@@ -1209,8 +1220,8 @@ func TestVariableVBSent(t *testing.T) {
 	fmt.Println("============== Test case start: TestVariableVBSent =================")
 	defer fmt.Println("============== Test case end: TestVariableVBSent =================")
 	assert := assert.New(t)
-	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
-	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
 
 	mutationEvent := &mcc.UprEvent{
 		VBucket: 1,
@@ -1224,6 +1235,9 @@ func TestVariableVBSent(t *testing.T) {
 
 	var dataSentAdditional parts.DataSentEventAdditional
 	dataSentAdditional.VBucket = 1
+	var manifestAdditional parts.ManifestAdditional
+	manifestAdditional.ManifestId = 1
+	manifestAdditional.RecycleFunc = func(obj interface{}) {}
 
 	// First let VB 1 replicate to VB 1
 	mutationEvent.Seqno = 1
@@ -1285,14 +1299,14 @@ func TestVariableVBSent(t *testing.T) {
 		Req:   &gomemcached.MCRequest{VBucket: 1},
 	}
 
-	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	oldIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
 
 	wrappedMCR.Seqno = 6
-	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
 	oldIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
@@ -1305,4 +1319,164 @@ func TestVariableVBSent(t *testing.T) {
 
 	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(6), through_seqno)
+}
+
+func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
+	fmt.Println("============== Test case start: TestOSOSentFirstOutOfOrderVariableVB =================")
+	defer fmt.Println("============== Test case end: TestOSOSentFirstOutOfOrderVariableVB =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	targetVBListToReplace := []uint16{0, 1, 2}
+
+	targetVBRandomRoute := func() uint16 {
+		idxRand := rand.Intn(len(targetVBListToReplace))
+		return targetVBListToReplace[idxRand]
+	}
+
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, targetVBListToReplace)
+
+	var osoSnapshotSeqnoCheck uint64
+	var osoSnapshotRaisedCnt uint32
+	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
+		// When raising raising a snapshot, the seqno should equal the throughSeqno
+		assert.Equal(osoSnapshotSeqnoCheck, snapshotSeqno)
+		atomic.AddUint32(&osoSnapshotRaisedCnt, 1)
+	}
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	// This test case will simulate the following from DCP
+	// OSO - 3, 2, 1, 4
+	// Non-OSO - 5
+
+	// The order of events raised will be out of order, but given that DCP has a sync mechanims for raising OSO, then:
+	// 1. OSO Start
+	// 2. 5 sent
+	// 3. 3 received
+	// 4. 2 sent
+	// 5. 1 sent
+	// 6. 2 received
+	// 7. 1 received
+	// 8. 4 received
+	// 9. 4 sent
+	// 10. 5 received
+	// 11. 3 sent
+
+	// 1. OSO start
+	through_seqno := svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+	var helperItems = make([]interface{}, 2)
+	helperItems[0] = uint16(1)
+	syncCh := make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	select {
+	case <-syncCh:
+		break
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VariableVBUsed = true
+	dataSentAdditional.OrigSrcVB = mutationEvent.VBucket
+	// VariableVB Random route
+	dataSentAdditional.VBucket = targetVBRandomRoute()
+	// Let's say manifest is by default 1 but one item got 5
+	dataSentAdditional.ManifestId = 1
+
+	var highestTgtManifestIdToUse = uint64(5)
+	// 2. 5 sent
+	// For this test, 5 is the "highest" seqno to be have sent - so we need to make sure that the manifestID is also the highest
+	mutationEvent.Seqno = 5
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.ManifestId = highestTgtManifestIdToUse
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+	dataSentAdditional.ManifestId = 1 // restore to 1
+
+	// 3. 3 received
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// 4. 2 sent
+	mutationEvent.Seqno = 2
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VBucket = targetVBRandomRoute()
+	// Let's bump the manifest for this one to 5
+	// dataSentAdditional.ManifestId = highestTgtManifestIdToUse
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+	//dataSentAdditional.ManifestId = 1 // restore to 1
+
+	// 5. 1 sent
+	mutationEvent.Seqno = 1
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VBucket = targetVBRandomRoute()
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// 2, 1, 4 received
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	mutationEvent.Seqno = 1
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	mutationEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// 9. 4 sent
+	mutationEvent.Seqno = 4
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VBucket = targetVBRandomRoute()
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// 11. 3 sent
+	mutationEvent.Seqno = 3
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VBucket = targetVBRandomRoute()
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Before OSO ends, throughSeqno should not move
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+
+	// OSO now ends -
+	osoSnapshotSeqnoCheck = 4
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = uint16(1)
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	select {
+	case <-syncCh:
+		break
+	}
+	assert.Equal(uint32(1), atomic.LoadUint32(&osoSnapshotRaisedCnt))
+
+	// 10. 5 received
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(5), through_seqno)
+
+	throughSeqnos, _, tgtManifestIds := svc.GetThroughSeqnosAndManifestIds()
+	assert.Equal(uint64(5), throughSeqnos[1])
+	var highestTgtManifestId uint64
+	for _, tgtManifestId := range tgtManifestIds {
+		if tgtManifestId > highestTgtManifestId {
+			highestTgtManifestId = tgtManifestId
+		}
+	}
+	assert.Equal(highestTgtManifestId, highestTgtManifestIdToUse)
 }
