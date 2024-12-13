@@ -3096,14 +3096,17 @@ func (g *GlobalVBMetrics) GetValue() interface{} {
 	return *g
 }
 
-func (g *GlobalVBMetrics) GetPerVBMetrics() map[uint16]map[string]int64 {
+// returns all the metrics recorded against targetVB for each vb on the target
+func (g *GlobalVBMetrics) GetPerVBTargetMetrics() map[uint16]map[string]int64 {
 	ret := make(map[uint16]map[string]int64)
 	for key, vbMetricMap := range *g {
-		for vbno, value := range vbMetricMap {
-			if _, exists := ret[vbno]; !exists {
-				ret[vbno] = make(map[string]int64)
+		if len(vbMetricMap) > 1 { // this function should return only targetVB based stats len==1 indicates source metric
+			for vbno, value := range vbMetricMap {
+				if _, exists := ret[vbno]; !exists {
+					ret[vbno] = make(map[string]int64)
+				}
+				ret[vbno][key] = value
 			}
-			ret[vbno][key] = value
 		}
 	}
 	return ret

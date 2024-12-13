@@ -2746,7 +2746,7 @@ func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetri
 
 func (h *VbBasedMetricHelper) updateGlobalVbMetrics(srcvb uint16, vbCountMetric base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	if vbCountMetric.IsTraditional() {
-		return fmt.Errorf("updateGlovalVbMetrics() called on tradition metrics")
+		return fmt.Errorf("updateGlobalVbMetrics() called on tradition metrics")
 	}
 
 	globalVbMetrics := vbCountMetric.GetValue().(base.GlobalVBMetrics)
@@ -2773,7 +2773,7 @@ func (h *VbBasedMetricHelper) updateGlobalVbMetrics(srcvb uint16, vbCountMetric 
 
 	errorMap := make(base.ErrorMap)
 
-	for vbno, metricMap := range globalVbMetrics.GetPerVBMetrics() {
+	for vbno, metricMap := range globalVbMetrics.GetPerVBTargetMetrics() {
 		vbBasedMetric, ok := tgtvbsBasedMetric[vbno]
 		if !ok {
 			errorMap[fmt.Sprintf("updateGlobalVbMetrics() - vbBasedMetric: vbno %v", vbno)] = base.ErrorNotMyVbucket
