@@ -22,13 +22,13 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
+	"github.com/couchbase/goxdcr/v8/connector"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/v8/pipeline"
 	"github.com/couchbase/goxdcr/v8/pipeline_svc"
 	"github.com/couchbase/goxdcr/v8/pipeline_utils"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
 type ThroughSeqnoTrackerSvc struct {
@@ -38,7 +38,8 @@ type ThroughSeqnoTrackerSvc struct {
 	attachedPipeline common.Pipeline
 
 	// map of vbs that the tracker tracks.
-	vb_map map[uint16]bool
+	vb_map           map[uint16]bool
+	variableVbTgtMap map[uint16]bool
 
 	// through_seqno seen by outnozzles based on the docs that are actually sent to target
 	// This is a map that is considered the "baseline" of sequence numbers. Whenever a batch operation
@@ -130,6 +131,10 @@ type ThroughSeqnoTrackerSvc struct {
 	vbOsoModeSessionDCPTracker OSOSeqnoTrackerMapType
 	osoSnapshotRaiser          func(vbno uint16, seqno uint64)
 	osoCntReceivedFromDCP      uint64
+
+	variableVBMode   bool
+	targetHasMoreVBs bool
+	variableTgtVbs   []uint16
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -257,7 +262,7 @@ func (t *OSOSeqnoTrackerMapType) StartNewOSOSession(tsTracker *ThroughSeqnoTrack
 	}
 
 	sessionTracker := (*t)[vbno]
-	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId, &tsTracker.osoCntReceivedFromDCP)
+	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId, &tsTracker.osoCntReceivedFromDCP).SetVariableVBMode(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
 }
 
 func (t *OSOSeqnoTrackerMapType) GetStartingSeqno(vbno uint16) (seqno uint64, osoAcive bool) {
@@ -286,11 +291,12 @@ func (t *OSOSeqnoTrackerMapType) TruncateSession(vbno uint16, session *OsoSessio
 }
 
 type OsoSessionsTracker struct {
-	lock     sync.RWMutex
-	sessions []*OsoSession
+	lock           sync.RWMutex
+	sessions       []*OsoSession
+	variableVBMode bool
 }
 
-func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64, cumulativeCnt *uint64) {
+func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64, cumulativeCnt *uint64) *OsoSession {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
@@ -305,7 +311,13 @@ func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenMa
 		cumulativeCnt:                  cumulativeCnt,
 	}
 
+	if o.variableVBMode {
+		newSession.variableMaxManifestIdProcessed = make(map[uint16]uint64)
+		newSession.variableUnsureBufferedProcessSeqnos = make(map[uint16]*DualSortedSeqnoListWithLock)
+	}
+
 	o.sessions = append(o.sessions, newSession)
+	return newSession
 }
 
 // If a latest session is in progress and DCP hasn't sent an end to this session
@@ -415,10 +427,11 @@ func (o *OsoSessionsTracker) TruncateSessionViaPtr(session *OsoSession) {
 	}
 }
 
-func newOsoSessionTracker() *OsoSessionsTracker {
+func newOsoSessionTracker(variableVBMode bool, tgtVbs []uint16) *OsoSessionsTracker {
 	return &OsoSessionsTracker{
-		lock:     sync.RWMutex{},
-		sessions: make([]*OsoSession, 0),
+		lock:           sync.RWMutex{},
+		sessions:       make([]*OsoSession, 0),
+		variableVBMode: variableVBMode,
 	}
 }
 
@@ -432,12 +445,29 @@ type OsoSession struct {
 	minSeqnoFromDCP                uint64
 	maxSeqnoFromDCP                uint64
 	maxManifestIdFromDCP           uint64
-	maxManifestIdProcessed         uint64
+	maxManifestIdProcessed         uint64 // Target Manifest for non-variable mode
 	cumulativeCnt                  *uint64
 	// first list keeps track of seqnos that are unsure
 	// second list keeps the manifestID that corresponds to the seqno
 	// Each session will potentially have max base.EventChanSize unsure seqnos
 	unsureBufferedProcessedSeqnos *DualSortedSeqnoListWithLock
+
+	// In variableVB mode, each target VB could have a max manifestID
+	variableVbMode                      bool
+	variableMaxManifestIdProcessed      map[uint16]uint64
+	variableUnsureBufferedProcessSeqnos map[uint16]*DualSortedSeqnoListWithLock
+}
+
+func (s *OsoSession) SetVariableVBMode(variableVBMode bool, tgtVbs []uint16) *OsoSession {
+	if !variableVBMode {
+		return s
+	}
+
+	s.variableVbMode = true
+	for _, tgtVb := range tgtVbs {
+		s.variableUnsureBufferedProcessSeqnos[tgtVb] = newDualSortedSeqnoListWithLock()
+	}
+	return s
 }
 
 func (s *OsoSession) IsDone() bool {
@@ -479,7 +509,9 @@ func (s *OsoSession) MarkSeqnoReceived(seqno uint64) {
 	}
 }
 
-func (s *OsoSession) MarkSeqnoProcessed(vbno uint16, seqno uint64, manifestId uint64, tracker *ThroughSeqnoTrackerSvc) (isDone bool) {
+// If the targetVbno is non-nil, it will be used for target manifest ID tracking as it means
+// the caller is confident about the target manifest ID
+func (s *OsoSession) MarkSeqnoProcessed(vbno uint16, seqno uint64, manifestId uint64, tracker *ThroughSeqnoTrackerSvc, tgtVbToUse *uint16) (isDone bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -489,28 +521,39 @@ func (s *OsoSession) MarkSeqnoProcessed(vbno uint16, seqno uint64, manifestId ui
 		// part of OSO, just mark it done
 		// Because OSO session Start will be synchronized, it guarantees that if this session (*s) is called
 		// it means that isDone was false when this session was open
-		tracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+		tracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVbToUse)
 		return
 	}
 
 	if !s.seqnoIsWithinRange(seqno) {
 		// This sent seqno may or may not be within this oso session
 		// Because the OnEvent() is async, we're not sure until a OSO end is received
-		s.unsureBufferedProcessedSeqnos.appendSeqnos(seqno, manifestId)
+		if tgtVbToUse != nil {
+			s.variableUnsureBufferedProcessSeqnos[*tgtVbToUse].appendSeqnos(seqno, manifestId)
+		} else {
+			s.unsureBufferedProcessedSeqnos.appendSeqnos(seqno, manifestId)
+		}
 		return
 	}
 
-	s.markSeqnoProcessedInternal(manifestId)
+	s.markSeqnoProcessedInternal(manifestId, tgtVbToUse)
 
 	isDone = s.isDoneNoLock()
 	return
 }
 
-func (s *OsoSession) markSeqnoProcessedInternal(manifestId uint64) {
+// If tgtVbToUse is provided and non-nil, then it's variableVB mode
+func (s *OsoSession) markSeqnoProcessedInternal(manifestId uint64, tgtVbToUse *uint16) {
 	s.seqnosHandledCnt++
 
-	if manifestId > s.maxManifestIdProcessed {
-		s.maxManifestIdProcessed = manifestId
+	if tgtVbToUse == nil {
+		if manifestId > s.maxManifestIdProcessed {
+			s.maxManifestIdProcessed = manifestId
+		}
+	} else {
+		if manifestId > s.variableMaxManifestIdProcessed[*tgtVbToUse] {
+			s.variableMaxManifestIdProcessed[*tgtVbToUse] = manifestId
+		}
 	}
 }
 
@@ -571,10 +614,14 @@ func (s *OsoSession) PlaybackOntoTsTracker(tsTracker *ThroughSeqnoTrackerSvc, vb
 		tsTracker.vbSystemEventsSeqnoListMap.UpdateOrAppendSeqnoManifest(vbno, maxProcessedSeqno, s.maxManifestIdProcessed)
 	}
 
+	// Playback will depend on the recording logic to properly choose either variable VB or non-variable VB mode
 	if s.maxManifestIdProcessed > 0 {
 		tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(vbno, maxProcessedSeqno, s.maxManifestIdProcessed)
 	}
-
+	// The following does the same above logic but in the case of variable VBucket
+	for tgtVbno, maxManifestIdProcessed := range s.variableMaxManifestIdProcessed {
+		tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(tgtVbno, maxProcessedSeqno, maxManifestIdProcessed)
+	}
 	return maxProcessedSeqno
 }
 
@@ -628,16 +675,25 @@ func (s *OsoSession) MarkManifestReceived(manifestId uint64) {
 // Lock is held
 // When a session is closed, the "unsure" list of seqnos can now be checked against the range
 // Anything not against the range can be marked as non-OSO processed seqnos and fill in the gaps
-func (s *OsoSession) processUnsureBuffer(vbno uint16, tracker *ThroughSeqnoTrackerSvc) {
-	listsLen := s.unsureBufferedProcessedSeqnos.getLengthOfSeqnoLists()
+func (s *OsoSession) processUnsureBuffer(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) {
+	if !s.variableVbMode {
+		s.processOneUnsureBufferedSeqnosList(s.unsureBufferedProcessedSeqnos, vbno, tsTracker, nil)
+	} else {
+		for tgtVb, unsureBufferedProcessedSeqno := range s.variableUnsureBufferedProcessSeqnos {
+			s.processOneUnsureBufferedSeqnosList(unsureBufferedProcessedSeqno, vbno, tsTracker, &tgtVb)
+		}
+	}
+}
 
+func (s *OsoSession) processOneUnsureBufferedSeqnosList(unsureBufferedProcessedSeqnos *DualSortedSeqnoListWithLock, vbno uint16, tsTracker *ThroughSeqnoTrackerSvc, tgtVb *uint16) {
+	listsLen := unsureBufferedProcessedSeqnos.getLengthOfSeqnoLists()
 	for i := 0; i < listsLen; i++ {
-		seqno := s.unsureBufferedProcessedSeqnos.seqno_list_1[i]
-		manifestId := s.unsureBufferedProcessedSeqnos.seqno_list_2[i]
+		seqno := unsureBufferedProcessedSeqnos.seqno_list_1[i]
+		manifestId := unsureBufferedProcessedSeqnos.seqno_list_2[i]
 		if s.seqnoIsWithinRange(seqno) {
-			s.markSeqnoProcessedInternal(manifestId)
+			s.markSeqnoProcessedInternal(manifestId, tgtVb)
 		} else {
-			tracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVb)
 		}
 	}
 }
@@ -752,23 +808,51 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 	tsTracker.rep_id = pipeline.Topic()
 	tsTracker.id = pipeline.FullTopic() + "_" + base.ThroughSeqnoTracker
 	tsTracker.attachedPipeline = pipeline
-	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
+	sourceVBList := base.SortUint16List(pipeline_utils.GetSourceVBListPerPipeline(pipeline))
+	targetVBList := base.SortUint16List(pipeline_utils.GetTargetVBListPerPipeline(pipeline))
+
+	if !base.AreSortedUint16ListsTheSame(sourceVBList, targetVBList) {
+		tsTracker.variableVBMode = true
+		tsTracker.variableTgtVbs = targetVBList
+		tsTracker.variableVbTgtMap = make(map[uint16]bool)
+		if len(targetVBList) > len(sourceVBList) {
+			tsTracker.targetHasMoreVBs = true
+		}
+		for _, tgtVb := range targetVBList {
+			tsTracker.variableVbTgtMap[tgtVb] = true
+		}
+	}
+
+	for _, vbno := range sourceVBList {
 		tsTracker.vb_map[vbno] = true
 
 		tsTracker.through_seqno_map[vbno] = base.NewSeqnoWithLock()
 		tsTracker.vb_last_seen_seqno_map[vbno] = base.NewSeqnoWithLock()
-
-		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_filtered_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
-		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vb_gap_seqno_list_map[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbSystemEventsSeqnoListMap[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbIgnoredSeqnoListMap[vbno] = base.NewSortedSeqnoListWithLock()
-		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbBackfillLastDCPSeqnoMap[vbno] = base.NewSeqnoWithLock()
 		tsTracker.vbBackfillHelperDoneMap[vbno] = base.NewSeqnoWithLock()
+
+		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
 		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
-		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker()
+		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+	}
+
+	if tsTracker.targetHasMoreVBs {
+		for _, vbno := range targetVBList {
+			if _, alreadyDone := tsTracker.vb_map[vbno]; alreadyDone {
+				continue
+			}
+			tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+			tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
+			tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
+			tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
+			tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		}
 	}
 }
 
@@ -891,10 +975,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := sentAdditional.Seqno
 		manifestId := sentAdditional.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &sentAdditional.VBucket
+		}
 		if !shouldProcessAsOSO {
-			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVbToUse)
 		} else {
-			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -906,10 +994,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := casChangedEvent.Seqno
 		manifestId := casChangedEvent.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &casChangedEvent.VBucket
+		}
 		if !shouldProcessAsOSO {
-			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVbToUse)
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -920,10 +1012,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := dataMergedEvt.Seqno
 		manifestId := dataMergedEvt.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &dataMergedEvt.VBucket
+		}
 		if !processedAsOSO {
-			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVbToUse)
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -934,10 +1030,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := failedEvt.Seqno
 		manifestId := failedEvt.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &failedEvt.VBucket
+		}
 		if !processedAsOSO {
-			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId, tgtVbToUse)
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -948,11 +1048,20 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := uprEvent.Seqno
 		manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		tsTracker.markUprEventAsFiltered(uprEvent)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVb := uint16(connector.CbCrc(uprEvent.Key))
+			tgtVbToUse = &tgtVb
+		}
 		if !processedAsOSO {
-			tsTracker.markUprEventAsFiltered(uprEvent)
-			tsTracker.addManifestId(uprEvent.VBucket, uprEvent.Seqno, manifestId)
+			if tgtVbToUse != nil {
+				tsTracker.addManifestId(*tgtVbToUse, uprEvent.Seqno, manifestId)
+			} else {
+				tsTracker.addManifestId(vbno, uprEvent.Seqno, manifestId)
+			}
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -964,11 +1073,17 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			uprEvent := event.Data.(*mcc.UprEvent)
 			vbno := uprEvent.VBucket
 			seqno := uprEvent.Seqno
+			manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
 			processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+			var tgtVbToUse *uint16
+			if tsTracker.variableVBMode {
+				tgtVb := uint16(connector.CbCrc(uprEvent.Key))
+				tgtVbToUse = &tgtVb
+			}
 			if !processedAsOSO {
 				tsTracker.markUprEventAsFiltered(uprEvent)
 			} else {
-				done := session.MarkSeqnoProcessed(0, seqno, 0, tsTracker)
+				done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 				if done {
 					tsTracker.HandleDoneSession(vbno, session)
 				}
@@ -980,11 +1095,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := dataFailedCRSrc.GetVB()
 		manifestId := dataFailedCRSrc.ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &dataFailedCRSrc.VBucket
+		}
 		if !processedAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
-			tsTracker.addManifestId(vbno, seqno, manifestId)
+			if tgtVbToUse != nil {
+				tsTracker.addManifestId(*tgtVbToUse, seqno, manifestId)
+			} else {
+				tsTracker.addManifestId(vbno, seqno, manifestId)
+			}
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -995,11 +1118,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := skippedEvt.GetVB()
 		manifestId := skippedEvt.ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &skippedEvt.VBucket
+		}
 		if !shouldProcessAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
-			tsTracker.addManifestId(vbno, seqno, manifestId)
+			if tgtVbToUse != nil {
+				tsTracker.addManifestId(*tgtVbToUse, seqno, manifestId)
+			} else {
+				tsTracker.addManifestId(vbno, seqno, manifestId)
+			}
 		} else {
-			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
@@ -1045,28 +1176,32 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		if !processedAsOSO {
 			tsTracker.addIgnoredSeqno(vbno, seqno)
 		} else {
-			done := session.MarkSeqnoProcessed(vbno, seqno, 0, nil)
+			done := session.MarkSeqnoProcessed(vbno, seqno, 0, tsTracker, nil)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
 		}
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
+		manifestInfo := event.OtherInfos.(parts.ManifestAdditional)
 		vbno := wrappedMcr.GetSourceVB()
 		seqno := wrappedMcr.Seqno
-		recycler, ok := event.OtherInfos.(utilities.RecycleObjFunc)
+		manifestAddn := event.OtherInfos.(parts.ManifestAdditional)
+		recycler := manifestAddn.RecycleFunc
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		var tgtVbToUse *uint16
+		if tsTracker.variableVBMode {
+			tgtVbToUse = &wrappedMcr.Req.VBucket
+		}
 		if !processedAsOSO {
 			tsTracker.markMCRequestAsIgnored(wrappedMcr)
 		} else {
-			done := session.MarkSeqnoProcessed(0, seqno, 0, nil)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestInfo.ManifestId, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
 		}
-		if ok {
-			recycler(wrappedMcr)
-		}
+		recycler(wrappedMcr)
 	case common.StreamingEnd:
 		vbno, ok := event.Data.(uint16)
 		if !ok {
@@ -1116,9 +1251,15 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	return nil
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, seqno uint64, manifestId uint64) {
+// If the targetVbno is non-nil, it will be used for target manifest ID tracking as it means
+// the caller is confident about the target manifest ID
+func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, seqno uint64, manifestId uint64, tgtVbno *uint16) {
 	tsTracker.addSentSeqno(vbno, seqno)
-	tsTracker.addManifestId(vbno, seqno, manifestId)
+	var vbnoToUse *uint16 = &vbno
+	if tgtVbno != nil {
+		vbnoToUse = tgtVbno
+	}
+	tsTracker.addManifestId(*vbnoToUse, seqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamBypass(vbno uint16) {
@@ -1620,6 +1761,25 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (throu
 			srcManifestIds[vbno] = manifestId
 		}
 	}
+
+	// Variable VB mode will has have to go through additional individual target VB and set the highest manifest ID
+	if tsTracker.targetHasMoreVBs {
+		for _, tgtVb := range tsTracker.variableTgtVbs {
+			if _, exists := tsTracker.vb_map[tgtVb]; exists {
+				// This is already captured as part of the source part above
+				continue
+			}
+
+			// For target manifest ID in variable VB mode, we don't care about the throughSeqno - just
+			// return the max manifestID that the target VB has seen
+			manifestId, err := tsTracker.vbTgtSeqnoManifestMap.GetManifestId(tgtVb, math.MaxUint64)
+			if err != nil {
+				tsTracker.logger.Warnf(err.Error())
+			} else {
+				tgtManifestIds[tgtVb] = manifestId
+			}
+		}
+	}
 	return
 }
 
@@ -1647,7 +1807,21 @@ func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
-	if _, ok := tsTracker.vb_map[vbno]; !ok {
+	var raiseErr bool
+
+	if tsTracker.variableVBMode {
+		_, tgtOk := tsTracker.variableVbTgtMap[vbno]
+		_, srcOk := tsTracker.vb_map[vbno]
+		if !tgtOk && !srcOk {
+			raiseErr = true
+		}
+	} else {
+		if _, ok := tsTracker.vb_map[vbno]; !ok {
+			raiseErr = true
+		}
+	}
+
+	if raiseErr {
 		err := fmt.Errorf("method %v in tracker service for pipeline %v received invalid vbno. vbno=%v; valid vbnos=%v",
 			caller, tsTracker.id, vbno, tsTracker.vb_map)
 		tsTracker.handleGeneralError(err)
