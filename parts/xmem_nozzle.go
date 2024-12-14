@@ -1444,7 +1444,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					additionalInfo := SentCasChangedEventAdditional{
 						IsGetDoc: true,
 					}
-					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.GetTargetVB(), item.Seqno}, additionalInfo))
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.GetSourceVB(), item.GetTargetVB(), item.Seqno}, additionalInfo))
 					xmem.retryAfterCasLockingFailure(item)
 				}()
 			case RetryTargetLocked:
@@ -1998,7 +1998,7 @@ func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.Wr
 		return
 	}
 
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetTargetVB(), req.Seqno}, err))
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, err))
 	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
 		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 			xmem.Id(),
@@ -3603,9 +3603,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.client_for_setMeta.IncrementBackOffFactor()
 						// Don't spam the log. Keep a counter instead
 						atomic.AddUint64(&xmem.counterGuardrailHit, 1)
-						vbno := wrappedReq.GetTargetVB()
+						srcvb := wrappedReq.GetSourceVB()
+						tgtvb := wrappedReq.GetTargetVB()
 						seqno := wrappedReq.Seqno
-						xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{vbno, seqno}, nil))
+						xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{srcvb, tgtvb, seqno}, nil))
 						markThenResend := func(req *bufferedMCRequest, pos uint16) (bool, error) {
 							req.setGuardrail(response.Status)
 							return xmem.resendWithReset(req, pos)
@@ -3748,14 +3749,17 @@ func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, re
 		// Note: We shouldn't hit this case in practice
 		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v, isSubDocOp: %v", wrappedReq.Req, len(wrappedReq.Req.Extras), isSubDocOp)
 	}
+	srcvb := wrappedReq.GetSourceVB()
+	tgtvb := wrappedReq.GetTargetVB()
+	seqno := wrappedReq.Seqno
 	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && !isSubDocOp { //replace mode
 		// Currently CAS regeneration takes place in two scenario's
 		// 1. If SubDoc is used
 		// 2. If there is a CAS poisoned doc and KV's protection mode is set to "replace"
 		// Note that this counter does not account for poisoned CAS's incase of subDocOp
-		return base.ReplaceMode
+		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ReplaceMode, xmem, []interface{}{srcvb, tgtvb, seqno}, nil))
 	} else if response.Status == mc.CAS_VALUE_INVALID { //error mode
-		return base.ErrorMode
+		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ErrorMode, xmem, []interface{}{srcvb, tgtvb, seqno}, nil))
 	}
 
 	return base.CasNotPoisoned

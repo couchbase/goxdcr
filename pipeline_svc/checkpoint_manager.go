@@ -1708,7 +1708,7 @@ POPULATE:
 	if err != nil {
 		return vbts, nil, 0, traditionalPair, nil, err
 	}
-	vbStatMap := NewVBStatsMapFromCkpt(ckptDoc, agreedIndex)
+	vbStatMap := NewVBStatsMapFromCkpt(ckptDoc, agreedIndex, vbno)
 	return vbts, vbStatMap, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingPair, nil
 }
 
@@ -2410,7 +2410,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	// Get stats that need to persist
 	vbCountMetrics, err := ckmgr.statsMgr.GetVBCountMetrics(vbno)
 	if err != nil {
-		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", service_def.DOCS_FILTERED_METRIC)
+		ckmgr.logger.Warnf("unable to get metrics from stats manager. err=%v\n", err)
 		return
 	}
 

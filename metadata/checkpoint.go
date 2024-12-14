@@ -545,15 +545,20 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 		if v == nil {
 			v = &GlobalVBTimestamp{}
 		}
-		tgtVBTimestampMap[k] = &GlobalVBTimestamp{
+
+		gVBTimestamp := &GlobalVBTimestamp{
 			TargetVBTimestamp: TargetVBTimestamp{
-				Target_vb_opaque:    v.Target_vb_opaque.Clone(),
 				Target_Seqno:        v.Target_Seqno,
 				TargetManifest:      v.TargetManifest,
 				BrokenMappingSha256: v.BrokenMappingSha256,
 				brokenMappings:      v.brokenMappings.Clone(),
 			},
 		}
+		if v.Target_vb_opaque != nil {
+			gVBTimestamp.Target_vb_opaque = v.Target_vb_opaque.Clone()
+		}
+
+		tgtVBTimestampMap[k] = gVBTimestamp
 	}
 
 	return tgtVBTimestampMap
@@ -1352,6 +1357,8 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			srcFilteredCntrs.FilteredItemsOnUserDefinedFilters = uint64(vbCountMap[vbKey])
 		case base.DocsCasPoisoned:
 			srcFilteredCntrs.CasPoisonCnt = uint64(vbCountMap[vbKey])
+		case base.ConflictDocsFiltered:
+			srcFilteredCntrs.FilteredConflictDocs = uint64(vbCountMap[vbKey])
 		}
 	}
 
@@ -1365,8 +1372,6 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			vbKey = vb
 		}
 		switch clogKey {
-		case base.ConflictDocsFiltered:
-			srcFilteredCntrs.FilteredConflictDocs = uint64(vbCountMap[vbKey])
 		case base.SrcConflictDocsWritten:
 			srcFilteredCntrs.SrcConflictDocsWritten = uint64(vbCountMap[vbKey])
 		case base.TgtConflictDocsWritten:
