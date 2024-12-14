@@ -27,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 #pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
-declare -A SlowBackfillBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=1000 ["replicateCkptIntervalMin"]=20)
+declare -A SlowBackfillBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=1000 ["replicateCkptIntervalMin"]=20)
 
 # Bucket -> Scopes
 # -----------------
