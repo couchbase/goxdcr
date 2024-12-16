@@ -657,7 +657,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 
 	// Remove all dismissed events
 	rep_status.GetEventsManager().ResetDismissedHistory()
-	rep_status.GetEventsManager().ClearNonBrokenMapOrPersistentEvents()
+	rep_status.GetEventsManager().ClearNonFatalEvents()
 
 	// if replication spec has been deleted
 	// or deleted and recreated, which is signaled by change in spec internal id
@@ -2074,7 +2074,7 @@ RE:
 		}
 		if r.rep_status != nil {
 			r.rep_status.ClearErrors()
-			r.rep_status.GetEventsManager().ClearNonBrokenMapEventsWithString(common.ProgressP2PComm)
+			r.rep_status.GetEventsManager().ClearNonFatalEventsWithString(common.ProgressP2PComm)
 		}
 		r.clearErrors()
 		errMap = make(base.ErrorMap) // clear errMap
