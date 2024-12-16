@@ -162,7 +162,10 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 	spec := primaryPipeline.Specification().GetReplicationSpec().Clone()
 	// spec.Settings is a map that is Read-Only since inception. Need to create a clone
 	// and force a low priority - otherwise there is a very small chance of concurrent r/w panic
-	spec.Settings.Values[metadata.PriorityKey] = base.PriorityTypeLow
+
+	//Note: earlier the priority was set to low to always but now backfill will inherit the priority of the main pipeline.
+	//This is done so that priority as seen by the resource manager and the priority requested by the pipeline to the
+	//throughput throttler are consistent.
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
@@ -777,7 +780,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {
-		xdcrf.logger.Infof("Constructed router %v", routerId)
+		xdcrf.logger.Infof("Constructed router %v with priority=%s", routerId, spec.Settings.GetPriority().String())
 	}
 	return router, err
 }

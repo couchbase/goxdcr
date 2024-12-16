@@ -148,7 +148,9 @@ func newState() *State {
 
 func (s *State) String() string {
 	var buffer bytes.Buffer
-	buffer.WriteString("overallTP: ")
+	buffer.WriteString("isClogEnabled: ")
+	buffer.WriteString(strconv.FormatBool(s.isConflictLoggingEnabled))
+	buffer.WriteString(" overallTP: ")
 	buffer.WriteString(strconv.FormatInt(s.overallThroughput, base.ParseIntBase))
 	buffer.WriteString(" highTP: ")
 	buffer.WriteString(strconv.FormatInt(s.highThroughput, base.ParseIntBase))
@@ -551,7 +553,7 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 	for _, spec := range backfillSpecs {
 		vblist, err := rm.backfillReplSvc.GetMyVBs(spec.ReplicationSpec())
 		if err != nil {
-			rm.logger.Debugf("failed to fetch responsible vbs for spec %s. err=%v", spec.Id, err)
+			rm.logger.Warnf("failed to fetch responsible vbs for spec %s. err=%v", spec.Id, err)
 		} else {
 			if !spec.VBTasksMap.ContainsAtLeastOneTaskForVBs(vblist) {
 				// There's no active backfill pipeline if the spec has no responsible Vbs. Hence skip the spec
@@ -637,7 +639,13 @@ func (rm *ResourceManager) logStatsOnce() {
 func (rm *ResourceManager) logState() {
 	rm.stateLock.RLock()
 	defer rm.stateLock.RUnlock()
-	rm.logger.Infof("Resource Manager State = %v\n", rm.previousState)
+
+	highTPMean := int64(rm.highThroughputSamples.Mean())
+	overallTPMean := int64(rm.overallThroughputSamples.Mean())
+	rm.logger.Infof("Resource Manager State highTPMean=%d, overallTPMean=%d, state = %v\n",
+		highTPMean,
+		overallTPMean,
+		rm.previousState)
 }
 
 func (rm *ResourceManager) logCounters() {

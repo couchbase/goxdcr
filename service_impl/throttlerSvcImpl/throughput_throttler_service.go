@@ -458,7 +458,7 @@ func (throttler *ThroughputThrottler) UpdateSettings(settings map[string]interfa
 		throttler.needToCalibrate.Set(needToCalibrate.(bool))
 	}
 
-	throttler.logger.Debugf("throughput throttler update settings: %#v", throttler)
+	throttler.logger.Tracef("throughput throttler update settings: %#v", throttler)
 
 	return errMap
 }
