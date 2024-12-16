@@ -78,6 +78,7 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.ResetSubdocOptionsForRetry()
 	req.ResetCLogOptions()
 	req.Size = 0
+	req.OrigSrcVB = nil
 	return req
 }
 

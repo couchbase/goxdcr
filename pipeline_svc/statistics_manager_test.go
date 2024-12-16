@@ -180,7 +180,7 @@ func setupCheckpointMgr(
 	collectionsManifestSvc *service_def.CollectionsManifestSvc,
 	backfillReplSvc *service_def.BackfillReplSvc) *CheckpointManager {
 
-	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqSvc, activeVBs, "targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, nil, nil)
+	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqSvc, activeVBs, "targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, nil, nil, false)
 
 	return ckptManager
 }

@@ -172,7 +172,10 @@ func (router *Router) GetUpstreamObjRecycler() func(interface{}) {
 }
 
 func (r *Router) GetLayoutString(part common.Part) string {
-	return fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", r.Id(), r.routingMapStringer())
+	if r.routingMapStringer != nil {
+		return fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", r.Id(), r.routingMapStringer())
+	}
+	return ""
 }
 
 func (r *Router) RegisterUpstreamPart(part common.Part) error {

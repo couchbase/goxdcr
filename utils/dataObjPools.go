@@ -54,6 +54,7 @@ func (w *WrappedUprPool) Put(uprEvent *base.WrappedUprEvent) {
 	if uprEvent != nil && uprEvent.Flags.ShouldUseDecompressedValue() {
 		w.slicePool.PutByteSlice(uprEvent.DecompressedValue)
 	}
+	uprEvent.TranslatedVB = nil
 	w.pool.Put(uprEvent)
 }
 

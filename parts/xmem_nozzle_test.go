@@ -120,7 +120,7 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 
 	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
 
-	router, _ := NewRouter("testId", spec, nil, nil, crMode, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil, nil)
+	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil, nil, nil, nil)
 
 	producer := &mocks.PipelineEventsProducer{}
 
@@ -487,9 +487,9 @@ func BenchmarkSnappyDecodeLenImpact(b *testing.B) {
 		wrappedReq := dataSet[dataIdx]
 		req := wrappedReq.Req
 		additionalInfo := DataSentEventAdditional{Seqno: dataSet[dataIdx].Seqno,
+			VbucketCommon:       VbucketCommon{VBucket: req.VBucket},
 			IsOptRepd:           false,
 			Opcode:              req.Opcode,
-			VBucket:             req.VBucket,
 			Req_size:            req.Size(),
 			UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
 		}
@@ -514,10 +514,10 @@ func BenchmarkSnappyDecodeLenImpactOriginal(b *testing.B) {
 		wrappedReq := dataSet[dataIdx]
 		req := wrappedReq.Req
 		additionalInfo := DataSentEventAdditional{Seqno: dataSet[dataIdx].Seqno,
-			IsOptRepd: false,
-			Opcode:    req.Opcode,
-			VBucket:   req.VBucket,
-			Req_size:  req.Size(),
+			VbucketCommon: VbucketCommon{VBucket: req.VBucket},
+			IsOptRepd:     false,
+			Opcode:        req.Opcode,
+			Req_size:      req.Size(),
 			// For this test, do not run Uncompressed calculation
 			// UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
 		}

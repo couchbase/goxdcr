@@ -747,6 +747,27 @@ type WrappedUprEvent struct {
 	Flags             WrappedUprEventFlag
 	ByteSliceGetter   func(uint64) ([]byte, error)
 	DecompressedValue []byte
+	TranslatedVB      *uint16 // nil if no vb translation
+}
+
+// Returns maxUint16 if erroneous
+func (w *WrappedUprEvent) GetSourceVB() uint16 {
+	if w == nil || w.UprEvent == nil {
+		return math.MaxUint16
+	}
+	return w.UprEvent.VBucket
+}
+
+// Returns maxUint16 if erroneous
+func (w *WrappedUprEvent) GetTargetVB() uint16 {
+	if w == nil || w.UprEvent == nil {
+		return math.MaxUint16
+	}
+	if w.TranslatedVB != nil {
+		return *w.TranslatedVB
+	} else {
+		return w.UprEvent.VBucket
+	}
 }
 
 type WrappedUprEventFlag uint64
@@ -834,6 +855,22 @@ type WrappedMCRequest struct {
 	// cache the MCRequest's size for the sake of stats.
 	// Size = Req.HdrSize() + len(Req.Body) + len(Req.ExtMeta)
 	Size int
+
+	// If VariableVB mode is enabled (not-nil), we need to store the original source VB
+	OrigSrcVB *uint16
+}
+
+// GetSourceVB returns math.MaxUint16 in an error scenario
+func (req *WrappedMCRequest) GetSourceVB() uint16 {
+	if req == nil || req.Req == nil {
+		return math.MaxUint16
+	}
+
+	if req.OrigSrcVB == nil {
+		return req.Req.VBucket
+	} else {
+		return *req.OrigSrcVB
+	}
 }
 
 // If conflict logging is in progress, wait for it to complete.
