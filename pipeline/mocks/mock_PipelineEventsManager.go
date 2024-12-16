@@ -120,67 +120,67 @@ func (_c *PipelineEventsManager_BackfillUpdateCb_Call) RunAndReturn(run func(*me
 	return _c
 }
 
-// ClearNonBrokenMapEventsWithString provides a mock function with given fields: substr
-func (_m *PipelineEventsManager) ClearNonBrokenMapEventsWithString(substr string) {
-	_m.Called(substr)
-}
-
-// PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearNonBrokenMapEventsWithString'
-type PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call struct {
-	*mock.Call
-}
-
-// ClearNonBrokenMapEventsWithString is a helper method to define mock.On call
-//   - substr string
-func (_e *PipelineEventsManager_Expecter) ClearNonBrokenMapEventsWithString(substr interface{}) *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call {
-	return &PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call{Call: _e.mock.On("ClearNonBrokenMapEventsWithString", substr)}
-}
-
-func (_c *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call) Run(run func(substr string)) *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call) Return() *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call) RunAndReturn(run func(string)) *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ClearNonBrokenMapOrPersistentEvents provides a mock function with given fields:
-func (_m *PipelineEventsManager) ClearNonBrokenMapOrPersistentEvents() {
+// ClearNonFatalEvents provides a mock function with given fields:
+func (_m *PipelineEventsManager) ClearNonFatalEvents() {
 	_m.Called()
 }
 
-// PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearNonBrokenMapOrPersistentEvents'
-type PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call struct {
+// PipelineEventsManager_ClearNonFatalEvents_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearNonFatalEvents'
+type PipelineEventsManager_ClearNonFatalEvents_Call struct {
 	*mock.Call
 }
 
-// ClearNonBrokenMapOrPersistentEvents is a helper method to define mock.On call
-func (_e *PipelineEventsManager_Expecter) ClearNonBrokenMapOrPersistentEvents() *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call {
-	return &PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call{Call: _e.mock.On("ClearNonBrokenMapOrPersistentEvents")}
+// ClearNonFatalEvents is a helper method to define mock.On call
+func (_e *PipelineEventsManager_Expecter) ClearNonFatalEvents() *PipelineEventsManager_ClearNonFatalEvents_Call {
+	return &PipelineEventsManager_ClearNonFatalEvents_Call{Call: _e.mock.On("ClearNonFatalEvents")}
 }
 
-func (_c *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call) Run(run func()) *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call {
+func (_c *PipelineEventsManager_ClearNonFatalEvents_Call) Run(run func()) *PipelineEventsManager_ClearNonFatalEvents_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call) Return() *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call {
+func (_c *PipelineEventsManager_ClearNonFatalEvents_Call) Return() *PipelineEventsManager_ClearNonFatalEvents_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call) RunAndReturn(run func()) *PipelineEventsManager_ClearNonBrokenMapOrPersistentEvents_Call {
+func (_c *PipelineEventsManager_ClearNonFatalEvents_Call) RunAndReturn(run func()) *PipelineEventsManager_ClearNonFatalEvents_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ClearNonFatalEventsWithString provides a mock function with given fields: substr
+func (_m *PipelineEventsManager) ClearNonFatalEventsWithString(substr string) {
+	_m.Called(substr)
+}
+
+// PipelineEventsManager_ClearNonFatalEventsWithString_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearNonFatalEventsWithString'
+type PipelineEventsManager_ClearNonFatalEventsWithString_Call struct {
+	*mock.Call
+}
+
+// ClearNonFatalEventsWithString is a helper method to define mock.On call
+//   - substr string
+func (_e *PipelineEventsManager_Expecter) ClearNonFatalEventsWithString(substr interface{}) *PipelineEventsManager_ClearNonFatalEventsWithString_Call {
+	return &PipelineEventsManager_ClearNonFatalEventsWithString_Call{Call: _e.mock.On("ClearNonFatalEventsWithString", substr)}
+}
+
+func (_c *PipelineEventsManager_ClearNonFatalEventsWithString_Call) Run(run func(substr string)) *PipelineEventsManager_ClearNonFatalEventsWithString_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *PipelineEventsManager_ClearNonFatalEventsWithString_Call) Return() *PipelineEventsManager_ClearNonFatalEventsWithString_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *PipelineEventsManager_ClearNonFatalEventsWithString_Call) RunAndReturn(run func(string)) *PipelineEventsManager_ClearNonFatalEventsWithString_Call {
 	_c.Call.Return(run)
 	return _c
 }
