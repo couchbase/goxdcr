@@ -207,7 +207,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
+	assert.Equal(4, routerCollector.vbMetricHelper.vbBasedMetric.Len())
 
 	uprEvent, err := RetrieveUprFile(uprEventFile)
 	assert.Nil(err)
@@ -223,16 +223,17 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 
-	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
-	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap.GetterTraditional(service_def2.DOCS_FILTERED_METRIC).GetLengthOfSeqnoList())
+	valIface, _ := routerCollector.vbMetricHelper.vbBasedMetric.Getter(uprEvent.VBucket)
+	val := valIface.(map[string]interface{})
+	assert.Equal(int64(0), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	seqnoCommitMap := make(map[uint16]uint64)
 	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
-
-	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(0), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
-	assert.Equal(int64(1), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
-	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(1), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap.GetterTraditional(service_def2.DOCS_FILTERED_METRIC).GetLengthOfSeqnoList())
 
 	tradtitionalMetric, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	metricsMap := tradtitionalMetric.GetValue().(base.TraditionalVBMetrics)
@@ -344,7 +345,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
+	assert.Equal(4, routerCollector.vbMetricHelper.vbBasedMetric.Len())
 
 	dcpCollector := statsMgr.getdcpCollector()
 	assert.NotNil(dcpCollector)
@@ -417,7 +418,7 @@ func TestStatsMgrWithFilteringStats(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
+	assert.Equal(4, routerCollector.vbMetricHelper.vbBasedMetric.Len())
 
 	dcpCollector := statsMgr.getdcpCollector()
 	assert.NotNil(dcpCollector)
@@ -748,7 +749,7 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
+	assert.Equal(4, routerCollector.vbMetricHelper.vbBasedMetric.Len())
 
 	uprEvent, err := RetrieveUprFile(uprEventFile)
 	assert.Nil(err)
@@ -763,17 +764,18 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
-
-	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
-	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	valIface, _ := routerCollector.vbMetricHelper.vbBasedMetric.Getter(uprEvent.VBucket)
+	val := valIface.(map[string]interface{})
+	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap.GetterTraditional(service_def2.DOCS_FILTERED_METRIC).GetLengthOfSeqnoList())
+	assert.Equal(int64(0), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	seqnoCommitMap := make(map[uint16]uint64)
 	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
 
-	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(0), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
-	assert.Equal(int64(1), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
-	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(1), (val[service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap.GetterTraditional(service_def2.DOCS_FILTERED_METRIC).GetLengthOfSeqnoList())
 
 	globalMetric, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	metricsMap := globalMetric.GetValue().(base.GlobalVBMetrics)

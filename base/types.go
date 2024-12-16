@@ -3096,6 +3096,19 @@ func (g *GlobalVBMetrics) GetValue() interface{} {
 	return *g
 }
 
+func (g *GlobalVBMetrics) GetPerVBMetrics() map[uint16]map[string]int64 {
+	ret := make(map[uint16]map[string]int64)
+	for key, vbMetricMap := range *g {
+		for vbno, value := range vbMetricMap {
+			if _, exists := ret[vbno]; !exists {
+				ret[vbno] = make(map[string]int64)
+			}
+			ret[vbno][key] = value
+		}
+	}
+	return ret
+}
+
 func (g *GlobalVBMetrics) IsTraditional() bool {
 	return false
 }

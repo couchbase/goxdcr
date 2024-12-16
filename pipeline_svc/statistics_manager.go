@@ -185,7 +185,7 @@ var VBMetricKeys []string
 var compileVBMetricKeyOnce sync.Once
 var vbMetricKeyLock sync.RWMutex
 
-func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) base.VBCountMetric {
+func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, srcvb uint16) base.VBCountMetric {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
 		return nil
 	}
@@ -195,8 +195,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	if ckptDoc.IsTraditional() {
 		return getTraditionalMetrics(record)
 	} else {
-		// Darshan TODO global checkpoint
-		return nil
+		return getGlobalMetrics(record, srcvb)
 	}
 }
 
@@ -231,6 +230,58 @@ func getTraditionalMetrics(record *metadata.CheckpointRecord) base.VBCountMetric
 	vbStatMap[service_def.CLOG_HIBERNATED_COUNT] = base.Uint64ToInt64(record.CLogHibernatedCnt)
 	vbStatMap[service_def.GET_DOCS_CAS_CHANGED_METRIC] = base.Uint64ToInt64(record.GetDocsCasChangedCnt)
 	return tradMetrics
+}
+
+// populate the metrics from the global checkpoint record
+func getGlobalMetrics(record *metadata.CheckpointRecord, srcvb uint16) base.VBCountMetric {
+	if record == nil || record.IsTraditional() {
+		return nil
+	}
+
+	globalMetrics := base.NewGlobalVBMetrics()
+	vbStatMap := globalMetrics.GetValue().(base.GlobalVBMetrics)
+
+	// initialize for router stats
+	for _, key := range base.RouterVBMetricKeys {
+		if _, exists := vbStatMap[key]; !exists {
+			vbStatMap[key] = make(map[uint16]int64)
+		}
+	}
+
+	// initialize for outNozzle stats
+	for _, key := range base.OutNozzleVBMetricKeys {
+		if _, exists := vbStatMap[key]; !exists {
+			vbStatMap[key] = make(map[uint16]int64)
+		}
+	}
+
+	// Add sourceVB based metrics to a non-traditional data structure
+	vbStatMap[service_def.DOCS_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsCnt)
+	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredFailedCnt)
+	vbStatMap[service_def.EXPIRY_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
+	vbStatMap[service_def.DELETION_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnDeletionsCnt)
+	vbStatMap[service_def.SET_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnSetCnt)
+	vbStatMap[service_def.BINARY_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnBinaryDocsCnt)
+	vbStatMap[service_def.EXPIRY_STRIPPED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnExpiryStrippedCnt)
+	vbStatMap[service_def.DOCS_FILTERED_TXN_ATR_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnATRDocsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_CLIENT_TXN_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnClientTxnRecordsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_TXN_XATTR_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnTxnXattrsDocsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_MOBILE_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnMobileRecords)
+	vbStatMap[service_def.DOCS_FILTERED_USER_DEFINED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnUserDefinedFilters)
+	vbStatMap[service_def.DOCS_FILTERED_CAS_POISONING_METRIC][srcvb] = base.Uint64ToInt64(record.CasPoisonCnt)
+
+	// Add targetVB based metrics
+	for tgtvb, gcntrs := range record.GlobalCounters {
+		vbStatMap[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC][tgtvb] = base.Uint64ToInt64(gcntrs.GuardrailResidentRatioCnt)
+		vbStatMap[service_def.GUARDRAIL_DATA_SIZE_METRIC][tgtvb] = base.Uint64ToInt64(gcntrs.GuardrailDataSizeCnt)
+		vbStatMap[service_def.GUARDRAIL_DISK_SPACE_METRIC][tgtvb] = base.Uint64ToInt64(gcntrs.GuardrailDiskSpaceCnt)
+		vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_SET][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithSubdocSetCnt)
+		vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithSubdocDeleteCnt)
+		vbStatMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithPoisonedCasErrorMode)
+		vbStatMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithPoisonedCasReplaceMode)
+	}
+
+	return globalMetrics
 }
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
@@ -1354,6 +1405,24 @@ func (stats_mgr *StatisticsManager) updatePublishInterval(settings metadata.Repl
 	return nil
 }
 
+// returns all the sourceVbs that this node is responsible for
+func (stats_mgr *StatisticsManager) GetAllSourceVbs() []uint16 {
+	allSourceVbs := make([]uint16, 0, 30)
+	for _, sourceNozzle := range stats_mgr.pipeline.Sources() {
+		allSourceVbs = append(allSourceVbs, sourceNozzle.ResponsibleVBs()...)
+	}
+	return allSourceVbs
+}
+
+// returns all the targetVbs that the outNozzles on this node is responsible for
+func (stats_mgr *StatisticsManager) GetAllTargetVbs() []uint16 {
+	allTargetVbs := make([]uint16, 0, 30)
+	for _, outNozzle := range stats_mgr.pipeline.Targets() {
+		allTargetVbs = append(allTargetVbs, outNozzle.ResponsibleVBs()...)
+	}
+	return allTargetVbs
+}
+
 type MetricsCollector interface {
 	Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error
 	OnEvent(event *common.Event)
@@ -1521,6 +1590,14 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_collector.stats_mgr = stats_mgr
 	outNozzle_collector.component_map = make(map[string]map[string]interface{})
 	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper().SetGlobalContext()
+	var combinedKeys []string
+	combinedKeys = append(combinedKeys, base.OutNozzleVBMetricKeys...)
+	combinedKeys = append(combinedKeys, base.CLogTargetMetricKeys...)
+	err := outNozzle_collector.vbMetricHelper.Initialize(outNozzle_collector.Id(), combinedKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
+	if err != nil {
+		return err
+	}
+
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
@@ -1700,8 +1777,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.CLOG_WAIT_TIME] = clogWaitTime
 		metric_map[service_def.GET_DOCS_CAS_CHANGED_METRIC] = getCasChanged
 
-		listOfVBs := part.ResponsibleVBs()
-		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), base.OutNozzleVBMetricKeys)
+		listOfTargetVBs := part.ResponsibleVBs()
+		outNozzle_collector.vbMetricHelper.Register(listOfTargetVBs, part.Id())
 		outNozzle_collector.component_map[part.Id()] = metric_map
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
 		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
@@ -2043,13 +2120,14 @@ func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event
 	case service_def.GET_DOCS_CAS_CHANGED_METRIC:
 		fallthrough
 	case service_def.TRUE_CONFLICTS_DETECTED:
-		vbucket := event.DerivedData[0].(uint16)
-		seqno := event.DerivedData[1].(uint64)
-		helper, ok := outNozzle_collector.vbMetricHelper.vbBasedHelper[vbucket]
+		srcvb := event.DerivedData[0].(uint16)
+		tgtvb := event.DerivedData[1].(uint16)
+		seqno := event.DerivedData[2].(uint64)
+		helper, ok := outNozzle_collector.vbMetricHelper.vbBasedHelper[srcvb]
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
-		helper.handleIncomingSeqno(seqno, metricKey)
+		helper.handleIncomingSeqno(tgtvb, seqno, metricKey)
 		return nil
 	default:
 		return base.ErrorInvalidInput
@@ -2172,35 +2250,133 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	return nil
 }
 
-type vbBasedThroughSeqnoHelper struct {
-	id string
-
-	// These are sorted because DCP streams send seqno in an increasing order
-	sortedSeqnoListMap map[string]*base.SortedSeqnoListWithLock
-
-	responsibleKeys []string
+type SortedSeqnoListWithLock interface {
+	IsTraditional() bool
+	GetterTraditional(string) *base.SortedSeqnoListWithLock
+	GetterGlobal(uint16, string) *base.SortedSeqnoListWithLock
+	AppendSeqnoTraditional(string, uint64)
+	AppendSeqnoGlobal(uint16, string, uint64)
 }
 
-func newVbBasedThroughSeqnoHelper(id string, keys []string) *vbBasedThroughSeqnoHelper {
-	helper := &vbBasedThroughSeqnoHelper{
-		id:                 id,
-		sortedSeqnoListMap: make(map[string]*base.SortedSeqnoListWithLock),
-		responsibleKeys:    keys,
-	}
+type TraditionalSeqnoListMap map[string]*base.SortedSeqnoListWithLock
 
-	for _, key := range keys {
-		helper.sortedSeqnoListMap[key] = base.NewSortedSeqnoListWithLock()
+func (t TraditionalSeqnoListMap) IsTraditional() bool {
+	return true
+}
+
+func (t TraditionalSeqnoListMap) GetterTraditional(key string) *base.SortedSeqnoListWithLock {
+	if value, exists := t[key]; exists {
+		return value
 	}
+	return nil
+}
+func (t TraditionalSeqnoListMap) GetterGlobal(vbno uint16, key string) *base.SortedSeqnoListWithLock {
+	// no-op
+	return nil
+}
+
+func (t TraditionalSeqnoListMap) AppendSeqnoTraditional(key string, seqno uint64) {
+	t[key].AppendSeqno(seqno)
+}
+
+func (t TraditionalSeqnoListMap) AppendSeqnoGlobal(vbno uint16, key string, seqno uint64) {
+	//no-op
+}
+
+type GlobalSeqnoListMap map[uint16]TraditionalSeqnoListMap
+
+func (g GlobalSeqnoListMap) IsTraditional() bool {
+	return false
+}
+
+func (t GlobalSeqnoListMap) GetterGlobal(tgtvb uint16, key string) *base.SortedSeqnoListWithLock {
+	if value, exists := t[tgtvb][key]; exists {
+		return value
+	}
+	return nil
+}
+func (t GlobalSeqnoListMap) GetterTraditional(key string) *base.SortedSeqnoListWithLock {
+	//no-op
+	return nil
+}
+
+func (t GlobalSeqnoListMap) AppendSeqnoGlobal(vbno uint16, key string, seqno uint64) {
+	t[vbno][key].AppendSeqno(seqno)
+}
+
+func (t GlobalSeqnoListMap) AppendSeqnoTraditional(key string, seqno uint64) {
+	// no-op
+}
+
+type vbBasedThroughSeqnoHelper struct {
+	id string
+	// These are sorted because DCP streams send seqno in an increasing order
+	sortedSeqnoListMap SortedSeqnoListWithLock
+
+	responsibleKeys []string
+
+	variableVbMode bool
+	globallyUsed   bool // indicates that the associated collector maintains stats that are recorded against targetVB
+	tgtVbsGetter   func() []uint16
+}
+
+func newVbBasedThroughSeqnoHelper(id string, keys []string, variableVbMode, globallyUsed bool, tgtVbsGetter func() []uint16) *vbBasedThroughSeqnoHelper {
+	helper := &vbBasedThroughSeqnoHelper{
+		id:              id,
+		responsibleKeys: keys,
+		variableVbMode:  variableVbMode,
+		globallyUsed:    globallyUsed,
+		tgtVbsGetter:    tgtVbsGetter,
+	}
+	helper.Initialize()
 	return helper
 }
 
-func (vbh *vbBasedThroughSeqnoHelper) handleIncomingSeqno(seqno uint64, metricKey string) {
-	vbh.sortedSeqnoListMap[metricKey].AppendSeqno(seqno)
+func (vbh *vbBasedThroughSeqnoHelper) InitializeGlobal() {
+	vbBasedThroughSeqno := make(GlobalSeqnoListMap)
+	allTgtVbs := vbh.tgtVbsGetter()
+
+	for _, tgtVb := range allTgtVbs {
+		keyToSeqnoList := make(TraditionalSeqnoListMap)
+		for _, key := range vbh.responsibleKeys {
+			keyToSeqnoList[key] = base.NewSortedSeqnoListWithLock()
+		}
+		if _, exists := vbBasedThroughSeqno[tgtVb]; !exists {
+			vbBasedThroughSeqno[tgtVb] = keyToSeqnoList
+		}
+	}
+	vbh.sortedSeqnoListMap = vbBasedThroughSeqno
 }
 
-func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]interface{}, latestSeqno uint64) {
+func (vbh *vbBasedThroughSeqnoHelper) InitializeTraditional() {
+	vbBasedThroughSeqno := make(TraditionalSeqnoListMap)
 	for _, key := range vbh.responsibleKeys {
-		sortedList := vbh.sortedSeqnoListMap[key].GetSortedSeqnoList(false)
+		vbBasedThroughSeqno[key] = base.NewSortedSeqnoListWithLock()
+	}
+	vbh.sortedSeqnoListMap = vbBasedThroughSeqno
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) Initialize() {
+	if vbh.variableVbMode && vbh.globallyUsed {
+		vbh.InitializeGlobal()
+	} else {
+		vbh.InitializeTraditional()
+	}
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) handleIncomingSeqno(vbno uint16, seqno uint64, metricKey string) {
+	if vbh.sortedSeqnoListMap.IsTraditional() {
+		vbh.sortedSeqnoListMap.AppendSeqnoTraditional(metricKey, seqno)
+	} else {
+		vbh.sortedSeqnoListMap.AppendSeqnoGlobal(vbno, metricKey, seqno)
+	}
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) mergeWithTraditionalMetrics(metricsMapIface interface{}, latestSeqno uint64) {
+	metricsMap := metricsMapIface.(map[string]interface{})
+
+	for _, key := range vbh.responsibleKeys {
+		sortedList := vbh.sortedSeqnoListMap.GetterTraditional(key).GetSortedSeqnoList(false)
 		// Figure out how many count are to be committed to metrics
 		i := sort.Search(len(sortedList), func(i int) bool {
 			return sortedList[i] > latestSeqno
@@ -2208,14 +2384,110 @@ func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]int
 		metricsMap[key].(metrics.Counter).Inc(int64(i))
 
 		// Clear incremented count from staging areas
-		vbh.sortedSeqnoListMap[key].TruncateSeqnos(latestSeqno)
+		vbh.sortedSeqnoListMap.GetterTraditional(key).TruncateSeqnos(latestSeqno)
+	}
+}
+
+func (vbh *vbBasedThroughSeqnoHelper) mergeWithGlobalMetrics(metricsMapIface interface{}, latestSeqno uint64) {
+	metricsMap := metricsMapIface.(TraditionalVbBasedMetric)
+
+	for tgtvb, metricsPerTgtvb := range metricsMap {
+		for _, key := range vbh.responsibleKeys {
+			sortedList := vbh.sortedSeqnoListMap.GetterGlobal(tgtvb, key).GetSortedSeqnoList(false)
+			// Figure out how many count are to be committed to metrics
+			i := sort.Search(len(sortedList), func(i int) bool {
+				return sortedList[i] > latestSeqno
+			})
+			metricsPerTgtvb[key].(metrics.Counter).Inc(int64(i))
+
+			// Clear incremented count from staging areas
+			vbh.sortedSeqnoListMap.GetterGlobal(tgtvb, key).TruncateSeqnos(latestSeqno)
+		}
+
 	}
 
 }
 
+func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap interface{}, latestSeqno uint64) {
+	if vbh.variableVbMode && vbh.globallyUsed {
+		vbh.mergeWithGlobalMetrics(metricsMap, latestSeqno)
+	} else {
+		vbh.mergeWithTraditionalMetrics(metricsMap, latestSeqno)
+	}
+}
+
+type vbBasedMetric interface {
+	IsTraditional() bool
+	Getter(uint16) (interface{}, error)
+	Setter(uint16, interface{}) error
+	Len() int
+}
+
+type GlobalVbBasedMetric map[uint16]TraditionalVbBasedMetric
+
+func NewGlobalVbBasedMetric() GlobalVbBasedMetric {
+	return make(GlobalVbBasedMetric)
+}
+
+func (g GlobalVbBasedMetric) IsTraditional() bool {
+	return false
+}
+
+func (g GlobalVbBasedMetric) Getter(vbno uint16) (interface{}, error) {
+	if metricsMap, ok := g[vbno]; ok {
+		return metricsMap, nil
+	} else {
+		return nil, fmt.Errorf("entry no found against vbno %v in the VbBasedMetric map", vbno)
+	}
+}
+
+func (g GlobalVbBasedMetric) Setter(vbno uint16, valueIface interface{}) error {
+	if value, ok := valueIface.(TraditionalVbBasedMetric); ok {
+		g[vbno] = value
+		return nil
+	} else {
+		return fmt.Errorf("failed to set for vbno %v in VbBasedMetric map. err=expected map[uint16]map[string]interface{} but got %T", vbno, valueIface)
+	}
+}
+
+func (g GlobalVbBasedMetric) Len() int {
+	return len(g)
+}
+
+type TraditionalVbBasedMetric map[uint16]map[string]interface{}
+
+func NewTraditionalVbBasedMetric() TraditionalVbBasedMetric {
+	return make(TraditionalVbBasedMetric)
+}
+
+func (t TraditionalVbBasedMetric) IsTraditional() bool {
+	return true
+}
+
+func (t TraditionalVbBasedMetric) Getter(vbno uint16) (interface{}, error) {
+	if metricsMap, ok := t[vbno]; ok {
+		return metricsMap, nil
+	} else {
+		return nil, fmt.Errorf("entry no found against vbno %v in the VbBasedMetric map", vbno)
+	}
+}
+
+func (t TraditionalVbBasedMetric) Setter(vbno uint16, valueIface interface{}) error {
+	if value, ok := valueIface.(map[string]interface{}); ok {
+		t[vbno] = value
+		return nil
+	} else {
+		return fmt.Errorf("failed to set value for vbno %v in VbBasedMetric map. err=expected map[string]interface{}, but got %T", vbno, valueIface)
+	}
+}
+
+func (t TraditionalVbBasedMetric) Len() int {
+	return len(t)
+}
+
 type VbBasedMetricHelper struct {
 	// For vb-based metric across all DCP nozzles
-	vbBasedMetric map[uint16]map[string]interface{}
+	vbBasedMetric vbBasedMetric
 
 	// A map of vb-> partIDs
 	partVbsIdMap map[uint16]string
@@ -2226,6 +2498,11 @@ type VbBasedMetricHelper struct {
 	responsibleKeys []string
 
 	usedGlobally bool
+
+	variableVBMode bool
+
+	getAllSourceVbs func() []uint16
+	getAllTargetVbs func() []uint16
 }
 
 // SetGlobalContext is used if the helper is part of the component that spans
@@ -2238,43 +2515,33 @@ func (h *VbBasedMetricHelper) SetGlobalContext() *VbBasedMetricHelper {
 	return h
 }
 
-func (h *VbBasedMetricHelper) Register(id string, vbs []uint16, partId string, keys []string) {
-	h.responsibleKeys = keys
+func (h *VbBasedMetricHelper) Register(vbs []uint16, partId string) {
 	for _, i := range vbs {
 		h.partVbsIdMap[i] = partId
-		metricsMap := make(map[string]interface{})
-		h.vbBasedHelper[i] = newVbBasedThroughSeqnoHelper(id, h.responsibleKeys)
-		for _, k := range keys {
-			metricsMap[k] = metrics.NewCounter()
-			metrics.Register(fmt.Sprintf("%v:%v", partId, i), metricsMap[k])
-		}
-		h.vbBasedMetric[i] = metricsMap
 	}
 }
 
 func (h *VbBasedMetricHelper) HandleLatestThroughSeqnos(seqnoMap map[uint16]uint64) {
 	var waitGrp sync.WaitGroup
 
-	for vb, _ := range h.vbBasedMetric {
+	for _, vb := range h.getAllSourceVbs() {
 		waitGrp.Add(1)
 		go h.handleLatestThroughSeqnoForVb(vb, seqnoMap[vb], &waitGrp)
 	}
-
 	waitGrp.Wait()
 
 }
 
 func (h *VbBasedMetricHelper) handleLatestThroughSeqnoForVb(vb uint16, latestSeqno uint64, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	metricsMap, ok := h.vbBasedMetric[vb]
-	if !ok {
+	metricsMap, err := h.vbBasedMetric.Getter(vb)
+	if err != nil {
 		return
 	}
 	vbHelper, ok := h.vbBasedHelper[vb]
 	if !ok {
 		return
 	}
-
 	vbHelper.mergeWithMetrics(metricsMap, latestSeqno)
 }
 
@@ -2291,12 +2558,16 @@ func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base
 }
 
 func (h *VbBasedMetricHelper) addTraditionalVbSpecificMetrics(vbno uint16, genericMetrics base.VBCountMetric) error {
-	vbBasedMetric, ok := h.vbBasedMetric[vbno]
-	if !ok {
+	vbBasedMetricIface, err := h.vbBasedMetric.Getter(vbno)
+	if err != nil {
 		return base.ErrorNotMyVbucket
 	}
 
 	if genericMetrics.IsTraditional() {
+		vbBasedMetric, ok := vbBasedMetricIface.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("vbBasedMetric should be traditional(map[string]interface{}) but got %T", vbBasedMetricIface)
+		}
 		err := h.addTraditionalToGenericMetrics(genericMetrics, vbBasedMetric)
 		if err != nil {
 			return err
@@ -2307,6 +2578,10 @@ func (h *VbBasedMetricHelper) addTraditionalVbSpecificMetrics(vbno uint16, gener
 		compiledMap, ok := genericMetrics.GetValue().(base.GlobalVBMetrics)
 		if !ok {
 			return fmt.Errorf("metrics passed in should be global, but got %T", genericMetrics)
+		}
+		vbBasedMetric, ok := vbBasedMetricIface.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("vbBasedMetric should be global(map[uint16]map[string]interface{}) but got %T", vbBasedMetricIface)
 		}
 
 		for _, k := range h.responsibleKeys {
@@ -2348,13 +2623,17 @@ func (h *VbBasedMetricHelper) addTraditionalToGenericMetrics(genericMetrics base
 func (h *VbBasedMetricHelper) addGlobalVbSpecificMetrics(vbno uint16, genericMetrics base.VBCountMetric) error {
 	if genericMetrics.IsTraditional() {
 		// Traditional passed in, means that this method should treat handling stats traditionally
-		vbBasedMetric, ok := h.vbBasedMetric[vbno]
-		if !ok {
+		vbBasedMetricIface, err := h.vbBasedMetric.Getter(vbno)
+		if err != nil {
 			return base.ErrorNotMyVbucket
 		}
-		err := h.addTraditionalToGenericMetrics(genericMetrics, vbBasedMetric)
-		if err != nil {
-			return err
+		vbBasedMetric, ok := vbBasedMetricIface.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("vbBasedMetric should be traditional(map[string]interface{}), but got %T", vbBasedMetricIface)
+		}
+		err1 := h.addTraditionalToGenericMetrics(genericMetrics, vbBasedMetric)
+		if err1 != nil {
+			return err1
 		}
 	} else {
 		// Global VBCountMetric passed in with this VbBasedMetricHelper that is meant to handle global stats
@@ -2364,8 +2643,18 @@ func (h *VbBasedMetricHelper) addGlobalVbSpecificMetrics(vbno uint16, genericMet
 			return fmt.Errorf("metrics passed in should be global, but got %T", genericMetrics)
 		}
 
+		vbBasedMetricIface, err := h.vbBasedMetric.Getter(vbno)
+		if err != nil {
+			return base.ErrorNotMyVbucket
+		}
+
+		vbBasedMetric, ok := vbBasedMetricIface.(TraditionalVbBasedMetric)
+		if !ok {
+			return fmt.Errorf("vbBasedMetric should be global(map[uint16]map[string]interface{}), but got %T", vbBasedMetricIface)
+		}
+
 		for _, k := range h.responsibleKeys {
-			for oneVb, oneVbBasedMetric := range h.vbBasedMetric {
+			for oneVb, oneVbBasedMetric := range vbBasedMetric {
 				registry, ok := oneVbBasedMetric[k]
 				if !ok {
 					continue
@@ -2390,18 +2679,20 @@ func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, vbCountM
 	if vbCountMetric.IsTraditional() {
 		return h.updateTraditionalVbMetrics(vb, vbCountMetric, currentRegistries)
 	} else {
-		// Darshan TODO global checkpoint
-		return nil
+		return h.updateGlobalVbMetrics(vb, vbCountMetric, currentRegistries)
 	}
 }
 
 func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetric base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
-	vbBasedMetric, ok := h.vbBasedMetric[vb]
-	if !ok {
+	// First find the part responsible for this vb
+	vbBasedMetricIface, err := h.vbBasedMetric.Getter(vb)
+	if err != nil {
 		return base.ErrorNotMyVbucket
 	}
-
-	// First find the part responsible for this vb
+	vbBasedMetric, ok := vbBasedMetricIface.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("vbBasedMetric should be traditional(map[string]interface{}) but got %T", vbBasedMetricIface)
+	}
 	partId, found := h.partVbsIdMap[vb]
 	if !found {
 		return base.ErrorNotMyVbucket
@@ -2409,7 +2700,7 @@ func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetri
 
 	registries := currentRegistries[partId]
 	if registries == nil {
-		return fmt.Errorf("Unable to find registry for %v", partId)
+		return fmt.Errorf("unable to find registry for %v", partId)
 	}
 
 	// Keys is the "keys" being read, i.e. the filtered_cnt, etc from Checkpoint
@@ -2442,20 +2733,191 @@ func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetri
 		// Increment stats independent of VB that need this
 		metricsIface := registries.Get(k)
 		if metricsIface == nil {
-			return fmt.Errorf("%v Unable to get metric\n", partId)
+			return fmt.Errorf("%v Unable to get metric %v", partId, k)
 		}
 		counter, ok = metricsIface.(metrics.Counter)
 		if !ok || counter == nil {
-			return fmt.Errorf("%v Unable to get metric counter\n", partId)
+			return fmt.Errorf("%v Unable to get metric counter", partId)
 		}
 		counter.Inc(difference)
 	}
 	return nil
 }
 
+func (h *VbBasedMetricHelper) updateGlobalVbMetrics(srcvb uint16, vbCountMetric base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
+	if vbCountMetric.IsTraditional() {
+		return fmt.Errorf("updateGlovalVbMetrics() called on tradition metrics")
+	}
+
+	globalVbMetrics := vbCountMetric.GetValue().(base.GlobalVBMetrics)
+
+	if !h.usedGlobally {
+		// Update the sourceVb metrics populated in a non-traditional data structure
+		srcVbMetrics := base.NewTraditionalVBMetrics()
+		vbMetricMap := srcVbMetrics.GetValue().(base.TraditionalVBMetrics)
+		for _, key := range h.responsibleKeys {
+			vbMetricMap[key] = globalVbMetrics[key][srcvb]
+		}
+		return h.updateTraditionalVbMetrics(srcvb, srcVbMetrics, currentRegistries)
+	}
+
+	vbBasedMetricIface, err := h.vbBasedMetric.Getter(srcvb)
+	if err != nil {
+		return base.ErrorNotMyVbucket
+	}
+
+	tgtvbsBasedMetric, ok := vbBasedMetricIface.(TraditionalVbBasedMetric)
+	if !ok {
+		return fmt.Errorf("vbBasedMetric should be of type map[uint16]map[string]interface{} but got %T", vbBasedMetricIface)
+	}
+
+	errorMap := make(base.ErrorMap)
+
+	for vbno, metricMap := range globalVbMetrics.GetPerVBMetrics() {
+		vbBasedMetric, ok := tgtvbsBasedMetric[vbno]
+		if !ok {
+			errorMap[fmt.Sprintf("updateGlobalVbMetrics() - vbBasedMetric: vbno %v", vbno)] = base.ErrorNotMyVbucket
+			continue
+		}
+
+		// First find the part responsible for this vb
+		partId, found := h.partVbsIdMap[vbno]
+		if !found {
+			errorMap[fmt.Sprintf("updateGlobalVbMetrics() - partsVBsIdMap: vbno %v", vbno)] = base.ErrorNotMyVbucket
+			continue
+		}
+
+		registries := currentRegistries[partId]
+		if registries == nil {
+			errorMap[fmt.Sprintf("updateGlobalVbMetrics() - statsMgr.registries:  vbno %v partId %v", vbno, partId)] = fmt.Errorf("unable to find registry")
+			continue
+		}
+		for k, v := range metricMap {
+			var isResponsibleForThisKey bool
+			for _, keyToCheck := range h.responsibleKeys {
+				if keyToCheck == k {
+					isResponsibleForThisKey = true
+					break
+				}
+			}
+			if !isResponsibleForThisKey {
+				continue
+			}
+
+			// Increment vb-related counters
+			registry, ok := vbBasedMetric[k]
+			if !ok {
+				return base.ErrorInvalidInput
+			}
+			counter := registry.(metrics.Counter)
+			currentVal := counter.Count()
+			// Difference here is to address scenario when rollback occurs
+			// If rollback happens, then the difference is new - old
+			// Either increment or decrement the current count in both vb specific and stats_mgr.registries
+			difference := v - currentVal
+			counter.Inc(difference)
+
+			// Increment stats independent of VB that need this
+			metricsIface := registries.Get(k)
+			counter, ok = metricsIface.(metrics.Counter)
+			if !ok || counter == nil {
+				errorMap[fmt.Sprintf("updateGlobalVbMetrics() - partId %v key %v", partId, k)] = fmt.Errorf("unable to get metric counter")
+			}
+			counter.Inc(difference)
+		}
+
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("%s", base.FlattenErrorMap(errorMap))
+	}
+	return nil
+}
+
+func (h *VbBasedMetricHelper) InitializeGlobal(id string, keys []string, srcvbGetter, tgtvbGetter func() []uint16, variableVBMode bool) error {
+	h.vbBasedMetric = make(GlobalVbBasedMetric)
+	h.responsibleKeys = keys
+	h.getAllSourceVbs = srcvbGetter
+	h.getAllTargetVbs = tgtvbGetter
+	h.variableVBMode = variableVBMode
+
+	allSourceVbs := h.getAllSourceVbs()
+	allTargetVbs := h.getAllTargetVbs()
+	var errorMap base.ErrorMap = make(base.ErrorMap)
+
+	for _, srcVb := range allSourceVbs {
+		h.vbBasedHelper[srcVb] = newVbBasedThroughSeqnoHelper(id, h.responsibleKeys, h.variableVBMode, h.usedGlobally, h.getAllTargetVbs)
+		metricsMap := make(TraditionalVbBasedMetric)
+
+		for _, tgtVb := range allTargetVbs {
+			if _, ok := metricsMap[tgtVb]; !ok {
+				metricsMap[tgtVb] = make(map[string]interface{})
+			}
+			for _, key := range h.responsibleKeys {
+				metricsMap[tgtVb][key] = metrics.NewCounter()
+				metrics.Register(fmt.Sprintf("%v:%v:%v", srcVb, tgtVb, key), metricsMap[tgtVb][key])
+			}
+		}
+
+		err := h.vbBasedMetric.Setter(srcVb, metricsMap)
+		if err != nil {
+			errorMap[fmt.Sprintf("GlobalVbBasedMetric.Setter()-vbno %v", srcVb)] = err
+		}
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("%s", base.FlattenErrorMap(errorMap))
+	}
+
+	return nil
+}
+
+// Variable VB      IsGlobal  Part/VBs
+// True				True      No func call
+// False			False     router/sourceVBs; outNozzle/targetVbs (sourceVbs==targetVbs)
+// False 			True      router/sourceVbs; outNozzle/targetVbs (sourceVbs==targetVbs)
+// True				False     router/sourceVbs; outNozzle/NotCalled
+func (h *VbBasedMetricHelper) InitializeTraditional(id string, keys []string, srcvbGetter, tgtvbGetter func() []uint16, variableVBMode bool) error {
+	h.vbBasedMetric = make(TraditionalVbBasedMetric)
+	h.responsibleKeys = keys
+	h.getAllSourceVbs = srcvbGetter
+	h.getAllTargetVbs = tgtvbGetter
+	h.variableVBMode = variableVBMode
+
+	vbs := h.getAllSourceVbs()
+	var errorMap base.ErrorMap = make(base.ErrorMap)
+
+	for _, i := range vbs {
+		h.vbBasedHelper[i] = newVbBasedThroughSeqnoHelper(id, h.responsibleKeys, h.variableVBMode, h.usedGlobally, h.getAllTargetVbs)
+
+		metricsMap := make(map[string]interface{})
+		for _, k := range keys {
+			metricsMap[k] = metrics.NewCounter()
+			metrics.Register(fmt.Sprintf("%v:%v", i, k), metricsMap[k])
+		}
+
+		err := h.vbBasedMetric.Setter(i, metricsMap)
+		if err != nil {
+			errorMap[fmt.Sprintf("TraditionalVbBasedMetric.Setter()-vbno %v", i)] = err
+		}
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf("%s", base.FlattenErrorMap(errorMap))
+	}
+	return nil
+}
+
+func (h *VbBasedMetricHelper) Initialize(id string, keys []string, srcvbGetter, tgtvbGetter func() []uint16, variableVBMode bool) error {
+	if variableVBMode && h.usedGlobally {
+		return h.InitializeGlobal(id, keys, srcvbGetter, tgtvbGetter, variableVBMode)
+	} else {
+		return h.InitializeTraditional(id, keys, srcvbGetter, tgtvbGetter, variableVBMode)
+	}
+}
+
 func NewVbBasedMetricHelper() *VbBasedMetricHelper {
 	helper := &VbBasedMetricHelper{}
-	helper.vbBasedMetric = make(map[uint16]map[string]interface{})
 	helper.partVbsIdMap = make(map[uint16]string)
 	helper.vbBasedHelper = make(map[uint16]*vbBasedThroughSeqnoHelper)
 
@@ -2488,6 +2950,10 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	r_collector.stats_mgr = stats_mgr
 	r_collector.component_map = make(map[string]map[string]interface{})
 	r_collector.vbMetricHelper = NewVbBasedMetricHelper()
+	err := r_collector.vbMetricHelper.Initialize(r_collector.id, base.RouterVBMetricKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
+	if err != nil {
+		return err
+	}
 	dcp_parts := pipeline.Sources()
 
 	routersToRegister := make(map[string]common.Connector)
@@ -2569,7 +3035,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 
 		// VB specific stats
 		listOfVbs := routersListOfVB[conn.Id()]
-		r_collector.vbMetricHelper.Register(r_collector.Id(), listOfVbs, conn.Id(), base.RouterVBMetricKeys)
+		r_collector.vbMetricHelper.Register(listOfVbs, conn.Id())
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
@@ -2613,23 +3079,23 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 		fallthrough
 	case service_def.DOCS_UNABLE_TO_FILTER_METRIC:
 		uprEvent := event.Data.(*mcc.UprEvent)
-		vbucket := uprEvent.VBucket
+		vbucket := uprEvent.VBucket // denotes the source VB
 		seqno := uprEvent.Seqno
 		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
-		helper.handleIncomingSeqno(seqno, metricKey)
+		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
 		return nil
 	case service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
 		mcReq := event.Data.(*base.WrappedMCRequest)
-		vbucket := mcReq.Req.VBucket
+		vbucket := mcReq.Req.VBucket // denotes the source VB
 		seqno := mcReq.Seqno
 		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
-		helper.handleIncomingSeqno(seqno, metricKey)
+		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
 		return nil
 	default:
 		return base.ErrorInvalidInput
@@ -3409,6 +3875,10 @@ func (cLogCollector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	if !ok {
 		panic(fmt.Sprintf("invalid cLogInstance type %T", clogger))
 	}
+	err := cLogCollector.vbMetricHelper.Initialize(cLogCollector.Id(), base.CLogVBMetricKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
+	if err != nil {
+		return err
+	}
 
 	registry := stats_mgr.getOrCreateRegistry(cLogInstance.Id())
 	conflict_docs_written := metrics.NewCounter()
@@ -3465,7 +3935,7 @@ func (cLogCollector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	for _, source := range sources {
 		responsibleVbs = append(responsibleVbs, source.ResponsibleVBs()...)
 	}
-	cLogCollector.vbMetricHelper.Register(cLogCollector.Id(), responsibleVbs, cLogInstance.Id(), base.CLogVBMetricKeys)
+	cLogCollector.vbMetricHelper.Register(responsibleVbs, cLogInstance.Id())
 
 	// register conflict logger as the async event handler for relevant events
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
@@ -3563,7 +4033,7 @@ func (cLogCollector *cLogCollector) handleVBEvent(event *common.Event, metricKey
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
-		helper.handleIncomingSeqno(seqno, metricKey)
+		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
 		return nil
 	default:
 		return base.ErrorInvalidInput

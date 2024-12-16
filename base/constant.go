@@ -127,6 +127,7 @@ var NumVBucketsKey = "numVBuckets"
 
 // Value for StorageBackendKey
 var Magma = "magma"
+var Couchstore = "couchstore"
 
 // Collection consts
 const UIDKey = "uid"
@@ -1982,13 +1983,13 @@ const ROUTER_NAME_PREFIX = "Router"
 var RouterVBMetricKeys = []string{DocsFiltered, DocsUnableToFilter, ExpiryFiltered,
 	DeletionFiltered, SetFiltered, BinaryFiltered, ExpiryStripped,
 	AtrTxnDocsFiltered, ClientTxnDocsFiltered, DocsFilteredOnTxnXattr,
-	MobileDocsFiltered, DocsFilteredOnUserDefinedFilter, DocsCasPoisoned}
+	MobileDocsFiltered, DocsFilteredOnUserDefinedFilter, DocsCasPoisoned, ConflictDocsFiltered}
 
 var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, GuardrailDiskSpace,
 	DocsSentWithSubdocSet, DocsSentWithSubdocDelete,
-	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode}
+	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode, GetDocsCasChangedCount, TrueConflictsDetected}
 
-var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, ConflictDocsFiltered}
+var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten}
 
 var CLogTargetMetricKeys = []string{TrueConflictsDetected, CLogHibernatedCount, GetDocsCasChangedCount}
 

@@ -1468,11 +1468,11 @@ func setupClusterRunCluster(port int) {
 	runCmd(cmd, printCmd)
 }
 
-func createClusterRunBucket(port int, bucketname string, lww bool) {
+func createClusterRunBucket(port int, bucketname string, lww bool, bucketType string) {
 	defer time.Sleep(3 * time.Second)
 	var cmd *exec.Cmd
 	if lww {
-		cmd = exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"), "-d", fmt.Sprintf("conflictResolutionType=%v", "lww"))
+		cmd = exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"), "-d", fmt.Sprintf("conflictResolutionType=%v", "lww"), "-d", fmt.Sprintf("storageBackend=%v", bucketType))
 	} else {
 		cmd = exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"))
 	}
@@ -1547,10 +1547,10 @@ func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, buc
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
 
-	createClusterRunBucket(srcNode, bucketName, true)
+	createClusterRunBucket(srcNode, bucketName, true, base.Couchstore)
 	turnOnCrossXVersioningClusterRun(srcNode, bucketName)
 
-	createClusterRunBucket(tgtNode, bucketName, true)
+	createClusterRunBucket(tgtNode, bucketName, true, base.Couchstore)
 	turnOnCrossXVersioningClusterRun(tgtNode, bucketName)
 
 	srcBucket, closeFunc1 := getGocbBucket(sourceConnStr, bucketName)
@@ -1620,12 +1620,12 @@ func setTargetKVProtectionMode(protectionMode, bucketName string, port int) {
 	fmt.Printf("Output: %v\n", out)
 }
 
-func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocbcore.Agent, func()) {
+func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocbcore.Agent, func(), string) {
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
 
-	createClusterRunBucket(srcNode, bucketName, true)
-	createClusterRunBucket(tgtNode, bucketName, true)
+	createClusterRunBucket(srcNode, bucketName, true, base.Magma)
+	createClusterRunBucket(tgtNode, bucketName, true, base.Couchstore)
 	// wait for the bucket to get created
 	time.Sleep(20 * time.Second)
 	srcAgentgentConfig := &gocbcore.AgentConfig{
@@ -1644,7 +1644,7 @@ func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgt
 	createClusterRunRemoteRef(srcNode, tgtNode, "C1")
 	replID1 := createClusterRunReplication(srcNode, bucketName, bucketName, "C1")
 	fmt.Printf("ReplicationID: %v\n", replID1)
-	return srcAgent, closeFunc3
+	return srcAgent, closeFunc3, replID1
 }
 
 // this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
@@ -2105,6 +2105,33 @@ func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
 // go test -timeout 120s -run ^TestCasPoisonKVProtection$ github.com/couchbase/goxdcr/parts
+
+func writeCasPoisonedDocs(agent *gocbcore.Agent, numOfDocs int, protectionMode string) {
+	scopeName := "_default"
+	colName := "_default"
+	docKey := ""
+	docVal := "{\"foo\":\"bar\"}"
+	var poisonedCas uint64 = 2017851073000000000
+
+	for i := 1; i <= numOfDocs; i++ {
+		randInt := rand.Int()
+		docKey = fmt.Sprintf("casPoisoned_%v_%v_%v", protectionMode, i, randInt)
+		InsertDocUsingSetMeta(agent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0, poisonedCas)
+	}
+}
+
+func verifyCasPoisonStats(t *testing.T, a *assert.Assertions, srcPrometheusPort int, expectedCount int) {
+	verifyCasPoisonProtectionStats(t, a, srcPrometheusPort, "error", expectedCount)
+	verifyCasPoisonProtectionStats(t, a, srcPrometheusPort, "replace", expectedCount)
+}
+
+func doPauseUnpauseCycle(port int, replID string) {
+	pauseClusterRunReplication(port, replID)
+	time.Sleep(15 * time.Second)
+	resumeClusterRunReplication(port, replID)
+	time.Sleep(15 * time.Second)
+}
+
 func TestCasPoisonKVProtection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasPoisonErrorMode")
@@ -2115,36 +2142,63 @@ func TestCasPoisonKVProtection(t *testing.T) {
 
 	// test common parameters
 	bucketName := "B1" // both on source and target
-	scopeName := "_default"
-	colName := "_default"
-	docKey := ""
-	docVal := "{\"foo\":\"bar\"}"
-	srcNode := 9000 // cluster_run source node port
-	tgtNode := 9001 // cluster_run target node port
-	tgtMemcachedPort := 12002
+	srcNode := 9000    // cluster_run source node port
+	tgtNode := 9001    // cluster_run target node port
 	srcprometheusPort := 13000
 	numOfDocs := 5
 	// printCmd = true
 
-	var poisonedCas uint64 = 20033899680000000
+	srcAgent, closeFunc1, replID := setupForCasPoisonTest(a, bucketName, srcNode, tgtNode)
 
-	srcAgent, closeFunc1 := setupForCasPoisonTest(a, bucketName, srcNode, tgtNode)
+	changeClusterRunBucketSetting(srcNode, bucketName, "invalidHlcStrategy", "ignore")
+	time.Sleep(15 * time.Second)
+
+	//disable live cas-poison check
+	changeClusterRunReplicationSettings(srcNode, replID, "casDriftThresholdSecs", "0")
+	time.Sleep(10 * time.Second)
 	defer closeFunc1()
+
 	//error mode
 	protectionMode := "error"
-	setTargetKVProtectionMode(protectionMode, bucketName, tgtMemcachedPort)
-	for i := 1; i <= numOfDocs; i++ {
-		docKey = fmt.Sprintf("casPoisonedError_%v", i)
-		InsertDocUsingSetMeta(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0, poisonedCas)
-	}
-	time.Sleep(3 * time.Second) // wait for the doc to replicate
-	verifyCasPoisonProtectionStats(t, a, srcprometheusPort, protectionMode, numOfDocs)
+	writeCasPoisonedDocs(srcAgent, numOfDocs, protectionMode)
+
+	//replace mode
 	protectionMode = "replace"
-	setTargetKVProtectionMode(protectionMode, bucketName, tgtMemcachedPort)
-	for i := 1; i <= numOfDocs; i++ {
-		docKey = fmt.Sprintf("casPoisonedReplace_%v", i)
-		InsertDocUsingSetMeta(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0, poisonedCas)
-	}
+	changeClusterRunBucketSetting(tgtNode, bucketName, "invalidHlcStrategy", "replace")
+	time.Sleep(10 * time.Second)
+	writeCasPoisonedDocs(srcAgent, numOfDocs, protectionMode)
+
 	time.Sleep(3 * time.Second) // wait for the doc to replicate
-	verifyCasPoisonProtectionStats(t, a, srcprometheusPort, protectionMode, numOfDocs)
+
+	//verify stats
+	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs)
+
+	//do pause-unpause cycle
+	doPauseUnpauseCycle(srcNode, replID)
+
+	//verify stats to ensure the right count was populated from the checkpoints
+	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs)
+
+	//insert 1 doc for both replace and error code
+
+	//replace mode
+	protectionMode = "replace"
+	writeCasPoisonedDocs(srcAgent, 1, protectionMode)
+
+	//error mode
+	changeClusterRunBucketSetting(tgtNode, bucketName, "invalidHlcStrategy", "error")
+	time.Sleep(10 * time.Second)
+	protectionMode = "error"
+	writeCasPoisonedDocs(srcAgent, 1, protectionMode)
+
+	time.Sleep(3 * time.Second) // wait for docs to replicate
+
+	//check for stat count
+	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs+1)
+
+	//do pause-unpause cycle
+	doPauseUnpauseCycle(srcNode, replID)
+
+	//verify stats to ensure the right count was populated from the checkpoints
+	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs+1)
 }

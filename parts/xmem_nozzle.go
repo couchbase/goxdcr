@@ -1444,7 +1444,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					additionalInfo := SentCasChangedEventAdditional{
 						IsGetDoc: true,
 					}
-					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.GetTargetVB(), item.Seqno}, additionalInfo))
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, []interface{}{item.GetSourceVB(), item.GetTargetVB(), item.Seqno}, additionalInfo))
 					xmem.retryAfterCasLockingFailure(item)
 				}()
 			case RetryTargetLocked:
@@ -1998,7 +1998,7 @@ func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.Wr
 		return
 	}
 
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetTargetVB(), req.Seqno}, err))
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, err))
 	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
 		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 			xmem.Id(),
@@ -3603,9 +3603,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.client_for_setMeta.IncrementBackOffFactor()
 						// Don't spam the log. Keep a counter instead
 						atomic.AddUint64(&xmem.counterGuardrailHit, 1)
-						vbno := wrappedReq.GetTargetVB()
+						srcvb := wrappedReq.GetSourceVB()
+						tgtvb := wrappedReq.GetTargetVB()
 						seqno := wrappedReq.Seqno
-						xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{vbno, seqno}, nil))
+						xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{srcvb, tgtvb, seqno}, nil))
 						markThenResend := func(req *bufferedMCRequest, pos uint16) (bool, error) {
 							req.setGuardrail(response.Status)
 							return xmem.resendWithReset(req, pos)
@@ -3710,7 +3711,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				if wrappedReq.OrigSrcVB != nil {
 					additionalInfo.SetOrigSrcVB(*wrappedReq.OrigSrcVB)
 				}
-				xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
+				xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, []interface{}{wrappedReq.GetSourceVB(), wrappedReq.GetTargetVB(), wrappedReq.Seqno}, additionalInfo))
 				if wrappedReq.ImportMutation && xmem.getMobileCompatible() == base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
 					xmem.importMutationEventId = xmem.eventsProducer.AddEvent(
 						base.LowPriorityMsg,
