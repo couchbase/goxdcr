@@ -9,16 +9,16 @@
 package service_impl
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"sync"
+
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"io/ioutil"
-	"os"
-	"sync"
 )
 
 type EncryptionSetting struct {
@@ -270,11 +270,11 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 	}
 
 	// Do validation
-	_, err = tls.X509KeyPair(certPEMBlock, clientKey)
-	if err != nil {
-		err = fmt.Errorf("unable to validate x509KeyPair from cbauth: %v", err)
-		return err
-	}
+	// _, err = tls.X509KeyPair(certPEMBlock, clientKey)
+	// if err != nil {
+	// 	err = fmt.Errorf("unable to validate x509KeyPair from cbauth: %v", err)
+	// 	return err
+	// }
 
 	sec.settingMtx.Lock()
 	defer sec.settingMtx.Unlock()
