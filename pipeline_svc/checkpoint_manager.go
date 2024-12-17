@@ -738,7 +738,7 @@ func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16, tgtVbList
 		ckptToEnhance.GlobalCounters = make(metadata.GlobalTargetCounters)
 
 		for _, tgtVb := range tgtVbList {
-			ckptToEnhance.InitializeVbForGlobalDS(tgtVb)
+			ckptToEnhance.InitializeVbForGlobalInfo(tgtVb)
 		}
 	}
 }
@@ -1560,12 +1560,12 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	}
 }
 
-func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx *globalCkptPrereplicateCacheCtx) {
+func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx *globalCkptPrereplicateCacheCtx) error {
 	obj, ok := ckmgr.cur_ckpts[vbno]
 	if !ok {
-		err := fmt.Errorf("Trying to check vbopaque on vb=%v which is not in MyVBList", vbno)
+		err := fmt.Errorf("trying to check vbopaque on vb=%v which is not in MyVBList", vbno)
 		ckmgr.handleGeneralError(err)
-		return
+		return err
 	}
 
 	needToPopulate := true
@@ -1582,7 +1582,7 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 	}
 
 	if !needToPopulate {
-		return
+		return nil
 	}
 
 	if ckmgr.isVariableVBMode() {
@@ -1593,13 +1593,16 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 		_, err := ckmgr.populateGlobalTargetVBOpaque(vbno, globalTargetTimestamp, ctx)
 		if err != nil {
 			ckmgr.logger.Errorf("populateGlobalTargetVBOpaque for vb %v had err %v", vbno, err)
+			return err
 		}
 	} else {
 		_, err := ckmgr.populateTargetVBOpaque(vbno, service_def.NewEmptyRemoteVBReplicationStatus(vbno))
 		if err != nil {
 			ckmgr.logger.Errorf("populateTargetVBOpaque for vb %v had err %v", vbno, err)
+			return err
 		}
 	}
+	return nil
 }
 
 func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus) (bMatch bool, err error) {
@@ -1938,7 +1941,10 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 		// However, if there are backfill checkpoints and they all do not match because of
 		//    checkpoint's startSeqno > backfillTaskEndSeqno
 		// then the vbopaque will never be populated and will need to be populated to ensure that ckpt operations can take place
-		ckmgr.populateTargetVBOpaqueIfNeeded(vbno, ctx)
+		err := ckmgr.populateTargetVBOpaqueIfNeeded(vbno, ctx)
+		if err != nil {
+			return vbts, lastSucccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingsPair, err
+		}
 	}
 
 	//update current ckpt map
@@ -2491,9 +2497,9 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 		tgtVbTimestamp.TargetManifest = tgtManifestId
 		return tgtVbTimestamp, nil
 	} else {
-		tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(map[uint16]*metadata.GlobalVBTimestamp)
+		tgtVbTimestampMap, ok := remoteTimestamp.GetValue().(metadata.GlobalTimestamp)
 		if !ok {
-			return nil, fmt.Errorf("vb %v expecting map[uint16]*metadata.GlobalVBTimestamp, got %T", vbno, remoteTimestamp.GetValue())
+			return nil, fmt.Errorf("vb %v expecting metadata.GlobalTimestamp, got %T", vbno, remoteTimestamp.GetValue())
 		}
 
 		if tgtVbTimestampMap == nil {
@@ -2525,8 +2531,8 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 
 func (ckmgr *CheckpointManager) retrieveTargetManifestIdAndBrokenMap(tgtManifestIds map[uint16]uint64, vbno uint16) (metadata.CollectionNamespaceMapping, uint64) {
 	tgtManifestId, ok := tgtManifestIds[vbno]
-	if !ok { // Darshan TODO - this can be very spammy
-		ckmgr.logger.Warnf("unable to find Target manifest ID for vb %v", vbno)
+	if !ok {
+		ckmgr.logger.Debugf("unable to find Target manifest ID for vb %v", vbno)
 	}
 
 	var brokenMapping metadata.CollectionNamespaceMapping
@@ -3135,13 +3141,6 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			return err
 		}
 		if len(oneNodeVbsCkptMap) > 0 {
-			for _, ckptDoc := range oneNodeVbsCkptMap {
-				for _, ckptRecord := range ckptDoc.Checkpoint_records {
-					if ckptRecord == nil {
-						continue
-					}
-				}
-			}
 			needToGetFailoverLogs = true
 			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v opaque %v", node, resp.ReplicationSpecId, resp.GetOpaque())
 			nodeVbMainCkptsMap[node] = oneNodeVbsCkptMap
@@ -3151,13 +3150,6 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			return err
 		}
 		if len(oneNodeVbsBackfillCkptMap) > 0 {
-			for _, ckptDoc := range oneNodeVbsBackfillCkptMap {
-				for _, ckptRecord := range ckptDoc.Checkpoint_records {
-					if ckptRecord == nil {
-						continue
-					}
-				}
-			}
 			needToGetFailoverLogs = true
 			ckmgr.logger.Infof("Received peerToPeer backfill checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
 			nodeVbBackfillCkptsMap[node] = oneNodeVbsBackfillCkptMap
@@ -3504,7 +3496,6 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 					continue
 				}
 
-				// NEIL TODO - file MB for this
 				ckptRecordVbUuid := ckptRecord.Target_vb_opaque.Value().(uint64)
 
 				for _, vbUuidSeqnoPair := range *failoverLog {

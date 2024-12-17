@@ -206,52 +206,5 @@ func (v *VBTranslator) AddDownStream(partId string, part common.Part) error {
 		return commonErr
 	}
 
-	if v.srcNumVBs >= v.tgtNumVBs {
-		// No additional work needs to be done
-		return nil
-	}
-
-	v.downstreamPartMtx.Lock()
-	defer v.downstreamPartMtx.Unlock()
-
-	v.routersAdded++
-	if v.routersAdded != v.numOfSrcNozzles {
-		// More routers will need to be added
-		return nil
-	}
-
-	additionalVBs := make(map[string][]uint16)
-
-	// At this point, all routers have been added. Do round-robin
-	var vbsListToRoundRobin []uint16
-	for vb, _ := range v.downstreamPartVBMap {
-		vbsListToRoundRobin = append(vbsListToRoundRobin, vb)
-	}
-	var idxToUse int
-
-	for i := 0; i < v.tgtNumVBs; i++ {
-		// It is possible for a source VB distribution of this node to have a range of [non-0, X]
-		if _, vbIsMapped := v.downstreamPartVBMap[uint16(i)]; vbIsMapped {
-			continue
-		}
-
-		routerToReuse := v.downstreamPartVBMap[vbsListToRoundRobin[idxToUse]]
-		idxToUse = (idxToUse + 1) % len(vbsListToRoundRobin)
-
-		v.downstreamPartVBMap[uint16(i)] = routerToReuse
-
-		// After reusing the router, this reused router is now responsible for this specific target VB that was not mapped
-		// before
-		additionalVBs[routerToReuse.Id()] = append(additionalVBs[routerToReuse.Id()], uint16(i))
-	}
-
-	for routerId, vbsToAdd := range additionalVBs {
-		settingsMap := make(metadata.ReplicationSettingsMap)
-		settingsMap[metadata.VariableVBAdditionalVBs] = vbsToAdd
-		err := v.downstreamPartMap[routerId].UpdateSettings(settingsMap)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }

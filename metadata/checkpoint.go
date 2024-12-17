@@ -499,7 +499,7 @@ func (g *GlobalTimestamp) ToSnappyCompressable() SnappyCompressableVal {
 }
 
 func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
-	otherGlobalTsMap, ok := targetVBOpaque.Value().(map[uint16]*GlobalVBTimestamp)
+	otherGlobalTsMap, ok := targetVBOpaque.Value().(GlobalTimestamp)
 	if !ok {
 		return false
 	}
@@ -540,7 +540,7 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 		return nil
 	}
 
-	tgtVBTimestampMap := make(map[uint16]*GlobalVBTimestamp)
+	tgtVBTimestampMap := make(GlobalTimestamp)
 	for k, v := range *g {
 		if v == nil {
 			v = &GlobalVBTimestamp{}
@@ -1229,7 +1229,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 		if err != nil {
 			return nil, err
 		}
-		err = record.PopulateShasForGlobalCheckPoint()
+		err = record.PopulateShasForGlobalInfo()
 		if err != nil {
 			return nil, err
 		}
@@ -1467,9 +1467,9 @@ func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
 	return nil
 }
 
-func (ckptRecord *CheckpointRecord) PopulateShasForGlobalCheckPoint() error {
+func (ckptRecord *CheckpointRecord) PopulateShasForGlobalInfo() error {
 	if ckptRecord.IsTraditional() {
-		return fmt.Errorf("PopulateShasForGlobalCheckPoint called on a traditional checkpoint")
+		return fmt.Errorf("PopulateShasForGlobalInfo called on a traditional checkpoint")
 	} else {
 		globalTimestampSha, err1 := ckptRecord.GlobalTimestamp.Sha256()
 		globalCounterSha, err2 := ckptRecord.GlobalCounters.Sha256()
@@ -1626,7 +1626,7 @@ func (ckptRecord *CheckpointRecord) LoadGlobalInfoMapping(allShasToGInfo ShaToGl
 }
 
 // Initializes the global data structures i.e. GlobalTimestamp and GlobalCounters for the specified VB
-func (ckptRecord *CheckpointRecord) InitializeVbForGlobalDS(targetVB uint16) {
+func (ckptRecord *CheckpointRecord) InitializeVbForGlobalInfo(targetVB uint16) {
 	if ckptRecord == nil {
 		return
 	}
@@ -1917,11 +1917,19 @@ func (targetVBUuid *TargetVBUuid) Clone() TargetVBOpaque {
 
 type GlobalTargetVbUuids map[uint16][]uint64
 
+// Note this function includes the header size of the map and the value slice
 func (g *GlobalTargetVbUuids) Size() int {
 	if g == nil {
 		return 0
 	}
-	return int(unsafe.Sizeof(g))
+	mapSize := unsafe.Sizeof(*g) // size of the map header
+
+	for key, value := range *g {
+		mapSize += unsafe.Sizeof(key)      // Size of the key
+		mapSize += unsafe.Sizeof(value)    // Size of the slice header
+		mapSize += uintptr(len(value)) * 8 // Size of the underlying slice data
+	}
+	return int(mapSize)
 }
 
 func (g *GlobalTargetVbUuids) Value() interface{} {
@@ -1938,7 +1946,7 @@ func (g *GlobalTargetVbUuids) Value() interface{} {
 // meant to be a direct comparison between two GlobalTargetVbUuids objects
 // Use SameAs() for direct comparisons
 func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
-	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(map[uint16]*GlobalVBTimestamp)
+	lastFetchedTargetOpaque, ok := globalTargetOpaque.Value().(GlobalTimestamp)
 	if !ok {
 		// We don't accept any other type of TargetVBOpaque for global checkpointing
 		// But because interface is hard-coded, there's no other way to raise error and prefer not to
@@ -2235,12 +2243,10 @@ func (c CheckpointSortRecordsList) Less(i, j int) bool {
 	}
 
 	// Last resort
-	if aRecord.IsTraditional() {
-		return aRecord.Target_Seqno > bRecord.Target_Seqno
-	} else {
-		// For global checkpoint, arbitrarily just check to see who has a larger global timestamp length as a tie breaker
-		return len(aRecord.GlobalTimestamp) > len(bRecord.GlobalTimestamp)
-	}
+	// indicates that aRecord is the lastest checkpoint
+	// Note - this is under the assumption that the wall clocks of all the nodes in a cluster
+	// are synchronised using NTP
+	return aRecord.CreationTime > bRecord.CreationTime
 }
 
 // Returns:
@@ -3077,7 +3083,7 @@ func GenerateGlobalVBsCkptDocMap(vbsList []uint16, brokenMappingShaToInsert stri
 			GlobalTimestamp: oneGts,
 			GlobalCounters:  oneGctrs,
 		}
-		oneRecord.PopulateShasForGlobalCheckPoint()
+		oneRecord.PopulateShasForGlobalInfo()
 		oneDoc := &CheckpointsDoc{
 			Checkpoint_records: CheckpointRecordsList{oneRecord},
 		}

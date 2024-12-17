@@ -553,13 +553,13 @@ func TestKvVBMapType_HasSameNumberOfVBs(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		k    KvVBMapType
+		k    *KvVBMapType
 		args args
 		want bool
 	}{
 		{
 			"Same number of VBs",
-			KvVBMapType{
+			&KvVBMapType{
 				"a": []uint16{
 					0, 1, 2,
 				},
@@ -589,7 +589,7 @@ func TestKvVBMapType_HasSameNumberOfVBs(t *testing.T) {
 		},
 		{
 			"Different number of VBs",
-			KvVBMapType{
+			&KvVBMapType{
 				"a": []uint16{
 					0, 1, 2, 3,
 				},
@@ -599,6 +599,16 @@ func TestKvVBMapType_HasSameNumberOfVBs(t *testing.T) {
 					0, 1, 2,
 				},
 			}},
+			false,
+		},
+		{
+			"Test argument is nil",
+			&KvVBMapType{
+				"a": []uint16{
+					0, 1, 2,
+				},
+			},
+			args{nil},
 			false,
 		},
 	}

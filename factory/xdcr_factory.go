@@ -870,7 +870,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 		xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() == base.PriorityTypeHigh,
 		spec.Settings.GetExpDelMode(), xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler,
 		remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter, eventsProducer,
-		srcNozzleVBs, allSrcVBs)
+		srcNozzleVBs)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)

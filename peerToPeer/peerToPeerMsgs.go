@@ -1602,14 +1602,6 @@ func (v *VBsPayload) PostDecompressInit() error {
 			continue
 		}
 
-		if payload.CheckpointsDoc != nil {
-			for _, record := range payload.CheckpointsDoc.Checkpoint_records {
-				if record == nil {
-					continue
-				}
-			}
-		}
-
 		payload.BackfillTsks.PostUnmarshalInit()
 	}
 	return nil

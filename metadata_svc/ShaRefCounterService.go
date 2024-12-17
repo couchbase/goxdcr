@@ -354,7 +354,7 @@ type MapShaRefCounter struct {
 	lock               sync.RWMutex
 	singleUpsert       chan bool
 	finch              chan bool
-	refCnt             map[string]uint64                    // map of sha to refCnt (shared between shaToMapping and shaToGlobalTs due to unlikelihood of collision)
+	refCnt             map[string]uint64                    // map of sha to refCnt
 	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping
 	shaToGlobalInfo    metadata.ShaToGlobalInfoMap          // map of sha to GlobalTimestamps and GlobalTargetCounters (shared due to unlikelihood of collisions - the collision probability is 1 in 1.16 x 10^77)
 	needToSync         bool                                 // needs to sync refCnt to shaMap and then also persist to metakv

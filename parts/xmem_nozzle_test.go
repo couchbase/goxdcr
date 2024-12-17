@@ -120,7 +120,7 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 
 	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
 
-	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil, nil, nil, nil)
+	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil, nil, nil)
 
 	producer := &mocks.PipelineEventsProducer{}
 

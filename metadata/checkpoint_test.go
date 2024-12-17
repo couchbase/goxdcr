@@ -314,7 +314,7 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 	}{
 		{
 			name: "globalGetValueTest",
-			g: map[uint16]*GlobalVBTimestamp{
+			g: GlobalTimestamp{
 				0: &GlobalVBTimestamp{
 					TargetVBTimestamp: TargetVBTimestamp{
 						Target_vb_opaque: &TargetVBUuid{1},
@@ -328,7 +328,7 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 					},
 				},
 			},
-			want: map[uint16]*GlobalVBTimestamp{
+			want: GlobalTimestamp{
 				0: &GlobalVBTimestamp{
 					TargetVBTimestamp: TargetVBTimestamp{
 						Target_vb_opaque: &TargetVBUuid{1},
@@ -347,11 +347,11 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wantMap, ok := tt.want.(map[uint16]*GlobalVBTimestamp)
+			wantMap, ok := tt.want.(GlobalTimestamp)
 			assert.True(t, ok)
 
 			for k, v := range wantMap {
-				gts, ok := tt.g.GetValue().(map[uint16]*GlobalVBTimestamp)
+				gts, ok := tt.g.GetValue().(GlobalTimestamp)
 				assert.True(t, ok)
 				assert.True(t, gts[k].SameAs(v))
 			}
@@ -395,7 +395,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 			1: &TargetPerVBCounters{},
 		},
 	}
-	assert.Nil(newCkptRecord.PopulateShasForGlobalCheckPoint())
+	assert.Nil(newCkptRecord.PopulateShasForGlobalInfo())
 
 	ns1, err := base.NewCollectionNamespaceFromString("s1.col1")
 	assert.Nil(err)
@@ -451,7 +451,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
-	assert.Nil(ckptRecord2.PopulateShasForGlobalCheckPoint())
+	assert.Nil(ckptRecord2.PopulateShasForGlobalInfo())
 
 	ckpt_doc := NewCheckpointsDoc("testInternalId")
 	added, _ := ckpt_doc.AddRecord(&newCkptRecord)

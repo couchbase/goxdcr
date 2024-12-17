@@ -1407,7 +1407,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc,
 	dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair),
 	remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error),
-	eventsProducer common.PipelineEventsProducer, srcNozzleVBs []uint16, allSrcVBs []uint16) (*Router, error) {
+	eventsProducer common.PipelineEventsProducer, srcNozzleVBs []uint16) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, exprFound := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -1465,7 +1465,6 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		eventsProducer:           eventsProducer,
 		casDriftThreshold:        casDriftThreshold,
 		sourceVBs:                srcNozzleVBs,
-		allSourceVBs:             allSrcVBs,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -2310,9 +2309,9 @@ func (r *RouterPart) ResponsibleVBs() []uint16 {
 				for vbno, _ := range r.router.routingMap {
 					r.responsibleVBs = append(r.responsibleVBs, vbno)
 				}
-				r.responsibleVBsSet = true
 			}
 		}
+		r.responsibleVBsSet = true
 		r.responsibleVBsMtx.Unlock()
 		r.responsibleVBsMtx.RLock()
 	}

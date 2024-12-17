@@ -1407,7 +1407,7 @@ func (stats_mgr *StatisticsManager) updatePublishInterval(settings metadata.Repl
 
 // returns all the sourceVbs that this node is responsible for
 func (stats_mgr *StatisticsManager) GetAllSourceVbs() []uint16 {
-	allSourceVbs := make([]uint16, 0, 30)
+	allSourceVbs := make([]uint16, 0, 45)
 	for _, sourceNozzle := range stats_mgr.pipeline.Sources() {
 		allSourceVbs = append(allSourceVbs, sourceNozzle.ResponsibleVBs()...)
 	}
@@ -1416,7 +1416,7 @@ func (stats_mgr *StatisticsManager) GetAllSourceVbs() []uint16 {
 
 // returns all the targetVbs that the outNozzles on this node is responsible for
 func (stats_mgr *StatisticsManager) GetAllTargetVbs() []uint16 {
-	allTargetVbs := make([]uint16, 0, 30)
+	allTargetVbs := make([]uint16, 0, 45)
 	for _, outNozzle := range stats_mgr.pipeline.Targets() {
 		allTargetVbs = append(allTargetVbs, outNozzle.ResponsibleVBs()...)
 	}

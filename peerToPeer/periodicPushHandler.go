@@ -110,7 +110,7 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 		var unknownCounter = 1
 		var mainExists bool
 		var backfillExists bool
-		var globalInfoShasCnt int // represents both GlobalTimestamp and GlobalCounters - need different counters?
+		var globalInfoShasCnt int // represents both GlobalTimestamp and GlobalCounters
 		for _, onePushRequest := range *req.PushRequests {
 			if onePushRequest == nil {
 				continue
