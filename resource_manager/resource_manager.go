@@ -248,6 +248,9 @@ type ResourceManager struct {
 	managedResourceOnceSpecMap map[string]*metadata.GenericSpecification
 
 	isKVNode uint32
+
+	// tracks if throttler limits have been reset or not
+	resettedThrottler bool
 }
 
 type ResourceMgrIface interface {
@@ -571,13 +574,56 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 
 	state := rm.computeState(specReplStatsMap, previousState)
 
-	rm.computeActionsToTake(previousState, state)
-
-	rm.takeActions(previousState, state)
+	if rm.needResourceManagement(state) {
+		rm.resettedThrottler = false
+		rm.computeActionsToTake(previousState, state)
+		rm.takeActions(previousState, state)
+	} else {
+		if !rm.resettedThrottler {
+			// reset throttler limits if we are not managing resources
+			// this is to ensure that throttler limits are reset when we are not managing resources
+			rm.resetThrottlerLimits(state)
+			rm.resettedThrottler = true
+		}
+	}
 
 	rm.setPreviousState(state)
 
 	return nil
+}
+
+func (rm *ResourceManager) areAllSpecSamePriority(specMap map[string]*metadata.GenericSpecification) bool {
+	var priority base.PriorityType
+	priorityCounts := [base.TotalPriorityTypes]int{}
+
+	for _, genericSpecPtr := range specMap {
+		spec := *genericSpecPtr
+		priority = spec.GetReplicationSpec().Settings.GetPriority()
+		priorityCounts[priority]++
+	}
+
+	specCount := len(specMap)
+	for i := 0; i < base.TotalPriorityTypes; i++ {
+		if priorityCounts[i] == specCount {
+			return true
+		}
+	}
+
+	return false
+}
+
+// needResourceManagement determines if resource management is needed or not
+// returns true if all replications are of the same priority and conflict logging is not enabled
+func (rm *ResourceManager) needResourceManagement(s *State) bool {
+	if s.isConflictLoggingEnabled {
+		return true
+	}
+
+	if rm.areAllSpecSamePriority(rm.managedResourceOnceSpecMap) {
+		return false
+	}
+
+	return true
 }
 
 func (rm *ResourceManager) collectCpuUsageOnce() {
@@ -1003,6 +1049,23 @@ func (rm *ResourceManager) takeActions(previousState *State, state *State) {
 		rm.resetDcpPriorities(state)
 	default:
 		// no op for ActionNone
+	}
+}
+
+// resetThrottlerLimits sets the throttler limits to 0 (essentially disabling the throttler)
+func (rm *ResourceManager) resetThrottlerLimits(state *State) {
+	settings := map[string]interface{}{
+		throttlerSvc.HighTokensKey:                int64(0),
+		throttlerSvc.LowTokensKey:                 int64(0),
+		throttlerSvc.MaxReassignableHighTokensKey: int64(0),
+		throttlerSvc.ConflictLogTokensKey:         int64(0),
+		throttlerSvc.ConflictLogEnabledKey:        state.isConflictLoggingEnabled,
+		throttlerSvc.NeedToCalibrateKey:           false,
+	}
+
+	errMap := rm.throughputThrottlerSvc.UpdateSettings(settings)
+	if len(errMap) > 0 {
+		rm.logger.Warnf("Error resetting tokens. err=%v\n", errMap)
 	}
 }
 

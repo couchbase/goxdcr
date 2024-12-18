@@ -1430,6 +1430,8 @@ func FormatErrMsgWithUpperLimit(errCh chan ComponentError, maxNumberOfErrorsToTr
 
 type PriorityType int
 
+const TotalPriorityTypes = 3
+
 const (
 	PriorityTypeHigh   PriorityType = iota
 	PriorityTypeMedium PriorityType = iota
