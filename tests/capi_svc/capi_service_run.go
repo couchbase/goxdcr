@@ -12,6 +12,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -21,9 +25,6 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_impl"
 	"github.com/couchbase/goxdcr/v8/tests/common"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"io/ioutil"
-	"os"
-	"time"
 )
 
 var logger *log.CommonLogger = log.NewLogger("capi_service", log.DefaultLoggerContext)
@@ -204,7 +205,7 @@ func testMassValidateVBUUIDs(capi_svc *service_impl.CAPIService, remoteBucket *s
 	return nil
 }
 
-//helper functions for setup
+// helper functions for setup
 func createRemoteCluster() error {
 	fmt.Println("Starting createRemoteCluster")
 	url := common.GetAdminportUrlPrefix(options.sourceKVHost, options.sourceKVPort)

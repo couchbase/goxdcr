@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -405,7 +406,8 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 			return &HandlerResultImpl{}, fmt.Errorf("generating response %v err: %v", resp.GetType(), err)
 		}
 		var out interface{}
-		var certificates, clientKey, clientCert []byte
+		var certificates []byte
+		var clientCertKeyPair []tls.Certificate
 		authMech := base.HttpAuthMechPlain
 		if securitySvc.IsClusterEncryptionLevelStrict() {
 			authMech = base.HttpAuthMechHttps
@@ -422,16 +424,12 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 			// If n2n encryption is required and client cert is mandatory, then the traditional
 			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
 			// provided by the ns_server
-			clientCert, clientKey = securitySvc.GetClientCertAndKey()
-			result, err := checkClientCertAndKeyExists(clientCert, clientKey)
-			if err != nil {
-				return result, err
-			}
+			clientCertKeyPair = securitySvc.GetClientCertAndKeyPair()
 		}
 
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,
-			"", "", authMech, certificates, true, clientCert, clientKey,
-			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, logger)
+			"", "", authMech, certificates, true, []byte{}, []byte{},
+			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, logger, clientCertKeyPair)
 		// utils returns this error because body is empty, which is fine
 		if err == base.ErrorResourceDoesNotExist {
 			err = nil

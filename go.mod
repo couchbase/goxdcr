@@ -1,6 +1,8 @@
 module github.com/couchbase/goxdcr/v8
 
-go 1.22.5
+go 1.23
+
+toolchain go1.23.4
 
 replace github.com/couchbase/eventing-ee => ../eventing-ee
 
@@ -34,6 +36,7 @@ require (
 	github.com/couchbase/gocbcore/v9 v9.1.11
 	github.com/couchbase/gomemcached v0.2.2-0.20230407174933-7d7ce13da8cc
 	github.com/couchbase/goutils v0.1.2
+	github.com/couchbase/tools-common/http v1.0.7
 	github.com/couchbaselabs/gojsonsm v1.0.1
 	github.com/glenn-brown/golang-pkg-pcre v0.0.0-20120522223659-48bb82a8b8ce
 	github.com/golang/snappy v0.0.4
@@ -53,6 +56,7 @@ require (
 	github.com/couchbase/go_json v0.0.0-20220330123059-4473a21887c8 // indirect
 	github.com/couchbase/query v0.0.0-00010101000000-000000000000 // indirect
 	github.com/couchbase/regulator v0.0.0-00010101000000-000000000000 // indirect
+	github.com/couchbase/tools-common/errors v1.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
@@ -66,8 +70,9 @@ require (
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/santhosh-tekuri/jsonschema v1.2.4 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	golang.org/x/crypto v0.25.0 // indirect
-	golang.org/x/sys v0.23.0 // indirect
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	golang.org/x/crypto v0.30.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

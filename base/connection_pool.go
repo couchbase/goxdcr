@@ -625,7 +625,7 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 
 	logger.Infof("Trying to create a ssl over memcached connection on %v", ssl_con_str)
 
-	conn, _, err := MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger)
+	conn, _, err := MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -659,7 +659,7 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 	return client, nil
 }
 
-func MakeTLSConn(ssl_con_str, username string, certificates []byte, check_server_name bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+func MakeTLSConn(ssl_con_str, username string, certificates []byte, check_server_name bool, clientCertificate, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (*tls.Conn, *tls.Config, error) {
 	if len(certificates) == 0 {
 		return nil, nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
@@ -689,6 +689,8 @@ func MakeTLSConn(ssl_con_str, username string, certificates []byte, check_server
 			return nil, nil, fmt.Errorf("Failed to parse client certificate and client key. err=%v", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{clientCert}
+	} else if len(clientCertKeyPair) > 0 {
+		tlsConfig.Certificates = clientCertKeyPair
 	}
 
 	// If check_server_name is false, we need to disable server name check during tls handshake to prevent it from failing

@@ -1,6 +1,7 @@
 package conflictlog
 
 import (
+	"crypto/tls"
 	"io"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type SecurityInfo interface {
 	IsClusterEncryptionLevelStrict() bool
 	GetCACertificates() []byte
 	GetClientCertAndKey() ([]byte, []byte)
+	GetClientCertAndKeyPair() []tls.Certificate
 }
 
 type managerSingleton struct {

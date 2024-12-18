@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strings"
@@ -123,7 +124,8 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 		return nil, err
 	}
 	authType := base.HttpAuthMechPlain
-	var certificates, clientKey, clientCert []byte
+	var certificates []byte
+	var clientCertKeyPair []tls.Certificate
 
 	if p2p.securitySvc.IsClusterEncryptionLevelStrict() {
 		authType = base.HttpAuthMechHttps
@@ -140,17 +142,13 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 			// If n2n encryption is required and client cert is mandatory, then the traditional
 			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
 			// provided by the ns_server
-			clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
-			result, err := checkClientCertAndKeyExists(clientCert, clientKey)
-			if err != nil {
-				return result, err
-			}
+			clientCertKeyPair = p2p.securitySvc.GetClientCertAndKeyPair()
 		}
 	}
 
 	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
-		payload, base.P2PCommTimeout, &out, nil, false, logger)
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, []byte{}, []byte{}, base.MethodPost, base.JsonContentType,
+		payload, base.P2PCommTimeout, &out, nil, false, logger, clientCertKeyPair)
 
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
@@ -159,39 +157,14 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 		// This is a special case where client cert is set to mandatory but either the propagation
 		// of the setting is not done cluster wide, or if the p2p is done before the cached value
 		// is updated. Try again with client certs
-		clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
-		result, err := checkClientCertAndKeyExists(clientCert, clientKey)
-		if err != nil {
-			return result, err
-		}
-		err, statusCode = p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
-			payload, base.P2PCommTimeout, &out, nil, false, logger)
+		clientCertKeyPair = p2p.securitySvc.GetClientCertAndKeyPair()
+		err, statusCode = p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, []byte{}, []byte{}, base.MethodPost, base.JsonContentType,
+			payload, base.P2PCommTimeout, &out, nil, false, logger, clientCertKeyPair)
 		// Client Cert mandatory + n2n encryption turned on is only implemented with p2p already existing
 		// No need to check for 404 return error
 	}
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err
-}
-
-// this is a wrapper function that returns appropriate error if client cert or key are missing
-// generally speaking, this should not happen because ns_server should always be passing in a valid
-// cert or key. If XDCR somehow gets in a terrible situation where the clientCert or key was not
-// loaded successfully, leading to a CBSE or anything, there are 2 ways about it:
-// 1. regenerateCerts or reload certs, which requires customer intervention
-// 2. restart goxdcr ... which will allow security service to reload the key and cert from the files specified
-func checkClientCertAndKeyExists(clientCert []byte, clientKey []byte) (HandlerResult, error) {
-	if len(clientCert) == 0 {
-		return &HandlerResultImpl{
-			Err:            ErrorMissingClientCert,
-			HttpStatusCode: http.StatusInternalServerError,
-		}, ErrorMissingClientCert
-	} else if len(clientKey) == 0 {
-		return &HandlerResultImpl{
-			Err:            ErrorMissingClientKey,
-			HttpStatusCode: http.StatusInternalServerError,
-		}, ErrorMissingClientKey
-	}
-	return nil, nil
 }
 
 func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error) {
@@ -205,7 +178,7 @@ func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteCluste
 
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRClusterToClusterPath, false, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), base.MethodPost, base.JsonContentType,
-		payload, base.ShortHttpTimeout, &out, nil, false, logger)
+		payload, base.ShortHttpTimeout, &out, nil, false, logger, nil)
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
 		err = nil

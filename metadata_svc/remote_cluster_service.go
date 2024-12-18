@@ -2293,7 +2293,7 @@ func (agent *RemoteClusterAgent) initTopologyGetterFunc(bucketName string) func(
 			return nil, false, "", err
 		}
 
-		targetBucketInfo, err := agent.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		targetBucketInfo, err := agent.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger, nil)
 		if err != nil {
 			return nil, false, "", err
 		}

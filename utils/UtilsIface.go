@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package utils
 
 import (
+	"crypto/tls"
 	"expvar"
 	"fmt"
 	"net"
@@ -109,7 +110,7 @@ type UtilsIface interface {
 	EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte
 	EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error)
 	GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error)
-	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error)
+	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (*http.Client, error)
 	GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	RemovePrefix(prefix string, str string) string
 	UrlForLog(urlStr string) string
@@ -150,7 +151,7 @@ type UtilsIface interface {
 	// Buckets related utilities
 	BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
 	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error)
-	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
+	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (map[string]interface{}, error)
 	GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error)
 	GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error)
 	RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
@@ -199,10 +200,18 @@ type UtilsIface interface {
 	LocalPool(localConnectStr string) (couchbase.Pool, error)
 	NewTCPConn(hostName string) (*net.TCPConn, error)
 	QueryRestApi(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, logger *log.CommonLogger) (error, int)
+	// The same routine QueryRestApiWithAuth is used to contact source and target clusters. The caller should ensure that the right
+	// params are passed based on if the caller intends to connect to source or target cluster.
+	// 1. To contact the source cluster: Credentials are fetched from securitySvc (i.e. cbauth).
+	// The caller should pass in clientCertKeyPair stored in the security service and pass in empty clientCertificate and clientKey. This is
+	// because there client certificates could be encrypted using passphrase.
+	// 2. To contact the target cluster: Credentials are most likely fetched from remote cluster reference. clientCertificate and clientKey should be passed
+	// from remote cluster reference and need to skip clientCertKeyPair.
+	// In short, the caller has to either pass-in clientCertificate and clientKey OR clientCertKeyPair. But not both.
 	QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech,
 		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte,
 		httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{},
-		client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int)
+		client *http.Client, keep_client_alive bool, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (error, int)
 
 	ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nodeInfo map[string]interface{}) string
 	SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error

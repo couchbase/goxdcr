@@ -6,6 +6,8 @@ import (
 	service_def "github.com/couchbase/goxdcr/v8/service_def"
 	mock "github.com/stretchr/testify/mock"
 
+	tls "crypto/tls"
+
 	x509 "crypto/x509"
 )
 
@@ -216,6 +218,53 @@ func (_c *SecuritySvc_GetClientCertAndKey_Call) Return(_a0 []byte, _a1 []byte) *
 }
 
 func (_c *SecuritySvc_GetClientCertAndKey_Call) RunAndReturn(run func() ([]byte, []byte)) *SecuritySvc_GetClientCertAndKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetClientCertAndKeyPair provides a mock function with given fields:
+func (_m *SecuritySvc) GetClientCertAndKeyPair() []tls.Certificate {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClientCertAndKeyPair")
+	}
+
+	var r0 []tls.Certificate
+	if rf, ok := ret.Get(0).(func() []tls.Certificate); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]tls.Certificate)
+		}
+	}
+
+	return r0
+}
+
+// SecuritySvc_GetClientCertAndKeyPair_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClientCertAndKeyPair'
+type SecuritySvc_GetClientCertAndKeyPair_Call struct {
+	*mock.Call
+}
+
+// GetClientCertAndKeyPair is a helper method to define mock.On call
+func (_e *SecuritySvc_Expecter) GetClientCertAndKeyPair() *SecuritySvc_GetClientCertAndKeyPair_Call {
+	return &SecuritySvc_GetClientCertAndKeyPair_Call{Call: _e.mock.On("GetClientCertAndKeyPair")}
+}
+
+func (_c *SecuritySvc_GetClientCertAndKeyPair_Call) Run(run func()) *SecuritySvc_GetClientCertAndKeyPair_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SecuritySvc_GetClientCertAndKeyPair_Call) Return(_a0 []tls.Certificate) *SecuritySvc_GetClientCertAndKeyPair_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SecuritySvc_GetClientCertAndKeyPair_Call) RunAndReturn(run func() []tls.Certificate) *SecuritySvc_GetClientCertAndKeyPair_Call {
 	_c.Call.Return(run)
 	return _c
 }

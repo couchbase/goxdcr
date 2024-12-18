@@ -8,7 +8,10 @@
 
 package service_def
 
-import "crypto/x509"
+import (
+	"crypto/tls"
+	"crypto/x509"
+)
 
 type EncryptionSettingIface interface {
 	IsStrictEncryption() bool
@@ -23,6 +26,7 @@ type SecuritySvc interface {
 	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
 
 	GetClientCertAndKey() ([]byte, []byte)
+	GetClientCertAndKeyPair() []tls.Certificate
 	SetClientCertSettingChangeCb(func())
 }
 

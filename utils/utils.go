@@ -12,6 +12,7 @@ package utils
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -1385,7 +1386,7 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 	externalSSLErr = base.ErrorNoPortNumber
 
 	portInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, base.HttpsPortLookupTimeout, &portInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, base.HttpsPortLookupTimeout, &portInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusUnauthorized {
 		// SSLPorts request normally do not require any user credentials
 		// the only place unauthorized error could be returned is when target is elasticsearch cluster
@@ -1426,7 +1427,7 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 
 func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int) {
 	clusterInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, path, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, path, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger, nil)
 	if err != nil || statusCode != http.StatusOK {
 		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, path, err, statusCode), statusCode
 	}
@@ -1475,7 +1476,7 @@ func (u *Utilities) GetNodeListWithMinInfo(hostAddr, username, password string, 
 
 func (u *Utilities) GetNodeServicesInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	nodeServicesInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.NodeServicesPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &nodeServicesInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.NodeServicesPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &nodeServicesInfo, nil, false, logger, nil)
 
 	if err != nil || statusCode != http.StatusOK {
 		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.NodeServicesPath, err, statusCode)
@@ -1522,7 +1523,7 @@ func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defa
 
 // get bucket info
 // a specialized case of GetClusterInfo
-func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (map[string]interface{}, error) {
 	if bucketName == "" {
 		return nil, fmt.Errorf("Bucket name cannot be empty")
 	}
@@ -1531,7 +1532,7 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 	// This is used for local as well - but log only if atrociously bad
 	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
 	defer stopFunc()
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, clientCertKeyPair)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}
@@ -1545,7 +1546,7 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 
 // get bucket uuid
 func (u *Utilities) BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
 	if err != nil {
 		return "", err
 	}
@@ -1561,7 +1562,7 @@ func (u *Utilities) GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (
 // key = bucketName, value = bucketUUID
 func (u *Utilities) GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error) {
 	bucketListInfo := make([]interface{}, 0)
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &bucketListInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &bucketListInfo, nil, false, logger, nil)
 	if err != nil || statusCode != http.StatusOK {
 		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.DefaultPoolBucketsPath, err, statusCode)
 	}
@@ -1633,7 +1634,7 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
 	bucketValidationInfoOp := func() error {
-		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
 		if err != nil {
 			return err
 		}
@@ -2354,7 +2355,7 @@ func (u *Utilities) QueryRestApi(baseURL string,
 	timeout time.Duration,
 	out interface{},
 	logger *log.CommonLogger) (error, int) {
-	return u.QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, httpCommand, contentType, body, timeout, out, nil, false, logger)
+	return u.QueryRestApiWithAuth(baseURL, path, preservePathEncoding, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, httpCommand, contentType, body, timeout, out, nil, false, logger, nil)
 }
 
 func (u *Utilities) EnforcePrefix(prefix string, str string) string {
@@ -2370,7 +2371,15 @@ func (u *Utilities) RemovePrefix(prefix string, str string) string {
 	return ret_str
 }
 
-// this expect the baseURL doesn't contain username and password
+// this expects the baseURL doesn't contain username and password.
+// The same routine QueryRestApiWithAuth is used to contact source and target clusters. The caller should ensure that the right
+// params are passed based on if the caller intends to connect to source or target cluster.
+// 1. To contact the source cluster: Credentials are fetched from securitySvc (i.e. cbauth).
+// The caller should pass in clientCertKeyPair stored in the security service and pass in empty clientCertificate and clientKey. This is
+// because there client certificates could be encrypted using passphrase.
+// 2. To contact the target cluster: Credentials are most likely fetched from remote cluster reference. clientCertificate and clientKey should be passed
+// from remote cluster reference and need to skip clientCertKeyPair.
+// In short, the caller has to either pass-in clientCertificate and clientKey OR clientCertKeyPair. But not both.
 func (u *Utilities) QueryRestApiWithAuth(
 	baseURL string,
 	path string,
@@ -2389,11 +2398,13 @@ func (u *Utilities) QueryRestApiWithAuth(
 	out interface{},
 	client *http.Client,
 	keep_client_alive bool,
-	logger *log.CommonLogger) (err error, statusCode int) {
+	logger *log.CommonLogger,
+	clientCertKeyPair []tls.Certificate,
+) (err error, statusCode int) {
 	var http_client *http.Client
 	if authMech != base.HttpAuthMechScramSha {
 		var req *http.Request
-		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger)
+		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, clientCertKeyPair)
 		if err != nil {
 			return
 		}
@@ -2492,7 +2503,9 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	contentType string,
 	body []byte,
 	client *http.Client,
-	logger *log.CommonLogger) (*http.Client, *http.Request, error) {
+	logger *log.CommonLogger,
+	clientCertKeyPair []tls.Certificate,
+) (*http.Client, *http.Request, error) {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
@@ -2504,7 +2517,7 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	}
 
 	if ret_client == nil {
-		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l)
+		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l, clientCertKeyPair)
 		if err != nil {
 			// req body could be long and unreadable... print just the header
 			redactedReq := base.CloneAndTagHttpRequest(req)
@@ -2625,7 +2638,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 	for i := 0; i < num_retry; i++ {
 		if authMech != base.HttpAuthMechScramSha {
-			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger)
+			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, nil)
 			if err == nil {
 				err, statusCode = u.doRestCall(req, timeout, out, http_client, logger)
 			}
@@ -2654,12 +2667,12 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 }
 
-func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
+func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (*http.Client, error) {
 	var client *http.Client
 	if authMech == base.HttpAuthMechHttps {
 		//using a separate tls connection to verify certificate
 		//it can be changed in 1.4 when DialTLS is avaialbe in http.Transport
-		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger)
+		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger, clientCertKeyPair)
 		if err != nil {
 			return nil, err
 		}
@@ -3020,7 +3033,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 
 func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	defaultPoolInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusOK {
 		// target supports scram sha
 		return defaultPoolInfo, statusCode, nil
@@ -3038,7 +3051,7 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 	defaultPoolInfo := make(map[string]interface{})
 
 	// we do not know the correct values of sanInCertificate. set sanInCertificate set to true for better security
-	err, statusCode := u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusOK {
 		return defaultPoolInfo, statusCode, nil
 	} else {
@@ -3047,7 +3060,7 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 			// make a second try with sanInCertificate set to false
 			// after we retrieve target cluster version, we will then re-set sanInCertificate to the appropriate value
 			logger.Debugf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostHttpsAddr)
-			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
+			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
 			if err == nil && statusCode == http.StatusOK {
 				return defaultPoolInfo, statusCode, nil
 			} else if statusCode == http.StatusUnauthorized {
@@ -3150,7 +3163,7 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 		return err
 	}
 
-	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
 	if err != nil {
 		return err
 	}
@@ -3232,7 +3245,7 @@ func (u *Utilities) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]inter
 
 func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
 	manifestInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusOK {
 		manifest, err := metadata.NewCollectionsManifestFromMap(manifestInfo)
 		return &manifest, err

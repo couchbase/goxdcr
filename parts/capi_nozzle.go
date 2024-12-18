@@ -692,7 +692,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 	// Query the Target by feeding it the current key -> revisions
 	var out interface{}
 	err, statusCode := capi.utils.QueryRestApiWithAuth(couchApiBaseHost, couchApiBasePath+base.RevsDiffPath, true, capi.config.username, capi.config.password, base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
-		keysAndRevisions, capi.config.connectionTimeout, &out, nil, false, capi.Logger())
+		keysAndRevisions, capi.config.connectionTimeout, &out, nil, false, capi.Logger(), nil)
 	capi.Logger().Debugf("%v results of _revs_diff query for vb %v: err=%v, status=%v\n", capi.Id(), vbno, err, statusCode)
 	if err != nil {
 		capi.Logger().Errorf("%v _revs_diff query for vb %v failed with err=%v\n", capi.Id(), vbno, err)

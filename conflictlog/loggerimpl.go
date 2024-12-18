@@ -1,6 +1,7 @@
 package conflictlog
 
 import (
+	"crypto/tls"
 	"fmt"
 	"reflect"
 	"sync"
@@ -1277,12 +1278,13 @@ func (l *LoggerImpl) updateBucketUUID(bucketList []string, force bool) (err erro
 // fetchBucketUUID queries ns_server to get the bucket info and extracts bucket UUID and vb count
 func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount int, err error) {
 	authType := base.HttpAuthMechPlain
-	hostname, err := l.topSvc.MyConnectionStr()
+	hostname, err := l.topSvc.MyHostAddr()
 	if err != nil {
 		return
 	}
 
-	var certificates, clientKey, clientCert []byte
+	var certificates []byte
+	var clientCertKeyPair []tls.Certificate
 	if l.security.IsClusterEncryptionLevelStrict() {
 		authType = base.HttpAuthMechHttps
 		certificates = l.security.GetCACertificates()
@@ -1296,12 +1298,12 @@ func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount in
 			// If n2n encryption is required and client cert is mandatory, then the traditional
 			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
 			// provided by the ns_server
-			clientCert, clientKey = l.security.GetClientCertAndKey()
+			clientCertKeyPair = l.security.GetClientCertAndKeyPair()
 		}
 	}
 
 	l.logger.Infof("fetching bucket info to get UUID and vbCount, id=%s, bucket=%s", l.id, bucketName)
-	data, err := l.utils.GetBucketInfo(hostname, bucketName, "", "", authType, certificates, true, clientCert, clientKey, l.logger)
+	data, err := l.utils.GetBucketInfo(hostname, bucketName, "", "", authType, certificates, true, nil, nil, l.logger, clientCertKeyPair)
 	if err != nil {
 		return
 	}

@@ -188,7 +188,7 @@ func (w *StreamApiWatcherImpl) runStreamingEndpoint() error {
 	if err != nil {
 		return errors.New(fmt.Sprintf("ConstructHttpRequest failed for %v%v with error '%v'", connStr, w.path, err.Error()))
 	}
-	client, err := w.utils.GetHttpClient(username, authMech, certificate, sanInCertificate, clientCertificate, clientKey, host, w.logger)
+	client, err := w.utils.GetHttpClient(username, authMech, certificate, sanInCertificate, clientCertificate, clientKey, host, w.logger, nil)
 	if err != nil {
 		return errors.New(fmt.Sprintf("GetHttpClient failed for %v%v with error '%v'", connStr, w.path, err.Error()))
 	}

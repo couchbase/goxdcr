@@ -95,12 +95,7 @@ func (m *MemcachedConn) newTLSConn(addr, user, passwd string) (conn mcc.ClientIf
 	// from the ns_server. This will happen in security service.
 
 	caCert := m.securityInfo.GetCACertificates()
-	clientCert, clientKey := m.securityInfo.GetClientCertAndKey()
-
-	x509Cert, err := tls.X509KeyPair(clientCert, clientKey)
-	if err != nil {
-		return
-	}
+	clientCertKeyPair := m.securityInfo.GetClientCertAndKeyPair()
 
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
@@ -108,7 +103,7 @@ func (m *MemcachedConn) newTLSConn(addr, user, passwd string) (conn mcc.ClientIf
 	// Setup HTTPS client
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: m.skipVerify,
-		Certificates:       []tls.Certificate{x509Cert},
+		Certificates:       clientCertKeyPair,
 		RootCAs:            caCertPool,
 	}
 

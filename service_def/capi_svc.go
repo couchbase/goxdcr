@@ -83,7 +83,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		return err
 	}
 
-	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, remoteBucket.logger)
+	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, remoteBucket.logger, nil)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		}
 
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = hostAddr
-		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger)
+		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger, nil)
 		if err != nil {
 			return err
 		}

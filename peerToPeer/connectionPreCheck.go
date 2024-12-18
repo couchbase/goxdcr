@@ -129,7 +129,7 @@ func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, po
 
 	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("connectToRemoteNS(%v)", hostAddr), base.DiagInternalThreshold)
 	err, _ = utils.QueryRestApiWithAuth(hostAddr, base.WhoAmIPath, false, username, password, authMech, cert, SANInCert, clientCert,
-		clientKey, base.MethodGet, base.JsonContentType, nil, base.ConnectionPreCheckRPCTimeout, &out, nil, false, logger)
+		clientKey, base.MethodGet, base.JsonContentType, nil, base.ConnectionPreCheckRPCTimeout, &out, nil, false, logger, nil)
 	timeTaken := stopFunc()
 
 	if err != nil {

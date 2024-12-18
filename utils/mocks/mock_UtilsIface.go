@@ -24,6 +24,8 @@ import (
 
 	time "time"
 
+	tls "crypto/tls"
+
 	utils "github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -1201,9 +1203,9 @@ func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, str
 	return _c
 }
 
-// GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+// GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair
+func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetBucketInfo")
@@ -1211,19 +1213,19 @@ func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username
 
 	var r0 map[string]interface{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, []tls.Certificate) (map[string]interface{}, error)); ok {
+		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, []tls.Certificate) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, []tls.Certificate) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1247,13 +1249,14 @@ type UtilsIface_GetBucketInfo_Call struct {
 //   - clientCertificate []byte
 //   - clientKey []byte
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}) *UtilsIface_GetBucketInfo_Call {
-	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)}
+//   - clientCertKeyPair []tls.Certificate
+func (_e *UtilsIface_Expecter) GetBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}, clientCertKeyPair interface{}) *UtilsIface_GetBucketInfo_Call {
+	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, clientCertKeyPair)}
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger), args[10].([]tls.Certificate))
 	})
 	return _c
 }
@@ -1263,7 +1266,7 @@ func (_c *UtilsIface_GetBucketInfo_Call) Return(_a0 map[string]interface{}, _a1 
 	return _c
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, []tls.Certificate) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3007,9 +3010,9 @@ func (_c *UtilsIface_GetHostNamesFromBucketInfo_Call) RunAndReturn(run func(map[
 	return _c
 }
 
-// GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger
-func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
-	ret := _m.Called(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)
+// GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair
+func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (*http.Client, error) {
+	ret := _m.Called(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetHttpClient")
@@ -3017,19 +3020,19 @@ func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech,
 
 	var r0 *http.Client
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger) (*http.Client, error)); ok {
-		return rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)
+	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate) (*http.Client, error)); ok {
+		return rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)
 	}
-	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger) *http.Client); ok {
-		r0 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)
+	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate) *http.Client); ok {
+		r0 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*http.Client)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger) error); ok {
-		r1 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)
+	if rf, ok := ret.Get(1).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate) error); ok {
+		r1 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3051,13 +3054,14 @@ type UtilsIface_GetHttpClient_Call struct {
 //   - clientKey []byte
 //   - ssl_con_str string
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetHttpClient(username interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, ssl_con_str interface{}, logger interface{}) *UtilsIface_GetHttpClient_Call {
-	return &UtilsIface_GetHttpClient_Call{Call: _e.mock.On("GetHttpClient", username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)}
+//   - clientCertKeyPair []tls.Certificate
+func (_e *UtilsIface_Expecter) GetHttpClient(username interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, ssl_con_str interface{}, logger interface{}, clientCertKeyPair interface{}) *UtilsIface_GetHttpClient_Call {
+	return &UtilsIface_GetHttpClient_Call{Call: _e.mock.On("GetHttpClient", username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)}
 }
 
-func (_c *UtilsIface_GetHttpClient_Call) Run(run func(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger)) *UtilsIface_GetHttpClient_Call {
+func (_c *UtilsIface_GetHttpClient_Call) Run(run func(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate)) *UtilsIface_GetHttpClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(base.HttpAuthMech), args[2].([]byte), args[3].(bool), args[4].([]byte), args[5].([]byte), args[6].(string), args[7].(*log.CommonLogger))
+		run(args[0].(string), args[1].(base.HttpAuthMech), args[2].([]byte), args[3].(bool), args[4].([]byte), args[5].([]byte), args[6].(string), args[7].(*log.CommonLogger), args[8].([]tls.Certificate))
 	})
 	return _c
 }
@@ -3067,7 +3071,7 @@ func (_c *UtilsIface_GetHttpClient_Call) Return(_a0 *http.Client, _a1 error) *Ut
 	return _c
 }
 
-func (_c *UtilsIface_GetHttpClient_Call) RunAndReturn(run func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger) (*http.Client, error)) *UtilsIface_GetHttpClient_Call {
+func (_c *UtilsIface_GetHttpClient_Call) RunAndReturn(run func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate) (*http.Client, error)) *UtilsIface_GetHttpClient_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5969,9 +5973,9 @@ func (_c *UtilsIface_QueryRestApi_Call) RunAndReturn(run func(string, string, bo
 	return _c
 }
 
-// QueryRestApiWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger
-func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int) {
-	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+// QueryRestApiWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair
+func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (error, int) {
+	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair)
 
 	if len(ret) == 0 {
 		panic("no return value specified for QueryRestApiWithAuth")
@@ -5979,17 +5983,17 @@ func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preserve
 
 	var r0 error
 	var r1 int
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) (error, int)); ok {
-		return rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, []tls.Certificate) (error, int)); ok {
+		return rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) error); ok {
-		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, []tls.Certificate) error); ok {
+		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair)
 	} else {
 		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) int); ok {
-		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, []tls.Certificate) int); ok {
+		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
@@ -6021,13 +6025,14 @@ type UtilsIface_QueryRestApiWithAuth_Call struct {
 //   - client *http.Client
 //   - keep_client_alive bool
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) QueryRestApiWithAuth(baseURL interface{}, path interface{}, preservePathEncoding interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, httpCommand interface{}, contentType interface{}, body interface{}, timeout interface{}, out interface{}, client interface{}, keep_client_alive interface{}, logger interface{}) *UtilsIface_QueryRestApiWithAuth_Call {
-	return &UtilsIface_QueryRestApiWithAuth_Call{Call: _e.mock.On("QueryRestApiWithAuth", baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)}
+//   - clientCertKeyPair []tls.Certificate
+func (_e *UtilsIface_Expecter) QueryRestApiWithAuth(baseURL interface{}, path interface{}, preservePathEncoding interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, httpCommand interface{}, contentType interface{}, body interface{}, timeout interface{}, out interface{}, client interface{}, keep_client_alive interface{}, logger interface{}, clientCertKeyPair interface{}) *UtilsIface_QueryRestApiWithAuth_Call {
+	return &UtilsIface_QueryRestApiWithAuth_Call{Call: _e.mock.On("QueryRestApiWithAuth", baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, clientCertKeyPair)}
 }
 
-func (_c *UtilsIface_QueryRestApiWithAuth_Call) Run(run func(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger)) *UtilsIface_QueryRestApiWithAuth_Call {
+func (_c *UtilsIface_QueryRestApiWithAuth_Call) Run(run func(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate)) *UtilsIface_QueryRestApiWithAuth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(string), args[4].(string), args[5].(base.HttpAuthMech), args[6].([]byte), args[7].(bool), args[8].([]byte), args[9].([]byte), args[10].(string), args[11].(string), args[12].([]byte), args[13].(time.Duration), args[14].(interface{}), args[15].(*http.Client), args[16].(bool), args[17].(*log.CommonLogger))
+		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(string), args[4].(string), args[5].(base.HttpAuthMech), args[6].([]byte), args[7].(bool), args[8].([]byte), args[9].([]byte), args[10].(string), args[11].(string), args[12].([]byte), args[13].(time.Duration), args[14].(interface{}), args[15].(*http.Client), args[16].(bool), args[17].(*log.CommonLogger), args[18].([]tls.Certificate))
 	})
 	return _c
 }
@@ -6037,7 +6042,7 @@ func (_c *UtilsIface_QueryRestApiWithAuth_Call) Return(_a0 error, _a1 int) *Util
 	return _c
 }
 
-func (_c *UtilsIface_QueryRestApiWithAuth_Call) RunAndReturn(run func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger) (error, int)) *UtilsIface_QueryRestApiWithAuth_Call {
+func (_c *UtilsIface_QueryRestApiWithAuth_Call) RunAndReturn(run func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, []tls.Certificate) (error, int)) *UtilsIface_QueryRestApiWithAuth_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -680,7 +680,8 @@ func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
 	var cooldownPeriod = base.TopologySvcCoolDownPeriod
 
 	clientCertOutput := make(map[string]interface{})
-	err, statusCode := top_svc.utils.QueryRestApiWithAuth(top_svc.staticHostAddr(), base.ClientCertAuthPath, false, "", "", base.HttpAuthMechPlain, nil, false /*sanInCertificate*/, nil, nil, base.MethodGet, "", nil, base.ShortHttpTimeout, &clientCertOutput, nil, false, top_svc.logger)
+	err, statusCode := top_svc.utils.QueryRestApiWithAuth(top_svc.staticHostAddr(), base.ClientCertAuthPath, false, "", "", base.HttpAuthMechPlain, nil, false /*sanInCertificate*/, nil, nil, base.MethodGet, "", nil,
+		base.ShortHttpTimeout, &clientCertOutput, nil, false, top_svc.logger, nil)
 	if err != nil || statusCode != http.StatusOK {
 		err = fmt.Errorf("ClientCertIsMandatory.Query(%v) status %v err %v", base.ClientCertAuthPath, statusCode, err)
 		top_svc.cachedClientCertMandatoryErr = err

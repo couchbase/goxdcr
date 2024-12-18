@@ -2700,7 +2700,7 @@ func (pm *PipelineManager) gcSourceBucket(spec *metadata.ReplicationSpecificatio
 		return false, err
 	}
 
-	bucketInfo, err := pm.utils.GetBucketInfo(local_connStr, spec.SourceBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, pm.logger)
+	bucketInfo, err := pm.utils.GetBucketInfo(local_connStr, spec.SourceBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, pm.logger, nil)
 	if err == pm.utils.GetNonExistentBucketError() {
 		shouldDel := pm.incrementGCCnt(pm.srcGcMap, spec.Id)
 		if shouldDel {
