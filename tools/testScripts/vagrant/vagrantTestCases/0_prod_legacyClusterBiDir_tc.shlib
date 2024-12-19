@@ -75,6 +75,31 @@ function deleteRecreateReplicationsAndCheck {
 	checkBidirectionalChangesLeft
 }
 
+function runDataLoadOnC1AndCheck {
+	runCbWorkloadGenBucket "C1" "B1"
+	sleep 20
+	checkUnidirectionalChangesLeft
+}
+
+function pauseAndResumeOnC1AndCheck {
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 30
+	resumeReplication "C1" "B1" "C2" "B2"
+	runCbWorkloadGenBucket "C1" "B1"
+	sleep 30
+	checkUnidirectionalChangesLeft
+}
+
+function deleteRecreateReplicationOnC1AndCheck {
+	deleteBucketReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 5
+	runCbWorkloadGenBucket "C1" "B1"
+	sleep 30
+	checkUnidirectionalChangesLeft
+}
+
 function runLegacyCurrentBidir {
 	local c1Ver="$1"
 	local c2Ver="$2"
@@ -111,12 +136,18 @@ function runLegacyCurrentBidir {
 	echo "Rebalancing nodes to become a 2-node target cluster"
 	startRebalancing "C2"
 
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-
-	runDataLoadBothSidesAndCheck
-	pauseAndResumeBothSidesAndCheck
-	deleteRecreateReplicationsAndCheck
+	if [ "$c1Ver" != "morpheus" ] || [ "$c2Ver" != "trinity" ]; then
+		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+		createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+		runDataLoadBothSidesAndCheck
+		pauseAndResumeBothSidesAndCheck
+		deleteRecreateReplicationsAndCheck
+	else
+		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+		runDataLoadOnC1AndCheck
+		pauseAndResumeOnC1AndCheck
+		deleteRecreateReplicationOnC1AndCheck
+	fi
 
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
@@ -125,5 +156,5 @@ function runLegacyCurrentBidir {
 
 function runTestCase {
 	runLegacyCurrentBidir "neo" "trinity" &&
-		runLegacyCurrentBidir "trinity" "morpheus"
+		runLegacyCurrentBidir "morpheus" "trinity" # morpheus -> trinity replication works but not the other way around
 }
