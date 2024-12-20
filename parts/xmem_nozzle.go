@@ -1136,7 +1136,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				xmem.handleGeneralError(err)
 			}
 			if len(conflictMap) > 0 {
-				if xmem.source_cr_mode != base.CRMode_Custom {
+				if !xmem.isCCR() {
 					panic(fmt.Sprintf("cr_mode=%v, conflict_map: %v", xmem.source_cr_mode, conflictMap))
 				}
 				// For all the keys with conflict, we will fetch the document metadata and body.
@@ -1256,7 +1256,6 @@ func (xmem *XmemNozzle) cleanupBufferedMCRequest(req *bufferedMCRequest) {
 		xmem.recycleDataObj(req.req)
 		resetBufferedMCRequest(req)
 	}
-
 }
 
 func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) error {
@@ -1956,7 +1955,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 	getSpecWithoutHlv := wrappedReq.GetMetaSpecWithoutHlv
 	getBodySpec := wrappedReq.GetBodySpec
 	var getSpecs []base.SubdocLookupPathSpec
-	if xmem.source_cr_mode == base.CRMode_Custom {
+	if xmem.isCCR() {
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
@@ -2131,7 +2130,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.PreserveSync {
 		needToUpdateSysXattrs = true
-	} else if xmem.source_cr_mode == base.CRMode_Custom {
+	} else if xmem.isCCR() {
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.SendHlv {
 		maxCas := xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket]
@@ -2408,24 +2407,25 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	return nil
 }
 
-// If the change is from targetCluster, we don't need to send it
+// If the change is from targetCluster, we don't need to send it back.
+// In fact, it will eventually lose CR. So we can short-circuit it's lifetime to
+// avoid unnecessary processing down the line.
 func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, error) {
-	if xmem.source_cr_mode != base.CRMode_Custom {
+	if !xmem.usesHlv(req) {
 		return false, nil
 	}
 
-	if req.RetryCRCount == 0 {
-		doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
-		meta, err := doc.GetMetadata(xmem.uncompressBody)
-		if err != nil {
-			return false, err
-		}
-		src := meta.GetHLV().GetCvSrc()
-		if src == xmem.targetActorId {
-			return true, nil
-		}
+	if req.RetryCRCount > 0 {
+		return false, nil
 	}
-	return false, nil
+
+	doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
+	meta, err := doc.GetMetadata(xmem.uncompressBody)
+	if err != nil {
+		return false, err
+	}
+
+	return meta.GetHLV().GetCvSrc() == xmem.targetActorId, nil
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) error {
@@ -2609,7 +2609,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 	atomic.StoreUint32(&xmem.cur_batch_count, 0)
 	// For the current batch, getMeta, conflict detection algorithm, and setMeta depend on
 	// CRR, HLV, and mobile
-	isCCR := xmem.source_cr_mode == base.CRMode_Custom
+	isCCR := xmem.isCCR()
 	crossClusterVers := xmem.getCrossClusterVers()
 	isMobile := xmem.getMobileCompatible() != base.MobileCompatibilityOff
 
@@ -2800,9 +2800,23 @@ func (xmem *XmemNozzle) nonOptimisticCROnly(req *base.WrappedMCRequest) bool {
 		return false
 	}
 
-	return xmem.getMobileCompatible() != base.MobileCompatibilityOff ||
-		(xmem.getCrossClusterVers() && req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
-		xmem.source_cr_mode == base.CRMode_Custom
+	return xmem.getMobileCompatible() != base.MobileCompatibilityOff || xmem.usesHlv(req)
+
+}
+
+// returns true if HLV can be stamped/updated for this req.
+func (xmem *XmemNozzle) usesHlv(req *base.WrappedMCRequest) bool {
+	if xmem.config.vbHlvMaxCas == nil || req == nil {
+		return false
+	}
+
+	return (xmem.getCrossClusterVers() &&
+		req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
+		xmem.isCCR()
+}
+
+func (xmem *XmemNozzle) isCCR() bool {
+	return xmem.source_cr_mode == base.CRMode_Custom
 }
 
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {

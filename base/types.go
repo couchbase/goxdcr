@@ -2910,6 +2910,10 @@ type HLVModeOptions struct {
 	PreserveSync  bool   // Preserve target _sync XATTR and send it in setWithMeta.
 	ActualCas     uint64 // copy of Req.Cas, which can be used if Req.Cas is set to 0
 	IncludeTgtHlv bool   // If HLV is fetched from target doc
+
+	// cache the source doc metadata to
+	// avoid recomputations.
+	SourceDocMetadata interface{}
 }
 
 // These options are explicitly set when SubdocOp != NotSubdoc
