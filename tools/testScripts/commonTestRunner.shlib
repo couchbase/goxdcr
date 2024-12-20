@@ -159,7 +159,7 @@ if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestc
 	echo "ERRO: Cannot use -x OR --xdcrDifferDir when it not xdcr differ testcases."
 	man $0
 	exit 1
-elif [ "$xdcrDifferDir" != "" ] && ((${#VSSH[@]} == 0)); then
+elif [ "$xdcrDifferDir" != "" ] && [[ -z ${VSSH:-} ]]; then
 	# Only check the following in non-Vagrant mode
 	differBin="$xdcrDifferDir/xdcrDiffer"
 	if [[ ! -f "$differBin" ]]; then
@@ -173,8 +173,21 @@ elif [ "$xdcrDifferDir" != "" ] && ((${#VSSH[@]} == 0)); then
 		exit 1
 	fi
 
-	mutationDir="$xdcrDifferDir/mutationDiff"
+	mutationDir="$xdcrDifferDir/outputs/mutationDiff"
 	mutationDiffResults="$mutationDir/mutationDiffDetails"
+else
+	# Since morpheus, xdcrDiffer is part of the build
+	if [[ -z ${VSSH:-} ]]; then
+		# Not running in Vagrant mode
+		installBinDir=$(findInstallBinDir)
+		xdcrDifferDir="$installBinDir"
+		differBin="./xdcrDiffer"
+
+		differSh="./runDiffer.sh"
+
+		mutationDir="$installBinDir/outputs/mutationDiff"
+		mutationDiffResults="$mutationDir/mutationDiffDetails"
+	fi
 fi
 
 if [[ "$mobileImportSimDir" != "" ]]; then

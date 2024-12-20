@@ -2978,3 +2978,23 @@ function findNsServerDir {
 
 	echo "$outStr"
 }
+
+function findInstallBinDir {
+	local i=0
+	local outStr=""
+	pushd "$PWD" >/dev/null
+
+	while [[ "$PWD" != / ]] && [[ ! -d "install/bin" ]]; do
+		i=$(($i + 1))
+		cd ..
+	done
+
+	local j
+	for ((j = 0; j < $i; j = $(($j + 1)))); do
+		outStr="${outStr}../"
+	done
+	outStr="${outStr}install/bin"
+	popd >/dev/null
+
+	echo "$outStr"
+}

@@ -814,7 +814,7 @@ function checkDifferLogItemCount {
 	local srcOrTgt=$1
 	local itemCnt=$2
 	local filteredCnt=$3
-	local logFile="${xdcrDifferDir}/xdcrDiffer.log"
+	local logFile="${xdcrDifferDir}/outputs/xdcrDiffer.log"
 	local expected="$srcOrTgt bucket item count including tombstones is $itemCnt (excluding $filteredCnt filtered mutations)"
 
 	found=$(grep -c "$expected" $logFile)
