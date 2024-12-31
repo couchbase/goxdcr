@@ -82,7 +82,7 @@ function runTestCase {
 	# Now to test the differ, launch it in the background - resolve it halfway through
 	runXdcrDiffer "C1" "B1" "C2" "B2" "retry" &
 
-	sleep 80
+	sleep 50
 	resumeReplication "C1" "B1" "C2" "B2"
 	resumeReplication "C2" "B2" "C1" "B1"
 	waitForBgJobs
