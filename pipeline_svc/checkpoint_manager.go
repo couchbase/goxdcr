@@ -3834,7 +3834,9 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	// the information
 	vbList, genSpec, err := ckmgr.getLatestVbList()
 	if err != nil {
-		ckmgr.logger.Errorf("error getting latest vblist: %v", err)
+		if !base.BypassUIErrorCodes(err.Error()) {
+			ckmgr.logger.Errorf("error getting latest vblist: %v", err)
+		}
 		return err
 	}
 

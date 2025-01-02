@@ -10,11 +10,12 @@ package peerToPeer
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"sync"
 )
 
 type ReplicaCache interface {
@@ -51,7 +52,9 @@ func (r *ReplicaCacheImpl) HandleSpecCreation(spec *metadata.ReplicationSpecific
 	replicaCacheId := ReplicaCacheSubscriberId + base.GetIterationId(&replicaCacheIteration)
 	sourceNotificationCh, err := r.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, replicaCacheId)
 	if err != nil {
-		r.logger.Errorf("Unable to handle spec creation for spec %v due to %v", spec.Id, err)
+		if !base.BypassUIErrorCodes(err.Error()) {
+			r.logger.Errorf("Unable to handle spec creation for spec %v due to %v", spec.Id, err)
+		}
 		return
 	}
 

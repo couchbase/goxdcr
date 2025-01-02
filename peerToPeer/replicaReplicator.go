@@ -11,16 +11,17 @@ package peerToPeer
 import (
 	"errors"
 	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"math/rand"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type ReplicaReplicator interface {
@@ -499,7 +500,9 @@ func (a *ReplicatorAgentImpl) run() {
 	}
 	a.sourceBucketTopologyCh, err = a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.spec, a.bucketSvcId)
 	if err != nil {
-		a.logger.Errorf("%v - Unable to subscribe to local bucket feed %v", a.specId, err)
+		if !base.BypassUIErrorCodes(err.Error()) {
+			a.logger.Errorf("%v - Unable to subscribe to local bucket feed %v", a.specId, err)
+		}
 		return
 	}
 
