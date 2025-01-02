@@ -1523,7 +1523,7 @@ func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defa
 
 // get bucket info
 // a specialized case of GetClusterInfo
-func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (map[string]interface{}, error) {
+func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	if bucketName == "" {
 		return nil, fmt.Errorf("Bucket name cannot be empty")
 	}
@@ -1532,7 +1532,7 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 	// This is used for local as well - but log only if atrociously bad
 	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
 	defer stopFunc()
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, clientCertKeyPair)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}
@@ -1546,7 +1546,7 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 
 // get bucket uuid
 func (u *Utilities) BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
+	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 	if err != nil {
 		return "", err
 	}
@@ -1634,7 +1634,7 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
 	bucketValidationInfoOp := func() error {
-		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
+		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 		if err != nil {
 			return err
 		}
@@ -3163,7 +3163,7 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 		return err
 	}
 
-	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, nil)
+	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 	if err != nil {
 		return err
 	}

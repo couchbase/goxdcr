@@ -670,7 +670,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 				service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
 				return err
 			}
-			bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, nil)
+			bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
 			if err != nil {
 				return err
 			}
@@ -715,7 +715,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
 			return err
 		}
-		bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, nil)
+		bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
 		if err != nil {
 			return err
 		}

@@ -9,6 +9,8 @@
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3")
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
@@ -121,6 +123,10 @@ function runTestCase {
 	echo "Running mobile coexistence test case on ring topology"
 	echo "============================================================================"
 	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupCluster
 	if (($? != 0)); then
 		exit $?
 	fi

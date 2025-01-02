@@ -83,7 +83,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		return err
 	}
 
-	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, remoteBucket.logger, nil)
+	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, remoteBucket.logger)
 	if err != nil {
 		return err
 	}

@@ -28,16 +28,11 @@ insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty # conflict bucket for C3.B3
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty # bucket to test conflict records are not replicated
 
-conflictLoggingMap1="{\"bucket\":\"B4\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B4\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B4\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap1)
+declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
-conflictLoggingMap2="{\"bucket\":\"B5\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B5\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B5\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap2)
+declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
-conflictLoggingMap3="{\"bucket\":\"B6\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B6\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B6\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap3)
-
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true) # replication to test conflict records are not replicated
+declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
 # Bucket -> Scopes
 # -----------------
@@ -56,7 +51,6 @@ function waitForChangesLeft0ForTopology {
 	waitForChangesLeft0 "C2" "B2" "C3" "B3"
 	waitForChangesLeft0 "C3" "B3" "C1" "B1"
 	waitForChangesLeft0 "C3" "B3" "C2" "B2"
-	waitForChangesLeft0 "C1" "B4" "C1" "B0"
 }
 
 function verifyPromStats {
@@ -78,27 +72,15 @@ function verifyPromStats {
 	validateDatapoolFailIs0 "C3" "B3" "B1"
 	validateDatapoolFailIs0 "C3" "B3" "B2"
 
-	# verify no unknown clog others
-	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B2"
-	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B3"
-	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B1"
-	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B3"
-	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B1"
-	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B2"
-
 	# verify that conflict records are not replicated
 	checkItemCnt "C1" "B0" 0
 
 	checkItemCnt "C1" "B1" $numItems
 	checkItemCnt "C2" "B2" $numItems
 	checkItemCnt "C3" "B3" $numItems
-
-	validateBinaryFilteredIs0 "C1" "B4" "B0"
-	validatePrometheusStatsDocsFilteredNon0 "C1" "B4" "B0"
-	validateDatapoolFailIs0 "C1" "B4" "B0"
 }
 
-function testReplicationWithConflictLogging {
+function testReplicationWithMobile {
 	echo "Setting enableCrossClusterVersioning to true"
 	setCrossClusterVersioningForBucket "C1" "B1"
 	setCrossClusterVersioningForBucket "C2" "B2"
@@ -145,10 +127,9 @@ function testReplicationWithConflictLogging {
 	createBucketReplication "C3" "B3" "C1" "B1" BucketReplProperties3
 	echo "Replication C3.B3 -> C2.B2"
 	createBucketReplication "C3" "B3" "C2" "B2" BucketReplProperties3
-	echo "Replication C1.B4 -> C1.B0"
 
-	# replication to verify that conflict records are not replicated.
-	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
+	enableMobileImportSimIfPresent "C1" "B1"
+	enableMobileImportSimIfPresent "C2" "B2"
 
 	sleepTime=30
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
@@ -194,7 +175,7 @@ function testReplicationWithConflictLogging {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running conflict logging with backfill test case"
+	echo "Running mobile with backfill test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -215,13 +196,12 @@ function runTestCase {
 	createRemoteClusterReference "C2" "C3"
 	createRemoteClusterReference "C3" "C1"
 	createRemoteClusterReference "C3" "C2"
-	createRemoteClusterReference "C1" "C1"
 
 	sleep 2
-	testReplicationWithConflictLogging
+	testReplicationWithMobile
 
 	echo "============================================================================"
-	echo "Running conflict logging with backfill test case passed"
+	echo "Running mobile with backfill test case passed"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets

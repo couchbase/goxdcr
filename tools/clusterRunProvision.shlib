@@ -668,6 +668,7 @@ function addOneNodeIn {
 		if [[ "$output" =~ Node\ is\ already\ part\ of\ cluster ]]; then
 			return 0
 		fi
+		echo $output
 
 		echo "Waiting for membership update"
 		sleep 10
@@ -1846,8 +1847,12 @@ function runCbWorkloadGenCollectionCont {
 }
 
 function waitForBgJobs {
+	echo "Waiting for background jobs to start..."
+	sleep 5
+
 	echo "Waiting for background jobs to finish..."
 	local jobsCnt=$(jobs -l | grep -c "Running")
+	echo "$jobsCnt background jobs were running initially"
 	while (($jobsCnt > 0)); do
 		sleep 1
 		jobsCnt=$(jobs -l | grep -c "Running")

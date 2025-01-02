@@ -163,65 +163,6 @@ func (_c *SecuritySvc_GetCaPool_Call) RunAndReturn(run func() *x509.CertPool) *S
 	return _c
 }
 
-// GetClientCertAndKey provides a mock function with given fields:
-func (_m *SecuritySvc) GetClientCertAndKey() ([]byte, []byte) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetClientCertAndKey")
-	}
-
-	var r0 []byte
-	var r1 []byte
-	if rf, ok := ret.Get(0).(func() ([]byte, []byte)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() []byte); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]byte)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func() []byte); ok {
-		r1 = rf()
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]byte)
-		}
-	}
-
-	return r0, r1
-}
-
-// SecuritySvc_GetClientCertAndKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClientCertAndKey'
-type SecuritySvc_GetClientCertAndKey_Call struct {
-	*mock.Call
-}
-
-// GetClientCertAndKey is a helper method to define mock.On call
-func (_e *SecuritySvc_Expecter) GetClientCertAndKey() *SecuritySvc_GetClientCertAndKey_Call {
-	return &SecuritySvc_GetClientCertAndKey_Call{Call: _e.mock.On("GetClientCertAndKey")}
-}
-
-func (_c *SecuritySvc_GetClientCertAndKey_Call) Run(run func()) *SecuritySvc_GetClientCertAndKey_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *SecuritySvc_GetClientCertAndKey_Call) Return(_a0 []byte, _a1 []byte) *SecuritySvc_GetClientCertAndKey_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *SecuritySvc_GetClientCertAndKey_Call) RunAndReturn(run func() ([]byte, []byte)) *SecuritySvc_GetClientCertAndKey_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetClientCertAndKeyPair provides a mock function with given fields:
 func (_m *SecuritySvc) GetClientCertAndKeyPair() []tls.Certificate {
 	ret := _m.Called()

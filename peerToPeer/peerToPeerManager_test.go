@@ -55,7 +55,7 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 		utilsMock.On("QueryRestApiWithAuth", peerNodeAddr, mock.Anything, mock.Anything, mock.Anything,
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-			mock.Anything).Return(queryErrs[i], queryStatuses[i])
+			mock.Anything, mock.Anything).Return(queryErrs[i], queryStatuses[i])
 	}
 
 	xdcrComp.On("PeerNodesAdminAddrs").Return(peerNodes, nil)

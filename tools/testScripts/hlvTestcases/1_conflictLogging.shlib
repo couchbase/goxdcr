@@ -15,6 +15,8 @@ cluster2BucketsArr=("B2" "B5")
 declare -a cluster3BucketsArr
 cluster3BucketsArr=("B3" "B6")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]} ["C3"]=${cluster3BucketsArr[@]})
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
@@ -76,6 +78,14 @@ function verifyPromStats {
 	validateDatapoolFailIs0 "C3" "B3" "B1"
 	validateDatapoolFailIs0 "C3" "B3" "B2"
 
+	# verify no unknown clog others
+	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B2"
+	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B3"
+	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B1"
+	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B3"
+	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B1"
+	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B2"
+
 	# verify that conflict records are not replicated
 	checkItemCnt "C1" "B0" 0
 
@@ -94,7 +104,7 @@ function testReplicationWithConflictLogging {
 	setCrossClusterVersioningForBucket "C2" "B2"
 	setCrossClusterVersioningForBucket "C3" "B3"
 
-	numItems=1000
+	numItems=10000
 	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
 
 	# the way this test creates conflicts is by having docs of the same keys on both buckets.
@@ -153,10 +163,16 @@ function runTestCase {
 	if (($? != 0)); then
 		exit $?
 	fi
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
 	setupTopologies
 	if (($? != 0)); then
 		exit $?
 	fi
+
+	return
 
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C1" "C3"

@@ -12,7 +12,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sync"
 
@@ -34,8 +33,6 @@ type EncryptionSetting struct {
 
 	// used to contact other peer nodes when client certificate setting on this cluster
 	// is mandatory
-	clientCert        []byte
-	clientKey         []byte
 	clientCertKeyPair []tls.Certificate
 }
 
@@ -143,8 +140,6 @@ func (sec *SecurityService) refreshClusterEncryption() error {
 	return nil
 }
 
-// Currently GetTLSConfig will return error "TLSConfig is not present for this service".
-// This is because XDCR does not have its own TLS server, as it uses ns_server's TLS https proxy
 func (sec *SecurityService) refreshTLSConfig() error {
 	newConfig, err := cbauth.GetTLSConfig()
 	if err != nil {
@@ -163,7 +158,7 @@ func (sec *SecurityService) refreshCert() error {
 		sec.logger.Warnf("Certificate location is missing. Cannot refresh certificate.")
 		return nil
 	}
-	certPEMBlock, err := ioutil.ReadFile(sec.caFile)
+	certPEMBlock, err := os.ReadFile(sec.caFile)
 	if err != nil {
 		return err
 	}
@@ -310,20 +305,9 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 		return err
 	}
 
-	sec.encrytionSetting.clientCert = certPEMBlock
-	sec.encrytionSetting.clientKey = clientKey
 	sec.encrytionSetting.clientCertKeyPair = tlsConfig.Certificates
 	sec.logger.Infof("refreshed client certs, client key and passphrase with len=%v", len(passphrase))
 	return nil
-}
-
-func (sec *SecurityService) GetClientCertAndKey() (clientCert, clientKey []byte) {
-	<-sec.encrytionSetting.initializedCh
-	sec.settingMtx.RLock()
-	defer sec.settingMtx.RUnlock()
-	clientCert = sec.encrytionSetting.clientCert
-	clientKey = sec.encrytionSetting.clientKey
-	return
 }
 
 func (sec *SecurityService) GetClientCertAndKeyPair() []tls.Certificate {

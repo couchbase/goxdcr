@@ -25,7 +25,6 @@ type SecuritySvc interface {
 	GetCaPool() *x509.CertPool
 	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
 
-	GetClientCertAndKey() ([]byte, []byte)
 	GetClientCertAndKeyPair() []tls.Certificate
 	SetClientCertSettingChangeCb(func())
 }

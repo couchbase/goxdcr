@@ -1,7 +1,16 @@
+/*
+Copyright 2024-Present Couchbase, Inc.
+
+Use of this software is governed by the Business Source License included in
+the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+file, in accordance with the Business Source License, use of this software will
+be governed by the Apache License, Version 2.0, included in the file
+licenses/APL2.txt.
+*/
+
 package conflictlog
 
 import (
-	"crypto/tls"
 	"fmt"
 	"reflect"
 	"sync"
@@ -1274,35 +1283,15 @@ func (l *LoggerImpl) updateBucketUUID(bucketList []string, force bool) (err erro
 	return
 }
 
-// fetchBucketUUID queries ns_server to get the bucket info and extracts bucket UUID and vb count
+// fetchBucketUUID queries local ns_server to get the bucket info and extracts bucket UUID and vb count
 func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount int, err error) {
-	authType := base.HttpAuthMechPlain
-	hostname, err := l.topSvc.MyHostAddr()
+	localConnStr, err := l.topSvc.MyConnectionStr()
 	if err != nil {
 		return
 	}
 
-	var certificates []byte
-	var clientCertKeyPair []tls.Certificate
-	if l.security.IsClusterEncryptionLevelStrict() {
-		authType = base.HttpAuthMechHttps
-		certificates = l.security.GetCACertificates()
-		if len(certificates) == 0 {
-			err = fmt.Errorf("expected non-empty certificates")
-			return
-		}
-
-		isMandatory, err := l.topSvc.ClientCertIsMandatory()
-		if err == nil && isMandatory {
-			// If n2n encryption is required and client cert is mandatory, then the traditional
-			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
-			// provided by the ns_server
-			clientCertKeyPair = l.security.GetClientCertAndKeyPair()
-		}
-	}
-
 	l.logger.Infof("fetching bucket info to get UUID and vbCount, id=%s, bucket=%s", l.id, bucketName)
-	data, err := l.utils.GetBucketInfo(hostname, bucketName, "", "", authType, certificates, true, nil, nil, l.logger, clientCertKeyPair)
+	data, err := l.utils.GetBucketInfo(localConnStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, l.logger)
 	if err != nil {
 		return
 	}
