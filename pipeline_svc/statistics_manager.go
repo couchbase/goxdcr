@@ -2096,7 +2096,9 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 		if remoteClusterCapability.HasCollectionSupport() {
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
-				logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
+				if !base.BypassUIErrorCodes(err.Error()) { // log only KV node related errors
+					logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
+				}
 				continue
 			}
 
@@ -2112,7 +2114,9 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 		} else {
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
-				logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
+				if !base.BypassUIErrorCodes(err.Error()) { // log only KV node related errors
+					logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
+				}
 				continue
 			}
 

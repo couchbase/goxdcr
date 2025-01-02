@@ -9,7 +9,6 @@
 package base
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -269,94 +268,11 @@ var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
 
 var CapellaHostnameSuffix = ".cloud.couchbase.com"
 
-// Various error messages
-var ErrorNotResponding = errors.New("Not responding")
-var ErrorNotOK = errors.New("Not OK")
-var ErrorNotMyVbucket = errors.New("NOT_MY_VBUCKET")
-var InvalidStateTransitionErrMsg = "Can't move to state %v - %v's current state is %v, can only move to state [%v]"
-var InvalidCerfiticateError = errors.New("Failed to parse given certificates. Certificates must be one or more, PEM-encoded x509 certificate and nothing more.")
-var ErrorNoSourceNozzle = errors.New("Invalid configuration. No source nozzle can be constructed since the source kv nodes are not the master for any vbuckets.")
-var ErrorNoTargetNozzle = errors.New("Invalid configuration. No target nozzle can be constructed.")
-var ErrorMasterNegativeIndex = errors.New("Master index is negative. ")
-var ErrorFailedAfterRetry = errors.New("Operation failed after max retries. ")
-var ErrorDoesNotExistString = "does not exist"
-var ErrorResourceDoesNotExist = fmt.Errorf("Specified resource %v.", ErrorDoesNotExistString)
-var ErrorResourceDoesNotMatch = errors.New("Specified resource does not match the item to which is being compared.")
-var ErrorInvalidType = errors.New("Specified type is invalid")
-var ErrorInvalidInput = errors.New("Invalid input given")
-var ErrorNoPortNumber = errors.New("No port number")
-var ErrorInvalidPortNumber = errors.New("Port number is not a valid integer")
-var ErrorUnauthorized = errors.New("unauthorized")
-var ErrorCompressionNotSupported = errors.New("Specified compression type is not supported.")
-var ErrorCompressionUnableToConvert = errors.New("Unable to translate user input to internal compression Type")
-var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is established as compressed even though compression is not requested.")
-var ErrorCompressionUnableToInflate = errors.New("Unable to properly uncompress data from DCP")
-var ErrorMaxReached = errors.New("Maximum entries has been reached")
-var ErrorNilPtr = errors.New("Nil pointer given")
-var ErrorNilPipeline = errors.New("Nil pipeline")
-var ErrorNoHostName = errors.New("hostname is missing")
-var ErrorInvalidSettingsKey = errors.New("Invalid settings key")
-var ErrorSizeExceeded = errors.New("Size is larger than maximum allowed")
-var ErrorLengthExceeded = errors.New("Length is longer than maximum allowed")
-var ErrorNoMatcher = errors.New("Internal error - unable to establish GoJsonsm Matcher")
-var ErrorNoDataPool = errors.New("Internal error - unable to establish GoXDCR datapool")
-var ErrorFilterEnterpriseOnly = errors.New("Filter expression can be specified in Enterprise edition only")
-var ErrorFilterInvalidVersion = errors.New("Filter version specified is deprecated")
-var ErrorFilterInvalidFormat = errors.New("Filter specified using key-only regex is deprecated")
-var ErrorFilterInvalidExpression = errors.New("Filter expression is invalid")
-var ErrorFilterParsingError = errors.New("Filter unable to parse DCP packet")
-var ErrorFilterSkipRestreamRequired = errors.New("Filter skip restream flag is required along with a filter")
-var ErrorNotSupported = errors.New("Not supported")
-var ErrorInvalidJSONMap = errors.New("Retrieved value is not a valid JSON key-value map")
-var ErrorInvalidCAS = errors.New("Invalid CAS")
-var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
-var ErrorExecutionTimedOut = errors.New("Execution timed out")
-var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timely manner, possibly due to busy source or target. Will try again...")
-var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfully contacted to figure out user intent for alternate address yet. Will try again next refresh cycle")
-var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
-var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
-var ErrorPipelineRestartDueToEncryptionChange = errors.New("Pipeline needs to update due to cluster encryption level change")
-var ErrorRemoteClusterFullEncryptionRequired = errors.New("Cluster encryption level is strict. Remote cluster reference must use full encryption.")
-var ErrorNotFound = errors.New("Specified entity is not found")
-var ErrorTargetCollectionsNotSupported = errors.New("Target cluster does not support collections")
-var ErrorSourceCollectionsNotSupported = errors.New("Source cluster collections critical error")
-var ErrorInvalidOperation = errors.New("Invalid operation")
-var ErrorRouterRequestRetry = errors.New("Request is in retry queue")
-var ErrorIgnoreRequest = errors.New("Request should be ignored")
-var ErrorXmemCollectionSubErr = errors.New(StringTargetCollectionMappingErr)
-var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
-var ErrorInvalidSRVFormat = errors.New("hostname format is not SRV")
-var ErrorSdkUriNotSupported = fmt.Errorf("XDCR currently does not support %v or %v URI. If using DNS SRV, remove the URI prefix", CouchbaseUri, CouchbaseSecureUri)
-var ErrorColMigrationEnterpriseOnly = errors.New("Collections migration is supported in Enterprise edition only")
-var ErrorInvalidColNamespaceFormat = fmt.Errorf("Invalid CollectionNamespace format")
-var ErrorCAPIDeprecated = errors.New("CAPI replication mode is now deprecated")
-var ReplicationSpecNotFoundErrorMessage = "requested resource not found"
-var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
-var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is supported in Enterprise Edition only")
-var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
-var BrokenMappingUIString = "Found following destination collection(s) missing (and will not get replicated to):\n"
-var ErrorSourceBucketTopologyNotReady = errors.New("Local bucket topology does not have any cached data yet")
-var ErrorTargetBucketTopologyNotReady = errors.New("Target bucket topology does not have any cached data yet")
-var ErrorNoBackfillNeeded = errors.New("No backfill needed")
-var ErrorNilCertificate = errors.New("Nil certificate")
-var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to strict mode and unable to retrieve a valid certificate")
-var ErrorOpInterrupted = errors.New("Operation interrupted")
-var ErrorNoVbSpecified = errors.New("No vb being specified")
-var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
-var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
-var ErrorHostNameEmpty = errors.New("Hostname is empty")
-var ErrorReplicationSpecNotActive = errors.New("replication specification not found or no longer active")
-
-func GetBackfillFatalDataLossError(specId string) error {
-	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
-}
+const ImportDetectedStr = "Import mutations detected when mobile is Off. This is not supported."
 
 const FinClosureStr = "because of finch closure"
 
 const StringTargetCollectionMappingErr = "Target node unable to find"
-
-// Various non-error internal msgs
-var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
 
 // the full error as of now is : "x509: cannot validate certificate for xxx because it doesn't contain any IP SANs"
 // use a much shorter version for matching to reduce the chance of false negatives - the error message may be changed by golang in the future
