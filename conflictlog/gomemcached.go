@@ -424,14 +424,16 @@ func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target 
 			return
 		}
 
-		switch err {
-		case baseclog.ErrUnknownCollection:
-			m.logger.Infof("collection not found key=%s, target=%s", key, target.String())
+		errStr := err.Error()
+		if strings.Contains(errStr, baseclog.ErrUnknownCollection.Error()) {
+			m.logger.Debugf("collection not found key=%s, target=%s", key, target.String())
 			checkCache = false
-		case baseclog.ErrNotMyVBucket:
-		default:
-			return err
+			continue
+		} else if strings.Contains(errStr, baseclog.ErrNotMyVBucket.Error()) {
+			continue
 		}
+
+		return err
 	}
 
 	return

@@ -93,7 +93,6 @@ type LoggerImpl struct {
 
 	// hibernated meaning the logger is not accepting any requests.
 	// This can happen when logger was in a error state for a long period of time.
-	// 0 is logger is not in hibernation, unix epoch timestamp of hibernation start time otherwise.
 	hibernated         atomic.Bool
 	hibernationLock    sync.Mutex
 	hibernationEventId int64
@@ -202,7 +201,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 	}
 
 	logger.Infof("updated bucket UUID from rules for replId=%s. Time elapsed=%v",
-		replId, time.Now().Sub(now))
+		replId, time.Since(now))
 
 	return
 }
@@ -423,7 +422,7 @@ func (l *LoggerImpl) UpdateRules(r *baseclog.Rules) (err error) {
 	}
 
 	l.logger.Infof("conflict logger rules=%v updated id=%s, time elapsed for uuid update=%v",
-		r, l.id, time.Now().Sub(now))
+		r, l.id, time.Since(now))
 	return
 }
 
@@ -644,7 +643,7 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 			continue
 		}
 
-		l.logger.Debugf("writeDocRetry using bucketName=%s bucketUUID=%s vbCount=%d", bucketName, bucketUUID, vbCount)
+		l.logger.Tracef("writeDocRetry using bucketName=%s bucketUUID=%s vbCount=%d", bucketName, bucketUUID, vbCount)
 
 		// Step2: Get connection from the pool
 		// It is possible that bucketUUID does not exists and hence this can fail

@@ -181,10 +181,6 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.GET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
 }
 
-var VBMetricKeys []string
-var compileVBMetricKeyOnce sync.Once
-var vbMetricKeyLock sync.RWMutex
-
 func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, srcvb uint16) base.VBCountMetric {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
 		return nil
@@ -2090,6 +2086,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 				metricMap[service_def.CLOG_QUEUE_FULL].(metrics.Counter).Inc(1)
 			case baseclog.ErrLoggerHibernated:
 				metricMap[service_def.CLOG_HIBERNATED_COUNT].(metrics.Counter).Inc(1)
+				err := outNozzle_collector.handleVBEvent(event, service_def.CLOG_HIBERNATED_COUNT)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -2120,6 +2120,8 @@ func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event
 	case service_def.GET_DOCS_CAS_CHANGED_METRIC:
 		fallthrough
 	case service_def.TRUE_CONFLICTS_DETECTED:
+		fallthrough
+	case service_def.CLOG_HIBERNATED_COUNT:
 		srcvb := event.DerivedData[0].(uint16)
 		tgtvb := event.DerivedData[1].(uint16)
 		seqno := event.DerivedData[2].(uint64)
