@@ -3119,9 +3119,21 @@ func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) 
 		} else {
 			req.Req.Opcode = mc.SET_WITH_META
 		}
-		req.Req.Body = req.SubdocCmdOptions.BodyPreSubdocCmd
-		req.Req.DataType = req.SubdocCmdOptions.DatatypePreSubdocCmd
-		req.Req.Extras = req.SubdocCmdOptions.ExtrasPreSubdocCmd
+
+		// This routine could be called from three places right now:
+		// 1. target CAS changes before fetching target doc body for conflict logging, after subdoc_get.
+		// 2. target doc is locked during subdoc_get.
+		// 3. target CAS changes during the write to target when using optimistic CAS locking.
+		// However for (1) and (2), if the req was a subdoc command, req.Req.Body, req.Req.DataType and req.Req.Extras
+		// would not have changed and hence req.SubdocCmdOptions.ReplacedBody will be false. That is, replacing it back
+		// is incorrect for cases (1) and (2)
+		if req.SubdocCmdOptions.ReplacedBody {
+			// replace it back
+			req.Req.Body = req.SubdocCmdOptions.BodyPreSubdocCmd
+			req.Req.DataType = req.SubdocCmdOptions.DatatypePreSubdocCmd
+			req.Req.Extras = req.SubdocCmdOptions.ExtrasPreSubdocCmd
+		}
+
 		req.ResetSubdocOptionsForRetry()
 	} else {
 		// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc

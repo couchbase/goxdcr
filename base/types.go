@@ -803,6 +803,7 @@ func (req *WrappedMCRequest) SetSubdocOptionsForRetry(body, extras []byte, datat
 	req.SubdocCmdOptions.BodyPreSubdocCmd = body
 	req.SubdocCmdOptions.ExtrasPreSubdocCmd = extras
 	req.SubdocCmdOptions.DatatypePreSubdocCmd = datatype
+	req.SubdocCmdOptions.ReplacedBody = true
 }
 
 func (req *WrappedMCRequest) ResetSubdocOptionsForRetry() {
@@ -2919,9 +2920,11 @@ type HLVModeOptions struct {
 // These options are explicitly set when SubdocOp != NotSubdoc
 // i.e. when subdoc command is used for replication instead of *_with_meta
 type SubdocCmdOptions struct {
-	SubdocOp                             SubdocOpType
-	BodyPreSubdocCmd, ExtrasPreSubdocCmd []byte
-	DatatypePreSubdocCmd                 uint8
+	SubdocOp             SubdocOpType
+	BodyPreSubdocCmd     []byte
+	ExtrasPreSubdocCmd   []byte
+	DatatypePreSubdocCmd uint8
+	ReplacedBody         bool
 	// booleans to indicate if corresponding target doc has the following non-empty metadata
 	TargetHasPv          bool
 	TargetHasMv          bool
