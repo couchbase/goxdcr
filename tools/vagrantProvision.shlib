@@ -798,7 +798,13 @@ function vagrantRunXdcrDiffer {
 		opts2Flag="$(xdcrDifferParseOpts "$extraOpts2")"
 	fi
 
-	cmd="${VSSH[$idx]} \"cd ${differDir}; ./runDiffer.sh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h ${VAGRANT_VM_IP_MAP["$clusterName"]}:8091 -s $srcBucket -t $tgtBucket -r $tgtCluster -c $opts1Flag $opts2Flag\""
+	if [[ "$differDir" == "/opt/couchbase/bin" ]]; then
+		# Run with sudo because since morpheus, it is possible the binary is built in, which needs to create output directories
+		cmd="${VSSH[$idx]} \"cd ${differDir}; sudo ./runDiffer.sh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h ${VAGRANT_VM_IP_MAP["$clusterName"]}:8091 -s $srcBucket -t $tgtBucket -r $tgtCluster -c $opts1Flag $opts2Flag\""
+	else
+		cmd="${VSSH[$idx]} \"cd ${differDir}; ./runDiffer.sh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h ${VAGRANT_VM_IP_MAP["$clusterName"]}:8091 -s $srcBucket -t $tgtBucket -r $tgtCluster -c $opts1Flag $opts2Flag\""
+	fi
+
 	echo "==== Running $cmd ===="
 	eval $cmd
 
@@ -817,7 +823,7 @@ function vagrantValidateDifferResults {
 	local expectedDeletedSrcCnt=${6:-}
 	local expectedDeletedTgtCnt=${7:-}
 
-	cmd="${VSSH[$idx]} \"cat ${differDir}/mutationDiff/mutationDiffDetails\""
+	cmd="${VSSH[$idx]} \"cat ${differDir}/outputs/mutationDiff/mutationDiffDetails\""
 	echo "==== Running $cmd > $tmpFile ===="
 	eval $cmd >$tmpFile
 

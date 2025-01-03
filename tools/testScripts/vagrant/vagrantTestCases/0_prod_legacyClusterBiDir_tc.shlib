@@ -100,6 +100,14 @@ function deleteRecreateReplicationOnC1AndCheck {
 	checkUnidirectionalChangesLeft
 }
 
+# Run xdcrDiffer on the local node's local build and validate the results
+function runXdcrDifferValidation {
+	local couchbaseBinDir="/opt/couchbase/bin"
+
+	vagrantRunXdcrDiffer "${couchbaseBinDir}" "C1" "B1" "C2" "B2"
+	vagrantValidateDifferResults "${couchbaseBinDir}" "C1" 0 0 0
+}
+
 function runLegacyCurrentBidir {
 	local c1Ver="$1"
 	local c2Ver="$2"
@@ -145,6 +153,8 @@ function runLegacyCurrentBidir {
 	else
 		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 		runDataLoadOnC1AndCheck
+		# Morpheus versions contain xdcrDiffer. Test it when morpheus is the source
+		runXdcrDifferValidation
 		pauseAndResumeOnC1AndCheck
 		deleteRecreateReplicationOnC1AndCheck
 	fi

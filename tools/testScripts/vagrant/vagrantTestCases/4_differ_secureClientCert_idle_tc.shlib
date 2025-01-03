@@ -22,27 +22,24 @@ VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C1P"]="192.168.56.3" ["C2"]="192.168.
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+cluster1BucketsArr=("B1")
+cluster2BucketsArr=("B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]})
 unset CLUSTER_SETUP_DONE_MAP
 declare -gA CLUSTER_SETUP_DONE_MAP
-
-# Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
-insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
-insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
-insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
-
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-
-#BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
-#SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
 
 # Test cases assume vagrant up has already been called
 
 # XDCR DIFFER TEST PREREQUISITES
 # A linux xdcrDiffer binary must have already been compiled
+# The path to the binary must be provided in the variable xdcrDifferDir
+# Run the test script like so: ./runVagrantTests.sh -r 4 -x "/home/vagrant/xdcrDiffer"
+
+# Since Morpheus, xdcrDiffer will now become part of the build
+# Thus, the "-x" variable should continue to be used until morpheus is the "oldest" build to be supported
+# At which point, this test script should only be using the "built" binary that comes with the image to run tests
+# At that time, we need to hard-code it such that when in vagrant mode, only the built binary is used
 
 function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1" &
@@ -86,7 +83,7 @@ function runNonSecureDifferTest {
 	sleep 1
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	#createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 	runDataLoad
 	sleep 10
@@ -124,7 +121,6 @@ function runSecureCertDifferTest {
 	sleep 1
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 	runDataLoad
 	sleep 10
@@ -160,7 +156,6 @@ function runSecureDifferTest {
 	sleep 1
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 	runDataLoad
 	sleep 10
@@ -204,6 +199,29 @@ function runTestCase {
 			echo "Running test with source $srcVersionToTest and target $tgtVersionToTest"
 			echo "============================================================================"
 			loadVersion "$srcVersionToTest" "$tgtVersionToTest"
+
+			# Bucket properties
+			cleanupBucketNamePropertyMap
+			unset Bucket1Property
+			unset Bucket2Property
+
+			# If target is morpheus and source is not, create 1024 vb's
+			if [[ "$srcVersionToTest" != "morpheus" ]] && [[ "$tgtVersionToTest" == "morpheus" ]]; then
+				declare -A Bucket2Property=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+			else
+				declare -A Bucket2Property=(["ramQuotaMB"]=100)
+			fi
+
+			# If source is morpheus and target is not, create 1024 vb's
+			if [[ "$srcVersionToTest" == "morpheus" ]] && [[ "$tgtVersionToTest" != "morpheus" ]]; then
+				declare -A Bucket1Property=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+			else
+				declare -A Bucket1Property=(["ramQuotaMB"]=100)
+			fi
+
+			insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Property
+			insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Property
+
 			setupTopologies
 			runDifferTestRebalanceIn
 
