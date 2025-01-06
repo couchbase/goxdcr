@@ -89,9 +89,13 @@ service_impl
 streamApiWatcher
 utils
 base/iopool
-resource_manager
 service_impl/throttlerSvcImpl
 )
+
+# resource_manager requires use of dynamic library of sigar
+if [[ ! -z "${runAllTests:-}" ]];then
+	DIRS_WITH_UT[${#DIRS_WITH_UT[@]}]="resource_manager"
+fi
 
 function killAllBgOnExit {
 	for job in $(jobs -p); do
