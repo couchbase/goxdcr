@@ -1771,7 +1771,7 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCReque
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 	req.Body = req.Body[:0]
-	req.VBucket = wrappedReq.Req.VBucket
+	req.VBucket = wrappedReq.GetTargetVB()
 	req.Key = wrappedReq.Req.Key
 	req.Opaque = opaque
 	req.Opcode = base.GET_WITH_META
@@ -1794,7 +1794,7 @@ func (xmem *XmemNozzle) composeRequestForGetEx(wrappedReq *base.WrappedMCRequest
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 	req.Body = req.Body[:0]
-	req.VBucket = wrappedReq.Req.VBucket
+	req.VBucket = wrappedReq.GetTargetVB()
 	req.Key = wrappedReq.Req.Key
 	req.Opaque = opaque
 	req.Opcode = mc.GETEX
@@ -1869,7 +1869,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 			}
 
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.GetSourceVB(), time.Now(), originalReq.GetManifestId())
 			opaque++
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
@@ -2133,7 +2133,7 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 			},
 			Body:     sourceBodyClone,
 			Datatype: sourceDocDatatype,
-			VBNo:     req.Req.VBucket,
+			VBNo:     req.GetSourceVB(),
 			VBUUID:   sourceDoc.VbUUID,
 			Seqno:    sourceDoc.Seqno,
 		},
@@ -2155,7 +2155,7 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 			},
 			Body:     targetBodyClone,
 			Datatype: targetDocDatatype,
-			VBNo:     req.Req.VBucket,
+			VBNo:     req.GetTargetVB(),
 			VBUUID:   targetVbUUID,
 			Seqno:    targetSeqno,
 		},
@@ -2189,13 +2189,13 @@ func (xmem *XmemNozzle) canLogConflict(source *base.WrappedMCRequest, target *ba
 		return false
 	}
 
-	sourceVbMaxCas, ok := xmem.config.vbHlvMaxCas[source.Req.VBucket]
+	sourceVbMaxCas, ok := xmem.config.vbHlvMaxCas[source.GetSourceVB()]
 	if !ok {
 		// this path should not be hit
 		return false
 	}
 
-	targetVbHlvMaxCas, ok := xmem.config.targetVbHlvMaxCas[source.Req.VBucket]
+	targetVbHlvMaxCas, ok := xmem.config.targetVbHlvMaxCas[source.GetTargetVB()]
 	if !ok {
 		// this path should not be hit
 		return false
@@ -2484,7 +2484,6 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 }
 
 func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest) (mc.CommandCode, base.SubdocLookupPathSpecs) {
-	incomingReq := wrappedReq.Req
 	getSpecWithHlv := wrappedReq.GetMetaSpecWithHlv
 	getSpecWithoutHlv := wrappedReq.GetMetaSpecWithoutHlv
 	getBodySpec := wrappedReq.GetBodySpec
@@ -2493,7 +2492,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
-	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[incomingReq.VBucket] {
+	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[wrappedReq.GetSourceVB()] {
 		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
 		// and current source mutation already has HLV, we still don't get target importCas (_mou.cas) / HLV. The reason is to
 		// figure out that current source mutation already has HLV will require us to parse the body. It has a
@@ -2560,7 +2559,7 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSp
 	}
 
 	req.Cas = cas
-	req.VBucket = wrappedReq.Req.VBucket
+	req.VBucket = wrappedReq.GetTargetVB()
 	req.Key = wrappedReq.Req.Key
 	req.Opaque = opaque
 	req.Extras = []byte{mc.SUBDOC_FLAG_ACCESS_DELETED}
@@ -2711,7 +2710,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	} else if xmem.isCCR() {
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.SendHlv {
-		maxCas := xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket]
+		maxCas := xmem.config.vbHlvMaxCas[wrappedReq.GetSourceVB()]
 		if wrappedReq.HLVModeOptions.ActualCas >= maxCas {
 			needToUpdateSysXattrs = true
 		}
@@ -2727,7 +2726,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 
 	var vbHlvMaxCas uint64
 	if wrappedReq.HLVModeOptions.SendHlv && xmem.config.vbHlvMaxCas != nil {
-		vbHlvMaxCas = xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket]
+		vbHlvMaxCas = xmem.config.vbHlvMaxCas[wrappedReq.GetSourceVB()]
 	}
 
 	sourceDoc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceActorId)
@@ -3418,7 +3417,7 @@ func (xmem *XmemNozzle) usesHlv(req *base.WrappedMCRequest) bool {
 	}
 
 	return (xmem.getCrossClusterVers() &&
-		req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.Req.VBucket]) ||
+		req.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[req.GetSourceVB()]) ||
 		xmem.isCCR()
 }
 
@@ -3644,8 +3643,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 						seenErrForUIAlert = true
 
-						vbno := wrappedReq.Req.VBucket
-						xmem.RaiseEvent(common.NewEvent(common.DataSentFailedUnknownStatus, response.Status, xmem, []interface{}{vbno, seqno}, nil))
+						xmem.RaiseEvent(common.NewEvent(common.DataSentFailedUnknownStatus, response.Status, xmem, []interface{}{wrappedReq.GetSourceVB(), wrappedReq.GetTargetVB(), seqno}, nil))
 						atomic.AddUint64(&xmem.counterUnknownStatus, 1)
 						xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 					}
