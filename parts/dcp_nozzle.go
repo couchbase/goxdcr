@@ -585,9 +585,10 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		if err = uprFeatures.EnableDeadConnDetection(source_dead_conn_threshold); err != nil {
 			return err
 		}
+		uprFeatures.EnableFlatbuffersSysEvents = true
 
 		if dcp.uprFeed == nil {
-			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
+			err = fmt.Errorf("%v uprfeed is nil", dcp.Id())
 			return err
 		}
 		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)

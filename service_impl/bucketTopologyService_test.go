@@ -241,7 +241,7 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 
 	spec2NotifyCh, err := bts.SubscribeToLocalBucketFeed(spec2, "")
 	assert.Nil(err)
-	assert.NotSame(specNotifyCh, spec2NotifyCh)
+	assert.NotSame(&specNotifyCh, &spec2NotifyCh)
 	assert.Equal(2, bts.srcBucketWatchersCnt[srcBucketName])
 	assert.Len(bts.srcBucketWatchers, 1)
 	var watcher *BucketTopologySvcWatcher
