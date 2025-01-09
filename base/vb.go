@@ -74,6 +74,6 @@ func cbCrc(key []byte) uint32 {
 	return (^crc) >> 16
 }
 
-func GetVBucketNo(key string, vbCount int) uint16 {
-	return uint16(cbCrc([]byte(key)) % uint32(vbCount))
+func GetVBucketNo(key []byte, vbCount int) uint16 {
+	return uint16(cbCrc(key) % uint32(vbCount))
 }

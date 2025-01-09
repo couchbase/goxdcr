@@ -414,7 +414,7 @@ func (m *MemcachedConn) getConnByVB(vbno uint16, replicaNum int) (conn mcc.Clien
 func (m *MemcachedConn) SetMeta(key string, body []byte, dataType uint8, target baseclog.Target) (err error) {
 	checkCache := true
 	var collId uint32
-	vbNo := base.GetVBucketNo(key, m.vbCount)
+	vbNo := base.GetVBucketNo([]byte(key), m.vbCount)
 
 	var conn mcc.ClientIface
 

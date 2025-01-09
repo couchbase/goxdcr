@@ -22,7 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
-	"github.com/couchbase/goxdcr/v8/connector"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/v8/pipeline"
@@ -134,7 +133,8 @@ type ThroughSeqnoTrackerSvc struct {
 
 	variableVBMode   bool
 	targetHasMoreVBs bool
-	variableTgtVbs   []uint16
+	// If variable VB mode is on, this will be the list of all target VBs
+	variableTgtVbs []uint16
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -1051,7 +1051,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.markUprEventAsFiltered(uprEvent)
 		var tgtVbToUse *uint16
 		if tsTracker.variableVBMode {
-			tgtVb := uint16(connector.CbCrc(uprEvent.Key))
+			tgtVb := base.GetVBucketNo(uprEvent.Key, len(tsTracker.variableTgtVbs))
 			tgtVbToUse = &tgtVb
 		}
 		if !processedAsOSO {
@@ -1077,7 +1077,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 			var tgtVbToUse *uint16
 			if tsTracker.variableVBMode {
-				tgtVb := uint16(connector.CbCrc(uprEvent.Key))
+				tgtVb := base.GetVBucketNo(uprEvent.Key, len(tsTracker.variableTgtVbs))
 				tgtVbToUse = &tgtVb
 			}
 			if !processedAsOSO {

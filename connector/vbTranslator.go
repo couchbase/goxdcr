@@ -190,7 +190,7 @@ func (v *VBTranslator) Forward(data interface{}) error {
 		return fmt.Errorf("Incorrect data type: %v", reflect.TypeOf(data))
 	}
 
-	newVB := uint16(CbCrc(wrappedUpr.UprEvent.Key) % uint32(v.tgtNumVBs))
+	newVB := base.GetVBucketNo(wrappedUpr.UprEvent.Key, v.tgtNumVBs)
 	wrappedUpr.TranslatedVB = &newVB
 
 	return v.forwardDataToDownstream(data, wrappedUpr.GetSourceVB())
