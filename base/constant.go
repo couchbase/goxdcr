@@ -636,6 +636,7 @@ var VersionForMobileSupport = ServerVersion{7, 6, 4}
 var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
+var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
