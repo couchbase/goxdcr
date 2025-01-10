@@ -488,7 +488,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 		assert.Nil(record.LoadGlobalInfoMapping(gInfoShaMap))
 	}
 
-	assert.Equal(5, len(checkDoc.Checkpoint_records))
+	assert.Equal(12, len(checkDoc.Checkpoint_records))
 	assert.NotNil(checkDoc.Checkpoint_records[1])
 	assert.True(checkDoc.Checkpoint_records[1].SameAs(&newCkptRecord))
 	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, checkDoc.Checkpoint_records[1].SourceManifestForBackfillMgr)
@@ -497,7 +497,7 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 
 	var decompressCheck CheckpointsDoc
 	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, shaMapCompressed))
-	assert.Equal(5, len(decompressCheck.Checkpoint_records))
+	assert.Equal(12, len(decompressCheck.Checkpoint_records))
 	assert.NotNil(decompressCheck.Checkpoint_records[1])
 	assert.True(decompressCheck.Checkpoint_records[1].SameAs(&newCkptRecord))
 	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, decompressCheck.Checkpoint_records[1].SourceManifestForBackfillMgr)

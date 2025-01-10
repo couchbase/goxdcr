@@ -242,8 +242,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.CapiBatchTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.CapiWriteTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.CapiReadTimeoutKey].(int))*time.Second,
-		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepKey].(int),
-		internal_settings.Values[metadata.MaxCheckpointRecordsToReadKey].(int),
+		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepTraditionalKey].(int),
+		internal_settings.Values[metadata.MaxCheckpointRecordsToReadTraditionalKey].(int),
 		time.Duration(internal_settings.Values[metadata.DefaultHttpTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.ShortHttpTimeoutKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxRetryForLiveUpdatePipelineKey].(int),
@@ -370,6 +370,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.CLogResourceManagerBoostKey].(int),
 		time.Duration(internal_settings.Values[metadata.CLogStatsLoggingMaxFreqKey].(int))*time.Second,
 		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
+		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepVariableVBKey].(int),
+		internal_settings.Values[metadata.MaxCheckpointRecordsToReadVariableVBKey].(int),
 	)
 }
 

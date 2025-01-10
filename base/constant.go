@@ -847,11 +847,17 @@ var CapiWriteTimeout = 10 * time.Second
 // timeout for tcp read operation in capi
 var CapiReadTimeout = 60 * time.Second
 
-// the maximum number of checkpoint records to keep in the checkpoint doc
-var MaxCheckpointRecordsToKeep int = 5
+// the maximum number of checkpoint records to keep in the checkpoint doc - for traditional replications
+var MaxCheckpointRecordsToKeepTraditional int = 5
 
-// the maximum number of checkpoint records to read from the checkpoint doc
-var MaxCheckpointRecordsToRead int = 5
+// the maximum number of checkpoint records to read from the checkpoint doc - for traditional replications
+var MaxCheckpointRecordsToReadTraditional int = 5
+
+// the maximum number of checkpoint records to keep in the checkpoint doc - for variableVB replications
+var MaxCheckpointRecordsToKeepVariableVB int = 12
+
+// the maximum number of checkpoint records to read from the checkpoint doc - for variableVB replications
+var MaxCheckpointRecordsToReadVariableVB int = 12
 
 // default time out for outgoing http requests if it is not explicitly specified (seconds)
 var DefaultHttpTimeout = 180 * time.Second
@@ -1151,7 +1157,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	refreshRemoteClusterRefInterval time.Duration, clusterVersion string,
 	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
 	capiWriteTimeout time.Duration, capiReadTimeout time.Duration,
-	maxCheckpointRecordsToKeep int, maxCheckpointRecordsToRead int,
+	maxCheckpointRecordsToKeepTraditional int, maxCheckpointRecordsToReadTraditional int,
 	defaultHttpTimeout time.Duration, shortHttpTimeout time.Duration,
 	maxRetryForLiveUpdatePipeline int, waitTimeForLiveUpdatePipeline time.Duration,
 	replSpecCheckInterval time.Duration, memStatsLogInterval time.Duration,
@@ -1218,7 +1224,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
-	tempMCErrorDisplayDelayFactor int) {
+	tempMCErrorDisplayDelayFactor int,
+	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1235,8 +1242,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapiBatchTimeout = capiBatchTimeout
 	CapiWriteTimeout = capiWriteTimeout
 	CapiReadTimeout = capiReadTimeout
-	MaxCheckpointRecordsToKeep = maxCheckpointRecordsToKeep
-	MaxCheckpointRecordsToRead = maxCheckpointRecordsToRead
+	MaxCheckpointRecordsToKeepTraditional = maxCheckpointRecordsToKeepTraditional
+	MaxCheckpointRecordsToReadTraditional = maxCheckpointRecordsToReadTraditional
 	DefaultHttpTimeout = defaultHttpTimeout
 	ShortHttpTimeout = shortHttpTimeout
 	MaxRetryForLiveUpdatePipeline = maxRetryForLiveUpdatePipeline
@@ -1394,6 +1401,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CLogStatsLoggingMaxFreqInterval = cLogStatsMaxFreq
 
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
+
+	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
+	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
 }
 
 // XDCR Dev hidden replication settings

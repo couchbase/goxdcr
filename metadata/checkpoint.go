@@ -1181,6 +1181,9 @@ func (c *CheckpointRecord) GetGlobalInfoMap() ShaToGlobalInfoMap {
 }
 
 func (c *CheckpointRecord) IsTraditional() bool {
+	if c == nil {
+		return true
+	}
 	return c.Target_vb_opaque != nil
 }
 
@@ -2660,6 +2663,22 @@ func (c *CheckpointsDoc) Size() int {
 	return totalSize
 }
 
+func (c *CheckpointsDoc) GetMaxCkptRecordsToKeep() int {
+	if c.IsTraditional() {
+		return base.MaxCheckpointRecordsToKeepTraditional
+	} else {
+		return base.MaxCheckpointRecordsToKeepVariableVB
+	}
+}
+
+func (c *CheckpointsDoc) GetMaxCkptRecordsToRead() int {
+	if c.IsTraditional() {
+		return base.MaxCheckpointRecordsToReadTraditional
+	} else {
+		return base.MaxCheckpointRecordsToReadVariableVB
+	}
+}
+
 func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	ckpt_record_map := make(map[string]interface{})
 	ckpt_record_map[FailOverUUID] = ckpt.Failover_uuid
@@ -2757,7 +2776,8 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 		SpecInternalId: specInternalId,
 		Revision:       nil}
 
-	for i := 0; i < base.MaxCheckpointRecordsToKeep; i++ {
+	maxCkptsToKeep := ckpt_doc.GetMaxCkptRecordsToKeep()
+	for i := 0; i < maxCkptsToKeep; i++ {
 		ckpt_doc.Checkpoint_records = append(ckpt_doc.Checkpoint_records, nil)
 	}
 
@@ -2778,15 +2798,16 @@ func NewCheckpointsDocFromSnappy(snappyBytes []byte, compressedMap ShaMappingCom
 // Not concurrency safe. It should be used by one goroutine only
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
+	maxCkptsRecordsToKeep := ckptsDoc.GetMaxCkptRecordsToKeep()
 	if length > 0 {
 		if !ckptsDoc.Checkpoint_records[0].SameAs(record) {
-			if length > base.MaxCheckpointRecordsToKeep {
-				for i := base.MaxCheckpointRecordsToKeep - 1; i < length; i++ {
+			if length > maxCkptsRecordsToKeep {
+				for i := maxCkptsRecordsToKeep - 1; i < length; i++ {
 					removedRecords = append(removedRecords, ckptsDoc.Checkpoint_records[i])
 				}
-				ckptsDoc.Checkpoint_records = ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToKeep]
-			} else if length < base.MaxCheckpointRecordsToKeep {
-				for i := length; i < base.MaxCheckpointRecordsToKeep; i++ {
+				ckptsDoc.Checkpoint_records = ckptsDoc.Checkpoint_records[:maxCkptsRecordsToKeep]
+			} else if length < maxCkptsRecordsToKeep {
+				for i := length; i < maxCkptsRecordsToKeep; i++ {
 					ckptsDoc.Checkpoint_records = append(ckptsDoc.Checkpoint_records, nil)
 				}
 			}
@@ -2816,10 +2837,10 @@ func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
 	if ckptsDoc == nil {
 		return nil
 	}
-	if len(ckptsDoc.Checkpoint_records) <= base.MaxCheckpointRecordsToRead {
+	if len(ckptsDoc.Checkpoint_records) <= ckptsDoc.GetMaxCkptRecordsToRead() {
 		return ckptsDoc.Checkpoint_records
 	} else {
-		return ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToRead]
+		return ckptsDoc.Checkpoint_records[:ckptsDoc.GetMaxCkptRecordsToRead()]
 	}
 }
 
@@ -2962,12 +2983,12 @@ func (c *CheckpointsDoc) LoadGlobalInfoFromShaMap(globalInfoShaMap ShaToGlobalIn
 }
 
 func (c *CheckpointsDoc) IsTraditional() bool {
-	if c == nil || len(c.GetCheckpointRecords()) == 0 {
+	if c == nil || len(c.Checkpoint_records) == 0 {
 		return true // for legacy use case
 	}
 
 	// Checkpoints should not intermix - thus one is enough to check
-	return c.GetCheckpointRecords()[0].IsTraditional()
+	return c.Checkpoint_records[0].IsTraditional()
 }
 
 // contains compressed mappings of both GlobalTimestamps and GlobalTargetCounters

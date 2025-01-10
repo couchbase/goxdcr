@@ -50,10 +50,10 @@ const (
 	CapiWriteTimeoutKey = "CapiWriteTimeout"
 	// timeout for tcp read operation in capi
 	CapiReadTimeoutKey = "CapiReadTimeout"
-	// the maximum number of checkpoint records to write/keep in the checkpoint doc
-	MaxCheckpointRecordsToKeepKey = "MaxCheckpointRecordsToKeep"
-	// the maximum number of checkpoint records to read from the checkpoint doc
-	MaxCheckpointRecordsToReadKey = "MaxCheckpointRecordsToRead"
+	// the maximum number of checkpoint records to write/keep in the checkpoint doc - for traditional replications
+	MaxCheckpointRecordsToKeepTraditionalKey = "MaxCheckpointRecordsToKeepTraditional"
+	// the maximum number of checkpoint records to read from the checkpoint doc - for traditional replications
+	MaxCheckpointRecordsToReadTraditionalKey = "MaxCheckpointRecordsToReadTraditional"
 	// default time out for outgoing http requests if it is not explicitly specified (seconds)
 	DefaultHttpTimeoutKey = "DefaultHttpTimeout"
 	// when we need to make a rest call when processing a XDCR rest request, the time out of the second rest call needs
@@ -303,6 +303,11 @@ const (
 	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
 
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
+
+	// the maximum number of checkpoint records to write/keep in the checkpoint doc - for variableVB replications
+	MaxCheckpointRecordsToKeepVariableVBKey = "MaxCheckpointRecordsToKeepVariableVB"
+	// the maximum number of checkpoint records to read from the checkpoint doc - for variableVB replications
+	MaxCheckpointRecordsToReadVariableVBKey = "MaxCheckpointRecordsToReadVariableVB"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -316,8 +321,8 @@ var CapiMaxRetryBatchUpdateDocsConfig = &SettingsConfig{6, &Range{1, 100}}
 var CapiBatchTimeoutConfig = &SettingsConfig{180, &Range{10, 3600}}
 var CapiWriteTimeoutConfig = &SettingsConfig{10, &Range{1, 3600}}
 var CapiReadTimeoutConfig = &SettingsConfig{60, &Range{10, 3600}}
-var MaxCheckpointRecordsToKeepConfig = &SettingsConfig{5, &Range{1, 100}}
-var MaxCheckpointRecordsToReadConfig = &SettingsConfig{5, &Range{1, 100}}
+var MaxCheckpointRecordsToKeepTraditionalConfig = &SettingsConfig{5, &Range{1, 100}}
+var MaxCheckpointRecordsToReadTraditionalConfig = &SettingsConfig{5, &Range{1, 100}}
 var DefaultHttpTimeoutConfig = &SettingsConfig{180, &Range{10, 3600}}
 var ShortHttpTimeoutConfig = &SettingsConfig{20, &Range{1, 3600}}
 var MaxRetryForLiveUpdatePipelineConfig = &SettingsConfig{5, &Range{1, 100}}
@@ -443,6 +448,8 @@ var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
 var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
 var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMaxFreqInterval / time.Second), &Range{30, 24 * 60 * 60 /* 1 day */}}
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
+var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
+var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -456,8 +463,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CapiBatchTimeoutKey:                           CapiBatchTimeoutConfig,
 	CapiWriteTimeoutKey:                           CapiWriteTimeoutConfig,
 	CapiReadTimeoutKey:                            CapiReadTimeoutConfig,
-	MaxCheckpointRecordsToKeepKey:                 MaxCheckpointRecordsToKeepConfig,
-	MaxCheckpointRecordsToReadKey:                 MaxCheckpointRecordsToReadConfig,
+	MaxCheckpointRecordsToKeepTraditionalKey:      MaxCheckpointRecordsToKeepTraditionalConfig,
+	MaxCheckpointRecordsToReadTraditionalKey:      MaxCheckpointRecordsToReadTraditionalConfig,
 	DefaultHttpTimeoutKey:                         DefaultHttpTimeoutConfig,
 	ShortHttpTimeoutKey:                           ShortHttpTimeoutConfig,
 	MaxRetryForLiveUpdatePipelineKey:              MaxRetryForLiveUpdatePipelineConfig,
@@ -583,6 +590,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
 	CLogStatsLoggingMaxFreqKey:                    CLogStatsLoggingMaxFreqConfig,
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
+	MaxCheckpointRecordsToKeepVariableVBKey:       MaxCheckpointRecordsToKeepVariableVBConfig,
+	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
@@ -651,8 +660,10 @@ func ConstructInternalSettingsFromV1Settings(v1Settings *V1InternalSettings) *In
 	s.Values[CapiBatchTimeoutKey] = v1Settings.CapiBatchTimeout
 	s.Values[CapiWriteTimeoutKey] = v1Settings.CapiWriteTimeout
 	s.Values[CapiReadTimeoutKey] = v1Settings.CapiReadTimeout
-	s.Values[MaxCheckpointRecordsToKeepKey] = v1Settings.MaxCheckpointRecordsToKeep
-	s.Values[MaxCheckpointRecordsToReadKey] = v1Settings.MaxCheckpointRecordsToRead
+	s.Values[MaxCheckpointRecordsToKeepTraditionalKey] = v1Settings.MaxCheckpointRecordsToKeepTraditional
+	s.Values[MaxCheckpointRecordsToReadTraditionalKey] = v1Settings.MaxCheckpointRecordsToReadTraditional
+	s.Values[MaxCheckpointRecordsToKeepVariableVBKey] = v1Settings.MaxCheckpointRecordsToKeepVariableVB
+	s.Values[MaxCheckpointRecordsToReadVariableVBKey] = v1Settings.MaxCheckpointRecordsToReadVariableVB
 
 	return s
 }
@@ -693,14 +704,20 @@ type V1InternalSettings struct {
 	// timeout for tcp read operation in capi (in seconds)
 	CapiReadTimeout int
 
-	// the maximum number of checkpoint records to write/keep in the checkpoint doc
-	MaxCheckpointRecordsToKeep int
+	// the maximum number of checkpoint records to write/keep in the checkpoint doc - for traditional replications
+	MaxCheckpointRecordsToKeepTraditional int
 
-	// the maximum number of checkpoint records to read from the checkpoint doc
-	MaxCheckpointRecordsToRead int
+	// the maximum number of checkpoint records to read from the checkpoint doc - for traditional replications
+	MaxCheckpointRecordsToReadTraditional int
 
 	// revision number to be used by metadata service. not included in json
 	Revision interface{}
+
+	// the maximum number of checkpoint records to write/keep in the checkpoint doc - for variableVB replications
+	MaxCheckpointRecordsToKeepVariableVB int
+
+	// the maximum number of checkpoint records to read from the checkpoint doc - for variableVB replications
+	MaxCheckpointRecordsToReadVariableVB int
 }
 
 // after upgrade, old internal settings that did not exist in before-upgrade version will take 0 value
@@ -739,10 +756,16 @@ func (os *V1InternalSettings) HandleUpgrade() {
 	if os.CapiReadTimeout == 0 {
 		os.CapiReadTimeout = CapiReadTimeoutConfig.defaultValue.(int)
 	}
-	if os.MaxCheckpointRecordsToKeep == 0 {
-		os.MaxCheckpointRecordsToKeep = MaxCheckpointRecordsToKeepConfig.defaultValue.(int)
+	if os.MaxCheckpointRecordsToKeepTraditional == 0 {
+		os.MaxCheckpointRecordsToKeepTraditional = MaxCheckpointRecordsToKeepTraditionalConfig.defaultValue.(int)
 	}
-	if os.MaxCheckpointRecordsToRead == 0 {
-		os.MaxCheckpointRecordsToRead = MaxCheckpointRecordsToReadConfig.defaultValue.(int)
+	if os.MaxCheckpointRecordsToReadTraditional == 0 {
+		os.MaxCheckpointRecordsToReadTraditional = MaxCheckpointRecordsToReadTraditionalConfig.defaultValue.(int)
+	}
+	if os.MaxCheckpointRecordsToKeepVariableVB == 0 {
+		os.MaxCheckpointRecordsToKeepVariableVB = MaxCheckpointRecordsToKeepVariableVBConfig.defaultValue.(int)
+	}
+	if os.MaxCheckpointRecordsToReadVariableVB == 0 {
+		os.MaxCheckpointRecordsToReadVariableVB = MaxCheckpointRecordsToReadVariableVBConfig.defaultValue.(int)
 	}
 }

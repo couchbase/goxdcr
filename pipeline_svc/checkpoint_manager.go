@@ -3574,7 +3574,7 @@ func findVbsThatNeedTargetFailoverLogs(filteredMaps []metadata.VBsCkptsDocMap) [
 			continue
 		}
 		for vbno, doc := range filteredMap {
-			if len(doc.Checkpoint_records) > base.MaxCheckpointRecordsToKeep {
+			if len(doc.Checkpoint_records) > doc.GetMaxCkptRecordsToKeep() {
 				//We need to further filter down the checkpoints - may need filtering using target
 				dedupMap[vbno] = true
 			}
@@ -3757,8 +3757,8 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 		sort.Sort(combinedRecords)
 
 		// Trim to keep the top
-		if len(combinedRecords) > base.MaxCheckpointRecordsToKeep {
-			combinedRecords = combinedRecords[:base.MaxCheckpointRecordsToKeep]
+		if len(combinedRecords) > ckptDoc.GetMaxCkptRecordsToKeep() {
+			combinedRecords = combinedRecords[:ckptDoc.GetMaxCkptRecordsToKeep()]
 		}
 
 		ckptDoc.Checkpoint_records = combinedRecords.ToRegularList()
