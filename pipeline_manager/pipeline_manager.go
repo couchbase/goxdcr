@@ -458,6 +458,15 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		return errMap
 	}
 
+	// Set the internal ID in rep_status
+	// This is to ensure that the rep_status is properly cleaned up during the process of spec deletion and recreation
+	// regardless of whether there were errors in StartPipeline
+	err = rep_status.SetInternalId(topic)
+	if err != nil {
+		errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = err
+		return errMap
+	}
+
 	// validate the pipeline before starting it
 	err = pipelineMgr.validatePipeline(topic)
 	if err != nil {
@@ -689,6 +698,8 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 		for _, poolName := range pools {
 			base.ConnPoolMgr().RemovePool(poolName)
 		}
+	} else if spec != nil && rep_status.GetSpecInternalId() == "" {
+		pipelineMgr.logger.Warnf("Found replication status to have an empty spec Internal Id for %v", replId)
 	}
 
 	return errMap

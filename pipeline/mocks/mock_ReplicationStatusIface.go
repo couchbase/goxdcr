@@ -1116,6 +1116,52 @@ func (_c *ReplicationStatusIface_SetCustomSettings_Call) RunAndReturn(run func(m
 	return _c
 }
 
+// SetInternalId provides a mock function with given fields: specId
+func (_m *ReplicationStatusIface) SetInternalId(specId string) error {
+	ret := _m.Called(specId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetInternalId")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(specId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ReplicationStatusIface_SetInternalId_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetInternalId'
+type ReplicationStatusIface_SetInternalId_Call struct {
+	*mock.Call
+}
+
+// SetInternalId is a helper method to define mock.On call
+//   - specId string
+func (_e *ReplicationStatusIface_Expecter) SetInternalId(specId interface{}) *ReplicationStatusIface_SetInternalId_Call {
+	return &ReplicationStatusIface_SetInternalId_Call{Call: _e.mock.On("SetInternalId", specId)}
+}
+
+func (_c *ReplicationStatusIface_SetInternalId_Call) Run(run func(specId string)) *ReplicationStatusIface_SetInternalId_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *ReplicationStatusIface_SetInternalId_Call) Return(_a0 error) *ReplicationStatusIface_SetInternalId_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ReplicationStatusIface_SetInternalId_Call) RunAndReturn(run func(string) error) *ReplicationStatusIface_SetInternalId_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetOverviewStats provides a mock function with given fields: stats, pipelineType
 func (_m *ReplicationStatusIface) SetOverviewStats(stats *expvar.Map, pipelineType common.PipelineType) {
 	_m.Called(stats, pipelineType)
