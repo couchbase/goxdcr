@@ -1,0 +1,284 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B1" "B4" "B0")
+declare -a cluster2BucketsArr
+cluster2BucketsArr=("B2" "B5")
+declare -a cluster3BucketsArr
+cluster3BucketsArr=("B3" "B6")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]} ["C3"]=${cluster3BucketsArr[@]})
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty_1024=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+declare -A BucketProperty_128=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=128)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty_1024
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty_128 # conflict bucket for C1.B1
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty_128
+insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty_1024 # conflict bucket for C2.B2
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty_128
+insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty_1024 # conflict bucket for C3.B3
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty_128  # bucket to test conflict records are not replicated
+
+conflictLoggingMap1="{\"bucket\":\"B4\",\"collection\":\"_default._default\",\"loggingRules\":{\"S1.col1\":{\"bucket\":\"B4\",\"collection\":\"S1.col1\"}}}"
+declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true)
+
+conflictLoggingMap2="{\"bucket\":\"B5\",\"collection\":\"_default._default\",\"loggingRules\":{\"S1.col1\":{\"bucket\":\"B5\",\"collection\":\"S1.col1\"}}}"
+declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true)
+
+conflictLoggingMap3="{\"bucket\":\"B6\",\"collection\":\"_default._default\",\"loggingRules\":{\"S1.col1\":{\"bucket\":\"B6\",\"collection\":\"S1.col1\"}}}"
+declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true)
+
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true) # replication to test conflict records are not replicated
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]} ["B3"]=${scope1Arr[@]} ["B4"]=${scope1Arr[@]} ["B5"]=${scope1Arr[@]} ["B6"]=${scope1Arr[@]} ["B0"]=${scope1Arr[@]})
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function waitForChangesLeft0ForTopology {
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C1" "B1" "C3" "B3"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C2" "B2" "C3" "B3"
+	waitForChangesLeft0 "C3" "B3" "C1" "B1"
+	waitForChangesLeft0 "C3" "B3" "C2" "B2"
+	waitForChangesLeft0 "C1" "B4" "C1" "B0"
+}
+
+function verifyPromStats {
+	numItems=$1
+
+	# verify no data-corruption
+	validateBinaryFilteredIs0 "C1" "B1" "B2"
+	validateBinaryFilteredIs0 "C1" "B1" "B3"
+	validateBinaryFilteredIs0 "C2" "B2" "B1"
+	validateBinaryFilteredIs0 "C2" "B2" "B3"
+	validateBinaryFilteredIs0 "C3" "B3" "B1"
+	validateBinaryFilteredIs0 "C3" "B3" "B2"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B1" "B2"
+	validateDatapoolFailIs0 "C1" "B1" "B3"
+	validateDatapoolFailIs0 "C2" "B2" "B1"
+	validateDatapoolFailIs0 "C2" "B2" "B3"
+	validateDatapoolFailIs0 "C3" "B3" "B1"
+	validateDatapoolFailIs0 "C3" "B3" "B2"
+
+	# verify no unknown clog others
+	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B2"
+	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B3"
+	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B1"
+	validatePrometheusStatsCLogOtherErrors0 "C2" "B2" "B3"
+	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B1"
+	validatePrometheusStatsCLogOtherErrors0 "C3" "B3" "B2"
+
+	# verify that conflict records are not replicated
+	checkItemCnt "C1" "B0" 0
+
+	checkItemCnt "C1" "B1" $numItems
+	checkItemCnt "C2" "B2" $numItems
+	checkItemCnt "C3" "B3" $numItems
+
+	validateBinaryFilteredIs0 "C1" "B4" "B0"
+	validateDatapoolFailIs0 "C1" "B4" "B0"
+}
+
+function runDataLoad {
+	numItems=10000
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
+
+	# the way this test creates conflicts is by having docs of the same keys on both buckets.
+	# this is hackish and doesn't represent a true conflict.
+	echo runCbWorkloadGenBucket _default._default "C1" "B1" $numItems $1
+	runCbWorkloadGenBucket "C1" "B1" $numItems $1
+
+	echo runCbWorkloadGenBucket _default._default "C2" "B2" $numItems "conflict"
+	runCbWorkloadGenBucket "C2" "B2" $numItems $1
+
+	echo runCbWorkloadGenBucket _default._default "C3" "B3" $numItems $1
+	runCbWorkloadGenBucket "C3" "B3" $numItems $1
+
+	echo runCbWorkloadGenCollection "C2" "B2" "S1" "col1" $1
+	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "" $1
+
+	echo runCbWorkloadGenCollection "C1" "B1" "S1" "col1" $1
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "" $1
+
+	echo runCbWorkloadGenCollection "C3" "B3" "S1" "col1" $1
+	runCbWorkloadGenCollection "C3" "B3" "S1" "col1" "" $1
+}
+
+function testReplicationWithConflictLogging {
+	pauseReplication "C1" "B1" "C2" "B2"
+	pauseReplication "C2" "B2" "C1" "B1"
+	pauseReplication "C1" "B1" "C3" "B3"
+	pauseReplication "C3" "B3" "C1" "B1"
+	pauseReplication "C2" "B2" "C3" "B3"
+	pauseReplication "C3" "B3" "C2" "B2"
+	sleep 10
+
+	runDataLoad $1
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	resumeReplication "C2" "B2" "C1" "B1"
+	resumeReplication "C1" "B1" "C3" "B3"
+	resumeReplication "C3" "B3" "C1" "B1"
+	resumeReplication "C2" "B2" "C3" "B3"
+	resumeReplication "C3" "B3" "C2" "B2"
+
+	sleepTime=30
+	echo "Sleep $sleepTime seconds to wait for replication to finish"
+	sleep $sleepTime
+
+	waitForChangesLeft0ForTopology
+
+	grepForAbnormalities
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running conflict logging + variableVB + mobile test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C1" "C3"
+	createRemoteClusterReference "C2" "C1"
+	createRemoteClusterReference "C2" "C3"
+	createRemoteClusterReference "C3" "C1"
+	createRemoteClusterReference "C3" "C2"
+	createRemoteClusterReference "C1" "C1"
+
+	sleep 2
+
+	echo "Setting enableCrossClusterVersioning to true"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+	setCrossClusterVersioningForBucket "C3" "B3"
+
+	echo "Replication C1.B1 -> C2.B2"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties1
+	echo "Replication C1.B1 -> C3.B3"
+	createBucketReplication "C1" "B1" "C3" "B3" BucketReplProperties1
+	echo "Replication C2.B2 -> C1.B1"
+	createBucketReplication "C2" "B2" "C1" "B1" BucketReplProperties2
+	echo "Replication C2.B2 -> C3.B3"
+	createBucketReplication "C2" "B2" "C3" "B3" BucketReplProperties2
+	echo "Replication C3.B3 -> C1.B1"
+	createBucketReplication "C3" "B3" "C1" "B1" BucketReplProperties3
+	echo "Replication C3.B3 -> C2.B2"
+	createBucketReplication "C3" "B3" "C2" "B2" BucketReplProperties3
+	echo "Replication C1.B4 -> C1.B0"
+
+	# replication to verify that conflict records are not replicated.
+	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
+
+	enableMobileImportSimIfPresent "C1" "B1"
+	enableMobileImportSimIfPresent "C2" "B2"
+	enableMobileImportSimIfPresent "C3" "B3"
+
+	# Only ECCV on
+	testReplicationWithConflictLogging "conflictX"
+
+	verifyPromStats $(($numItems * 2))
+
+	# Turn on mobile and CLogging
+	echo "turn on mobile and conflict logging"
+	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Active"
+	setReplicationSettings "C2" "B2" "C1" "B1" "mobile=Active"
+	setReplicationSettings "C1" "B1" "C3" "B3" "mobile=Active"
+	setReplicationSettings "C3" "B3" "C1" "B1" "mobile=Active"
+	setReplicationSettings "C2" "B2" "C3" "B3" "mobile=Active"
+	setReplicationSettings "C3" "B3" "C2" "B2" "mobile=Active"
+	setReplicationSettings "C1" "B1" "C2" "B2" "conflictLogging=$conflictLoggingMap1"
+	setReplicationSettings "C2" "B2" "C1" "B1" "conflictLogging=$conflictLoggingMap2"
+	setReplicationSettings "C1" "B1" "C3" "B3" "conflictLogging=$conflictLoggingMap1"
+	setReplicationSettings "C3" "B3" "C1" "B1" "conflictLogging=$conflictLoggingMap3"
+	setReplicationSettings "C2" "B2" "C3" "B3" "conflictLogging=$conflictLoggingMap2"
+	setReplicationSettings "C3" "B3" "C2" "B2" "conflictLogging=$conflictLoggingMap3"
+	echo "sleep 10s for pipeline to restart"
+	sleep 10
+	NumConflictDocsC1=0
+	NumConflictDocsC2=0
+	NumConflictDocsC3=0
+	testReplicationWithConflictLogging "conflictY"
+	numConflictDocsC1=$(getBucketItemCount "C1" "B4")
+	numConflictDocsC2=$(getBucketItemCount "C2" "B5")
+	numConflictDocsC3=$(getBucketItemCount "C3" "B6")
+	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2; numConflictDocsC3=$numConflictDocsC3"
+
+	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)) || (($numConflictDocsC3 <= $NumConflictDocsC3)); then
+		echo "conflicts were not written?"
+		exit 1
+	fi
+
+	NumConflictDocsC1=$numConflictDocsC1
+	NumConflictDocsC2=$numConflictDocsC2
+	NumConflictDocsC3=$numConflictDocsC3
+
+	verifyPromStats $(($numItems * 4))
+	validatePrometheusStatsDocsFilteredNon0 "C1" "B4" "B0"
+
+	# Turn off mobile and CLogging
+	echo "turn off mobile and conflict logging"
+	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Off"
+	setReplicationSettings "C2" "B2" "C1" "B1" "mobile=Off"
+	setReplicationSettings "C1" "B1" "C3" "B3" "mobile=Off"
+	setReplicationSettings "C3" "B3" "C1" "B1" "mobile=Off"
+	setReplicationSettings "C2" "B2" "C3" "B3" "mobile=Off"
+	setReplicationSettings "C3" "B3" "C2" "B2" "mobile=Off"
+	setReplicationSettings "C1" "B1" "C2" "B2" "conflictLogging={}"
+	setReplicationSettings "C2" "B2" "C1" "B1" "conflictLogging={}"
+	setReplicationSettings "C1" "B1" "C3" "B3" "conflictLogging={}"
+	setReplicationSettings "C3" "B3" "C1" "B1" "conflictLogging={}"
+	setReplicationSettings "C2" "B2" "C3" "B3" "conflictLogging={}"
+	setReplicationSettings "C3" "B3" "C2" "B2" "conflictLogging={}"
+	echo "sleep 10s for pipeline to restart"
+	sleep 10
+
+	testReplicationWithConflictLogging "conflictZ"
+	verifyPromStats $(($numItems * 6))
+
+	numConflictDocsC1=$(getBucketItemCount "C1" "B4")
+	numConflictDocsC2=$(getBucketItemCount "C2" "B5")
+	numConflictDocsC3=$(getBucketItemCount "C3" "B6")
+	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2; numConflictDocsC3=$numConflictDocsC3"
+
+	if !(( $numConflictDocsC1 == $NumConflictDocsC1 )) || !(( $numConflictDocsC2 == $NumConflictDocsC2 )) || !(( $numConflictDocsC3 == $NumConflictDocsC3 )); then
+		echo "conflicts were not written?"
+		exit 1
+	fi
+
+	echo "============================================================================"
+	echo "Running conflict logging + variableVB + mobile test case passed"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

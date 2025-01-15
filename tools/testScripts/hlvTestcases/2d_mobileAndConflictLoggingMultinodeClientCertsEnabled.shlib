@@ -275,6 +275,12 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
+	# Clear the logs at the beginning.
+	# This is necessary because we later use 'grep' to search for specific log lines and count their occurrences.
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
 	runReplicationResume

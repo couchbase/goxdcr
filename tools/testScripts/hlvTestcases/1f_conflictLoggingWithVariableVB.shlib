@@ -1,4 +1,4 @@
-# Copyright 2024-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -19,14 +19,15 @@ CLUSTER_SETUP_DONE_MAP=()
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
-insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
-insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty # conflict bucket for C1.B1
-insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
-insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty # conflict bucket for C2.B2
-insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
-insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty # conflict bucket for C3.B3
-insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty # bucket to test conflict records are not replicated
+declare -A BucketProperty_1024=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+declare -A BucketProperty_128=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=128)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty_1024
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty_128 # conflict bucket for C1.B1
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty_128
+insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty_1024 # conflict bucket for C2.B2
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty_128
+insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty_1024 # conflict bucket for C3.B3
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty_128  # bucket to test conflict records are not replicated
 
 conflictLoggingMap1="{\"bucket\":\"B4\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B4\", \"collection\": \"S1.col1\"}}}"
 declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap1)
@@ -157,7 +158,7 @@ function testReplicationWithConflictLogging {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running conflict logging test case"
+	echo "Running conflict logging + variableVB test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -184,7 +185,7 @@ function runTestCase {
 	testReplicationWithConflictLogging
 
 	echo "============================================================================"
-	echo "Running conflict logging test case passed"
+	echo "Running conflict logging + variableVB test case passed"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets
