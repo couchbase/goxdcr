@@ -766,7 +766,10 @@ func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
 		t.DocsSentWithSubdocDeleteCnt == other.DocsSentWithSubdocDeleteCnt &&
 		t.DocsSentWithSubdocSetCnt == other.DocsSentWithSubdocSetCnt &&
 		t.DocsSentWithPoisonedCasErrorMode == other.DocsSentWithPoisonedCasErrorMode &&
-		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode
+		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode &&
+		t.TrueConflictsDetected == other.TrueConflictsDetected &&
+		t.CLogHibernatedCnt == other.CLogHibernatedCnt &&
+		t.GetDocsCasChangedCnt == other.GetDocsCasChangedCnt
 }
 
 func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
@@ -811,6 +814,18 @@ func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
 	docsSentWithPoisonedCasReplace, ok := fieldMap[DocsSentWithPoisonedCasReplaceMode]
 	if ok {
 		t.DocsSentWithPoisonedCasReplaceMode = uint64(docsSentWithPoisonedCasReplace.(float64))
+	}
+	trueConflictsDetected, ok := fieldMap[TrueConflictsDetected]
+	if ok {
+		t.TrueConflictsDetected = uint64(trueConflictsDetected.(float64))
+	}
+	clogHibernatedCnt, ok := fieldMap[CLogHibernatedCnt]
+	if ok {
+		t.CLogHibernatedCnt = uint64(clogHibernatedCnt.(float64))
+	}
+	getDocsCasChangedCnt, ok := fieldMap[GetDocsCasChangedCnt]
+	if ok {
+		t.GetDocsCasChangedCnt = uint64(getDocsCasChangedCnt.(float64))
 	}
 
 	return nil
