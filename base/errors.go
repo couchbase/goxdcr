@@ -64,7 +64,7 @@ var (
 	ErrorTargetNoAltHostName                     = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
 	ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
 	ErrorPipelineRestartDueToEncryptionChange    = errors.New("Pipeline needs to update due to cluster encryption level change")
-	ErrorRemoteClusterFullEncryptionRequired     = errors.New("Cluster encryption level is strict. Remote cluster reference must use full encryption.")
+	ErrorRemoteClusterFullEncryptionRequired     = errors.New("Current cluster encryption level requires the remote-cluster-reference to be of 'Full' encryption-type.")
 	ErrorNotFound                                = errors.New("Specified entity is not found")
 	ErrorTargetCollectionsNotSupported           = errors.New("Target cluster does not support collections")
 	ErrorSourceCollectionsNotSupported           = errors.New("Source cluster collections critical error")

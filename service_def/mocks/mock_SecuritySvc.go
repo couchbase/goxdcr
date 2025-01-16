@@ -210,6 +210,51 @@ func (_c *SecuritySvc_GetClientCertAndKeyPair_Call) RunAndReturn(run func() []tl
 	return _c
 }
 
+// IsClusterEncryptionLevelAll provides a mock function with given fields:
+func (_m *SecuritySvc) IsClusterEncryptionLevelAll() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsClusterEncryptionLevelAll")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// SecuritySvc_IsClusterEncryptionLevelAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsClusterEncryptionLevelAll'
+type SecuritySvc_IsClusterEncryptionLevelAll_Call struct {
+	*mock.Call
+}
+
+// IsClusterEncryptionLevelAll is a helper method to define mock.On call
+func (_e *SecuritySvc_Expecter) IsClusterEncryptionLevelAll() *SecuritySvc_IsClusterEncryptionLevelAll_Call {
+	return &SecuritySvc_IsClusterEncryptionLevelAll_Call{Call: _e.mock.On("IsClusterEncryptionLevelAll")}
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionLevelAll_Call) Run(run func()) *SecuritySvc_IsClusterEncryptionLevelAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionLevelAll_Call) Return(_a0 bool) *SecuritySvc_IsClusterEncryptionLevelAll_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionLevelAll_Call) RunAndReturn(run func() bool) *SecuritySvc_IsClusterEncryptionLevelAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsClusterEncryptionLevelStrict provides a mock function with given fields:
 func (_m *SecuritySvc) IsClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
@@ -251,6 +296,51 @@ func (_c *SecuritySvc_IsClusterEncryptionLevelStrict_Call) Return(_a0 bool) *Sec
 }
 
 func (_c *SecuritySvc_IsClusterEncryptionLevelStrict_Call) RunAndReturn(run func() bool) *SecuritySvc_IsClusterEncryptionLevelStrict_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsClusterEncryptionStrictOrAll provides a mock function with given fields:
+func (_m *SecuritySvc) IsClusterEncryptionStrictOrAll() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsClusterEncryptionStrictOrAll")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// SecuritySvc_IsClusterEncryptionStrictOrAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsClusterEncryptionStrictOrAll'
+type SecuritySvc_IsClusterEncryptionStrictOrAll_Call struct {
+	*mock.Call
+}
+
+// IsClusterEncryptionStrictOrAll is a helper method to define mock.On call
+func (_e *SecuritySvc_Expecter) IsClusterEncryptionStrictOrAll() *SecuritySvc_IsClusterEncryptionStrictOrAll_Call {
+	return &SecuritySvc_IsClusterEncryptionStrictOrAll_Call{Call: _e.mock.On("IsClusterEncryptionStrictOrAll")}
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionStrictOrAll_Call) Run(run func()) *SecuritySvc_IsClusterEncryptionStrictOrAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionStrictOrAll_Call) Return(_a0 bool) *SecuritySvc_IsClusterEncryptionStrictOrAll_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SecuritySvc_IsClusterEncryptionStrictOrAll_Call) RunAndReturn(run func() bool) *SecuritySvc_IsClusterEncryptionStrictOrAll_Call {
 	_c.Call.Return(run)
 	return _c
 }

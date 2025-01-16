@@ -310,6 +310,51 @@ func (_c *XDCRCompTopologySvc_IsMyClusterDeveloperPreview_Call) RunAndReturn(run
 	return _c
 }
 
+// IsMyClusterEncryptionLevelAll provides a mock function with given fields:
+func (_m *XDCRCompTopologySvc) IsMyClusterEncryptionLevelAll() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterEncryptionLevelAll")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsMyClusterEncryptionLevelAll'
+type XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call struct {
+	*mock.Call
+}
+
+// IsMyClusterEncryptionLevelAll is a helper method to define mock.On call
+func (_e *XDCRCompTopologySvc_Expecter) IsMyClusterEncryptionLevelAll() *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call {
+	return &XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call{Call: _e.mock.On("IsMyClusterEncryptionLevelAll")}
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call) Run(run func()) *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call) Return(_a0 bool) *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call) RunAndReturn(run func() bool) *XDCRCompTopologySvc_IsMyClusterEncryptionLevelAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsMyClusterEncryptionLevelStrict provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) IsMyClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
@@ -351,6 +396,51 @@ func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelStrict_Call) Return(_a0 
 }
 
 func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelStrict_Call) RunAndReturn(run func() bool) *XDCRCompTopologySvc_IsMyClusterEncryptionLevelStrict_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsMyClusterEncryptionStrictOrAll provides a mock function with given fields:
+func (_m *XDCRCompTopologySvc) IsMyClusterEncryptionStrictOrAll() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterEncryptionStrictOrAll")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsMyClusterEncryptionStrictOrAll'
+type XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call struct {
+	*mock.Call
+}
+
+// IsMyClusterEncryptionStrictOrAll is a helper method to define mock.On call
+func (_e *XDCRCompTopologySvc_Expecter) IsMyClusterEncryptionStrictOrAll() *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call {
+	return &XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call{Call: _e.mock.On("IsMyClusterEncryptionStrictOrAll")}
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call) Run(run func()) *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call) Return(_a0 bool) *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call) RunAndReturn(run func() bool) *XDCRCompTopologySvc_IsMyClusterEncryptionStrictOrAll_Call {
 	_c.Call.Return(run)
 	return _c
 }

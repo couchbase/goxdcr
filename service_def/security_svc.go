@@ -14,12 +14,16 @@ import (
 )
 
 type EncryptionSettingIface interface {
-	IsStrictEncryption() bool
+	IsEncryptionLevelStrict() bool
+	IsEncryptionLevelAll() bool
+	IsEncryptionLevelStrictOrAll() bool
 }
 
 type SecuritySvc interface {
 	Start() error
 	IsClusterEncryptionLevelStrict() bool
+	IsClusterEncryptionLevelAll() bool
+	IsClusterEncryptionStrictOrAll() bool
 	EncryptData() bool
 	GetCACertificates() []byte
 	GetCaPool() *x509.CertPool

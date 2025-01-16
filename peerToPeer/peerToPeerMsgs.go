@@ -409,7 +409,8 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		var certificates []byte
 		var clientCertKeyPair []tls.Certificate
 		authMech := base.HttpAuthMechPlain
-		if securitySvc.IsClusterEncryptionLevelStrict() {
+
+		if securitySvc.IsClusterEncryptionStrictOrAll() {
 			authMech = base.HttpAuthMechHttps
 			certificates = securitySvc.GetCACertificates()
 			if len(certificates) == 0 {
@@ -418,13 +419,12 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 					HttpStatusCode: http.StatusInternalServerError,
 				}, base.ErrorNilCertificateStrictMode
 			}
-		}
-		isMandatory, err := xdcrCompTopologySvc.ClientCertIsMandatory()
-		if err == nil && isMandatory {
-			// If n2n encryption is required and client cert is mandatory, then the traditional
-			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
-			// provided by the ns_server
-			clientCertKeyPair = securitySvc.GetClientCertAndKeyPair()
+
+			// If n2n encryption is "strict/all" and client cert is "mandatory", then the traditional cbauth
+			// username/pw "superuser" pairing will not work - and thus we must use clientCert and key provided by the ns_server
+			if isMandatory, _ := xdcrCompTopologySvc.ClientCertIsMandatory(); isMandatory {
+				clientCertKeyPair = securitySvc.GetClientCertAndKeyPair()
+			}
 		}
 
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,

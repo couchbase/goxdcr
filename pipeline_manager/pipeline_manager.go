@@ -322,18 +322,32 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 }
 
 func (pipelineMgr *PipelineManager) HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface) {
-	if new.IsStrictEncryption() == false || old.IsStrictEncryption() == new.IsStrictEncryption() {
+	if old.IsEncryptionLevelStrict() || !new.IsEncryptionLevelStrictOrAll() ||
+		(old.IsEncryptionLevelAll() && new.IsEncryptionLevelAll()) {
 		return
 	}
-	// Cluster encryption level has changed to strict. All pipelines not full encryption cannot run
+
+	// Cluster encryption level has changed to 'all' or 'strict'. Pipelines may need full-encryption to be allowed to run.
 	refList, err := pipelineMgr.remote_cluster_svc.RemoteClusters()
 	if err != nil {
 		pipelineMgr.logger.Errorf("Cannot get list of remote clusters. err=%v", err)
 		return
 	}
+
+	localClusterUUID, err := pipelineMgr.xdcr_topology_svc.MyClusterUUID()
+	if err != nil {
+		pipelineMgr.logger.Errorf("failed to handle cluster encryption level change: %v", err)
+		return
+	}
+
 	for _, ref := range refList {
-		if ref.DemandEncryption() == true && ref.EncryptionType() == metadata.EncryptionType_Full {
-			// Full encryption remote ref works with strict cluster encryption
+		if new.IsEncryptionLevelAll() && localClusterUUID != ref.Uuid() {
+			// if level is 'all', ignore inter-cluster references
+			continue
+		}
+
+		if ref.DemandEncryption() && ref.EncryptionType() == metadata.EncryptionType_Full {
+			// ignore references which are already of 'full' encryption type
 			continue
 		}
 

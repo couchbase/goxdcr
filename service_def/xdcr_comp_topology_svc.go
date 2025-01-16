@@ -31,7 +31,7 @@ type XDCRCompTopologySvc interface {
 	// the address, ip:couchbaseAdminport, of the host that this xdcr comp is running on
 	// note that ip is the public ip of the host, which may not be the same as what MyHost() returns.
 	// this is used as local cluster address by audit
-	// If cluster encryption mode is strict, then the host address will contain a TLS port
+	// If clusterEncryptionLevel is 'strict' or 'all', then the host address will contain a TLS port
 	MyHostAddr() (string, error)
 
 	//the address, ip:memcachedport, of the kv that this xdcr comp is running on
@@ -67,7 +67,10 @@ type XDCRCompTopologySvc interface {
 	IsIpv6Blocked() bool
 
 	IsMyClusterDeveloperPreview() bool
+
 	IsMyClusterEncryptionLevelStrict() bool
+	IsMyClusterEncryptionLevelAll() bool
+	IsMyClusterEncryptionStrictOrAll() bool
 
 	// get local host name
 	GetLocalHostName() string
@@ -78,7 +81,7 @@ type XDCRCompTopologySvc interface {
 	XDCRCompToKVNodeMap() (map[string][]string, error)
 
 	// Returns a list of peer admin addresses
-	// If security requires strict mode, the address returned will contain a TLS port
+	// If security requires 'strict' or 'all' clusterEncryptionLevel, the address returned will contain a TLS port
 	PeerNodesAdminAddrs() ([]string, error)
 
 	// implements base.ClusterConnectionInfoProvider

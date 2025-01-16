@@ -74,6 +74,7 @@ func setupBoilerPlateRCS() (*service_def.UILogSvc,
 	utilitiesMock.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogRemoteCluster", mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyClusterUUID").Return("myUUID", nil)
+	xdcrTopologyMock.On("IsMyClusterEncryptionLevelAll").Return(false)
 
 	remoteClusterSvc, _ := NewRemoteClusterService(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		log.DefaultLoggerContext, utilitiesMock)

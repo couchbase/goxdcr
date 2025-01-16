@@ -75,6 +75,7 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 	bucketSvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(subscribeErr)
 
 	securitySvc.On("IsClusterEncryptionLevelStrict").Return(false)
+	securitySvc.On("IsClusterEncryptionStrictOrAll").Return(false)
 
 	collectionsManifestSvc.On("SetPeerManifestsGetter", mock.Anything).Return(nil)
 

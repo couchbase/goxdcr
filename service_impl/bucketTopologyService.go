@@ -225,10 +225,10 @@ func (b *BucketTopologyService) getStreamApiCallback(spec *metadata.ReplicationS
 	}
 }
 
-// When cluster uses strict encryption, we need to use loopback address for local server
+// When clusterEncryptionLevel is set to 'strict', we need to use loopback address for local server
 // and set the key in serverVBMap accordingly
 func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap *base.KvVBMapType, bucketInfo map[string]interface{}) error {
-	if b.xdcrCompTopologySvc.IsMyClusterEncryptionLevelStrict() == false {
+	if !b.xdcrCompTopologySvc.IsMyClusterEncryptionStrictOrAll() {
 		return nil
 	}
 	loopback := base.LocalHostName
@@ -286,7 +286,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		if err != nil {
 			return fmt.Errorf("%v Failed to get nodesList from bucketInfo err=%v", spec.SourceBucketName, err)
 		}
-		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
+		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionStrictOrAll(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 		if err != nil {
 			if err != watcher.replicaLastWarnErr {
 				watcher.replicaLastWarnErr = err

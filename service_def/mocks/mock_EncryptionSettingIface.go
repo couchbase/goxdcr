@@ -17,12 +17,12 @@ func (_m *EncryptionSettingIface) EXPECT() *EncryptionSettingIface_Expecter {
 	return &EncryptionSettingIface_Expecter{mock: &_m.Mock}
 }
 
-// IsStrictEncryption provides a mock function with given fields:
-func (_m *EncryptionSettingIface) IsStrictEncryption() bool {
+// IsEncryptionLevelAll provides a mock function with given fields:
+func (_m *EncryptionSettingIface) IsEncryptionLevelAll() bool {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for IsStrictEncryption")
+		panic("no return value specified for IsEncryptionLevelAll")
 	}
 
 	var r0 bool
@@ -35,29 +35,119 @@ func (_m *EncryptionSettingIface) IsStrictEncryption() bool {
 	return r0
 }
 
-// EncryptionSettingIface_IsStrictEncryption_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsStrictEncryption'
-type EncryptionSettingIface_IsStrictEncryption_Call struct {
+// EncryptionSettingIface_IsEncryptionLevelAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsEncryptionLevelAll'
+type EncryptionSettingIface_IsEncryptionLevelAll_Call struct {
 	*mock.Call
 }
 
-// IsStrictEncryption is a helper method to define mock.On call
-func (_e *EncryptionSettingIface_Expecter) IsStrictEncryption() *EncryptionSettingIface_IsStrictEncryption_Call {
-	return &EncryptionSettingIface_IsStrictEncryption_Call{Call: _e.mock.On("IsStrictEncryption")}
+// IsEncryptionLevelAll is a helper method to define mock.On call
+func (_e *EncryptionSettingIface_Expecter) IsEncryptionLevelAll() *EncryptionSettingIface_IsEncryptionLevelAll_Call {
+	return &EncryptionSettingIface_IsEncryptionLevelAll_Call{Call: _e.mock.On("IsEncryptionLevelAll")}
 }
 
-func (_c *EncryptionSettingIface_IsStrictEncryption_Call) Run(run func()) *EncryptionSettingIface_IsStrictEncryption_Call {
+func (_c *EncryptionSettingIface_IsEncryptionLevelAll_Call) Run(run func()) *EncryptionSettingIface_IsEncryptionLevelAll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *EncryptionSettingIface_IsStrictEncryption_Call) Return(_a0 bool) *EncryptionSettingIface_IsStrictEncryption_Call {
+func (_c *EncryptionSettingIface_IsEncryptionLevelAll_Call) Return(_a0 bool) *EncryptionSettingIface_IsEncryptionLevelAll_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *EncryptionSettingIface_IsStrictEncryption_Call) RunAndReturn(run func() bool) *EncryptionSettingIface_IsStrictEncryption_Call {
+func (_c *EncryptionSettingIface_IsEncryptionLevelAll_Call) RunAndReturn(run func() bool) *EncryptionSettingIface_IsEncryptionLevelAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsEncryptionLevelStrict provides a mock function with given fields:
+func (_m *EncryptionSettingIface) IsEncryptionLevelStrict() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsEncryptionLevelStrict")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// EncryptionSettingIface_IsEncryptionLevelStrict_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsEncryptionLevelStrict'
+type EncryptionSettingIface_IsEncryptionLevelStrict_Call struct {
+	*mock.Call
+}
+
+// IsEncryptionLevelStrict is a helper method to define mock.On call
+func (_e *EncryptionSettingIface_Expecter) IsEncryptionLevelStrict() *EncryptionSettingIface_IsEncryptionLevelStrict_Call {
+	return &EncryptionSettingIface_IsEncryptionLevelStrict_Call{Call: _e.mock.On("IsEncryptionLevelStrict")}
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrict_Call) Run(run func()) *EncryptionSettingIface_IsEncryptionLevelStrict_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrict_Call) Return(_a0 bool) *EncryptionSettingIface_IsEncryptionLevelStrict_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrict_Call) RunAndReturn(run func() bool) *EncryptionSettingIface_IsEncryptionLevelStrict_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsEncryptionLevelStrictOrAll provides a mock function with given fields:
+func (_m *EncryptionSettingIface) IsEncryptionLevelStrictOrAll() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsEncryptionLevelStrictOrAll")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsEncryptionLevelStrictOrAll'
+type EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call struct {
+	*mock.Call
+}
+
+// IsEncryptionLevelStrictOrAll is a helper method to define mock.On call
+func (_e *EncryptionSettingIface_Expecter) IsEncryptionLevelStrictOrAll() *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call {
+	return &EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call{Call: _e.mock.On("IsEncryptionLevelStrictOrAll")}
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call) Run(run func()) *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call) Return(_a0 bool) *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call) RunAndReturn(run func() bool) *EncryptionSettingIface_IsEncryptionLevelStrictOrAll_Call {
 	_c.Call.Return(run)
 	return _c
 }

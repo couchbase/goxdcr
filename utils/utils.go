@@ -3463,7 +3463,7 @@ func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap *map[uint16]uint64) error {
 // 2. Map of memcached Address -> ns_server address
 // 3. Number of replicas set for this bucket
 // 4. List of VBs that this node is not the owner, but is a member as a replica
-func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func(vbnos []uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error) {
+func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isClusterEncryptionStrictOrAll bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func(vbnos []uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error) {
 	nodesList, ok := bucketInfo[base.NodesKey].([]interface{})
 	if !ok {
 		return nil, nil, 0, nil, fmt.Errorf("Unable to get %v from bucketInfo", base.NodesKey)
@@ -3500,8 +3500,8 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 			return nil, nil, 0, nil, fmt.Errorf("Unable to find ports data structure")
 		}
 
-		parsedSecureAdminPort, secureAdminPortErr := u.GetHttpsMgtPortFromNodeInfo(nodeInfo)
-		if isStrictlySecure {
+		if isClusterEncryptionStrictOrAll {
+			parsedSecureAdminPort, secureAdminPortErr := u.GetHttpsMgtPortFromNodeInfo(nodeInfo)
 			if secureAdminPortErr != nil {
 				parsedSecureAdminPort = int(base.DefaultAdminPortSSL)
 			}

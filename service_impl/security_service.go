@@ -23,25 +23,34 @@ import (
 )
 
 type EncryptionSetting struct {
-	EncrytionEnabled bool
-	StrictEncryption bool // This disables non SSL port and remote cluster ref must use full encryption
-	CbAuthTlsConfig  cbauth.TLSConfig
-	caPool           *x509.CertPool // This is generated from the certificates field.
-	certificates     []byte         // This is the content of ca.pem
-	initializer      sync.Once
-	initializedCh    chan bool
+	EncryptionEnabled bool
+	StrictEncryption  bool // Corresponds to clusterEncryptionLevel "strict". This disables non-SSL ports and remote cluster ref must use "full" encryption.
+	AllEncryption     bool // Corresponds to clusterEncryptionLevel "all"
+	CbAuthTlsConfig   cbauth.TLSConfig
+	caPool            *x509.CertPool // This is generated from the certificates field.
+	certificates      []byte         // This is the content of ca.pem
+	initializer       sync.Once
+	initializedCh     chan bool
 
 	// used to contact other peer nodes when client certificate setting on this cluster
 	// is mandatory
 	clientCertKeyPair []tls.Certificate
 }
 
-func (setting *EncryptionSetting) IsStrictEncryption() bool {
+func (setting *EncryptionSetting) IsEncryptionLevelStrict() bool {
 	return setting.StrictEncryption
 }
 
+func (setting *EncryptionSetting) IsEncryptionLevelAll() bool {
+	return setting.AllEncryption
+}
+
+func (setting *EncryptionSetting) IsEncryptionLevelStrictOrAll() bool {
+	return setting.EncryptionEnabled
+}
+
 type SecurityService struct {
-	encrytionSetting        EncryptionSetting
+	encryptionSetting       EncryptionSetting
 	securityChangeCallbacks map[string]service_def.SecChangeCallback
 	settingMtx              sync.RWMutex
 	callbackMtx             sync.RWMutex
@@ -57,7 +66,7 @@ type SecurityService struct {
 
 func NewSecurityService(caFile string, logger_ctx *log.LoggerContext) *SecurityService {
 	return &SecurityService{
-		encrytionSetting: EncryptionSetting{
+		encryptionSetting: EncryptionSetting{
 			initializedCh: make(chan bool),
 		},
 		securityChangeCallbacks: make(map[string]service_def.SecChangeCallback),
@@ -87,42 +96,53 @@ func (sec *SecurityService) Start() error {
 func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting
+	return sec.encryptionSetting
 }
 
 func (sec *SecurityService) GetCaPool() *x509.CertPool {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.caPool
+	return sec.encryptionSetting.caPool
 }
 
 func (sec *SecurityService) GetCACertificates() []byte {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.certificates
+	return sec.encryptionSetting.certificates
 }
 
 func (sec *SecurityService) GetClientPassphrase() []byte {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.CbAuthTlsConfig.ClientPrivateKeyPassphrase
+	return sec.encryptionSetting.CbAuthTlsConfig.ClientPrivateKeyPassphrase
 }
 
 func (sec *SecurityService) IsClusterEncryptionLevelStrict() bool {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.IsStrictEncryption()
+	return sec.encryptionSetting.StrictEncryption
+}
+
+func (sec *SecurityService) IsClusterEncryptionLevelAll() bool {
+	<-sec.encryptionSetting.initializedCh
+	sec.settingMtx.RLock()
+	defer sec.settingMtx.RUnlock()
+	return sec.encryptionSetting.AllEncryption
+}
+
+func (sec *SecurityService) IsClusterEncryptionStrictOrAll() bool {
+	return sec.EncryptData() // based on ns_server's should_cluster_data_be_encrypted() method, see MB-42373
 }
 
 func (sec *SecurityService) EncryptData() bool {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.EncrytionEnabled
+	return sec.encryptionSetting.EncryptionEnabled
 }
 
 func (sec *SecurityService) refreshClusterEncryption() error {
@@ -134,9 +154,10 @@ func (sec *SecurityService) refreshClusterEncryption() error {
 
 	sec.settingMtx.Lock()
 	defer sec.settingMtx.Unlock()
-	sec.encrytionSetting.EncrytionEnabled = clusterSetting.EncryptData
-	sec.encrytionSetting.StrictEncryption = clusterSetting.DisableNonSSLPorts
-	sec.logger.Infof("Cluster Encryption is changed to enabled=%v, strict=%v", sec.encrytionSetting.EncrytionEnabled, sec.encrytionSetting.StrictEncryption)
+	sec.encryptionSetting.EncryptionEnabled = clusterSetting.EncryptData
+	sec.encryptionSetting.StrictEncryption = clusterSetting.DisableNonSSLPorts
+	sec.encryptionSetting.AllEncryption = (clusterSetting.EncryptData && !clusterSetting.DisableNonSSLPorts) // based on ns_server's should_cluster_data_be_encrypted() and disable_non_ssl_ports() methods, see MB-32256 & MB-42373
+	sec.logger.Infof("Cluster Encryption is changed to enabled=%v, strict=%v, all=%v", sec.encryptionSetting.EncryptionEnabled, sec.encryptionSetting.StrictEncryption, sec.encryptionSetting.AllEncryption)
 	return nil
 }
 
@@ -148,7 +169,7 @@ func (sec *SecurityService) refreshTLSConfig() error {
 	}
 	sec.settingMtx.Lock()
 	defer sec.settingMtx.Unlock()
-	sec.encrytionSetting.CbAuthTlsConfig = newConfig
+	sec.encryptionSetting.CbAuthTlsConfig = newConfig
 	sec.logger.Infof("Cluster TLS Config refreshed with client passphrase len=%v.", len(newConfig.ClientPrivateKeyPassphrase))
 	return nil
 }
@@ -168,8 +189,8 @@ func (sec *SecurityService) refreshCert() error {
 		return base.InvalidCerfiticateError
 	}
 	sec.settingMtx.Lock()
-	sec.encrytionSetting.caPool = caPool
-	sec.encrytionSetting.certificates = certPEMBlock
+	sec.encryptionSetting.caPool = caPool
+	sec.encryptionSetting.certificates = certPEMBlock
 	sec.settingMtx.Unlock()
 	sec.logger.Infof("Certificates are updated.")
 	return nil
@@ -227,7 +248,7 @@ func (sec *SecurityService) refresh(code uint64) error {
 		}
 	}
 
-	sec.encrytionSetting.initializer.Do(func() {
+	sec.encryptionSetting.initializer.Do(func() {
 		if err := sec.refreshTLSConfig(); err != nil {
 			err = fmt.Errorf("error in security context initializing TLS config: %v", err)
 			sec.logger.Error(err.Error())
@@ -242,7 +263,7 @@ func (sec *SecurityService) refresh(code uint64) error {
 			sec.logger.Error(err.Error())
 		}
 
-		close(sec.encrytionSetting.initializedCh)
+		close(sec.encryptionSetting.initializedCh)
 		sec.logger.Infof("Security context is initialized.")
 	})
 	newSetting := sec.getEncryptionSetting()
@@ -290,8 +311,8 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 	sec.settingMtx.Lock()
 	defer sec.settingMtx.Unlock()
 
-	caCerts := sec.encrytionSetting.certificates
-	passphrase := sec.encrytionSetting.CbAuthTlsConfig.ClientPrivateKeyPassphrase
+	caCerts := sec.encryptionSetting.certificates
+	passphrase := sec.encryptionSetting.CbAuthTlsConfig.ClientPrivateKeyPassphrase
 	tlsConfig, err := tlsUtils.NewConfig(tlsUtils.ConfigOptions{
 		ClientCert:           certPEMBlock,
 		ClientKey:            clientKey,
@@ -305,16 +326,16 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 		return err
 	}
 
-	sec.encrytionSetting.clientCertKeyPair = tlsConfig.Certificates
+	sec.encryptionSetting.clientCertKeyPair = tlsConfig.Certificates
 	sec.logger.Infof("refreshed client certs, client key and passphrase with len=%v", len(passphrase))
 	return nil
 }
 
 func (sec *SecurityService) GetClientCertAndKeyPair() []tls.Certificate {
-	<-sec.encrytionSetting.initializedCh
+	<-sec.encryptionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.clientCertKeyPair
+	return sec.encryptionSetting.clientCertKeyPair
 }
 
 func (sec *SecurityService) SetClientCertSettingChangeCb(cb func()) {

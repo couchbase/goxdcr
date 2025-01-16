@@ -475,9 +475,20 @@ func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteCl
 		agent.connectivityHelper.MarkIpFamilyError(false)
 	}
 
-	if (ref.DemandEncryption() == false || ref.EncryptionType() != metadata.EncryptionType_Full) &&
-		agent.topologySvc.IsMyClusterEncryptionLevelStrict() == true {
-		agent.connectivityHelper.MarkEncryptionError(true)
+	requireFullEncryption := false
+	if agent.topologySvc.IsMyClusterEncryptionLevelStrict() {
+		requireFullEncryption = true
+	} else if agent.topologySvc.IsMyClusterEncryptionLevelAll() {
+		localClusterUUID, err := agent.topologySvc.MyClusterUUID()
+		if err != nil {
+			agent.logger.Warnf("failed to fetch local cluster UUID while checking remote cluster reference status")
+		}
+		requireFullEncryption = localClusterUUID == ref.Uuid() // intra-cluster replication
+	}
+
+	if requireFullEncryption {
+		isRefUsingFullEncryption := ref.IsEncryptionEnabled() && ref.EncryptionType() == metadata.EncryptionType_Full
+		agent.connectivityHelper.MarkEncryptionError(!isRefUsingFullEncryption)
 	} else {
 		agent.connectivityHelper.MarkEncryptionError(false)
 	}
@@ -2904,8 +2915,22 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 
+	requireFullEncryption := false
 	if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() {
-		if ref.IsEncryptionEnabled() == false || ref.EncryptionType() != metadata.EncryptionType_Full {
+		requireFullEncryption = true
+	} else if service.xdcr_topology_svc.IsMyClusterEncryptionLevelAll() && len(ref.Uuid()) > 0 {
+		// For clusterEncryptionLevel 'all': covers the reference vaildation performed as part of pipeline validation,
+		// while the validation for add/set references is done later at the end of this method
+		localClusterUUID, err := service.xdcr_topology_svc.MyClusterUUID()
+		if err != nil {
+			return err
+		}
+		requireFullEncryption = localClusterUUID == ref.Uuid() // intra-cluster replication
+	}
+
+	if requireFullEncryption {
+		isRefUsingFullEncryption := ref.IsEncryptionEnabled() && ref.EncryptionType() == metadata.EncryptionType_Full
+		if !isRefUsingFullEncryption {
 			return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
 		}
 	}
@@ -2988,6 +3013,23 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 
 		// update uuid in ref to real value
 		ref.SetUuid(actualUuidStr)
+
+		// check if this add/set reference request corresponds to an intra-cluster reference with clusterEncryptionLevel 'all';
+		// and if so, then whether the reference is of 'full' encryption type
+		if service.xdcr_topology_svc.IsMyClusterEncryptionLevelAll() && len(ref.Uuid()) > 0 {
+			localClusterUUID, err := service.xdcr_topology_svc.MyClusterUUID()
+			if err != nil {
+				return err
+			}
+			requireFullEncryption = localClusterUUID == ref.Uuid() // intra-cluster replication
+
+			if requireFullEncryption {
+				isRefUsingFullEncryption := ref.IsEncryptionEnabled() && ref.EncryptionType() == metadata.EncryptionType_Full
+				if !isRefUsingFullEncryption {
+					return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
+				}
+			}
+		}
 	}
 
 	return nil
@@ -3200,11 +3242,9 @@ func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.Uti
 	}
 
 	if isClusterEncrLevelStrict {
-		// If source cluster is strict encryption, we cannot send anything to remote 8091 port.
-		// Sending request to 8091 without TLS will succeed if target is not strict. But we don't want to do it.
-		// Sending request to 8091 with TLS will fail if target is strict (target refuses connection) or
-		// if target is not strict (timeout). Either way, instead of trying both in thee code below, we should
-		// replace 8091 with 18091 and try only that.
+		// The clusterEncryptionLevel 'strict' is used to enforce TLS on all Source cluster communications.
+		// In order to make a TLS connection to the Target cluster, we use its TLS port (18091) instead of
+		// the default insecure port (8091). Refer the 'XDCR Enforce TLS' doc linked on MB-42371.
 		portNo, portNoErr := base.GetPortNumber(refHostName)
 		httpPortNo, httpPortNoErr := base.GetPortNumber(refHttpsHostNameIn)
 		if portNoErr == nil && portNo == base.DefaultAdminPort {

@@ -47,10 +47,10 @@ type XDCRTopologySvc struct {
 	cachedIsKVNodeInitDone bool
 	cachedIsKVNodeMtx      sync.RWMutex
 
-	cachedMemcachedAddr         string
-	cachedMemcachedAddrInitDone bool
-	cachedMemcachedAddrIsStrict bool
-	cachedMemcachedAddrMtx      sync.RWMutex
+	cachedMemcachedAddr              string
+	cachedMemcachedAddrInitDone      bool
+	cachedMemcachedAddrIsStrictOrAll bool
+	cachedMemcachedAddrMtx           sync.RWMutex
 
 	strictSecurityErrLogged uint32
 
@@ -186,9 +186,9 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 		// If getHostInfo had error because ns_server is overloaded, then we can return the last cached value that
 		// had been requested, since MyMemcachedAddr() is not likely to change, unless strictness has changed
 		var cachedRetVal string
-		currentStrictSetting := top_svc.IsMyClusterEncryptionLevelStrict()
+		currentEncryptionLevel := top_svc.IsMyClusterEncryptionStrictOrAll()
 		top_svc.cachedMemcachedAddrMtx.RLock()
-		if top_svc.cachedMemcachedAddrInitDone && top_svc.cachedMemcachedAddrIsStrict == currentStrictSetting {
+		if top_svc.cachedMemcachedAddrInitDone && top_svc.cachedMemcachedAddrIsStrictOrAll == currentEncryptionLevel {
 			err = nil
 			cachedRetVal = top_svc.cachedMemcachedAddr
 		}
@@ -208,9 +208,9 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 
 	hostName := base.GetHostName(hostAddr)
 
-	strictness := top_svc.IsMyClusterEncryptionLevelStrict()
-	if strictness {
-		// Since we don't do encryption between local services, we have to use loopback address
+	encLevelStrictOrAll := top_svc.IsMyClusterEncryptionStrictOrAll()
+	if encLevelStrictOrAll {
+		// Since we don't do encryption between services on the local node, we have to use loopback address
 		hostName = base.LocalHostName
 		if top_svc.IsIpv4Blocked() {
 			hostName = base.LocalHostNameIpv6
@@ -220,7 +220,7 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 	top_svc.cachedMemcachedAddrMtx.Lock()
 	defer top_svc.cachedMemcachedAddrMtx.Unlock()
 	top_svc.cachedMemcachedAddrInitDone = true
-	top_svc.cachedMemcachedAddrIsStrict = strictness
+	top_svc.cachedMemcachedAddrIsStrictOrAll = encLevelStrictOrAll
 	top_svc.cachedMemcachedAddr = base.GetHostAddr(hostName, port)
 	return top_svc.cachedMemcachedAddr, nil
 }
@@ -294,7 +294,7 @@ func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 		return nil, err
 	}
 
-	isStrict := top_svc.securitySvc.IsClusterEncryptionLevelStrict()
+	isStrictOrAll := top_svc.securitySvc.IsClusterEncryptionStrictOrAll()
 	var hostnameList []string
 	for _, nodeInfoRaw := range nodesList {
 		nodeInfo := nodeInfoRaw.(map[string]interface{})
@@ -323,7 +323,7 @@ func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 			adminPort = parsedAdminPort
 		}
 
-		if isStrict {
+		if isStrictOrAll {
 			adminPort = base.DefaultAdminPortSSL
 			parsedSecureAdminPort, portErr := top_svc.utils.GetHttpsMgtPortFromNodeInfo(nodeInfo)
 			if portErr == nil {
@@ -394,7 +394,7 @@ func (top_svc *XDCRTopologySvc) getHostAddrFromHostInfo(nodeInfoMap map[string]i
 		return "", ErrorParsingHostInfo
 	}
 
-	if top_svc.securitySvc.IsClusterEncryptionLevelStrict() {
+	if top_svc.securitySvc.IsClusterEncryptionStrictOrAll() {
 		// Need to massage this into a TLS address
 		sslPort, err := top_svc.utils.GetHttpsMgtPortFromNodeInfo(nodeInfoMap)
 		if err != nil {
@@ -595,6 +595,15 @@ func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
 func (top_svc *XDCRTopologySvc) IsMyClusterEncryptionLevelStrict() bool {
 	return top_svc.securitySvc.IsClusterEncryptionLevelStrict()
 }
+
+func (top_svc *XDCRTopologySvc) IsMyClusterEncryptionLevelAll() bool {
+	return top_svc.securitySvc.IsClusterEncryptionLevelAll()
+}
+
+func (top_svc *XDCRTopologySvc) IsMyClusterEncryptionStrictOrAll() bool {
+	return top_svc.securitySvc.IsClusterEncryptionStrictOrAll()
+}
+
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
 	return "http://" + base.GetHostAddr(top_svc.GetLocalHostName(), top_svc.adminport)
 }
