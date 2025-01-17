@@ -183,7 +183,7 @@ func (w *StreamApiWatcherImpl) runStreamingEndpoint() error {
 	if err != nil {
 		return err
 	}
-	authMode := w.utils.GetAuthMode(username, clientCertificate, w.path, authMech)
+	authMode := w.utils.GetAuthMode(username, clientCertificate, w.path, authMech, nil)
 	req, host, err := w.utils.ConstructHttpRequest(connStr, w.path, true, username, password, authMech, authMode, base.MethodGet, base.JsonContentType, body, w.logger)
 	if err != nil {
 		return errors.New(fmt.Sprintf("ConstructHttpRequest failed for %v%v with error '%v'", connStr, w.path, err.Error()))

@@ -1154,17 +1154,17 @@ func (_c *UtilsIface_FilterExpressionMatchesDoc_Call) RunAndReturn(run func(stri
 	return _c
 }
 
-// GetAuthMode provides a mock function with given fields: username, clientCertificate, path, authMech
-func (_m *UtilsIface) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode {
-	ret := _m.Called(username, clientCertificate, path, authMech)
+// GetAuthMode provides a mock function with given fields: username, clientCertificate, path, authMech, clientCertClientKey
+func (_m *UtilsIface) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech, clientCertClientKey []tls.Certificate) base.UserAuthMode {
+	ret := _m.Called(username, clientCertificate, path, authMech, clientCertClientKey)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAuthMode")
 	}
 
 	var r0 base.UserAuthMode
-	if rf, ok := ret.Get(0).(func(string, []byte, string, base.HttpAuthMech) base.UserAuthMode); ok {
-		r0 = rf(username, clientCertificate, path, authMech)
+	if rf, ok := ret.Get(0).(func(string, []byte, string, base.HttpAuthMech, []tls.Certificate) base.UserAuthMode); ok {
+		r0 = rf(username, clientCertificate, path, authMech, clientCertClientKey)
 	} else {
 		r0 = ret.Get(0).(base.UserAuthMode)
 	}
@@ -1182,13 +1182,14 @@ type UtilsIface_GetAuthMode_Call struct {
 //   - clientCertificate []byte
 //   - path string
 //   - authMech base.HttpAuthMech
-func (_e *UtilsIface_Expecter) GetAuthMode(username interface{}, clientCertificate interface{}, path interface{}, authMech interface{}) *UtilsIface_GetAuthMode_Call {
-	return &UtilsIface_GetAuthMode_Call{Call: _e.mock.On("GetAuthMode", username, clientCertificate, path, authMech)}
+//   - clientCertClientKey []tls.Certificate
+func (_e *UtilsIface_Expecter) GetAuthMode(username interface{}, clientCertificate interface{}, path interface{}, authMech interface{}, clientCertClientKey interface{}) *UtilsIface_GetAuthMode_Call {
+	return &UtilsIface_GetAuthMode_Call{Call: _e.mock.On("GetAuthMode", username, clientCertificate, path, authMech, clientCertClientKey)}
 }
 
-func (_c *UtilsIface_GetAuthMode_Call) Run(run func(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech)) *UtilsIface_GetAuthMode_Call {
+func (_c *UtilsIface_GetAuthMode_Call) Run(run func(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech, clientCertClientKey []tls.Certificate)) *UtilsIface_GetAuthMode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].([]byte), args[2].(string), args[3].(base.HttpAuthMech))
+		run(args[0].(string), args[1].([]byte), args[2].(string), args[3].(base.HttpAuthMech), args[4].([]tls.Certificate))
 	})
 	return _c
 }
@@ -1198,7 +1199,7 @@ func (_c *UtilsIface_GetAuthMode_Call) Return(_a0 base.UserAuthMode) *UtilsIface
 	return _c
 }
 
-func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, string, base.HttpAuthMech) base.UserAuthMode) *UtilsIface_GetAuthMode_Call {
+func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, string, base.HttpAuthMech, []tls.Certificate) base.UserAuthMode) *UtilsIface_GetAuthMode_Call {
 	_c.Call.Return(run)
 	return _c
 }

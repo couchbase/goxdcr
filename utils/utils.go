@@ -2469,10 +2469,13 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 
 }
 
-func (u *Utilities) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode {
+// The caller is expected to pass one of clientCertificate or clientCertKeyPair.
+// clientCertKeyPair is the "processed" form of client cert + client key.
+func (u *Utilities) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech, clientCertKeyPair []tls.Certificate) base.UserAuthMode {
 	userAuthMode := base.UserAuthModeNone
 
-	if len(username) == 0 && len(clientCertificate) == 0 && path != base.SSLPortsPath {
+	noClientCert := len(clientCertificate) == 0 && len(clientCertKeyPair) == 0
+	if len(username) == 0 && noClientCert && path != base.SSLPortsPath {
 		// username and clientCertificate can be both empty only when
 		// 1. this is a local http call to the same node
 		// or 2. this is a call to /nodes/self/xdcrSSLPorts on target to retrieve ssl port for subsequent https calls
@@ -2509,7 +2512,7 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
-	userAuthMode := u.GetAuthMode(username, clientCertificate, path, authMech)
+	userAuthMode := u.GetAuthMode(username, clientCertificate, path, authMech, clientCertKeyPair)
 
 	req, host, err := u.ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, l)
 	if err != nil {
