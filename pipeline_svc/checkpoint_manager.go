@@ -176,11 +176,26 @@ type CheckpointManager struct {
 }
 
 type checkpointSyncHelper struct {
-	checkpointAllowed bool
-	ongoingOps        []bool // mark false when starting, true once done
+	checkpointAllowed  bool
+	ongoingOps         []bool // mark false when starting, true once done
+	setVBTimestampDone bool
 
 	mtx sync.RWMutex
 	cv  sync.Cond
+}
+
+func (h *checkpointSyncHelper) setVBTimestampOpDone() {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.setVBTimestampDone = true
+}
+
+func (h *checkpointSyncHelper) isSetVBTimestampOpDone() bool {
+	h.mtx.RLock()
+	defer h.mtx.RUnlock()
+
+	return h.setVBTimestampDone
 }
 
 func (h *checkpointSyncHelper) setCheckpointAllowed() {
@@ -1139,6 +1154,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}()
 	defer func() {
 		ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
+		ckmgr.checkpointAllowedHelper.setVBTimestampOpDone()
 		ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 	}()
 	// Pipeline instances may overlap, So use instance ID instead
@@ -3272,7 +3288,16 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 
 	ckmgr.checkpointAllowedHelper.disableCkptAndWait()
 	disableCkptStopTimer()
-	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
+	defer func() {
+		// The MergeCheckpoints function can be invoked in the following scenarios:
+		// 1. During VBMasterCheck at the time of pipeline start.
+		// 2. As part of a periodic push operation.
+		// Checkpointing operation should be allowed only if the SetVBTimestamp operation is done
+		// i.e. for case 1 we should not allow checkpointing since SetVBTimestamp opertion wouldn't have been completed yet.
+		if ckmgr.checkpointAllowedHelper.isSetVBTimestampOpDone() {
+			ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
+		}
+	}()
 
 	// Once finished waiting, get all the accumulated information during this time that needs to be merged and do it in one shot
 	ckptArgs := getter()
