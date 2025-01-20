@@ -11,17 +11,18 @@ package metadata_svc
 import (
 	"crypto/sha256"
 	"fmt"
+	"math"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
-	"math"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const sourceRefreshStr = "sourceRefresh"

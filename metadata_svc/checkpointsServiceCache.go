@@ -323,7 +323,12 @@ func (c *CheckpointsServiceCacheImpl) Run() {
 						getReq.errorCode = service_def.MetadataNotFoundErr
 					} else {
 						compressedBytes := c.latestCompressedCache[getReq.individualVbReq]
-						ckptDoc, err := metadata.NewCheckpointsDocFromSnappy(compressedBytes, c.latestCompressedShaMaps)
+						brokenMap, globalInfoShaMap, err := metadata.SnappyDecompressShaMap(c.latestCompressedShaMaps)
+						if err != nil {
+							getReq.errorCode = err
+							c.requestInvalidateCache()
+						}
+						ckptDoc, err := metadata.NewCheckpointsDocFromSnappy(compressedBytes, brokenMap, globalInfoShaMap)
 						if err != nil {
 							getReq.errorCode = err
 							c.requestInvalidateCache()

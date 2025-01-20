@@ -143,7 +143,9 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 	assert.True(checkDoc.Checkpoint_records[0].SameAs(&ckptRecord2))
 
 	var decompressCheck CheckpointsDoc
-	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, shaMapCompressed))
+	brokenMap1, globalInfoShaMap, err := SnappyDecompressShaMap(shaMapCompressed)
+	assert.Nil(err)
+	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, brokenMap1, globalInfoShaMap))
 	assert.Equal(5, len(decompressCheck.Checkpoint_records))
 	assert.NotNil(decompressCheck.Checkpoint_records[1])
 	assert.True(decompressCheck.Checkpoint_records[1].SameAs(&newCkptRecord))
@@ -496,7 +498,9 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 	assert.True(checkDoc.Checkpoint_records[0].SameAs(&ckptRecord2))
 
 	var decompressCheck CheckpointsDoc
-	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, shaMapCompressed))
+	brokenMap1, globalInfoShaMap, err := SnappyDecompressShaMap(shaMapCompressed)
+	assert.Nil(err)
+	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, brokenMap1, globalInfoShaMap))
 	assert.Equal(12, len(decompressCheck.Checkpoint_records))
 	assert.NotNil(decompressCheck.Checkpoint_records[1])
 	assert.True(decompressCheck.Checkpoint_records[1].SameAs(&newCkptRecord))

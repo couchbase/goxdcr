@@ -2524,18 +2524,37 @@ func (v *VBsCkptsDocMap) GetGlobalInfoDoc() (*GlobalInfoCompressedDoc, error) {
 
 type VBsCkptsDocSnappyMap map[uint16][]byte
 
+// Decompress snappyShaMap containing both brokenMappings and globalInfoMap
+func SnappyDecompressShaMap(snappyShaMap ShaMappingCompressedMap) (ShaToCollectionNamespaceMap, ShaToGlobalInfoMap, error) {
+	if snappyShaMap == nil {
+		return nil, nil, base.ErrorNilPtr
+	}
+	brokenMap, err := snappyShaMap.ToBrokenMapShaMap()
+	if err != nil {
+		return nil, nil, err
+	}
+	globalInfoMap, err := snappyShaMap.ToGlobalInfoMap()
+	if err != nil {
+		return nil, nil, err
+	}
+	return brokenMap, globalInfoMap, nil
+}
+
 func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompressedMap) (VBsCkptsDocMap, error) {
 	if v == nil || snappyShaMap == nil {
 		return nil, base.ErrorNilPtr
 	}
-
+	brokenMap, globalInfoShaMap, err := SnappyDecompressShaMap(snappyShaMap)
+	if err != nil {
+		return nil, err
+	}
 	errMap := make(base.ErrorMap)
 	regularMap := make(VBsCkptsDocMap)
 	for vbno, compresedBytes := range *v {
 		if compresedBytes == nil {
 			regularMap[vbno] = nil
 		} else {
-			ckptDoc, err := NewCheckpointsDocFromSnappy(compresedBytes, snappyShaMap)
+			ckptDoc, err := NewCheckpointsDocFromSnappy(compresedBytes, brokenMap, globalInfoShaMap)
 			if err != nil {
 				errMap[fmt.Sprintf("vbno: %v", vbno)] = err
 				continue
@@ -2799,9 +2818,9 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 	return ckpt_doc
 }
 
-func NewCheckpointsDocFromSnappy(snappyBytes []byte, compressedMap ShaMappingCompressedMap) (*CheckpointsDoc, error) {
+func NewCheckpointsDocFromSnappy(snappyBytes []byte, brokenMap ShaToCollectionNamespaceMap, globalInfoShaMap ShaToGlobalInfoMap) (*CheckpointsDoc, error) {
 	ckptDoc := &CheckpointsDoc{}
-	err := ckptDoc.SnappyDecompress(snappyBytes, compressedMap)
+	err := ckptDoc.SnappyDecompress(snappyBytes, brokenMap, globalInfoShaMap)
 
 	if err != nil {
 		return nil, err
@@ -2913,8 +2932,8 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 	return snappy.Encode(nil, marshalledBytes), snapShaMap, nil
 }
 
-func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappingCompressedMap) error {
-	if c == nil || shaCompressedMap == nil {
+func (c *CheckpointsDoc) SnappyDecompress(data []byte, brokenMap ShaToCollectionNamespaceMap, globalInfoShaMap ShaToGlobalInfoMap) error {
+	if c == nil {
 		return base.ErrorNilPtr
 	}
 
@@ -2930,10 +2949,6 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 
 	errMap := make(base.ErrorMap)
 
-	brokenMap, err := shaCompressedMap.ToBrokenMapShaMap()
-	if err != nil {
-		return err
-	}
 	if len(brokenMap) > 0 {
 		records := c.GetCheckpointRecords()
 		for _, record := range records {
@@ -2949,10 +2964,6 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 		}
 	}
 
-	globalInfoShaMap, err := shaCompressedMap.ToGlobalInfoMap()
-	if err != nil {
-		return err
-	}
 	errMap2 := c.LoadGlobalInfoFromShaMap(globalInfoShaMap)
 
 	base.MergeErrorMaps(errMap, errMap2, false)

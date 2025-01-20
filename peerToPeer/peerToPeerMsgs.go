@@ -1301,10 +1301,20 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	retMap := make(map[uint16]*metadata.CheckpointsDoc)
+	var globalInfoShaMap metadata.ShaToGlobalInfoMap
+	var err error
+
+	// Decompress GlobalInfoDoc
+	if p.GlobalInfoDoc != nil {
+		globalInfoShaMap, err = p.GlobalInfoDoc.ToShaMap()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if p.NotMyVBs != nil {
 		for vb, payload := range *p.NotMyVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, globalInfoShaMap)
 			if err != nil {
 				return nil, err
 			}
@@ -1313,7 +1323,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 
 	if p.ConflictingVBs != nil {
 		for vb, payload := range *p.ConflictingVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, globalInfoShaMap)
 			if err != nil {
 				return nil, err
 			}
@@ -1322,7 +1332,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 
 	if p.PushVBs != nil {
 		for vb, payload := range *p.PushVBs {
-			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, p.GlobalInfoDoc)
+			err := p.setRetMapFromPayload(pipelineType, payload, retMap, vb, globalInfoShaMap)
 			if err != nil {
 				return nil, err
 			}
@@ -1331,7 +1341,7 @@ func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) (m
 	return retMap, nil
 }
 
-func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16, gInfoDoc *metadata.GlobalInfoCompressedDoc) error {
+func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16, globalInfoShaMap metadata.ShaToGlobalInfoMap) error {
 	switch pipelineType {
 	case common.MainPipeline:
 		if payload.CheckpointsDoc != nil {
@@ -1345,12 +1355,8 @@ func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType,
 		return fmt.Errorf("incorrect type: %T", pipelineType)
 	}
 
-	if gInfoDoc != nil {
+	if globalInfoShaMap != nil {
 		errMap := make(base.ErrorMap)
-		globalInfoShaMap, err := gInfoDoc.ToShaMap()
-		if err != nil {
-			return err
-		}
 		for _, ckptDoc := range retMap {
 			oneErrMap := ckptDoc.LoadGlobalInfoFromShaMap(globalInfoShaMap)
 			base.MergeErrorMaps(errMap, oneErrMap, false)
