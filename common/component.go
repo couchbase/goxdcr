@@ -103,6 +103,11 @@ const (
 	SeqnoAdvReceived ComponentEventType = iota
 	// We use subdoc multipath sets and deletes when we have a specific mobile/xdcr case to avoid cas rollback on target
 	DocsSentWithSubdocCmd ComponentEventType = iota
+
+	// data which was supposed to be replicated using
+	// a subdoc command, but could not be because it reached
+	// the maximum operations limit.
+	SubdocCmdSkippedDueToLimits ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
@@ -114,6 +119,8 @@ func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	case DataSent:
 		return true
 	case DataNotReplicated:
+		return true
+	case SubdocCmdSkippedDueToLimits:
 		return true
 	default:
 		return false

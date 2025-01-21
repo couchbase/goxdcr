@@ -365,6 +365,7 @@ var ErrorUnexpectedSubdocOp = errors.New("Unexpected subdoc op was observed")
 var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
 var ErrorHostNameEmpty = errors.New("Hostname is empty")
 var ErrorReplicationSpecNotActive = errors.New("replication specification not found or no longer active")
+var ErrorSubdocMaxPathLimitBreached = fmt.Errorf("subdoc max path limit breached")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -553,7 +554,7 @@ const (
 	DataSentEventListener                = "DataSentEventListener"
 	DataSentCasChangedEventListener      = "DataSentCasChangedEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
-	TargetDataSkippedEventListener       = "TargetDataSkippedEventListener"
+	OutNozzleDataSkippedEventListener    = "OutNozzleDataSkippedEventListener"
 	GetReceivedEventListener             = "GetReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
@@ -723,7 +724,7 @@ var Version7_2_1 = ServerVersion{7, 2, 1}
 var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
-var VersionForMobileSupport = ServerVersion{7, 6, 4}
+var VersionForMobileSupport = ServerVersion{7, 6, 6}
 var VersionForCasPoisonDetection = ServerVersion{7, 6, 3}
 
 func (s ServerVersion) String() string {
@@ -1739,6 +1740,7 @@ const (
 	DocsSentWithSubdocSet           = "docs_sent_with_subdoc_set"
 	DocsSentWithSubdocDelete        = "docs_sent_with_subdoc_delete"
 	DocsCasPoisoned                 = "docs_cas_poisoned"
+	SubdocCmdsSkippedCount          = "subdoc_cmd_docs_skipped"
 )
 
 var ValidJsonEnds []byte = []byte{
@@ -1803,3 +1805,6 @@ const (
 )
 
 const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"
+
+// from https://github.com/couchbase/kv_engine/blob/master/docs/SubDocument.md#limits
+const SUBDOC_MULTI_MAX_PATHS int = 16

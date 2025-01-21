@@ -440,8 +440,8 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFailedCREventListener, i),
 			pipeline.Topic(), logger_ctx)
-		target_data_skipped_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
-			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TargetDataSkippedEventListener, i),
+		outnozzle_data_skipped_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.OutNozzleDataSkippedEventListener, i),
 			pipeline.Topic(), logger_ctx)
 		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
@@ -478,7 +478,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle := targets[index]
 			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
-			out_nozzle.RegisterComponentEventListener(common.TargetDataSkipped, target_data_skipped_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.TargetDataSkipped, outnozzle_data_skipped_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetDocReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
@@ -491,6 +491,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.HlvPruned, hlvPrunedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.DocsSentWithSubdocCmd, dataSentWithSubdocCmdListener)
+			out_nozzle.RegisterComponentEventListener(common.SubdocCmdSkippedDueToLimits, outnozzle_data_skipped_event_listener)
 		}
 	}
 }

@@ -1,0 +1,189 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3")
+CLUSTER_NAME_KV_PORT_MAP=(["C1"]=12000 ["C2"]=12002 ["C3"]=12004)
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
+
+declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
+
+function waitForChangesLeft0ForTopology {
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C1" "B1" "C3" "B3"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C2" "B2" "C3" "B3"
+	waitForChangesLeft0 "C3" "B3" "C1" "B1"
+	waitForChangesLeft0 "C3" "B3" "C2" "B2"
+}
+
+function verifyPromStats {
+	# verify no data-corruption
+	validateBinaryFilteredIs0 "C1" "B1" "B2"
+	validateBinaryFilteredIs0 "C1" "B1" "B3"
+	validateBinaryFilteredIs0 "C2" "B2" "B1"
+	validateBinaryFilteredIs0 "C2" "B2" "B3"
+	validateBinaryFilteredIs0 "C3" "B3" "B1"
+	validateBinaryFilteredIs0 "C3" "B3" "B2"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B1" "B2"
+	validateDatapoolFailIs0 "C1" "B1" "B3"
+	validateDatapoolFailIs0 "C2" "B2" "B1"
+	validateDatapoolFailIs0 "C2" "B2" "B3"
+	validateDatapoolFailIs0 "C3" "B3" "B1"
+	validateDatapoolFailIs0 "C3" "B3" "B2"
+}
+
+function testMobileHlvWithRingTopology {
+	echo "Setting enableCrossClusterVersioning to true"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+	setCrossClusterVersioningForBucket "C3" "B3"
+
+	if [[ -z "$mobileImportSimBin" ]]; then
+		echo "enable mobile import simulator to ensure subdoc ops are triggered"
+		exit 1
+	fi
+
+	enableMobileImportSimIfPresent "C1" "B1"
+	enableMobileImportSimIfPresent "C2" "B2"
+	enableMobileImportSimIfPresent "C3" "B3"
+
+	echo "Replication C1.B1 -> C2.B2"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
+	echo "Replication C1.B1 -> C3.B3"
+	createBucketReplication "C1" "B1" "C3" "B3" BucketReplPropertiesWithMobile
+	echo "Replication C2.B2 -> C1.B1"
+	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
+	echo "Replication C2.B2 -> C3.B3"
+	createBucketReplication "C2" "B2" "C3" "B3" BucketReplPropertiesWithMobile
+	echo "Replication C3.B3 -> C1.B1"
+	createBucketReplication "C3" "B3" "C1" "B1" BucketReplPropertiesWithMobile
+	echo "Replication C3.B3 -> C2.B2"
+	createBucketReplication "C3" "B3" "C2" "B2" BucketReplPropertiesWithMobile
+
+	# insert 100 docs which have 20 user xattrs each
+	numAbnormalDocs=100
+	numUserXattrs=20
+	echo "inserting $numAbnormalDocs docs with $numUserXattrs user xattrs each"
+
+	for ((i = 1; i <= $numAbnormalDocs; i++)); do
+		if (($i % 10 == 0)); then
+			echo "writing document $i"
+		fi
+
+		writeJSONDocument "C1" "B1" "mobile1_$i" '{"foo":"bar"}'
+		writeJSONDocument "C2" "B2" "mobile2_$i" '{"foo":"bar"}'
+		writeJSONDocument "C3" "B3" "mobile3_$i" '{"foo":"bar"}'
+	done
+	for ((i = 1; i <= $numAbnormalDocs; i++)); do
+		if (($i % 10 == 0)); then
+			echo "upserting xattrs for document $i"
+		fi
+
+		insertNXattrs "C1" "B1" "mobile1_$i" $numUserXattrs &
+		insertNXattrs "C2" "B2" "mobile2_$i" $numUserXattrs &
+		insertNXattrs "C3" "B3" "mobile3_$i" $numUserXattrs &
+	done
+
+	echo "DONE - inserting $numAbnormalDocs with $numUserXattrs each"
+	echo "sleeping for 20 seconds"
+	sleep 20
+	waitForChangesLeft0ForTopology
+
+	# Insert
+	writeJSONDocument "C1" "B1" "mobile1" '{"foo":"bar"}'
+	writeJSONDocument "C1" "B1" "mobile2" '{"foo":"bar"}'
+	waitForChangesLeft0ForTopology
+
+	# Update
+	writeJSONDocument "C1" "B1" "mobile1" '{"foo2":"bar2"}'
+	writeJSONDocument "C1" "B1" "mobile2" '{"foo2":"bar2"}'
+	waitForChangesLeft0ForTopology
+	# Update at C2.B2
+	writeJSONDocument "C2" "B2" "mobile1" '{"foo3":"bar3"}'
+	writeJSONDocument "C2" "B2" "mobile2" '{"foo3":"bar3"}'
+	waitForChangesLeft0ForTopology
+	# Update at C3.B3
+	writeJSONDocument "C3" "B3" "mobile1" '{"foo3":"bar3"}'
+	writeJSONDocument "C3" "B3" "mobile2" '{"foo3":"bar3"}'
+	waitForChangesLeft0ForTopology
+	grepForAbnormalities
+
+	echo runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B1" &
+	echo runCbWorkloadGenBucket "C1" "B1" 10000 "common"
+	runCbWorkloadGenBucket "C1" "B1" 10000 "common" &
+
+	echo runCbWorkloadGenBucket "C2" "B2"
+	runCbWorkloadGenBucket "C2" "B2" &
+	echo runCbWorkloadGenBucket "C2" "B2" 10000 "common"
+	runCbWorkloadGenBucket "C2" "B2" 10000 "common" &
+
+	echo runCbWorkloadGenBucket "C3" "B3"
+	runCbWorkloadGenBucket "C3" "B3" &
+	echo runCbWorkloadGenBucket "C3" "B3" 10000 "common"
+	runCbWorkloadGenBucket "C3" "B3" 10000 "common" &
+
+	echo "sleeping 20 seconds for cbworkloadgen to finish"
+	sleep 20
+
+	sleepTime=40
+	echo "Sleep $sleepTime seconds to wait for replication to finish"
+	sleep $sleepTime
+
+	waitForChangesLeft0ForTopology
+
+	grepForAbnormalities
+
+	verifyPromStats
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running mobile coexistence test case on ring topology testing subdoc guardrails"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C1" "C3"
+	createRemoteClusterReference "C2" "C1"
+	createRemoteClusterReference "C2" "C3"
+	createRemoteClusterReference "C3" "C1"
+	createRemoteClusterReference "C3" "C2"
+
+	sleep 2
+	testMobileHlvWithRingTopology
+
+	echo "============================================================================"
+	echo "Mobile coexistence test case on ring topology testing subdoc guardrails passed"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}

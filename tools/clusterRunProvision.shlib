@@ -2920,6 +2920,69 @@ function disableInternalResidentRatioGuardrail {
 	$CURL -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag/eval -d "ns_memcached:set_data_ingress(\"${bucket}\", ok)."
 }
 
+function insertNXattrs {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local N=$4
+	local kvPort=${CLUSTER_NAME_KV_PORT_MAP[$clusterName]:-}
+
+	pipCheckCouchbase
+
+	python3 <<END
+
+from couchbase.auth import PasswordAuthenticator
+from couchbase.bucket import Bucket
+from couchbase.cluster import Cluster
+from couchbase.options import ClusterOptions
+import couchbase.subdocument as SD
+
+doc_content = {
+    'field1': 'value1',
+    'field2': 'value2'
+}
+
+bootstrap="127.0.0.1:$kvPort"
+bucket_name="$bucketName"
+
+# Connect options - authentication
+auth = PasswordAuthenticator(
+    "$DEFAULT_ADMIN",
+    "$DEFAULT_PW",
+)
+
+cluster = Cluster('couchbase://{}'.format(bootstrap), ClusterOptions(auth))
+bucket = cluster.bucket(bucket_name)
+
+n = int("$N")
+maxPathLen = 16
+# maxPathLen is 16. So make groups of utmost 16.
+multiSpecs = []
+multiSpecsLen = int(n/maxPathLen)
+cnter = 0
+for j in range(multiSpecsLen):
+	specs = []
+	for i in range(maxPathLen):
+		specs.append(SD.upsert('xattrK'+str(cnter), 'xattrV'+str(cnter), xattr=True))
+		cnter = cnter+1
+	multiSpecs.append(specs)
+
+specs = []
+for i in range(int(n%maxPathLen)):
+	specs.append(SD.upsert('xattrK'+str(cnter), 'xattrV'+str(cnter), xattr=True))
+	cnter = cnter+1
+multiSpecs.append(specs)
+
+cb_coll = bucket.default_collection()
+for specs in multiSpecs:
+	cb_coll.mutate_in(
+		"$docName",
+		specs
+	)
+
+END
+}
+
 function setupXdcrInboundUser {
 	local clusterName=$1
 	local username=$2

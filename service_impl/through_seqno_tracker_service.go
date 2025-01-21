@@ -781,7 +781,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataSentEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
-	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.TargetDataSkippedEventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.OutNozzleDataSkippedEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataClonedEventListener, tsTracker)
@@ -980,10 +980,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 				tsTracker.HandleDoneSession(vbno, session)
 			}
 		}
+	case common.SubdocCmdSkippedDueToLimits:
+		fallthrough
 	case common.TargetDataSkipped:
-		seqno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
-		vbno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
-		manifestId := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).ManifestId
+		seqno := event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).Seqno
+		vbno := event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).VBucket
+		manifestId := event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).ManifestId
 		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
@@ -1031,7 +1033,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		} else {
 			session.MarkSeqnoReceived(seqno)
 		}
-		// But instead of doing additional work, just follow the recipe for TargetDataSkipped
+		// But instead of doing additional work, just follow the recipe for OutNozzleDataSkipped
 		if !processedAsOSO {
 			tsTracker.addIgnoredSeqno(vbno, seqno)
 		} else {
@@ -1758,13 +1760,15 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	var vbno uint16
 
 	switch event.EventType {
+	case common.SubdocCmdSkippedDueToLimits:
+		fallthrough
 	case common.TargetDataSkipped:
-		if event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Cloned == true {
+		if event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).Cloned == true {
 			cloned = true
-			syncCh = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).CloneSyncCh
+			syncCh = event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).CloneSyncCh
 		}
-		seqno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
-		vbno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
+		seqno = event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).Seqno
+		vbno = event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional).VBucket
 	case common.DataFailedCRSource:
 		if event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Cloned == true {
 			cloned = true

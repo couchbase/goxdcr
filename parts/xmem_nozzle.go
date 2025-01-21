@@ -1023,12 +1023,19 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 			xmem.Id(), err, base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
 	} else if fromTarget {
 		// Change is from target. Don't replicate back
-		additionalInfo := TargetDataSkippedEventAdditional{Seqno: request.Seqno,
-			Opcode:      request.GetMemcachedCommand(),
-			IsExpirySet: (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
-			VBucket:     request.Req.VBucket,
-			ManifestId:  request.GetManifestId(),
+		additionalInfo := OutNozzleDataSkippedEventAdditional{
+			DataSkippedCommon: DataSkippedCommon{
+				Seqno:       request.Seqno,
+				VBucket:     request.Req.VBucket,
+				Opcode:      request.GetMemcachedCommand(),
+				IsExpirySet: (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
+				ManifestId:  request.GetManifestId(),
+				Cloned:      request.Cloned,
+				CloneSyncCh: request.ClonedSyncCh,
+			},
+			Reason: DataIsFromTarget,
 		}
+
 		xmem.RaiseEvent(common.NewEvent(common.TargetDataSkipped, nil, xmem, nil, additionalInfo))
 		xmem.recycleDataObj(request)
 		atomic.AddUint64(&xmem.counter_from_target, 1)
@@ -1314,6 +1321,27 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 				err = xmem.preprocessMCRequest(item, lookupResp)
 				if err != nil {
+					if err == base.ErrorSubdocMaxPathLimitBreached {
+						// we skip this item to avoid xmem connection repair in loop.
+						// There will be a counter and debug logs to ensure debuggability.
+						additionalInfo := OutNozzleDataSkippedEventAdditional{
+							DataSkippedCommon: DataSkippedCommon{
+								Seqno:       item.Seqno,
+								VBucket:     item.Req.VBucket,
+								Opcode:      item.GetMemcachedCommand(),
+								IsExpirySet: (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+								ManifestId:  item.GetManifestId(),
+								Cloned:      item.Cloned,
+								CloneSyncCh: item.ClonedSyncCh,
+							},
+							Reason: SubdocMaxPathLimitReached,
+						}
+
+						xmem.RaiseEvent(common.NewEvent(common.SubdocCmdSkippedDueToLimits, nil, xmem, []interface{}{item.Req.VBucket, item.Seqno}, additionalInfo))
+						xmem.recycleDataObj(item)
+						continue
+					}
+
 					return err
 				}
 
@@ -1465,6 +1493,23 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	// Send HLV and preserve _sync if necessary
 	err := xmem.updateSystemXattrForTarget(req, lookup)
 	if err != nil {
+		if err == base.ErrorSubdocMaxPathLimitBreached {
+			// should be handled specifically.
+			var xtoc []byte
+			xtocErr := fmt.Errorf("nil lookup: %v", lookup == nil)
+			if lookup != nil && lookup.Resp != nil {
+				xtoc, xtocErr = lookup.ResponseForAPath(base.XattributeToc)
+			}
+			xmem.Logger().Debugf("%v Breached subdoc multi path limit. Key=%v%s%v, body=%v%v%v, xtoc=%v%s%v, err=%v, xtocErr=%v",
+				xmem.Id(), req.IsSubdocOp(),
+				base.UdTagBegin, string(req.Req.Key), base.UdTagEnd,
+				base.UdTagBegin, req.Req.Body, base.UdTagEnd,
+				base.UdTagBegin, xtoc, base.UdTagEnd, err,
+				xtocErr,
+			)
+			return err
+		}
+
 		var respBody []byte
 		if lookup != nil && lookup.Resp != nil {
 			respBody = lookup.Resp.Body
@@ -2402,7 +2447,10 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	}
 
 	// Compose the subdoc request and also set the appropriate CAS.
-	base.ComposeRequestForSubdocMutation(specs, req, lookup.Resp.Cas, newbody, accessDeleted, wrappedReq.SubdocCmdOptions.TargetDocIsTombstone, true)
+	_, err = base.ComposeRequestForSubdocMutation(specs, req, lookup.Resp.Cas, newbody, accessDeleted, wrappedReq.SubdocCmdOptions.TargetDocIsTombstone, true)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

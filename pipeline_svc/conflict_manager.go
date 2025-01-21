@@ -433,8 +433,8 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCR
 	bodylen = bodylen + spec.Size()
 	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
-	req := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
-	return req, nil
+	req, err := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
+	return req, err
 }
 
 func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDoc []byte) (*mc.MCRequest, error) {
@@ -531,8 +531,8 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	specs = append(specs, spec)
 	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
-	req := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
-	return req, nil
+	req, err := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
+	return req, err
 }
 func (c *ConflictManager) sendDocument(id int, input *crMeta.ConflictParams, req *mc.MCRequest, client *base.XmemClient) {
 	defer input.ObjectRecycler(input.Source)

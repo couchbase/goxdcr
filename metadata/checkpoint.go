@@ -51,6 +51,7 @@ const (
 	DocsSentWithSubdocSetCnt           string = "docs_sent_with_subdoc_set"
 	DocsSentWithSubdocDeleteCnt        string = "docs_sent_with_subdoc_delete"
 	CasPoisonCnt                       string = "cas_poison_cnt"
+	SubdocCmdSkippedCnt                string = "subdoc_cmd_skipped_cnt"
 )
 
 type CheckpointRecord struct {
@@ -109,6 +110,8 @@ type CheckpointRecord struct {
 	DocsSentWithSubdocSetCnt    uint64 `json:"docs_sent_with_subdoc_set"`
 	DocsSentWithSubdocDeleteCnt uint64 `json:"docs_sent_with_subdoc_delete"`
 	CasPoisonCnt                uint64 `json:"cas_poison_cnt"`
+	// Number of subdoc commands skipped due to maximum paths limit.
+	SubdocCmdSkippedCnt uint64 `json:"subdoc_cmd_skipped_cnt"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -155,6 +158,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 	subdocSetItems := uint64(vbCountMetrics[base.DocsSentWithSubdocSet])
 	subdocDeleteItems := uint64(vbCountMetrics[base.DocsSentWithSubdocDelete])
 	casPoisonItems := uint64(vbCountMetrics[base.DocsCasPoisoned])
+	subdocSkippedCnt := uint64(vbCountMetrics[base.SubdocCmdsSkippedCount])
 
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
@@ -185,6 +189,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		DocsSentWithSubdocSetCnt:           subdocSetItems,
 		DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
 		CasPoisonCnt:                       casPoisonItems,
+		SubdocCmdSkippedCnt:                subdocSkippedCnt,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -244,7 +249,8 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.GuardrailResidentRatioCnt == newRecord.GuardrailResidentRatioCnt &&
 		ckptRecord.DocsSentWithSubdocDeleteCnt == newRecord.DocsSentWithSubdocDeleteCnt &&
 		ckptRecord.DocsSentWithSubdocSetCnt == newRecord.DocsSentWithSubdocSetCnt &&
-		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt {
+		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt &&
+		ckptRecord.SubdocCmdSkippedCnt == newRecord.SubdocCmdSkippedCnt {
 		return true
 	} else {
 		return false
@@ -284,6 +290,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.DocsSentWithSubdocDeleteCnt = other.DocsSentWithSubdocDeleteCnt
 	ckptRecord.DocsSentWithSubdocSetCnt = other.DocsSentWithSubdocSetCnt
 	ckptRecord.CasPoisonCnt = other.CasPoisonCnt
+	ckptRecord.SubdocCmdSkippedCnt = other.SubdocCmdSkippedCnt
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -451,6 +458,11 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	casPoisonCnt, ok := fieldMap[CasPoisonCnt]
 	if ok {
 		ckptRecord.CasPoisonCnt = uint64(casPoisonCnt.(float64))
+	}
+
+	subdocSkippedCnt, ok := fieldMap[SubdocCmdSkippedCnt]
+	if ok {
+		ckptRecord.SubdocCmdSkippedCnt = uint64(subdocSkippedCnt.(float64))
 	}
 
 	return nil
@@ -1075,6 +1087,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
 		DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
 		CasPoisonCnt:                       c.CasPoisonCnt,
+		SubdocCmdSkippedCnt:                c.SubdocCmdSkippedCnt,
 	}
 	return retVal
 }

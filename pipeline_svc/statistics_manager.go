@@ -43,7 +43,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -149,6 +149,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_SENT_WITH_SUBDOC_SET:           service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_SUBDOC_DELETE:        service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_CAS_POISONING_METRIC:  service_def.MetricTypeCounter,
+	service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:      service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -157,7 +158,7 @@ var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.
 	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC, service_def.DOCS_FILTERED_CAS_POISONING_METRIC}
 
 var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC,
-	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE}
+	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC}
 
 var VBMetricKeys []string
 var compileVBMetricKeyOnce sync.Once
@@ -200,6 +201,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_SET] = base.Uint64ToInt64(record.DocsSentWithSubdocSetCnt)
 	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = base.Uint64ToInt64(record.DocsSentWithSubdocDeleteCnt)
 	vbStatMap[service_def.DOCS_FILTERED_CAS_POISONING_METRIC] = base.Uint64ToInt64(record.CasPoisonCnt)
+	vbStatMap[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC] = base.Uint64ToInt64(record.SubdocCmdSkippedCnt)
 	return vbStatMap
 }
 
@@ -1566,6 +1568,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.DOCS_SENT_WITH_SUBDOC_SET, docsSentWithSubdocSet)
 		docsSentWithSubdocDelete := metrics.NewCounter()
 		registry.Register(service_def.DOCS_SENT_WITH_SUBDOC_DELETE, docsSentWithSubdocDelete)
+		subdocCmdDocsSkipped := metrics.NewCounter()
+		registry.Register(service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, subdocCmdDocsSkipped)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1615,6 +1619,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.HLV_UPDATED_METRIC] = hlvUpdated
 		metric_map[service_def.DOCS_SENT_WITH_SUBDOC_SET] = docsSentWithSubdocSet
 		metric_map[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = docsSentWithSubdocDelete
+		metric_map[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC] = subdocCmdDocsSkipped
 
 		listOfVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
@@ -1627,7 +1632,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TargetDataSkippedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.OutNozzleDataSkippedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
@@ -1747,7 +1752,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 
 	case common.TargetDataSkipped:
 		metricMap[service_def.TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
-		event_otherInfos := event.OtherInfos.(parts.TargetDataSkippedEventAdditional)
+		event_otherInfos := event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
 			metricMap[service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
@@ -1870,6 +1875,13 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
 			return err
 		}
+
+	case common.SubdocCmdSkippedDueToLimits:
+		metricMap[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+		err := outNozzle_collector.handleVBEvent(event, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1886,6 +1898,8 @@ func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event
 	case service_def.GUARDRAIL_RESIDENT_RATIO_METRIC:
 		fallthrough
 	case service_def.GUARDRAIL_DATA_SIZE_METRIC:
+		fallthrough
+	case service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:
 		vbucket := event.DerivedData[0].(uint16)
 		seqno := event.DerivedData[1].(uint64)
 		helper, ok := outNozzle_collector.vbMetricHelper.vbBasedHelper[vbucket]
