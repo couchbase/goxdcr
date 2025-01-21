@@ -152,7 +152,20 @@ type DataFailedCRSourceEventAdditional struct {
 	ImportMutation bool
 }
 
-type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
+type DataSkippedCommon DataFailedCRSourceEventAdditional
+
+type OutNozzleDataSkippedEventAdditional struct {
+	DataSkippedCommon
+	Reason OutNozzleDataSkippedReason
+}
+
+type OutNozzleDataSkippedReason int
+
+const (
+	UnknownReason OutNozzleDataSkippedReason = iota
+	DataIsFromTarget
+	SubdocMaxPathLimitReached
+)
 
 type DataSentEventAdditional struct {
 	VbucketCommon

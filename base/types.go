@@ -3347,7 +3347,11 @@ func (smps SubdocMutationPathSpecs) Size() int {
 // If targetDocIsTombstone is true, we set CAS to 0 and set an ADD flag. It will fail with KEY_EEXISTS if the doc exists.
 // If targetDocIsTombstone is false, targetCas must match the document CAS. Otherwise it will fail with KEY_EEXISTS (i.e. cas locking).
 // If reuseReq is set, then the source request which was input, will be modified and returned, instead of a creating a new request instance.
-func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, targetCas uint64, bodyslice []byte, sourceDocIsTombstone, targetDocIsTombstone, reuseReq bool) *mc.MCRequest {
+func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, targetCas uint64, bodyslice []byte, sourceDocIsTombstone, targetDocIsTombstone, reuseReq bool) (*mc.MCRequest, error) {
+	if len(specs) > SUBDOC_MULTI_MAX_PATHS {
+		return nil, ErrorSubdocMaxPathLimitBreached
+	}
+
 	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
 	pos := 0
 	n := 0
@@ -3438,7 +3442,7 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 		// since the body of subdoc command consists of operational specs, the only supported datatype will be Raw/Unknown.
 		// Snappy could be supported in future, but as of the date of writing this code, we cannot compress the body of subdoc command.
 		source.DataType = RawDataType
-		return source
+		return source, nil
 	}
 
 	// TODO: MB-61803 - use mcRequestPool
@@ -3451,7 +3455,7 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 		Body:     bodyslice[:pos],
 		DataType: RawDataType,
 	}
-	return &req
+	return &req, nil
 }
 
 type ExternalMgmtHostAndPortGetter func(map[string]interface{}, bool) (string, int, error)

@@ -101,6 +101,7 @@ var (
 	ErrorHostNameEmpty                           = errors.New("Hostname is empty")
 	ErrorReplicationSpecNotActive                = errors.New("replication specification not found or no longer active")
 	ErrorCLoggingMixedModeUnsupported            = errors.New("not all nodes support conflict logging feature")
+	ErrorSubdocMaxPathLimitBreached              = fmt.Errorf("subdoc max path limit breached")
 )
 
 // Various non-error internal msgs

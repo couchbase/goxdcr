@@ -486,7 +486,7 @@ const (
 	DataSentEventListener                = "DataSentEventListener"
 	DataSentCasChangedEventListener      = "DataSentCasChangedEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
-	TargetDataSkippedEventListener       = "TargetDataSkippedEventListener"
+	OutNozzleDataSkippedEventListener    = "OutNozzleDataSkippedEventListener"
 	GetReceivedEventListener             = "GetReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
@@ -632,7 +632,7 @@ var Version7_2_1 = ServerVersion{7, 2, 1}
 var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
-var VersionForMobileSupport = ServerVersion{7, 6, 4}
+var VersionForMobileSupport = ServerVersion{7, 6, 6}
 var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
@@ -1772,6 +1772,7 @@ const (
 	TrueConflictsDetected              = "true_conflicts_detected"
 	CLogHibernatedCount                = "clog_hibernated_count"
 	GetDocsCasChangedCount             = "get_docs_cas_changed"
+	SubdocCmdsSkippedCount             = "subdoc_cmd_docs_skipped"
 )
 
 var ValidJsonEnds []byte = []byte{
@@ -1905,7 +1906,8 @@ var RouterVBMetricKeys = []string{DocsFiltered, DocsUnableToFilter, ExpiryFilter
 
 var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, GuardrailDiskSpace,
 	DocsSentWithSubdocSet, DocsSentWithSubdocDelete,
-	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode, GetDocsCasChangedCount, TrueConflictsDetected}
+	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode,
+	GetDocsCasChangedCount, TrueConflictsDetected, SubdocCmdsSkippedCount}
 
 var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten}
 
@@ -1918,3 +1920,6 @@ var GlobalPreReplicateCacheExpireTimeSecs = 10
 // Generally speaking, pre_replicate should not fail. If it fails, ckpt resume/rollback
 // would generally error out and XDCR should avoid hammering ns_server
 var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
+
+// from https://github.com/couchbase/kv_engine/blob/master/docs/SubDocument.md#limits
+const SUBDOC_MULTI_MAX_PATHS int = 16

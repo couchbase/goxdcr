@@ -47,7 +47,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -179,6 +179,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.CLOG_STATUS:                         service_def.MetricTypeGauge,
 	service_def.DOCS_FILTERED_CLOG_METRIC:           service_def.MetricTypeCounter,
 	service_def.GET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
+	service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:      service_def.MetricTypeCounter,
 }
 
 func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, srcvb uint16) base.VBCountMetric {
@@ -1713,6 +1714,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.CLOG_WAIT_TIME, clogWaitTime)
 		getCasChanged := metrics.NewCounter()
 		registry.Register(service_def.GET_DOCS_CAS_CHANGED_METRIC, getCasChanged)
+		subdocCmdDocsSkipped := metrics.NewCounter()
+		registry.Register(service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, subdocCmdDocsSkipped)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1772,6 +1775,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.CLOG_POOL_GET_TIMEDOUT] = clogPoolGetTimedout
 		metric_map[service_def.CLOG_WAIT_TIME] = clogWaitTime
 		metric_map[service_def.GET_DOCS_CAS_CHANGED_METRIC] = getCasChanged
+		metric_map[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC] = subdocCmdDocsSkipped
 
 		listOfTargetVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(listOfTargetVBs, part.Id())
@@ -1784,7 +1788,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
-	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TargetDataSkippedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.OutNozzleDataSkippedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
@@ -1964,7 +1968,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 
 	case common.TargetDataSkipped:
 		metricMap[service_def.TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
-		event_otherInfos := event.OtherInfos.(parts.TargetDataSkippedEventAdditional)
+		event_otherInfos := event.OtherInfos.(parts.OutNozzleDataSkippedEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
 			metricMap[service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
@@ -2093,11 +2097,14 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			}
 		}
 
-		err := outNozzle_collector.handleVBEvent(event, service_def.TRUE_CONFLICTS_DETECTED)
+	case common.SubdocCmdSkippedDueToLimits:
+		metricMap[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+		err := outNozzle_collector.handleVBEvent(event, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC)
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -2122,6 +2129,8 @@ func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event
 	case service_def.TRUE_CONFLICTS_DETECTED:
 		fallthrough
 	case service_def.CLOG_HIBERNATED_COUNT:
+		fallthrough
+	case service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:
 		srcvb := event.DerivedData[0].(uint16)
 		tgtvb := event.DerivedData[1].(uint16)
 		seqno := event.DerivedData[2].(uint64)

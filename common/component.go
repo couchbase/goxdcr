@@ -111,6 +111,11 @@ const (
 	// 2. conflict logging stats
 	CLogDocsWritten ComponentEventType = iota
 	CLogWriteStatus ComponentEventType = iota
+
+	// data which was supposed to be replicated using
+	// a subdoc command, but could not be because it reached
+	// the maximum operations limit.
+	SubdocCmdSkippedDueToLimits ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
@@ -122,6 +127,8 @@ func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	case DataSent:
 		return true
 	case DataNotReplicated:
+		return true
+	case SubdocCmdSkippedDueToLimits:
 		return true
 	default:
 		return false

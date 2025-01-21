@@ -98,6 +98,7 @@ const (
 	EXPIRY_TARGET_DOCS_SKIPPED_METRIC   = "expiry_target_docs_skipped"
 	DELETION_TARGET_DOCS_SKIPPED_METRIC = "deletion_target_docs_skipped"
 	SET_TARGET_DOCS_SKIPPED_METRIC      = "set_target_docs_skipped"
+	SUBDOC_CMD_DOCS_SKIPPED_METRIC      = base.SubdocCmdsSkippedCount
 
 	// For mobile
 	SOURCE_SYNC_XATTR_REMOVED_METRIC    = "source_sync_xattr_removed"
@@ -1043,7 +1044,6 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Volatile,
 		Labels:       StandardLabels,
 	},
-
 	TARGET_DOCS_SKIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
@@ -1758,6 +1758,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Internal,
 		Labels:       StandardLabels,
 		Notes:        "Represents the number of docs which were in conflict, but it's target CAS changed before fetching target body for further processing for conflict logging or merging of the conflicting source and target docs.",
+	},
+	SUBDOC_CMD_DOCS_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of document mutations that were not replicated to the target because they resulted in subdoc commands breaching the maximum paths limit.",
+		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 }
 
