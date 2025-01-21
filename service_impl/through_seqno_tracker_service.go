@@ -131,8 +131,7 @@ type ThroughSeqnoTrackerSvc struct {
 	osoSnapshotRaiser          func(vbno uint16, seqno uint64)
 	osoCntReceivedFromDCP      uint64
 
-	variableVBMode   bool
-	targetHasMoreVBs bool
+	variableVBMode bool
 	// If variable VB mode is on, this will be the list of all target VBs
 	variableTgtVbs []uint16
 }
@@ -815,9 +814,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.variableVBMode = true
 		tsTracker.variableTgtVbs = targetVBList
 		tsTracker.variableVbTgtMap = make(map[uint16]bool)
-		if len(targetVBList) > len(sourceVBList) {
-			tsTracker.targetHasMoreVBs = true
-		}
 		for _, tgtVb := range targetVBList {
 			tsTracker.variableVbTgtMap[tgtVb] = true
 		}
@@ -842,18 +838,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 	}
 
-	if tsTracker.targetHasMoreVBs {
-		for _, vbno := range targetVBList {
-			if _, alreadyDone := tsTracker.vb_map[vbno]; alreadyDone {
-				continue
-			}
-			tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
-			tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
-			tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
-			tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
-			tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+	// Initialize for all the targetVBs as well
+	for _, vbno := range targetVBList {
+		if _, alreadyDone := tsTracker.vb_map[vbno]; alreadyDone {
+			continue
 		}
+		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
+		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 	}
+
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
@@ -1763,21 +1759,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (throu
 	}
 
 	// Variable VB mode will has have to go through additional individual target VB and set the highest manifest ID
-	if tsTracker.targetHasMoreVBs {
-		for _, tgtVb := range tsTracker.variableTgtVbs {
-			if _, exists := tsTracker.vb_map[tgtVb]; exists {
-				// This is already captured as part of the source part above
-				continue
-			}
+	for _, tgtVb := range tsTracker.variableTgtVbs {
+		if _, exists := tsTracker.vb_map[tgtVb]; exists {
+			// This is already captured as part of the source part above
+			continue
+		}
 
-			// For target manifest ID in variable VB mode, we don't care about the throughSeqno - just
-			// return the max manifestID that the target VB has seen
-			manifestId, err := tsTracker.vbTgtSeqnoManifestMap.GetManifestId(tgtVb, math.MaxUint64)
-			if err != nil {
-				tsTracker.logger.Warnf(err.Error())
-			} else {
-				tgtManifestIds[tgtVb] = manifestId
-			}
+		// For target manifest ID in variable VB mode, we don't care about the throughSeqno - just
+		// return the max manifestID that the target VB has seen
+		manifestId, err := tsTracker.vbTgtSeqnoManifestMap.GetManifestId(tgtVb, math.MaxUint64)
+		if err != nil {
+			tsTracker.logger.Warnf(err.Error())
+		} else {
+			tgtManifestIds[tgtVb] = manifestId
 		}
 	}
 	return
