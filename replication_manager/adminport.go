@@ -1406,6 +1406,11 @@ func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Reques
 		return nil, fmt.Errorf("Remote cluster Ref is null")
 	}
 
+	// validate certificates uploaded as part of the Reference
+	if err = remoteClusterRef.ValidateCertificates(); err != nil {
+		return EncodeRemoteClusterValidationErrorIntoResponse(err)
+	}
+
 	taskId := generateTaskId(adminport.sourceKVHost)
 
 	logger_ap.Infof("Request params: remoteClusterRef=%v; Task ID generated: %v", remoteClusterRef.CloneAndRedact(), taskId)
