@@ -96,7 +96,9 @@ type RemoteClusterReference struct {
 	EncryptionType_   string `json:"EncryptionType"`
 	// Certificate_ contains user entered data only. Readers should call Certificates() or certificatesNoLock() to
 	// ensure that access to Capella will not be interrupted. This way, if the Capella default's cert is updated, this
-	// field shall continue to remain empty and no metadata upgrade needs to take place
+	// field shall continue to remain empty and no metadata upgrade needs to take place.
+	// Specifies the set of root (CA) certificates which will be used to verify the
+	// certificate chains of the remote cluster nodes (during TLS handshake).
 	Certificate_ []byte `json:"Certificate"`
 	// hostname to use when making https connection
 	HttpsHostName_    string            `json:"HttpsHostName"`
@@ -1334,7 +1336,8 @@ func (ref *RemoteClusterReference) ValidateCertificates() error {
 
 	// check validity of server root certificates
 	var rootCerts []*x509.Certificate
-	for {
+	var rootCertValidationErrors []string
+	for rootCertIndex := 0; len(refCertificates) > 0; rootCertIndex++ {
 		var block *pem.Block
 		block, refCertificates = pem.Decode(refCertificates)
 		if block == nil {
@@ -1342,20 +1345,38 @@ func (ref *RemoteClusterReference) ValidateCertificates() error {
 		}
 		certificate, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return fmt.Errorf("Failed to parse certificate. err=%v", err)
+			rootCertValidationErrors = append(rootCertValidationErrors, fmt.Sprintf("certificate %v: failed to parse certificate; err=%v", rootCertIndex, err))
+			continue
 		}
 
-		// check the signature of certificate
+		canSignOtherCerts := (certificate.BasicConstraintsValid && certificate.IsCA)
+		subjectRDN := certificate.Subject.ToRDNSequence().String()
+		certSelfIssued := subjectRDN == certificate.Issuer.ToRDNSequence().String()
+
+		// check if non root-certificate
+		if !canSignOtherCerts || !certSelfIssued {
+			rootCertValidationErrors = append(rootCertValidationErrors, fmt.Sprintf("certificate %v (subject %v): not a root certificate (isCA? %v subject==issuer? %v); retry after removing it from the set of remote cluster root certificates", rootCertIndex, subjectRDN, canSignOtherCerts, certSelfIssued))
+			continue
+		}
+
+		// check the signature of root certificate
 		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
 		if err != nil {
-			return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
+			rootCertValidationErrors = append(rootCertValidationErrors, fmt.Sprintf("certificate %v (subject %v): failed to validate signature of root certificate; err=%v", rootCertIndex, subjectRDN, err))
+			continue
 		}
 		rootCerts = append(rootCerts, certificate)
 	}
+
+	if len(rootCertValidationErrors) > 0 {
+		return fmt.Errorf("%v certificate(s) failed validation - %v", len(rootCertValidationErrors), strings.Join(rootCertValidationErrors, " | "))
+	}
+
 	// We should have at least one root certificate
 	if len(rootCerts) == 0 {
 		return base.InvalidCerfiticateError
 	}
+
 	// check validity of client certificate if it has been provided
 	refClientCertificate := ref.ClientCertificate()
 	if len(refClientCertificate) == 0 {
@@ -1364,7 +1385,7 @@ func (ref *RemoteClusterReference) ValidateCertificates() error {
 
 	_, err := tls.X509KeyPair(refClientCertificate, ref.ClientKey())
 	if err != nil {
-		return fmt.Errorf("Error parsing client certificate. err=%v", err)
+		return fmt.Errorf("failed to parse client certificate; err=%v", err)
 	}
 
 	return nil
