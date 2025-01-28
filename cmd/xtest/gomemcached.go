@@ -28,6 +28,7 @@ func gomemcachedTest(cfg Config) (err error) {
 		cfg.GomemcachedTest.VBCount,
 		cfg.GomemcachedTest.Address,
 		xsvc.SecuritySvc,
+		xsvc.TopSvc,
 		true)
 
 	if err != nil {

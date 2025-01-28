@@ -207,7 +207,7 @@ function runOneRebalanceCycle {
 	done
 
 	setNodeToNodeEncryption "C1" "enable"
-	setEncryptionLevel "C1" "strict"
+	setEncryptionLevel "C1" "all"
 
 	echo "Sleeping before checking logs"
 	sleep 15
@@ -277,9 +277,9 @@ function runReplicationResume {
 }
 
 function runTestCase {
-	echo "============================================================================"
-	echo "Conflict logging with multinode setup and security with client certs mandatory"
-	echo "============================================================================"
+	echo "============================================================================================================"
+	echo "Conflict logging with multinode setup and security with client certs mandatory & N2N encryption set to 'all'"
+	echo "============================================================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT

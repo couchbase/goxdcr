@@ -27,6 +27,7 @@ import (
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -42,6 +43,7 @@ type MemcachedConn struct {
 	addr          string
 	logger        *log.CommonLogger
 	securityInfo  SecurityInfo
+	topSvc        service_def.XDCRCompTopologySvc
 	bucketName    string
 	bucketUUID    string
 	vbCount       int
@@ -53,7 +55,7 @@ type MemcachedConn struct {
 	skipVerify    bool
 }
 
-func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName, bucketUUID string, vbCount int, addr string, securityInfo SecurityInfo, skipVerifiy bool) (m *MemcachedConn, err error) {
+func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName, bucketUUID string, vbCount int, addr string, securityInfo SecurityInfo, topSvc service_def.XDCRCompTopologySvc, skipVerifiy bool) (m *MemcachedConn, err error) {
 	if bucketUUID == "" {
 		err = fmt.Errorf("bucketUUID cannot be empty")
 		return
@@ -78,6 +80,7 @@ func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCa
 		vbCount:       vbCount,
 		addr:          addr,
 		securityInfo:  securityInfo,
+		topSvc:        topSvc,
 		logger:        logger,
 		utilsObj:      utilsObj,
 		manifestCache: manCache,
@@ -99,13 +102,12 @@ func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCa
 // newTLSConn creates an SSL connection to a memcached node.
 // Note: this is subtly different than base.NewTlsConn(). In this we use cbauth's user/passwd
 // over SSL connection instead of client certificate's SAN
-func (m *MemcachedConn) newTLSConn(addr, user, passwd string) (conn mcc.ClientIface, err error) {
+func (m *MemcachedConn) newTLSConn(addr, user, passwd string, clientCertKeyPair []tls.Certificate) (conn mcc.ClientIface, err error) {
 	// We load the certs everytime since the certs could have changed by ns_server
 	// This will be actually not needed as these will be loaded only when the notification
 	// from the ns_server. This will happen in security service.
 
 	caCert := m.securityInfo.GetCACertificates()
-	clientCertKeyPair := m.securityInfo.GetClientCertAndKeyPair()
 
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
@@ -113,8 +115,11 @@ func (m *MemcachedConn) newTLSConn(addr, user, passwd string) (conn mcc.ClientIf
 	// Setup HTTPS client
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: m.skipVerify,
-		Certificates:       clientCertKeyPair,
 		RootCAs:            caCertPool,
+	}
+
+	if len(clientCertKeyPair) > 0 {
+		tlsConfig.Certificates = clientCertKeyPair
 	}
 
 	tlsConn, err := tls.Dial("tcp", addr, tlsConfig)
@@ -147,16 +152,13 @@ func (m *MemcachedConn) newTLSConn(addr, user, passwd string) (conn mcc.ClientIf
 }
 
 // newMemcNodeConn creates the new connection to a KV node.
-// useSSL when false overrides the check for cluster being in strict mode.
-// useSSL=false is used when establishing the connection the 'thisNode' which is using localhost.
-// This is an initial connection to boot the rest of the connections and hence it has to be non-SSL
-// The flip side is that when useSSL=true then it futher depends on whether cluster has encryption
-// level strict or not. If yes then SSL connection is created
-func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) (conn mcc.ClientIface, err error) {
-	isEncStrict := false
-	if useSSL {
-		isEncStrict = m.securityInfo.IsClusterEncryptionLevelStrict()
-	}
+// isPeerNode=false when establishing connection to 'thisNode', which will use the loopback address.
+// That would be an initial connection to boot the rest of the connections.
+// When isPeerNode=true, and if n2n encryption is enabled ('clusterEncryptionLevel' set to 'strict' or 'all'),
+// then a TLS connection is created; otherwise non-TLS.
+func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, isPeerNode bool) (conn mcc.ClientIface, err error) {
+	isEncStrictOrAll := m.securityInfo.IsClusterEncryptionStrictOrAll()
+	isClientCertMandatoryOrHybrid, _ := m.topSvc.ClientCertIsMandatoryOrHybrid()
 
 	var features utils.HELOFeatures
 	features.Xattribute = true
@@ -165,11 +167,15 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, useSSL bool) 
 	features.DataType = true
 	// For setMeta, negotiate compression, if it is set
 	features.CompressionType = base.CompressionTypeSnappy
-	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s bucket=%s bucketUUID=%s encStrict=%v tlsSkipVerify=%v features=%+v",
-		m.id, user, addr, m.bucketName, m.bucketUUID, isEncStrict, m.skipVerify, features)
+	m.logger.Infof("connecting to memcached id=%d user=%s addr=%s bucket=%s bucketUUID=%s isPeerNode=%v encStrictOrAll=%v clientCertHybridOrMandatory=%v tlsSkipVerify=%v features=%+v",
+		m.id, user, addr, m.bucketName, m.bucketUUID, isPeerNode, isEncStrictOrAll, isClientCertMandatoryOrHybrid, m.skipVerify, features)
 
-	if isEncStrict {
-		conn, err = m.newTLSConn(addr, user, passwd)
+	if isPeerNode && isEncStrictOrAll {
+		if isClientCertMandatoryOrHybrid {
+			conn, err = m.newTLSConn(addr, user, passwd, m.securityInfo.GetClientCertAndKeyPair())
+		} else {
+			conn, err = m.newTLSConn(addr, user, passwd, nil)
+		}
 	} else {
 		conn, err = base.NewConn(addr, user, passwd, m.bucketName, true, base.KeepAlivePeriod, m.logger)
 	}
@@ -374,19 +380,30 @@ func (m *MemcachedConn) handleResponse(key string, rsp *gomemcached.MCResponse, 
 func (m *MemcachedConn) getConnByVB(vbno uint16, replicaNum int) (conn mcc.ClientIface, err error) {
 	// The logic is as follows:
 	//    We use non-tls addr if connecting to 'thisNode' (aka localhost).
-	//    For everything else it depends if certs are enabled or not
+	//    For peer nodes it depends on if n2n encryption is enabled ('all'/'strict') or not.
 	//    m.bucketInfo == nil implies that so far we have not received NOT_MY_VBUCKET error.
 
 	addr2use := m.addr
-	isEncStrict := m.securityInfo.IsClusterEncryptionLevelStrict()
+	isEncStrictOrAll := m.securityInfo.IsClusterEncryptionStrictOrAll()
+	isPeerNode := false // m.addr (& thus addr2use) is set to XDCRCompTopologySvc.MyMemcachedAddr()
 	if m.bucketInfo != nil {
 		_, hostname, port, sslPort, thisNode, err := m.bucketInfo.GetAddrByVB(vbno, replicaNum)
 		if err != nil {
 			return nil, err
 		}
 
+		isPeerNode = !thisNode
+
+		if thisNode {
+			hostname = base.LocalHostName
+			if base.IsIpV4Blocked() {
+				hostname = base.LocalHostNameIpv6
+			}
+		}
+
 		addr2use = fmt.Sprintf("%s:%d", hostname, port)
-		if !thisNode && isEncStrict {
+
+		if !thisNode && isEncStrictOrAll {
 			addr2use = fmt.Sprintf("%s:%d", hostname, sslPort)
 		}
 	}
@@ -396,13 +413,13 @@ func (m *MemcachedConn) getConnByVB(vbno uint16, replicaNum int) (conn mcc.Clien
 		return
 	}
 
-	m.logger.Debugf("selecting id=%d certs=%v addr2use=%s for vb=%d", m.id, isEncStrict, addr2use, vbno)
+	m.logger.Debugf("selecting id=%d isEncStrictOrAll=%v addr2use=%s for vb=%d", m.id, isEncStrictOrAll, addr2use, vbno)
 	conn, ok := m.connMap[addr2use]
 	if ok {
 		return
 	}
 
-	conn, err = m.newMemcNodeConn(user, passwd, addr2use, true)
+	conn, err = m.newMemcNodeConn(user, passwd, addr2use, isPeerNode)
 	if err != nil {
 		return
 	}

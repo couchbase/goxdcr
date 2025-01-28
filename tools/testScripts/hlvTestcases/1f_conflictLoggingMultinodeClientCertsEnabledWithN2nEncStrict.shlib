@@ -267,9 +267,9 @@ function runReplicationResume {
 }
 
 function runTestCase {
-	echo "============================================================================"
-	echo "Conflict logging with multinode setup and security with client certs enabled"
-	echo "============================================================================"
+	echo "============================================================================================================="
+	echo "Conflict logging with multinode setup and security with client certs enabled & N2N encryption set to 'strict'"
+	echo "============================================================================================================="
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT

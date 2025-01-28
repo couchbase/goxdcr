@@ -2829,6 +2829,21 @@ function writeMandatoryClientCertJSON {
 	echo "$tempFile"
 }
 
+function writeHybridClientCertJSON {
+	local tempFile=$(mktemp)
+	echo '{
+    "state": "hybrid",
+    "prefixes": [
+      {
+        "path": "subject.cn",
+        "prefix": "",
+        "delimiter": ""
+      }
+    ]
+  }' >$tempFile
+	echo "$tempFile"
+}
+
 function writeDisableClientCertJSON {
 	local tempFile
 	tempFile=$(mktemp)
@@ -2855,6 +2870,14 @@ function setMandatoryClientCert {
 	local tempFile
 
 	tempFile=$(writeMandatoryClientCertJSON)
+	executeClientCertAuth "$cluster" "$tempFile"
+}
+
+function setHybridClientCert {
+	local cluster=$1
+	local tempFile
+
+	tempFile=$(writeHybridClientCertJSON)
 	executeClientCertAuth "$cluster" "$tempFile"
 }
 

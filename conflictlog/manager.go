@@ -41,6 +41,7 @@ type Manager interface {
 
 type SecurityInfo interface {
 	IsClusterEncryptionLevelStrict() bool
+	IsClusterEncryptionStrictOrAll() bool
 	GetCACertificates() []byte
 	GetClientCertAndKeyPair() []tls.Certificate
 }
@@ -151,7 +152,7 @@ func (m *managerImpl) newMemcachedConn(bucketUUID string, params interface{}) (c
 
 	conn, err = NewMemcachedConn(m.logger, m.utils, m.manifestCache,
 		connParams.bucketName, connParams.uuid, connParams.vbCount,
-		addr, m.securityInfo, m.skipTlsVerify)
+		addr, m.securityInfo, m.topSvc, m.skipTlsVerify)
 	return
 }
 
