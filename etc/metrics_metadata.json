@@ -327,19 +327,6 @@
         ],
         "stability": "committed"
     },
-    "xdcr_clog_wait_time_seconds": {
-        "type": "gauge",
-        "help": "Rolling average of time the replication to target cluster was delayed due to conflict logging.",
-        "added": "8.0.0",
-        "unit": "seconds",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
     "xdcr_clog_write_timedout_total": {
         "type": "counter",
         "help": "Number of conflict records for which the write to conflict bucket was timed out.",

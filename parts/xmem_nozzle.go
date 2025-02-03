@@ -804,6 +804,7 @@ type XmemNozzle struct {
 
 	// pipeline level conflict logger
 	conflictLogger baseclog.Logger
+	cLogReqSyncCh  chan bool
 
 	stopOnce uint32
 }
@@ -860,6 +861,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 		mcRequestPool:       base.NewMCRequestPool(id, nil),
 		sourceClusterUuid:   sourceClusterUUID,
 		pipelineType:        pipelineType,
+		cLogReqSyncCh:       make(chan bool),
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -2041,13 +2043,22 @@ func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, pres
 
 // wrapper function to handle conflict (i.e. log conflict) between source (req) and target (resp) docs
 func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) {
-	err := xmem.logConflict(req, resp)
-	if err == baseclog.ErrLoggerClosed {
-		return
+	// It is assumed that if err != nil, the logging request
+	// has successfully reached the conflict logger and the conflict writing will be attempted.
+	// The conflict logging request event needs to be synchronous to ensure that the event raising
+	// doesn't race and lose with the concurrent pipeline events like failed CR events, to ensure correctness
+	// in throughSeqNo calculation.
+	syncCh := xmem.cLogReqSyncCh
+	info := conflictlog.CLogReqT{
+		Vbno:   req.GetSourceVB(),
+		Seqno:  req.Seqno,
+		SyncCh: syncCh,
 	}
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, nil))
+	<-syncCh
 
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, nil, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, err))
-	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated {
+	err := xmem.logConflict(req, resp)
+	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated || err == baseclog.ErrLoggerClosed {
 		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
 			xmem.Id(),
 			base.UdTagBegin, req.Req.Key, base.UdTagEnd,
@@ -2214,11 +2225,9 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 
 	conflictLogger := xmem.conflictLogger
 	if conflictLogger != nil {
-		loggerHandle, err := conflictLogger.Log(&conflictRecord)
+		err := conflictLogger.Log(&conflictRecord)
 		if err != nil {
 			return err
-		} else {
-			cLogOpts.Handle = loggerHandle
 		}
 	}
 
@@ -3712,21 +3721,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				resp_wait_time = time.Since(*sent_time)
 				manifestId = wrappedReq.GetManifestId()
 
-				now := time.Now()
-				// before moving the throughseqno forward,
-				// wait for it's conflict logging to be done
-				cLogErr := wrappedReq.WaitForConflictLogging(xmem.finish_ch)
-				if cLogErr != nil && cLogErr != baseclog.ErrLogWaitAborted {
-					// the errors are captured in the form of stats.
-					// One has to turn on debug logging inorder to identify the exact errors
-					// that are not captured by the stats.
-					xmem.Logger().Debugf("Error waiting for conflict logging to finish, key=%v%s%v, err=%v",
-						base.UdTagBegin, req.Key, base.UdTagEnd,
-						cLogErr,
-					)
-				}
-				cLogWaitTime := time.Since(now)
-
 				isExpirySet := false
 				subdocOpType := base.NotSubdoc
 				if wrappedReq.IsSubdocOp() {
@@ -3754,8 +3748,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					CloneSyncCh:          wrappedReq.ClonedSyncCh,
 					SubdocOpType:         subdocOpType,
 					CasPoisonProtection:  xmem.handleCasPoisoning(wrappedReq, response),
-					CLogWaitTime:         cLogWaitTime,
-					CLogError:            cLogErr,
 				}
 				if wrappedReq.OrigSrcVB != nil {
 					additionalInfo.SetOrigSrcVB(*wrappedReq.OrigSrcVB)

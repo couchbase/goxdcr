@@ -877,29 +877,12 @@ func (req *WrappedMCRequest) GetSourceVB() uint16 {
 	}
 }
 
-// If conflict logging is in progress, wait for it to complete.
-func (req *WrappedMCRequest) WaitForConflictLogging(finCh chan bool) error {
-	cLogOpts := req.ConflictLoggerOptions
-	if cLogOpts == nil || cLogOpts.Handle == nil {
-		// no conflict logger, or no conflict logging for this req
-		return nil
-	}
-
-	err := cLogOpts.Handle.Wait(finCh)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (req *WrappedMCRequest) ResetCLogOptions() {
 	if req.ConflictLoggerOptions == nil {
 		return
 	}
 
 	req.ConflictLoggerOptions.Enabled = false
-	req.ConflictLoggerOptions.Handle = nil
 	req.ConflictLoggerOptions.TargetInfo = nil
 	req.ConflictLoggerOptions.TargetHlv = ""
 	req.ConflictLoggerOptions.TargetMou = ""
@@ -2237,6 +2220,20 @@ func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
 	}
 }
 
+// truncate all seqnos that are no larger than passed in through_seqno
+// in an unsorted seqno list.
+func (list_obj *SortedSeqnoListWithLock) TruncateUnsortedSeqnos(through_seqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+	seqno_list := list_obj.seqno_list
+	index, found := SearchUint64ListUnsorted(seqno_list, through_seqno)
+	if found {
+		list_obj.seqno_list = seqno_list[index+1:]
+	} else if index > 0 {
+		list_obj.seqno_list = seqno_list[index:]
+	}
+}
+
 type Uleb128 []byte
 
 type ExplicitMappingValidator struct {
@@ -3227,9 +3224,6 @@ type HLVModeOptions struct {
 
 type CLoggerOptions struct {
 	Enabled bool
-	// Handle to wait for conflict logging in progress for this request.
-	// It has a value of nil if conflict logging is not in progress.
-	Handle ConflictLoggerHandle
 	// cache to log target info.
 	TargetInfo *DocumentMetadata
 	// actual cas, without considering it as import mutation or not.
@@ -3706,15 +3700,6 @@ func (clm ConflictLoggingMappingInput) Same(otherClm ConflictLoggingMappingInput
 	}
 
 	return true
-}
-
-// A LoggerHandle is returned for every conflict logging request.
-// The handle allows it caller to wait on the logging to complete (or error out)
-type ConflictLoggerHandle interface {
-	// Wait allows caller to complete the conflict logging
-	// The finch is the caller's finch. If the caller
-	// wants to exit early then the Wait will unblock as well
-	Wait(finch chan bool) error
 }
 
 // represents the status of backfill spec updates

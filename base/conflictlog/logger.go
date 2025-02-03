@@ -13,7 +13,6 @@ package conflictlog
 import (
 	"time"
 
-	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 )
 
@@ -26,7 +25,7 @@ type Logger interface {
 	QueueSize() int
 
 	// Log writes the conflict to the conflict buccket
-	Log(c Conflict) (base.ConflictLoggerHandle, error)
+	Log(c Conflict) error
 
 	// UpdateWorkerCount changes the underlying log worker count
 	UpdateWorkerCount(count int) error

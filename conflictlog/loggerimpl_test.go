@@ -13,7 +13,6 @@ package conflictlog
 import (
 	"fmt"
 	"io"
-	"sync"
 	"testing"
 	"time"
 
@@ -104,30 +103,16 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 		Target: baseclog.NewTarget("B1", "S1", "C1"),
 	})
 
-	handles := []base.ConflictLoggerHandle{}
 	for i := 0; i < 10; i++ {
-		h, err := l.Log(&ConflictRecord{})
+		err := l.Log(&ConflictRecord{})
 		require.Nil(t, err)
-
-		handles = append(handles, h)
 	}
 
 	assert.Nil(t, l.Stop())
 
-	_, err = l.Log(&ConflictRecord{})
+	err = l.Log(&ConflictRecord{})
 	require.Equal(t, baseclog.ErrLoggerClosed, err)
 	assert.Nil(t, l.Stop())
-
-	wg := &sync.WaitGroup{}
-	for _, h := range handles {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err = h.Wait(nil)
-			require.Nil(t, err)
-		}()
-	}
-	wg.Wait()
 }
 
 // the workers will be shutdown to test the number of workers.
@@ -302,9 +287,6 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	for i := 0; i < numItems; i++ {
 		l.logReqCh <- logRequest{
 			conflictRec: &ConflictRecord{},
-			// have a buffered channel because we don't have a reader of this channel.
-			// i.e. no Wait() will be called.
-			ackCh: make(chan error, 1),
 		}
 	}
 

@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/v8/pipeline"
@@ -134,6 +135,15 @@ type ThroughSeqnoTrackerSvc struct {
 	variableVBMode bool
 	// If variable VB mode is on, this will be the list of all target VBs
 	variableTgtVbs []uint16
+
+	// seqno_list_1 tracks all the conflict logging requests.
+	// seqno_list_2 tracks all the conflict logging responses (conflict logging requests that are done processing).
+	// It is assumed that seqno_list_2 is a subset of seqno_list_1.
+	// i.e. len(seqno_list_2) <= len(seqno_list_1).
+	// It's the pipeline's responsibility that this assumption are upheld.
+	cLogTrackerVbMap            map[uint16]*DualSortedSeqnoListWithLock
+	nonMonotonicThroughSeqnoCnt atomic.Uint64
+	faultyCLogTrackerCnt        atomic.Uint64
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -165,6 +175,15 @@ func (list_obj *DualSortedSeqnoListWithLock) getSortedSeqnoLists(vbno uint16, id
 	return base.DeepCopyUint64Array(list_obj.seqno_list_1), base.DeepCopyUint64Array(list_obj.seqno_list_2)
 }
 
+func (list_obj *DualSortedSeqnoListWithLock) sortAndGetSeqnoLists() ([]uint64, []uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+
+	base.SortUint64List(list_obj.seqno_list_1)
+	base.SortUint64List(list_obj.seqno_list_2)
+	return base.DeepCopyUint64Array(list_obj.seqno_list_1), base.DeepCopyUint64Array(list_obj.seqno_list_2)
+}
+
 func (list_obj *DualSortedSeqnoListWithLock) getLengthOfSeqnoLists() int {
 	list_obj.lock.RLock()
 	defer list_obj.lock.RUnlock()
@@ -180,13 +199,41 @@ func (list_obj *DualSortedSeqnoListWithLock) appendSeqnos(seqno_1 uint64, seqno_
 	list_obj.seqno_list_2 = append(list_obj.seqno_list_2, seqno_2)
 }
 
+// append seqno to the end of seqno_list_1 only
+func (list_obj *DualSortedSeqnoListWithLock) appendSeqnoToList1(seqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+	list_obj.seqno_list_1 = append(list_obj.seqno_list_1, seqno)
+}
+
+// append seqno to the end of seqno_list_2 only
+func (list_obj *DualSortedSeqnoListWithLock) appendSeqnoToList2(seqno2 uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+	list_obj.seqno_list_2 = append(list_obj.seqno_list_2, seqno2)
+}
+
 // truncate all seqnos that are no larger than passed in through_seqno
-func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnos(through_seqno uint64) {
+// through_seqno is assumed to be not present in the lists, since we are dealing with
+// gap seqnos.
+func (list_obj *DualSortedSeqnoListWithLock) truncateGapSeqnos(through_seqno uint64) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 
 	list_obj.seqno_list_1 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_1)
 	list_obj.seqno_list_2 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_2)
+}
+
+// truncate all seqnos that are no larger than passed in through_seqno
+// seqno_list_1 and seqno_list_2 is assumed to not be related and hence truncated independently.
+// The entire lists are assumed to be NOT sorted. However the lists are assumed to be sorted
+// from index 0 to the index of through_seqno. Eg: [1, 2, 3, 5, 4, 9, 8], through_seqno=3.
+func (list_obj *DualSortedSeqnoListWithLock) truncateHalfSortedSeqnos(through_seqno uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+
+	list_obj.seqno_list_1 = truncateHalfSortedSeqnoList(through_seqno, list_obj.seqno_list_1)
+	list_obj.seqno_list_2 = truncateHalfSortedSeqnoList(through_seqno, list_obj.seqno_list_2)
 }
 
 // When we truncate based on a through_seqno, this is the "reverse" truncate of the Seqnos
@@ -779,6 +826,19 @@ func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 	return seqno_list
 }
 
+// The entire lists are assumed to be NOT sorted. However the lists are assumed to be sorted
+// from index 0 to the index of through_seqno. Eg: [1, 2, 3, 5, 4, 9, 8], through_seqno=3.
+func truncateHalfSortedSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
+	index, found := base.SearchUint64ListUnsorted(seqno_list, through_seqno)
+	if found {
+		return seqno_list[index+1:]
+	} else if index > 0 {
+		return seqno_list[index:]
+	}
+
+	return seqno_list
+}
+
 func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser func(vbno uint16, seqno uint64)) *ThroughSeqnoTrackerSvc {
 	logger := log.NewLogger("ThrSeqTrackSvc", logger_ctx)
 	tsTracker := &ThroughSeqnoTrackerSvc{
@@ -799,6 +859,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser 
 		vbClonedTracker:             make(map[uint16]*DualSortedSeqnoListWithLock),
 		vbOsoModeSessionDCPTracker:  make(OSOSeqnoTrackerMapType),
 		osoSnapshotRaiser:           osoSnapshotRaiser,
+		cLogTrackerVbMap:            make(map[uint16]*DualSortedSeqnoListWithLock),
 	}
 	return tsTracker
 }
@@ -836,6 +897,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
 		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+
+		tsTracker.cLogTrackerVbMap[vbno] = newDualSortedSeqnoListWithLock()
 	}
 
 	// Initialize for all the targetVBs as well
@@ -848,6 +911,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
 		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
+
+		tsTracker.cLogTrackerVbMap[vbno] = newDualSortedSeqnoListWithLock()
 	}
 
 }
@@ -865,6 +930,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataClonedEventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.TrueConflictsEventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CLogWriteStatusEventListener, tsTracker)
 
 	conflictMgr := pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC)
 	if conflictMgr != nil {
@@ -1250,6 +1317,21 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		if isDone {
 			tsTracker.HandleDoneSession(vbno, session)
 		}
+	case common.ConflictsDetected:
+		info := event.Data.(conflictlog.CLogReqT)
+		vb := info.Vbno
+		seqno := info.Seqno
+		tsTracker.appendCLogReq(vb, seqno)
+		info.SyncCh <- true
+	case common.CLogWriteStatus:
+		info := event.Data.(conflictlog.CLogRespT)
+		if !info.ThroughSeqnoRelated {
+			// not a through seqno event.
+			return nil
+		}
+		vb := info.Vbno
+		seqno := info.Seqno
+		tsTracker.appendCLogRes(vb, seqno)
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 	}
@@ -1473,11 +1555,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_sent_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
-	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(through_seqno)
+	tsTracker.vb_gap_seqno_list_map[vbno].truncateGapSeqnos(through_seqno)
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbIgnoredSeqnoListMap[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vbTgtSeqnoManifestMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbClonedTracker[vbno].truncateSeqno1Floor(through_seqno)
+	tsTracker.cLogTrackerVbMap[vbno].truncateHalfSortedSeqnos(through_seqno)
 }
 
 /**
@@ -1532,9 +1615,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	// a gap seqno, since we do not want to use gap seqnos for checkpointing
 
 	// Starting from last_through_seqno, find the largest N such that last_through_seqno+1, last_through_seqno+2,
-	// .., last_through_seqno+N all exist in filtered_seqno_list, failed_cr_seqno_list, sent_seqno_list, or a gap range,
-	// and that last_through_seqno+N itself is not in a gap range
-	// return last_through_seqno+N as the current through_seqno. Note that N could be 0.
+	// .., last_through_seqno+N all exist in filtered_seqno_list, failed_cr_seqno_list, sent_seqno_list,
+	// systemEventSeqnoList, ignoreSeqnoList, or a gap range, and that last_through_seqno+N itself is not in a gap range.
+	// Return last_through_seqno+N as the current through_seqno. Note that N could be 0.
+
+	// If conflict logger exists, processCLoggerRequests is called on the above computed through_seqno to make sure conflicts are
+	// all processed until through_seqno. This is to ensure that all conflicts detected are not dropped/lost on pipeline restarts.
 
 	through_seqno := last_through_seqno
 
@@ -1663,13 +1749,118 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		default:
 			panic(fmt.Sprintf("unexpected found_seqno_type, %v", found_seqno_type))
 		}
+	}
 
-		through_seqno_obj.SetSeqnoWithoutLock(through_seqno)
+	cleanupFunc := func(throughSeqno uint64) {
+		through_seqno_obj.SetSeqnoWithoutLock(throughSeqno)
 
 		// truncate no longer needed entries from seqno lists to reduce memory/cpu overhead for future computations
-		go tsTracker.truncateSeqnoLists(vbno, through_seqno)
+		go tsTracker.truncateSeqnoLists(vbno, throughSeqno)
 	}
-	return through_seqno
+
+	return tsTracker.processCLoggerRequests(vbno, through_seqno, last_through_seqno,
+		sent_seqno_list, failed_cr_seqno_list, filtered_seqno_list, systemEventSeqnoList, ignoredSeqnoList, cleanupFunc)
+}
+
+// Given the newly computed throughSeqno (i.e. newThroughSeqno), if conflict logging is in the mix, this routine will find and return the
+// maximum seqno less than or equal to newThroughSeqno until which all conflict logging requests are completely processed in that moment.
+//
+// The returned seqno will be present in sentSeqnoList U failedCRSeqnoList U filteredSeqnoList U systemEventSeqnoList[1:] U ignoredSeqnoList.
+// Note: systemEventSeqnoList[1:] is used instead of systemEventSeqnoList because systemEventSeqnoList uses truncateSeqno1Floor.
+//
+// Pre-requisites:
+// cLogRes is a subset of cLogReq.
+//
+// Algorithm:
+// (1) Find the smallest seqno for which conflict logging was requested but not done.
+// This is efficiently done by sorting cLogReq and cLogRes and finding the minimum index i such that cLogReq[i] != cLogRes[i].
+// (2) Find the greatest seqno in sentSeqnoList U failedCRSeqnoList U filteredSeqnoList U systemEventSeqnoList[1:] U ignoredSeqnoList,
+// such that it is less than the seqno found in (1). This is efficiently done by computing one seqno each (candidates) in each of the above mentioned
+// lists such that each one of them are less than the seqno found in (1). The maximum of all these candidate seqno will be the final throughSeq number.
+//
+// If we are not able to find a new higher seqno than the last iteration, lastThroughSeqno will be returned.
+//
+//	sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList are assumed to be sorted.
+func (tsTracker *ThroughSeqnoTrackerSvc) processCLoggerRequests(vbno uint16, newThroughSeqno, lastThroughSeqno uint64, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList []uint64, cleanup func(uint64)) uint64 {
+	// cLogReq donates the conflict logging requests generated by xmem nozzle.
+	// cLogRes donates the conflict logging requests that are completely done by conflict logger.
+	cLogReq, cLogRes := tsTracker.cLogTrackerVbMap[vbno].sortAndGetSeqnoLists()
+
+	if tsTracker.logger.GetLogLevel() >= log.LogLevelTrace {
+		tsTracker.logger.Tracef("%v vb %v, req=%v, res=%v, sent=%v, failed=%v, system=%v, ignored=%v, filtered=%v, new=%v, old=%v",
+			tsTracker.rep_id, vbno, cLogReq, cLogRes, sentSeqnoList, failedCRSeqnoList, systemEventSeqnoList, ignoredSeqnoList, filteredSeqnoList, newThroughSeqno, lastThroughSeqno)
+	}
+
+	if len(cLogRes) > len(cLogReq) {
+		// This breaks our pre-requisite as described above and should not happen.
+		// Have debug info and donot run the algorithm i.e. behave as if there was no conflict logger.
+		// When this code path is hit, there is a risk of dropped conflicts when replication restarts.
+		tsTracker.logger.Debugf("%v faulty cLogTracker vb %v, req=%v, res=%v, sent=%v, failed=%v, system=%v, ignored=%v, filtered=%v, new=%v, old=%v",
+			tsTracker.rep_id, vbno, cLogReq, cLogRes, sentSeqnoList, failedCRSeqnoList, systemEventSeqnoList, ignoredSeqnoList, filteredSeqnoList, newThroughSeqno, lastThroughSeqno)
+		tsTracker.faultyCLogTrackerCnt.Add(1)
+		cleanup(newThroughSeqno)
+		return newThroughSeqno
+	}
+
+	if len(cLogRes) == len(cLogReq) {
+		// could be either because of:
+		// 1. conflict logging is not enabled. OR
+		// 2. all conflict logging requests are done.
+		cleanup(newThroughSeqno)
+		return newThroughSeqno
+	}
+
+	// cLogReqNotDoneIdx represents the minimum index of the seqno for which conflict logging
+	// was requested, but it has not been processed yet by the conflict logger.
+	cLogReqNotDoneIdx := len(cLogRes)
+	for cLogReqIdx, cLogResIdx := 0, 0; cLogResIdx < len(cLogRes); cLogReqIdx, cLogResIdx = cLogReqIdx+1, cLogResIdx+1 {
+		if cLogRes[cLogResIdx] != cLogReq[cLogReqIdx] {
+			cLogReqNotDoneIdx = cLogReqIdx
+			break
+		}
+	}
+
+	// all conflict logging requests were completed until newThroughSeqno.
+	if newThroughSeqno < cLogReq[cLogReqNotDoneIdx] {
+		cleanup(newThroughSeqno)
+		return newThroughSeqno
+	}
+
+	// Find the maximum element less than or equal to cLog req that is not done yet in each seqno list.
+	// Each one of these are candidates for the final through seqno.
+	var ok1, ok2, ok3, ok4, ok5 bool
+	var max1, max2, max3, max4, max5 uint64
+
+	max1, ok1 = base.FindLessThan(sentSeqnoList, cLogReq[cLogReqNotDoneIdx])
+	max2, ok2 = base.FindLessThan(failedCRSeqnoList, cLogReq[cLogReqNotDoneIdx])
+	max3, ok3 = base.FindLessThan(filteredSeqnoList, cLogReq[cLogReqNotDoneIdx])
+	max4, ok4 = base.FindLessThan(ignoredSeqnoList, cLogReq[cLogReqNotDoneIdx])
+	if len(systemEventSeqnoList) > 0 {
+		max5, ok5 = base.FindLessThan(systemEventSeqnoList[1:], cLogReq[cLogReqNotDoneIdx])
+	}
+
+	if !ok1 && !ok2 && !ok3 && !ok4 && !ok5 {
+		// We did not find any new candidates to be returned.
+		// Return the last computed through seqno.
+		cleanup(lastThroughSeqno)
+		return lastThroughSeqno
+	}
+
+	// Find the overall maximum of all the candidates.
+	finalThroughSeqno := max(max1, max2, max3, max4, max5)
+	if finalThroughSeqno < lastThroughSeqno {
+		// This is a defensive check to ensure we have a monotonically increasing throughSeqno.
+		// We treat this case similar to if there was no conflict logger with the risk of losing conflicts
+		// when there is a replication restart.
+		tsTracker.logger.Debugf("%v throughSeqno rolled back for vb %v, req=%v, res=%v, sent=%v, failed=%v, system=%v, ignored=%v, filtered=%v, new=%v, old=%v, final=%v",
+			tsTracker.rep_id, vbno, cLogReq, cLogRes, sentSeqnoList, failedCRSeqnoList, systemEventSeqnoList, ignoredSeqnoList, filteredSeqnoList, newThroughSeqno, lastThroughSeqno, finalThroughSeqno)
+		tsTracker.nonMonotonicThroughSeqnoCnt.Add(1)
+		cleanup(newThroughSeqno)
+		return newThroughSeqno
+	}
+
+	cleanup(finalThroughSeqno)
+	return finalThroughSeqno
 }
 
 // if seqno is a gap seqno, return (true, seqno of end of gap range)
@@ -1919,9 +2110,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 		}
 	}
 
-	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v oso_received=%v\n",
+	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v oso_received=%v nonMonoThroughSeqnos=%v faultyCLogTrackers=%v",
 		tsTracker.id, time.Since(start_time), count, max_sent, sum_sent/count, max_filtered, sum_filtered/count, max_failed_cr, sum_failed_cr/count,
-		max_gap, sum_gap/count, atomic.LoadUint64(&tsTracker.osoCntReceivedFromDCP))
+		max_gap, sum_gap/count, atomic.LoadUint64(&tsTracker.osoCntReceivedFromDCP), tsTracker.nonMonotonicThroughSeqnoCnt.Load(), tsTracker.faultyCLogTrackerCnt.Load(),
+	)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleDataClonedEvent(vbno uint16, reqSeqno uint64, totalInstances int, syncCh chan bool) {
@@ -2065,4 +2257,14 @@ func (tsTracker *ThroughSeqnoTrackerSvc) shouldProcessAsOso(vbno uint16, seqno u
 func (tsTracker *ThroughSeqnoTrackerSvc) HandleDoneSession(vbno uint16, session *OsoSession) {
 	session.PlaybackOntoTsTracker(tsTracker, vbno)
 	tsTracker.vbOsoModeSessionDCPTracker.TruncateSession(vbno, session)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) appendCLogReq(vbno uint16, seqno uint64) {
+	cLogReqResList := tsTracker.cLogTrackerVbMap[vbno]
+	cLogReqResList.appendSeqnoToList1(seqno)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) appendCLogRes(vbno uint16, seqno uint64) {
+	cLogReqResList := tsTracker.cLogTrackerVbMap[vbno]
+	cLogReqResList.appendSeqnoToList2(seqno)
 }

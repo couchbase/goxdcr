@@ -1478,3 +1478,149 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 	}
 	assert.Equal(highestTgtManifestId, highestTgtManifestIdToUse)
 }
+
+func shuffle(l []uint64) {
+	rand.Shuffle(len(l), func(i, j int) {
+		l[i], l[j] = l[j], l[i]
+	})
+}
+
+func TestProcessCLoggerRequests(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestProcessCLoggerRequests =================")
+	defer fmt.Println("============== Test case end: TestProcessCLoggerRequests =================")
+
+	// Setup
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
+
+	// Test data
+	vbno := uint16(1)
+	cleanup := func(throughSeqno uint64) {
+		// No-op for this test
+	}
+	allSeqnos := []uint64{6, 7, 8, 9, 10, 11, 12, 15, 16, 19, 20, 21, 22, 23, 24, 25}
+	base.SortUint64List(allSeqnos)
+
+	// randomly divide allSeqnos to 5 separate lists.
+	var sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList []uint64
+	systemEventSeqnoList = append(systemEventSeqnoList, 1) // always consists atleast one item
+	for i := range len(allSeqnos) {
+		listNum := rand.Intn(5)
+		switch listNum {
+		case 0:
+			sentSeqnoList = append(sentSeqnoList, allSeqnos[i])
+		case 1:
+			failedCRSeqnoList = append(failedCRSeqnoList, allSeqnos[i])
+		case 2:
+			filteredSeqnoList = append(filteredSeqnoList, allSeqnos[i])
+		case 3:
+			systemEventSeqnoList = append(systemEventSeqnoList, allSeqnos[i])
+		case 4:
+			ignoredSeqnoList = append(ignoredSeqnoList, allSeqnos[i])
+		}
+	}
+
+	setupClogLists := func(cLogReq, cLogRes []uint64) {
+		shuffle(cLogReq)
+		shuffle(cLogRes)
+		svc.cLogTrackerVbMap[vbno] = newDualSortedSeqnoListWithLock()
+		svc.cLogTrackerVbMap[vbno].seqno_list_1 = cLogReq
+		svc.cLogTrackerVbMap[vbno].seqno_list_2 = cLogRes
+	}
+
+	// Test case 1: All conflict logging requests are done
+	newThroughSeqno := uint64(22)
+	lastThroughSeqno := uint64(5)
+
+	// 1a. no conflicts at all
+	cLogReq := []uint64{}
+	cLogRes := []uint64{}
+	setupClogLists(cLogReq, cLogRes)
+	result := svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(newThroughSeqno, result)
+
+	// 1b. conflicts exists, but all done
+	cLogReq = []uint64{6, 11, 12, 15, 16}
+	cLogRes = []uint64{6, 11, 12, 15, 16}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(newThroughSeqno, result)
+
+	// Test case 2: Conflict logging requests are not done
+	// 2a. none are done
+	cLogReq = []uint64{11, 12, 15, 16}
+	cLogRes = []uint64{}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(uint64(10), result)
+
+	// 2b. some are not done, in order reqs, result is the previous integer.
+	cLogReq = []uint64{6, 11, 12, 15, 16}
+	cLogRes = []uint64{6, 11, 12}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(uint64(12), result)
+
+	// 2c. some are not done, in order reqs, result is not previous integer.
+	cLogReq = []uint64{6, 11, 12, 19, 20}
+	cLogRes = []uint64{6, 11, 12}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(uint64(16), result)
+
+	// 2d. some are not done, unordered reqs, result is the previous integer.
+	cLogReq = []uint64{6, 11, 12, 15, 16}
+	cLogRes = []uint64{6, 11, 15}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(uint64(11), result)
+
+	// 2e. some are not done, unordered reqs, result is not previous integer.
+	cLogReq = []uint64{6, 11, 15, 19, 20}
+	cLogRes = []uint64{6, 11, 19}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(uint64(12), result)
+
+	// Test case 3: No new candidates found i.e. first cLogReq not done.
+	cLogReq = []uint64{6, 11, 12, 15, 16}
+	cLogRes = []uint64{12, 15, 16}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(lastThroughSeqno, result)
+
+	// Test case 4: all clog requests not done are beyond newThroughSeqno.
+	cLogReq = []uint64{6, 11, 12, 15, 16, 24}
+	cLogRes = []uint64{6, 11, 12, 15, 16}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(newThroughSeqno, result)
+
+	// 4a. same as test 4, but clog requests are only beyond newThroughSeqno.
+	cLogReq = []uint64{23, 24, 25}
+	cLogRes = []uint64{}
+	setupClogLists(cLogReq, cLogRes)
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(newThroughSeqno, result)
+
+	// Test case 5: test faultyCLogTrackerCnt
+	// This input is unrealistic and should not happen.
+	cLogReq = []uint64{6, 11, 12, 15, 16, 24}
+	cLogRes = []uint64{6, 11, 12, 15, 16, 24, 25}
+	setupClogLists(cLogReq, cLogRes)
+	assert.Equal(svc.faultyCLogTrackerCnt.Load(), uint64(0))
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList, cleanup)
+	assert.Equal(newThroughSeqno, result)
+	assert.Equal(svc.faultyCLogTrackerCnt.Load(), uint64(1))
+
+	// Test case 6: test nonMonotonicThroughSeqnoCnt
+	// This input is unrealistic and should not happen.
+	cLogReq = []uint64{7, 8, 9}
+	cLogRes = []uint64{8}
+	setupClogLists(cLogReq, cLogRes)
+	assert.Equal(svc.nonMonotonicThroughSeqnoCnt.Load(), uint64(0))
+	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, []uint64{1, 2, 3}, []uint64{}, []uint64{}, []uint64{8}, []uint64{}, cleanup)
+	assert.Equal(newThroughSeqno, result)
+	assert.Equal(svc.nonMonotonicThroughSeqnoCnt.Load(), uint64(1))
+}

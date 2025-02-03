@@ -137,7 +137,6 @@ func runLoggerLoad(wg *sync.WaitGroup, logger *log.CommonLogger, opts *ConflictL
 	}
 
 	docCountPerXmem := opts.DocLoadCount / opts.XMemCount
-	finch := make(chan bool, 1)
 
 	logger.Infof("xmemCount=%d, docCountPerXmem=%d", opts.XMemCount, docCountPerXmem)
 
@@ -150,20 +149,7 @@ func runLoggerLoad(wg *sync.WaitGroup, logger *log.CommonLogger, opts *ConflictL
 			docIdPrefix := fmt.Sprintf("xmem-doc-%d", n)
 			logger.Infof("starting xmem with keyPrefix=%s", docIdPrefix)
 
-			handles := []base.ConflictLoggerHandle{}
 			for i := 0; i < docCountPerXmem; i++ {
-				if i%opts.BatchCount == 0 {
-					for _, h := range handles {
-						err = h.Wait(finch)
-						if err != nil {
-							logger.Errorf("error in conflict log err=%v", err)
-							return
-						}
-					}
-
-					handles = []base.ConflictLoggerHandle{}
-				}
-
 				min, max := opts.DocSizeRange[0], opts.DocSizeRange[1]
 				crd, err := createCRDDoc(docIdPrefix, i, min, max)
 				if err != nil {
@@ -172,22 +158,12 @@ func runLoggerLoad(wg *sync.WaitGroup, logger *log.CommonLogger, opts *ConflictL
 				}
 
 				logger.Debugf("writing to conflict log")
-				h, err := clog.Log(crd)
+				err = clog.Log(crd)
 				if err != nil {
 					logger.Errorf("error in sending conflict log err=%v", err)
 					if err == baseclog.ErrQueueFull {
 						continue
 					}
-					return
-				}
-
-				handles = append(handles, h)
-			}
-
-			for _, h := range handles {
-				err = h.Wait(finch)
-				if err != nil {
-					logger.Errorf("error in conflict log err=%v", err)
 					return
 				}
 			}

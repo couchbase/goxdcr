@@ -108,7 +108,7 @@ const (
 	// Conflict logger events:
 	// 1. xmem's conflict logging stats
 	ConflictsDetected ComponentEventType = iota
-	// 2. conflict logging stats
+	// 2. conflict logging stats and events.
 	CLogDocsWritten ComponentEventType = iota
 	CLogWriteStatus ComponentEventType = iota
 
@@ -140,6 +140,8 @@ func (c ComponentEventType) IsSynchronousEvent() bool {
 	case FixedRoutingUpdateEvent:
 		return true
 	case BrokenRoutingUpdateEvent:
+		return true
+	case ConflictsDetected:
 		return true
 	default:
 		return false

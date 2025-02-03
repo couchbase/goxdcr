@@ -190,3 +190,22 @@ func (w writeError) isNWError() bool {
 func (w writeError) noRetryNeeded() bool {
 	return w == noRetryErr
 }
+
+type CLogReqT struct {
+	Vbno  uint16
+	Seqno uint64
+
+	// The req event needs to be synchronous.
+	SyncCh chan bool
+}
+
+type CLogRespT struct {
+	// if throughSeqnoRelated=true, vbno and seqno are populated.
+	ThroughSeqnoRelated bool
+	Vbno                uint16
+	Seqno               uint64
+
+	// errors for statistics
+	Err     error
+	NwError bool
+}

@@ -2614,3 +2614,16 @@ func NoBucketError(err error) bool {
 func DecodeULEB128PrefixedKey(key []byte) (uint32, int, error) {
 	return gocbcoreMemd.DecodeULEB128_32(key)
 }
+
+// Find the greatest element x in the sorted list, such that x < input.
+func FindLessThan(list []uint64, input uint64) (uint64, bool) {
+	index := sort.Search(len(list), func(i int) bool {
+		return list[i] >= input
+	})
+	if index > 0 {
+		return list[index-1], true
+	}
+
+	// no elements in list are less than the input.
+	return 0, false
+}

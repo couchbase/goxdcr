@@ -189,7 +189,6 @@ const (
 	CLOG_THROTTLED          = "clog_throttled"
 	CLOG_WRITE_TIMEDOUT     = "clog_write_timedout"
 	CLOG_POOL_GET_TIMEDOUT  = "clog_pool_get_timedout"
-	CLOG_WAIT_TIME          = "clog_wait_time"
 
 	// clogger stats
 	CONFLICT_DOCS_WRITTEN         = base.ConflictDocsWritten
@@ -1723,14 +1722,6 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCLoggerSupport,
 		Description:  "Number of unidentified errors encountered while writing the conflict records to the conflict bucket. One should turn on debug logging for the replication to catch the unknown response.",
-		Stability:    Committed,
-		Labels:       StandardLabels,
-	},
-	CLOG_WAIT_TIME: StatsProperty{
-		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
-		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForCLoggerSupport,
-		Description:  "Rolling average of time the replication to target cluster was delayed due to conflict logging.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

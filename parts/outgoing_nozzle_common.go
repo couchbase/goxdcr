@@ -185,8 +185,6 @@ type DataSentEventAdditional struct {
 	CloneSyncCh          chan bool
 	SubdocOpType         base.SubdocOpType
 	CasPoisonProtection  base.TargetKVCasPoisonProtectionMode
-	CLogWaitTime         time.Duration
-	CLogError            error
 }
 
 // GetVB is used for doing throughSeqno processing

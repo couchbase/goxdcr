@@ -1919,7 +1919,7 @@ var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, 
 	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode,
 	GetDocsCasChangedCount, TrueConflictsDetected, SubdocCmdsSkippedCount}
 
-var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten}
+var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, CLogHibernatedCount}
 
 var CLogTargetMetricKeys = []string{TrueConflictsDetected, CLogHibernatedCount, GetDocsCasChangedCount}
 

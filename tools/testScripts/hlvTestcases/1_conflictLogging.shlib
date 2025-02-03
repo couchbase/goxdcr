@@ -104,7 +104,7 @@ function testReplicationWithConflictLogging {
 	setCrossClusterVersioningForBucket "C2" "B2"
 	setCrossClusterVersioningForBucket "C3" "B3"
 
-	numItems=10000
+	numItems=500000
 	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
 
 	# the way this test creates conflicts is by having docs of the same keys on both buckets.
@@ -144,7 +144,7 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=30
+	sleepTime=150
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 

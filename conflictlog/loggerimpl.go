@@ -111,8 +111,6 @@ type LoggerImpl struct {
 
 type logRequest struct {
 	conflictRec *ConflictRecord
-	//ackCh is the channel on which the result of the logging is reported back
-	ackCh chan error
 }
 
 type clStats struct {
@@ -260,7 +258,7 @@ func (l *LoggerImpl) Id() string {
 	return l.id
 }
 
-func (l *LoggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
+func (l *LoggerImpl) log(c *ConflictRecord) (err error) {
 	l.stats.recordCnt.Add(1)
 
 	if l.hibernated.Load() {
@@ -268,10 +266,8 @@ func (l *LoggerImpl) log(c *ConflictRecord) (ackCh chan error, err error) {
 		return
 	}
 
-	ackCh = make(chan error, 1)
 	req := logRequest{
 		conflictRec: c,
-		ackCh:       ackCh,
 	}
 
 	l.lock.RLock()
@@ -292,29 +288,48 @@ func (l *LoggerImpl) QueueSize() int {
 	return len(l.logReqCh)
 }
 
-func (l *LoggerImpl) Log(c baseclog.Conflict) (h base.ConflictLoggerHandle, err error) {
+func (l *LoggerImpl) Log(c baseclog.Conflict) (err error) {
 	if l.logger.GetLogLevel() >= log.LogLevelTrace {
 		l.logger.Tracef("logging conflict record scope=%s collection=%s", c.Scope(), c.Collection())
 	}
 
-	if l.isClosed() {
-		err = baseclog.ErrLoggerClosed
-		return
-	}
-
 	record, ok := c.(*ConflictRecord)
 	if !ok {
-		err = fmt.Errorf("wrong type of conflict record %T", c)
+		// this should never happen.
+		panic(fmt.Errorf("wrong type of conflict record %T", c))
+	}
+
+	var eventError *error
+	defer func() {
+		if eventError == nil || *eventError == nil {
+			return
+		}
+
+		// If logger could not accept the request for logging,
+		// mark it as done explicitly before returning to move the through seqno and for error stats.
+		info := CLogRespT{
+			ThroughSeqnoRelated: true,
+			Vbno:                record.Source.VBNo,
+			Seqno:               record.Source.Seqno,
+			NwError:             false,
+			Err:                 *eventError,
+		}
+		l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, info, l,
+			[]interface{}{record.Source.VBNo, record.Target.VBNo, record.Source.Seqno},
+			nil), record.OriginatingPipeline,
+		)
+	}()
+
+	if l.isClosed() {
+		err = baseclog.ErrLoggerClosed
+		eventError = &err
 		return
 	}
 
-	ackCh, err := l.log(record)
+	err = l.log(record)
 	if err != nil {
+		eventError = &err
 		return
-	}
-
-	h = logReqHandle{
-		ackCh: ackCh,
 	}
 
 	return
@@ -454,10 +469,18 @@ func (l *LoggerImpl) worker() {
 			req.conflictRec.ResetStartTime()
 
 			err := l.processReq(req)
-			req.ackCh <- err
 			if err != nil {
 				l.hibernateIfNeeded(err)
 			}
+
+			info := CLogRespT{
+				ThroughSeqnoRelated: true,
+				Vbno:                req.conflictRec.Source.VBNo,
+				Seqno:               req.conflictRec.Source.Seqno,
+				NwError:             false,
+				Err:                 err,
+			}
+			l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil), req.conflictRec.OriginatingPipeline)
 
 			totalWriteTime := time.Since(req.conflictRec.StartTime).Microseconds()
 			l.stats.totalWriteLatency.Add(uint64(totalWriteTime))
@@ -563,7 +586,6 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		// we let the callers deal with it
 		return err
 	}
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, srcVbSeqnoPair, nil), pipelineType)
 
 	// Write target document.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -571,9 +593,10 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		return err
 	}, req.conflictRec.OriginatingPipeline)
 	if err != nil {
+		// only source doc was written.
+		l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, SourceDoc, l, srcVbSeqnoPair, nil), pipelineType)
 		return err
 	}
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, srcVbSeqnoPair, nil), pipelineType)
 
 	// Write conflict record.
 	err = l.writeDocRetry(target.Bucket, func(conn Connection) error {
@@ -581,8 +604,12 @@ func (l *LoggerImpl) writeDocs(req logRequest, target baseclog.Target) (err erro
 		return err
 	}, req.conflictRec.OriginatingPipeline)
 	if err != nil {
+		// only source doc + target doc was written.
+		l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, TargetDoc, l, srcVbSeqnoPair, nil), pipelineType)
 		return err
 	}
+
+	// all of source doc + target doc + CRD was written for this conflict.
 	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogDocsWritten, CRD, l, srcVbSeqnoPair, nil), pipelineType)
 
 	return
@@ -599,7 +626,11 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 	}
 
 	nwError := l.utils.IsSeriousNetError(err)
-	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
+	info := CLogRespT{
+		NwError: nwError,
+		Err:     err,
+	}
+	l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil), originatingPipelineType)
 
 	if nwError {
 		refreshBucketInfo = true
@@ -666,7 +697,11 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 			}
 
 			nwError = l.utils.IsSeriousNetError(err)
-			l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, err, l, nil, nwError), originatingPipelineType)
+			info := CLogRespT{
+				NwError: nwError,
+				Err:     err,
+			}
+			l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil), originatingPipelineType)
 			// This is to account for nw errors while connecting
 			if !nwError {
 				return
@@ -779,20 +814,6 @@ func (l *LoggerImpl) processReq(req logRequest) error {
 	}
 
 	return nil
-}
-
-type logReqHandle struct {
-	ackCh chan error
-}
-
-func (h logReqHandle) Wait(finch chan bool) (err error) {
-	select {
-	case <-finch:
-		err = baseclog.ErrLogWaitAborted
-	case err = <-h.ackCh:
-	}
-
-	return
 }
 
 // newCap should be greater than or equal to existing queue capacity
@@ -966,7 +987,10 @@ func (l *LoggerImpl) Start(_ metadata.ReplicationSettingsMap) error {
 
 	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
 	// to mark the prometheus stat as unhibernated or running
-	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerRunning, l, nil, false))
+	info := CLogRespT{
+		Err: baseclog.ErrLoggerRunning,
+	}
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
 	for i := 0; i < l.opts.workerCount; i++ {
 		l.startWorker()
@@ -1200,8 +1224,12 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 		return
 	}
 
-	// raise an event for both main and backfill (if exists) pipelines.
-	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerHibernated, l, nil, false))
+	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
+	// to mark the prometheus stat as hibernated.
+	info := CLogRespT{
+		Err: baseclog.ErrLoggerHibernated,
+	}
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
 	// hibernate the logger
 	defer l.logger.Infof("Conflict logger hibernated rid=%s lid=%s", l.replId, l.id)
@@ -1234,7 +1262,10 @@ func (l *LoggerImpl) unhibernate() {
 
 	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
 	// to mark the prometheus stat as unhibernated
-	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, baseclog.ErrLoggerRunning, l, nil, false))
+	info := CLogRespT{
+		Err: baseclog.ErrLoggerRunning,
+	}
+	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
 	l.hibernated.Store(false)
 	l.errorCnt = 0
