@@ -187,7 +187,7 @@ func ValidateAndConvertGlobalSettingsValue(key, value string) (convertedValue in
 			return ServiceToLogLevelMapType{}, err
 		}
 		// Add any missing entries to serviceToLogLevelMap and ensure it has the correct number of services
-		err = serviceToLogLevelMap.FillAndValidate()
+		err = serviceToLogLevelMap.ValidateAndFill()
 		if err != nil {
 			err = fmt.Errorf("invalid input. err=%v", err)
 			return ServiceToLogLevelMapType{}, err
@@ -204,31 +204,50 @@ func (serviceToLogLevelMap ServiceToLogLevelMapType) Initialize() {
 	}
 }
 
+// This function verifies that the provided service name is valid and that the log level is correctly specified.
+func (serviceToLogLevelMap ServiceToLogLevelMapType) validate() error {
+	nameIndex := make(map[string]bool)
+	for _, service := range genericServices {
+		nameIndex[service] = true
+	}
+
+	for serviceName, logLevel := range serviceToLogLevelMap {
+		if _, ok := nameIndex[serviceName]; !ok {
+			return fmt.Errorf("%s is not a valid service name. Valid names are %v", serviceName, genericServices)
+		}
+		_, err := log.LogLevelFromStr(logLevel)
+		if err != nil {
+			return fmt.Errorf("Invalid logLevel %v for service %v. Valid logLevels are Debug, Error, Fatal, Info, Trace, Warn", logLevel, serviceName)
+		}
+	}
+	return nil
+}
+
 // genericServicesLogLevel can be updated through
 // 1. UI - in this case all the genericServices will be present
 // 2. REST API - the user could enter only those services whose logLevel needs to be changed
 // When retrieving data via the REST API, it must always return logLevels for all services to reflect the current status in the UI.
 // Hence this functions fills the missing entries if any and ensures all the services are present at any point of time
-func (serviceToLogLevelMap ServiceToLogLevelMapType) FillAndValidate() error {
+func (serviceToLogLevelMap ServiceToLogLevelMapType) ValidateAndFill() error {
+	err := serviceToLogLevelMap.validate()
+	if err != nil {
+		return err
+	}
+
 	for _, service := range genericServices {
 		if _, ok := serviceToLogLevelMap[service]; !ok {
-			//If the input map lacks the entry, populate it with the current or default value.
+			// if the input map lacks the entry, populate it with the current or default value.
 			log.ServiceToLoggerContext.Lock.RLock()
 			loggerContext, exists := log.ServiceToLoggerContext.ServiceToContextMap[service]
 			log.ServiceToLoggerContext.Lock.RUnlock()
-			if exists { //populate with current value
+			if exists { // populate with current value
 				serviceToLogLevelMap[service] = loggerContext.Log_level.String()
 			} else { // populate with default value
 				serviceToLogLevelMap[service] = log.LogLevelInfo.String()
 			}
 		}
 	}
-	mapLength := len(serviceToLogLevelMap)
-	noOfServices := len(genericServices)
-	if mapLength != noOfServices {
-		// can happpen when serviceToLogLevelMap contains invalid service names
-		return fmt.Errorf("serviceToLogLevelMap contains invalid entries: expected %v valid services, but found %v", noOfServices, mapLength)
-	}
+
 	return nil
 }
 
