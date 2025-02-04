@@ -93,13 +93,25 @@ func handleFin(event *common.Event) {
 	if event.EventType.IsSynchronousEvent() {
 		syncErrCh, ok1 := event.OtherInfos.(chan error)
 		if ok1 {
-			close(syncErrCh)
+			select {
+			case <-syncErrCh:
+				// channel might already be closed
+			default:
+				close(syncErrCh)
+			}
+
 			return
 		}
 
 		syncBoolCh, ok2 := event.OtherInfos.(chan bool)
 		if ok2 {
-			close(syncBoolCh)
+			select {
+			case <-syncBoolCh:
+				// channel might already be closed
+			default:
+				close(syncBoolCh)
+			}
+
 			return
 		}
 	}

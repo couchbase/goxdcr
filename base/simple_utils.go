@@ -309,6 +309,10 @@ func SortUint64List(list []uint64) []uint64 {
 	return list
 }
 
+// Returns the index of smallest seqno in the seqno_list such that it is greater than or equal to input seqno.
+// true is returned when exact match is found. false is returned when the index of seqno greater than input is returned.
+// When no seqno which is greater than or equal to input is found, {len(seqno_list), false} is returned.
+// Performs binary search on the sorted list.
 func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
 	index := sort.Search(len(seqno_list), func(i int) bool {
 		return seqno_list[i] >= seqno
@@ -320,13 +324,15 @@ func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
 	}
 }
 
+// similar to SearchUint64List, but on an unsorted list. Performs linear search.
 func SearchUint64ListUnsorted(seqno_list []uint64, seqno uint64) (int, bool) {
 	for index, val := range seqno_list {
-		if val == seqno {
-			return index, true
+		if val >= seqno {
+			return index, val == seqno
 		}
 	}
-	return 0, false
+
+	return len(seqno_list), false
 }
 
 func SortedUint64ListsAreSame(sorted_list_1, sorted_list_2 []uint64) bool {

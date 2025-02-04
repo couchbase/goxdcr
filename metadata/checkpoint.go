@@ -683,6 +683,7 @@ type SourceVBCounters struct {
 	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
 	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
 	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
+	CLogHibernatedCnt      uint64 `json:"clog_hibernated_cnt"`
 	// Number of items that did not send due to source document CAS clock out of bounds
 	CasPoisonCnt uint64 `json:"cas_poison_cnt"`
 	// Number of subdoc commands skipped due to maximum paths limit.
@@ -718,7 +719,8 @@ func (s *SourceVBCounters) SameAs(other *SourceVBCounters) bool {
 		s.TgtConflictDocsWritten == other.TgtConflictDocsWritten &&
 		s.CRDConflictDocsWritten == other.CRDConflictDocsWritten &&
 		s.CasPoisonCnt == other.CasPoisonCnt &&
-		s.SubdocCmdSkippedCnt == other.SubdocCmdSkippedCnt
+		s.SubdocCmdSkippedCnt == other.SubdocCmdSkippedCnt &&
+		s.CLogHibernatedCnt == other.CLogHibernatedCnt
 }
 
 // TargetPerVBCounters contain a list of counters that are collected throughout a target VB's
@@ -736,7 +738,6 @@ type TargetPerVBCounters struct {
 	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
 	// conflict logger stats
 	TrueConflictsDetected uint64 `json:"true_conflicts_detected"`
-	CLogHibernatedCnt     uint64 `json:"clog_hibernated_cnt"`
 	GetDocsCasChangedCnt  uint64 `json:"get_docs_cas_changed_cnt"`
 }
 
@@ -772,7 +773,6 @@ func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
 		t.DocsSentWithPoisonedCasErrorMode == other.DocsSentWithPoisonedCasErrorMode &&
 		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode &&
 		t.TrueConflictsDetected == other.TrueConflictsDetected &&
-		t.CLogHibernatedCnt == other.CLogHibernatedCnt &&
 		t.GetDocsCasChangedCnt == other.GetDocsCasChangedCnt
 }
 
@@ -822,10 +822,6 @@ func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
 	trueConflictsDetected, ok := fieldMap[TrueConflictsDetected]
 	if ok {
 		t.TrueConflictsDetected = uint64(trueConflictsDetected.(float64))
-	}
-	clogHibernatedCnt, ok := fieldMap[CLogHibernatedCnt]
-	if ok {
-		t.CLogHibernatedCnt = uint64(clogHibernatedCnt.(float64))
 	}
 	getDocsCasChangedCnt, ok := fieldMap[GetDocsCasChangedCnt]
 	if ok {
@@ -1321,6 +1317,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			SrcConflictDocsWritten:             srcConflictDocsWritten,
 			TgtConflictDocsWritten:             tgtConflictDocsWritten,
 			CRDConflictDocsWritten:             crdConflictDocsWritten,
+			CLogHibernatedCnt:                  clogHibernatedCnt,
 			CasPoisonCnt:                       casPoisonItems,
 			SubdocCmdSkippedCnt:                subdocCmdSkippedCnt,
 		},
@@ -1334,7 +1331,6 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
 			DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
 			GetDocsCasChangedCnt:               getDocsCasChangedCnt,
-			CLogHibernatedCnt:                  clogHibernatedCnt,
 			TrueConflictsDetected:              trueConflictsDetected,
 		},
 	}
@@ -1351,7 +1347,7 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			return nil, fmt.Errorf("global stats %v should only have 1 vb", routerKey)
 		}
 		var vbKey uint16
-		for vb, _ := range vbCountMap {
+		for vb := range vbCountMap {
 			vbKey = vb
 		}
 		switch routerKey {
@@ -1392,7 +1388,7 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			return nil, fmt.Errorf("global stats %v should only have 1 vb", clogKey)
 		}
 		var vbKey uint16
-		for vb, _ := range vbCountMap {
+		for vb := range vbCountMap {
 			vbKey = vb
 		}
 		switch clogKey {
@@ -1402,6 +1398,8 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			srcFilteredCntrs.TgtConflictDocsWritten = uint64(vbCountMap[vbKey])
 		case base.CRDConflictDocsWritten:
 			srcFilteredCntrs.CRDConflictDocsWritten = uint64(vbCountMap[vbKey])
+		case base.CLogHibernatedCount:
+			srcFilteredCntrs.CLogHibernatedCnt = uint64(vbCountMap[vbKey])
 		}
 	}
 
@@ -1427,28 +1425,15 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 				globalCntrs[vb].DocsSentWithPoisonedCasErrorMode = uint64(count)
 			case base.DocsSentWithPoisonedCasReplaceMode:
 				globalCntrs[vb].DocsSentWithPoisonedCasReplaceMode = uint64(count)
+			case base.TrueConflictsDetected:
+				globalCntrs[vb].TrueConflictsDetected = uint64(count)
+			case base.GetDocsCasChangedCount:
+				globalCntrs[vb].GetDocsCasChangedCnt = uint64(count)
 			case base.SubdocCmdsSkippedCount:
 				if len(vbCountMap) > 1 {
 					return nil, fmt.Errorf("global stats %v should only have 1 vb", outNozzleKey)
 				}
 				srcFilteredCntrs.SubdocCmdSkippedCnt = uint64(count)
-			}
-		}
-	}
-
-	for _, targetClogKey := range base.CLogTargetMetricKeys {
-		vbCountMap := vbCountMetrics[targetClogKey]
-		for vb, count := range vbCountMap {
-			if globalCntrs[vb] == nil {
-				globalCntrs[vb] = &TargetPerVBCounters{}
-			}
-			switch targetClogKey {
-			case base.TrueConflictsDetected:
-				globalCntrs[vb].TrueConflictsDetected = uint64(count)
-			case base.CLogHibernatedCount:
-				globalCntrs[vb].CLogHibernatedCnt = uint64(count)
-			case base.GetDocsCasChangedCount:
-				globalCntrs[vb].GetDocsCasChangedCnt = uint64(count)
 			}
 		}
 	}
@@ -2783,6 +2768,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
 			CasPoisonCnt:                       c.CasPoisonCnt,
 			SubdocCmdSkippedCnt:                c.SubdocCmdSkippedCnt,
+			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
 		},
 
 		CreationTime: c.CreationTime,
@@ -2795,7 +2781,6 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
 			DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
 			TrueConflictsDetected:              c.TrueConflictsDetected,
-			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
 			GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
 		},
 

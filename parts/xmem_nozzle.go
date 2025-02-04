@@ -2050,12 +2050,16 @@ func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.Wr
 	// in throughSeqNo calculation.
 	syncCh := xmem.cLogReqSyncCh
 	info := conflictlog.CLogReqT{
-		Vbno:   req.GetSourceVB(),
-		Seqno:  req.Seqno,
-		SyncCh: syncCh,
+		Vbno:  req.GetSourceVB(),
+		Seqno: req.Seqno,
 	}
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, nil))
-	<-syncCh
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, syncCh))
+	select {
+	case <-syncCh:
+	case <-xmem.finish_ch:
+		// pipeline services should have shut down too.
+		return
+	}
 
 	err := xmem.logConflict(req, resp)
 	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated || err == baseclog.ErrLoggerClosed {

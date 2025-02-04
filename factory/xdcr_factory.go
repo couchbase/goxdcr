@@ -1569,7 +1569,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	// through seqno tracker needs to be initialized after pipeline supervisor
 	// since it uses the latter as error handler
 	osoSnapshotRaiser := xdcrf.MakeOSOSnapshotRaiser(pipeline)
-	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx, osoSnapshotRaiser)
+	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx, osoSnapshotRaiser, conflictLogger != nil)
 	through_seqno_tracker_svc.Attach(pipeline)
 
 	// Create pipeline statistics manager.

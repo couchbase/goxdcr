@@ -1917,11 +1917,9 @@ var RouterVBMetricKeys = []string{DocsFiltered, DocsUnableToFilter, ExpiryFilter
 var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, GuardrailDiskSpace,
 	DocsSentWithSubdocSet, DocsSentWithSubdocDelete,
 	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode,
-	GetDocsCasChangedCount, TrueConflictsDetected, SubdocCmdsSkippedCount}
+	GetDocsCasChangedCount, TrueConflictsDetected, CLogHibernatedCount, SubdocCmdsSkippedCount}
 
 var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, CLogHibernatedCount}
-
-var CLogTargetMetricKeys = []string{TrueConflictsDetected, CLogHibernatedCount, GetDocsCasChangedCount}
 
 // After a successful pre_replicate call, how long the information stays around for
 var GlobalPreReplicateCacheExpireTimeSecs = 10

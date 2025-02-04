@@ -144,6 +144,13 @@ type ThroughSeqnoTrackerSvc struct {
 	cLogTrackerVbMap            map[uint16]*DualSortedSeqnoListWithLock
 	nonMonotonicThroughSeqnoCnt atomic.Uint64
 	faultyCLogTrackerCnt        atomic.Uint64
+
+	// In the OSO mode, if there are cLog seqno belonging to a
+	// future session which is not being processed yet, we will store
+	// here, since ThroughSeqnoTrackerSvc data-structure is on top of the heirarchy.
+	cLogCrossOSOSnapshotUnsureBuffer map[uint16]*DualSortedSeqnoListWithLock
+
+	cLogExists bool
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -182,6 +189,17 @@ func (list_obj *DualSortedSeqnoListWithLock) sortAndGetSeqnoLists() ([]uint64, [
 	base.SortUint64List(list_obj.seqno_list_1)
 	base.SortUint64List(list_obj.seqno_list_2)
 	return base.DeepCopyUint64Array(list_obj.seqno_list_1), base.DeepCopyUint64Array(list_obj.seqno_list_2)
+}
+
+func (list_obj *DualSortedSeqnoListWithLock) getSeqnoListsAndFullTruncate() ([]uint64, []uint64) {
+	list_obj.lock.Lock()
+	defer list_obj.lock.Unlock()
+
+	list1, list2 := base.DeepCopyUint64Array(list_obj.seqno_list_1), base.DeepCopyUint64Array(list_obj.seqno_list_2)
+	list_obj.seqno_list_1 = list_obj.seqno_list_1[:0]
+	list_obj.seqno_list_2 = list_obj.seqno_list_2[:0]
+
+	return list1, list2
 }
 
 func (list_obj *DualSortedSeqnoListWithLock) getLengthOfSeqnoLists() int {
@@ -308,7 +326,7 @@ func (t *OSOSeqnoTrackerMapType) StartNewOSOSession(tsTracker *ThroughSeqnoTrack
 	}
 
 	sessionTracker := (*t)[vbno]
-	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId, &tsTracker.osoCntReceivedFromDCP).SetVariableVBMode(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
+	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId, &tsTracker.osoCntReceivedFromDCP, vbno).SetVariableVBMode(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
 }
 
 func (t *OSOSeqnoTrackerMapType) GetStartingSeqno(vbno uint16) (seqno uint64, osoAcive bool) {
@@ -340,13 +358,15 @@ type OsoSessionsTracker struct {
 	lock           sync.RWMutex
 	sessions       []*OsoSession
 	variableVBMode bool
+	tsTracker      *ThroughSeqnoTrackerSvc
 }
 
-func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64, cumulativeCnt *uint64) *OsoSession {
+func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64, cumulativeCnt *uint64, vbno uint16) *OsoSession {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
 	newSession := &OsoSession{
+		vbno:                           vbno,
 		lock:                           sync.RWMutex{},
 		dcpSeqnoWhenSessionStarts:      lastSeenSeqno,
 		dcpManifestIdWhenSessionStarts: lastSeenManifestId,
@@ -355,6 +375,8 @@ func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenMa
 		minSeqnoFromDCP:                math.MaxUint64,
 		unsureBufferedProcessedSeqnos:  newDualSortedSeqnoListWithLock(),
 		cumulativeCnt:                  cumulativeCnt,
+		unsureBufferedCLogSeqnos:       newDualSortedSeqnoListWithLock(),
+		tsTracker:                      o.tsTracker,
 	}
 
 	if o.variableVBMode {
@@ -473,16 +495,18 @@ func (o *OsoSessionsTracker) TruncateSessionViaPtr(session *OsoSession) {
 	}
 }
 
-func newOsoSessionTracker(variableVBMode bool, tgtVbs []uint16) *OsoSessionsTracker {
+func newOsoSessionTracker(variableVBMode bool, tsTracker *ThroughSeqnoTrackerSvc) *OsoSessionsTracker {
 	return &OsoSessionsTracker{
 		lock:           sync.RWMutex{},
 		sessions:       make([]*OsoSession, 0),
 		variableVBMode: variableVBMode,
+		tsTracker:      tsTracker,
 	}
 }
 
 type OsoSession struct {
 	lock                           sync.RWMutex
+	vbno                           uint16
 	dcpSeqnoWhenSessionStarts      uint64
 	dcpManifestIdWhenSessionStarts uint64
 	dcpSentOsoEnd                  bool
@@ -502,6 +526,22 @@ type OsoSession struct {
 	variableVbMode                      bool
 	variableMaxManifestIdProcessed      map[uint16]uint64
 	variableUnsureBufferedProcessSeqnos map[uint16]*DualSortedSeqnoListWithLock
+
+	// The following two variables are not guarenteed to be protected under
+	// the "lock" RWMutex above. Instead atomics is used to ensure their safety to avoid
+	// holding on to the write mutex all the time in isDoneNoLock, given it's a hotspot.
+	// cLogRequested indicates the number of conflict logging requests
+	// for this session.
+	cLogRequestedCnt atomic.Uint64
+	// cLogResponded indicates the number of conflict logging requests
+	// that were done processing for this session.
+	cLogRespondedCnt atomic.Uint64
+
+	// unsure cLog seqnos for the current session.
+	// seqno_list_1 is for cLog requests. seqno_list_2 is for cLog responses.
+	unsureBufferedCLogSeqnos *DualSortedSeqnoListWithLock
+
+	tsTracker *ThroughSeqnoTrackerSvc
 }
 
 func (s *OsoSession) SetVariableVBMode(variableVBMode bool, tgtVbs []uint16) *OsoSession {
@@ -530,11 +570,79 @@ func (s *OsoSession) ReceivedOSOEnd() bool {
 	return s.dcpSentOsoEnd
 }
 
-// A session is done if DCP has sent an OSO end, and that all the seqnos the DCP sent
-// during this session has been processed by downstream parts
+// Returns true i.e. this current session done, only when all the CLog requests of the session were done.
+func (s *OsoSession) isDoneWithCLog() bool {
+	tsTracker := s.tsTracker
+
+	cLogCrossOSOSnapshotUnsureBuffer := tsTracker.cLogCrossOSOSnapshotUnsureBuffer[s.vbno]
+	cLogCrossOSOSnapshotUnsureBuffer.lock.Lock()
+	defer cLogCrossOSOSnapshotUnsureBuffer.lock.Unlock()
+
+	var processedCrossOSOUnsureCLogReqs []uint64
+	var processedCrossOSOUnsureCLogResps []uint64
+
+	for _, seqno := range cLogCrossOSOSnapshotUnsureBuffer.seqno_list_1 {
+		if s.seqnoIsWithinRange(seqno) {
+			s.cLogRequestedCnt.Add(1)
+		} else {
+			// seqno is not from this session, will try for a future session.
+			processedCrossOSOUnsureCLogReqs = append(processedCrossOSOUnsureCLogReqs, seqno)
+		}
+	}
+
+	for _, seqno := range cLogCrossOSOSnapshotUnsureBuffer.seqno_list_2 {
+		if s.seqnoIsWithinRange(seqno) {
+			s.cLogRespondedCnt.Add(1)
+		} else {
+			// seqno is not from this session, will try for a future session.
+			processedCrossOSOUnsureCLogResps = append(processedCrossOSOUnsureCLogResps, seqno)
+		}
+	}
+
+	unsureCLogReqList, unsureCLogResList := s.unsureBufferedCLogSeqnos.getSeqnoListsAndFullTruncate()
+
+	for _, seqno := range unsureCLogReqList {
+		if s.seqnoIsWithinRange(seqno) {
+			s.cLogRequestedCnt.Add(1)
+		} else {
+			// seqno is not from this session, will try for a future session.
+			processedCrossOSOUnsureCLogReqs = append(processedCrossOSOUnsureCLogReqs, seqno)
+		}
+	}
+
+	for _, seqno := range unsureCLogResList {
+		if s.seqnoIsWithinRange(seqno) {
+			s.cLogRespondedCnt.Add(1)
+		} else {
+			// seqno is not from this session, will try for a future session.
+			processedCrossOSOUnsureCLogResps = append(processedCrossOSOUnsureCLogResps, seqno)
+		}
+	}
+
+	cLogCrossOSOSnapshotUnsureBuffer.seqno_list_1 = processedCrossOSOUnsureCLogReqs
+	cLogCrossOSOSnapshotUnsureBuffer.seqno_list_2 = processedCrossOSOUnsureCLogResps
+
+	return s.cLogRequestedCnt.Load() == s.cLogRespondedCnt.Load()
+}
+
+// A session is done if all these conditions are satisfied:
+// 1. DCP has sent an OSO end, and
+// 2. All the seqnos the DCP sent during this session has been processed by downstream parts, and
+// 3. Conflict logger doesn't exist or it exists and has finished logging all the requests of this session.
 func (s *OsoSession) isDoneNoLock() bool {
+	tsTracker := s.tsTracker
+
 	if s.dcpSentOsoEnd &&
 		s.seqnosFromDCPCnt == s.seqnosHandledCnt {
+		if tsTracker.cLogExists {
+			// now we know that the current OSO session is done.
+			// Try to fit in that unsure buffers of conflict logger in
+			// this current session. Then we will deem this current session done,
+			// only when all the requests of the session were done.
+			return s.isDoneWithCLog()
+		}
+
+		// no conflict logger
 		return true
 	}
 	return false
@@ -744,6 +852,38 @@ func (s *OsoSession) processOneUnsureBufferedSeqnosList(unsureBufferedProcessedS
 	}
 }
 
+func (s *OsoSession) markCLogReqSeqno(seqno uint64) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if s.seqnoIsWithinRange(seqno) {
+		// seqno is part of the current session.
+		s.cLogRequestedCnt.Add(1)
+	} else {
+		// This seqno could probably be for a later session.
+		// Mark it as unsure for now.
+		s.unsureBufferedCLogSeqnos.appendSeqnoToList1(seqno)
+	}
+
+	return s.isDoneNoLock()
+}
+
+func (s *OsoSession) markCLogResSeqno(seqno uint64) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if s.seqnoIsWithinRange(seqno) {
+		// seqno is part of the current session.
+		s.cLogRespondedCnt.Add(1)
+	} else {
+		// This seqno could probably be for a later session.
+		// Mark it as unsure for now.
+		s.unsureBufferedCLogSeqnos.appendSeqnoToList2(seqno)
+	}
+
+	return s.isDoneNoLock()
+}
+
 type SeqnoManifestsMapType map[uint16]*DualSortedSeqnoListWithLock
 
 // If the manifestID has not changed, then this function will update the existing seqno associated with the manifestID
@@ -839,28 +979,31 @@ func truncateHalfSortedSeqnoList(through_seqno uint64, seqno_list []uint64) []ui
 	return seqno_list
 }
 
-func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser func(vbno uint16, seqno uint64)) *ThroughSeqnoTrackerSvc {
+func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser func(vbno uint16, seqno uint64), hasConflictLogger bool) *ThroughSeqnoTrackerSvc {
 	logger := log.NewLogger("ThrSeqTrackSvc", logger_ctx)
 	tsTracker := &ThroughSeqnoTrackerSvc{
-		AbstractComponent:           component.NewAbstractComponentWithLogger("ThrSeqTrackSvc", logger),
-		logger:                      logger,
-		vb_map:                      make(map[uint16]bool),
-		through_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
-		vb_last_seen_seqno_map:      make(map[uint16]*base.SeqnoWithLock),
-		vb_sent_seqno_list_map:      make(map[uint16]*base.SortedSeqnoListWithLock),
-		vb_filtered_seqno_list_map:  make(map[uint16]*base.SortedSeqnoListWithLock),
-		vb_failed_cr_seqno_list_map: make(map[uint16]*base.SortedSeqnoListWithLock),
-		vb_gap_seqno_list_map:       make(map[uint16]*DualSortedSeqnoListWithLock),
-		vbSystemEventsSeqnoListMap:  make(SeqnoManifestsMapType),
-		vbIgnoredSeqnoListMap:       make(map[uint16]*base.SortedSeqnoListWithLock),
-		vbTgtSeqnoManifestMap:       make(SeqnoManifestsMapType),
-		vbBackfillLastDCPSeqnoMap:   make(map[uint16]*base.SeqnoWithLock),
-		vbBackfillHelperDoneMap:     make(map[uint16]*base.SeqnoWithLock),
-		vbClonedTracker:             make(map[uint16]*DualSortedSeqnoListWithLock),
-		vbOsoModeSessionDCPTracker:  make(OSOSeqnoTrackerMapType),
-		osoSnapshotRaiser:           osoSnapshotRaiser,
-		cLogTrackerVbMap:            make(map[uint16]*DualSortedSeqnoListWithLock),
+		AbstractComponent:                component.NewAbstractComponentWithLogger("ThrSeqTrackSvc", logger),
+		logger:                           logger,
+		vb_map:                           make(map[uint16]bool),
+		through_seqno_map:                make(map[uint16]*base.SeqnoWithLock),
+		vb_last_seen_seqno_map:           make(map[uint16]*base.SeqnoWithLock),
+		vb_sent_seqno_list_map:           make(map[uint16]*base.SortedSeqnoListWithLock),
+		vb_filtered_seqno_list_map:       make(map[uint16]*base.SortedSeqnoListWithLock),
+		vb_failed_cr_seqno_list_map:      make(map[uint16]*base.SortedSeqnoListWithLock),
+		vb_gap_seqno_list_map:            make(map[uint16]*DualSortedSeqnoListWithLock),
+		vbSystemEventsSeqnoListMap:       make(SeqnoManifestsMapType),
+		vbIgnoredSeqnoListMap:            make(map[uint16]*base.SortedSeqnoListWithLock),
+		vbTgtSeqnoManifestMap:            make(SeqnoManifestsMapType),
+		vbBackfillLastDCPSeqnoMap:        make(map[uint16]*base.SeqnoWithLock),
+		vbBackfillHelperDoneMap:          make(map[uint16]*base.SeqnoWithLock),
+		vbClonedTracker:                  make(map[uint16]*DualSortedSeqnoListWithLock),
+		vbOsoModeSessionDCPTracker:       make(OSOSeqnoTrackerMapType),
+		osoSnapshotRaiser:                osoSnapshotRaiser,
+		cLogTrackerVbMap:                 make(map[uint16]*DualSortedSeqnoListWithLock),
+		cLogCrossOSOSnapshotUnsureBuffer: make(map[uint16]*DualSortedSeqnoListWithLock),
+		cLogExists:                       hasConflictLogger,
 	}
+
 	return tsTracker
 }
 
@@ -894,11 +1037,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 
 		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
-		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
+		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker)
 		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 
 		tsTracker.cLogTrackerVbMap[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.cLogCrossOSOSnapshotUnsureBuffer[vbno] = newDualSortedSeqnoListWithLock()
 	}
 
 	// Initialize for all the targetVBs as well
@@ -908,11 +1052,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		}
 		tsTracker.vb_sent_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
-		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker.variableTgtVbs)
+		tsTracker.vbOsoModeSessionDCPTracker[vbno] = newOsoSessionTracker(tsTracker.variableVBMode, tsTracker)
 		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vb_failed_cr_seqno_list_map[vbno] = base.NewSortedSeqnoListWithLock()
 
 		tsTracker.cLogTrackerVbMap[vbno] = newDualSortedSeqnoListWithLock()
+		tsTracker.cLogCrossOSOSnapshotUnsureBuffer[vbno] = newDualSortedSeqnoListWithLock()
 	}
 
 }
@@ -1319,19 +1464,36 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		}
 	case common.ConflictsDetected:
 		info := event.Data.(conflictlog.CLogReqT)
-		vb := info.Vbno
+		vbno := info.Vbno
 		seqno := info.Seqno
-		tsTracker.appendCLogReq(vb, seqno)
-		info.SyncCh <- true
+		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if shouldProcessAsOSO {
+			done := session.markCLogReqSeqno(seqno)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
+		} else {
+			tsTracker.appendCLogReq(vbno, seqno)
+		}
+		syncCh := event.OtherInfos.(chan bool)
+		syncCh <- true
 	case common.CLogWriteStatus:
 		info := event.Data.(conflictlog.CLogRespT)
 		if !info.ThroughSeqnoRelated {
 			// not a through seqno event.
 			return nil
 		}
-		vb := info.Vbno
+		vbno := info.Vbno
 		seqno := info.Seqno
-		tsTracker.appendCLogRes(vb, seqno)
+		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if shouldProcessAsOSO {
+			done := session.markCLogResSeqno(seqno)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
+		} else {
+			tsTracker.appendCLogRes(vbno, seqno)
+		}
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 	}
@@ -1782,6 +1944,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 //
 //	sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList are assumed to be sorted.
 func (tsTracker *ThroughSeqnoTrackerSvc) processCLoggerRequests(vbno uint16, newThroughSeqno, lastThroughSeqno uint64, sentSeqnoList, failedCRSeqnoList, filteredSeqnoList, systemEventSeqnoList, ignoredSeqnoList []uint64, cleanup func(uint64)) uint64 {
+	if !tsTracker.cLogExists {
+		cleanup(newThroughSeqno)
+		return newThroughSeqno
+	}
+
 	// cLogReq donates the conflict logging requests generated by xmem nozzle.
 	// cLogRes donates the conflict logging requests that are completely done by conflict logger.
 	cLogReq, cLogRes := tsTracker.cLogTrackerVbMap[vbno].sortAndGetSeqnoLists()
@@ -1893,8 +2060,12 @@ func isSeqnoGapSeqno(gap_seqno_list_1, gap_seqno_list_2 []uint64, seqno uint64) 
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	start_time := time.Now()
 	defer func() {
+		expectedTime := base.ThresholdForThroughSeqnoComputation
+		if tsTracker.cLogExists {
+			expectedTime = 2 * expectedTime
+		}
 		time_taken := time.Since(start_time)
-		if time_taken > base.ThresholdForThroughSeqnoComputation {
+		if time_taken > expectedTime {
 			tsTracker.logger.Warnf("%v GetThroughSeqnos completed after %v\n", tsTracker.id, time_taken)
 		}
 	}()

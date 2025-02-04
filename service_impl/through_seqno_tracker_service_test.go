@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	commonMock "github.com/couchbase/goxdcr/v8/common/mocks"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
@@ -85,7 +86,7 @@ func setupMocks(pipeline *commonMock.Pipeline, sourceNozzle *commonMock.SourceNo
 
 	replSpecSvc.On("GetDerivedObj", mock.Anything).Return(nil, nil)
 
-	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext, nil)
+	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext, nil, false)
 	svc.unitTesting = true
 	svc.Attach(pipeline)
 	return svc
@@ -1493,6 +1494,7 @@ func TestProcessCLoggerRequests(t *testing.T) {
 	// Setup
 	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
 	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
+	svc.cLogExists = true
 
 	// Test data
 	vbno := uint16(1)
@@ -1623,4 +1625,366 @@ func TestProcessCLoggerRequests(t *testing.T) {
 	result = svc.processCLoggerRequests(vbno, newThroughSeqno, lastThroughSeqno, []uint64{1, 2, 3}, []uint64{}, []uint64{}, []uint64{8}, []uint64{}, cleanup)
 	assert.Equal(newThroughSeqno, result)
 	assert.Equal(svc.nonMonotonicThroughSeqnoCnt.Load(), uint64(1))
+}
+
+func TestOSOModeWithCLogger(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestOSOModeWithCLogger =================")
+	defer fmt.Println("============== Test case end: TestOSOModeWithCLogger =================")
+
+	// Setup
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
+	svc.cLogExists = true
+	vbno := uint16(1)
+	mutationEvent := &mcc.UprEvent{
+		VBucket: vbno,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+	var dataSentAdditional parts.DataSentEventAdditional
+	var cLogReqAdditional conflictlog.CLogReqT
+	var cLogRespAdditional conflictlog.CLogRespT
+	dataSentAdditional.VBucket = vbno
+	cLogReqAdditional.Vbno = vbno
+	cLogRespAdditional.Vbno = vbno
+	cLogRespAdditional.ThroughSeqnoRelated = true
+	raiseEventAndTest := func(event *common.Event, syncCh chan bool, osoMode bool, dcpSentOsoEnd bool, minDCPSeqno, maxDCPSeqno,
+		seqnoFroDcp, seqnoHandled, seqnoBeforeSessionStart, cLogReqCnt, cLogResCnt, ts int) {
+
+		assert.NotNil(event)
+		if syncCh != nil {
+			go func() {
+				assert.Nil(svc.ProcessEvent(event))
+			}()
+			<-syncCh
+		} else {
+			assert.Nil(svc.ProcessEvent(event))
+		}
+		var seqno uint64
+		if upr, ok := event.Data.(*mcc.UprEvent); ok {
+			seqno = upr.Seqno
+		} else if dataSent, ok := event.Data.(parts.DataSentEventAdditional); ok {
+			seqno = dataSent.Seqno
+		} else if cLogReq, ok := event.Data.(conflictlog.CLogReqT); ok {
+			seqno = cLogReq.Seqno
+		} else if cLogRes, ok := event.Data.(conflictlog.CLogRespT); ok {
+			seqno = cLogRes.Seqno
+		} else if event.EventType == common.OsoSnapshotReceived {
+			assert.Equal(svc.GetThroughSeqno(vbno), uint64(ts))
+			// we don't know the seqno to fetch the appropriate session
+			return
+		} else {
+			panic(fmt.Sprintf("implement %T", event.Data))
+		}
+
+		oso, session := svc.shouldProcessAsOso(vbno, seqno)
+		assert.Equal(svc.osoModeActive, uint32(1))
+		assert.Equal(oso, osoMode)
+		assert.Equal(session.dcpSentOsoEnd, dcpSentOsoEnd)
+		assert.Equal(session.minSeqnoFromDCP, uint64(minDCPSeqno))
+		assert.Equal(session.maxSeqnoFromDCP, uint64(maxDCPSeqno))
+		assert.Equal(session.seqnosFromDCPCnt, uint64(seqnoFroDcp))
+		assert.Equal(session.seqnosHandledCnt, uint64(seqnoHandled))
+		assert.Equal(session.dcpSeqnoWhenSessionStarts, uint64(seqnoBeforeSessionStart))
+		assert.Equal(session.cLogRequestedCnt.Load(), uint64(cLogReqCnt))
+		assert.Equal(session.cLogRespondedCnt.Load(), uint64(cLogResCnt))
+		assert.Equal(svc.GetThroughSeqno(vbno), uint64(ts))
+	}
+
+	// let's say we receive a OSO snapshots - OSOStart 2 5 3 4 1 OSOEnd, OSOStart 8 7 6 9 10 OSOEnd, OSOStart 11 OSOEnd
+	// and CLogReqs were generated for 3 4 8 and 10.
+
+	// OSO snapshot start
+	var helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh := make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 2 received
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 2, 1, 0, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 5 received
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 2, 0, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 5 sent
+	mutationEvent.Seqno = 5
+	dataSentAdditional.Seqno = 5
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 2, 1, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 3 received
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 1, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 2 sent
+	mutationEvent.Seqno = 2
+	dataSentAdditional.Seqno = 2
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 2, 0, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// cLogReq for seqno 3
+	mutationEvent.Seqno = 3
+	cLogReqAdditional.Seqno = 3
+	syncCh = make(chan bool)
+	commonEvent = common.NewEvent(common.ConflictsDetected, cLogReqAdditional, nil, nil, syncCh)
+	raiseEventAndTest(commonEvent, syncCh, true, false, 2, 5, 3, 2, 0, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 3 sent
+	mutationEvent.Seqno = 3
+	dataSentAdditional.Seqno = 3
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 3, 0, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 4 received
+	mutationEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 4, 3, 0, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// cLogReq for seqno 4
+	mutationEvent.Seqno = 4
+	cLogReqAdditional.Seqno = 4
+	syncCh = make(chan bool)
+	commonEvent = common.NewEvent(common.ConflictsDetected, cLogReqAdditional, nil, nil, syncCh)
+	raiseEventAndTest(commonEvent, syncCh, true, false, 2, 5, 4, 3, 0, 2, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 4 sent
+	mutationEvent.Seqno = 4
+	dataSentAdditional.Seqno = 4
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 4, 4, 0, 2, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 1 received
+	mutationEvent.Seqno = 1
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 1, 5, 5, 4, 0, 2, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// OSO End received for current snapshot
+	// ts is still 0, since some mutations are not sent + conflict logged.
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, nil, false, true, 1, 5, 5, 4, 0, 2, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// New OSO snapshot start. However the previous snapshot shouldn't close.
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 5, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 8 received
+	mutationEvent.Seqno = 8
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 8, 8, 1, 0, 5, 0, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 8 cLog request
+	mutationEvent.Seqno = 8
+	cLogReqAdditional.Seqno = 8
+	syncCh = make(chan bool)
+	commonEvent = common.NewEvent(common.ConflictsDetected, cLogReqAdditional, nil, nil, syncCh)
+	raiseEventAndTest(commonEvent, syncCh, true, false, 8, 8, 1, 0, 5, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 8 sent
+	mutationEvent.Seqno = 8
+	dataSentAdditional.Seqno = 8
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 8, 8, 1, 1, 5, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 1 sent - but cLog not yet done, so throughSeqno still 0.
+	mutationEvent.Seqno = 1
+	dataSentAdditional.Seqno = 1
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, true, 1, 5, 5, 5, 0, 2, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 4 cLog response. However the session should not be closed still.
+	mutationEvent.Seqno = 4
+	cLogRespAdditional.Seqno = 4
+	commonEvent = common.NewEvent(common.CLogWriteStatus, cLogRespAdditional, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, true, 1, 5, 5, 5, 0, 2, 1, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 7 received
+	mutationEvent.Seqno = 7
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 7, 8, 2, 1, 5, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 6 received
+	mutationEvent.Seqno = 6
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 1, 5, 1, 0, 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 3 cLog response. With that first session should close.
+	mutationEvent.Seqno = 3
+	cLogRespAdditional.Seqno = 3
+	commonEvent = common.NewEvent(common.CLogWriteStatus, cLogRespAdditional, nil, nil, nil)
+	// now the session to check is session 2, because session 1 is done. But throughSeqno is 5.
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 1, 5, 1, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 6 sent
+	mutationEvent.Seqno = 6
+	dataSentAdditional.Seqno = 6
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 2, 5, 1, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 8 cLog response.
+	mutationEvent.Seqno = 8
+	cLogRespAdditional.Seqno = 8
+	commonEvent = common.NewEvent(common.CLogWriteStatus, cLogRespAdditional, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 2, 5, 1, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 9 received
+	mutationEvent.Seqno = 9
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 9, 4, 2, 5, 1, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 10 received
+	mutationEvent.Seqno = 10
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 6, 10, 5, 2, 5, 1, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// OSO End received for current snapshot
+	// ts is still 5, since some mutations are not sent + conflict logged.
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 2, 5, 1, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 10 cLog request
+	mutationEvent.Seqno = 10
+	cLogReqAdditional.Seqno = 10
+	syncCh = make(chan bool)
+	commonEvent = common.NewEvent(common.ConflictsDetected, cLogReqAdditional, nil, nil, syncCh)
+	raiseEventAndTest(commonEvent, syncCh, true, true, 6, 10, 5, 2, 5, 2, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 10 sent
+	mutationEvent.Seqno = 10
+	dataSentAdditional.Seqno = 10
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 3, 5, 2, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// seqno 7 sent
+	mutationEvent.Seqno = 7
+	dataSentAdditional.Seqno = 7
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 4, 5, 2, 1, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// cLog 10 response. All cLog responses got, but 1 item not sent yet.
+	// So throughSeqno is still 5.
+	mutationEvent.Seqno = 10
+	cLogRespAdditional.Seqno = 10
+	commonEvent = common.NewEvent(common.CLogWriteStatus, cLogRespAdditional, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 4, 5, 2, 2, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+
+	// New OSO snapshot start. However the previous snapshot shouldn't close.
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 10, 0, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+
+	// seqno 11 cLog request asynchronously before data received.
+	// cLogReqCnt will still be 0 because it will go to the unsure buffer of the last session.
+	mutationEvent.Seqno = 11
+	cLogReqAdditional.Seqno = 11
+	syncCh = make(chan bool)
+	commonEvent = common.NewEvent(common.ConflictsDetected, cLogReqAdditional, nil, nil, syncCh)
+	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 10, 0, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_1), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_2), 0)
+
+	// seqno 11 cLog response asynchronously before data received.
+	// cLogResCnt will still be 0 because it will go to the unsure buffer of the last session.
+	mutationEvent.Seqno = 11
+	cLogRespAdditional.Seqno = 11
+	commonEvent = common.NewEvent(common.CLogWriteStatus, cLogRespAdditional, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, ^0, 0, 0, 0, 10, 0, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_1), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_2), 1)
+
+	// seqno 11 received now.
+	mutationEvent.Seqno = 11
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	raiseEventAndTest(commonEvent, nil, true, false, 11, 11, 1, 0, 10, 0, 0, 5)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_1), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_2), 1)
+
+	// seqno 9 sent. With this throughSeqno will move to 10.
+	// previous session should close.
+	mutationEvent.Seqno = 9
+	dataSentAdditional.Seqno = 9
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	// check session stat of remaining session
+	raiseEventAndTest(commonEvent, nil, true, false, 11, 11, 1, 0, 10, 0, 0, 10)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_1), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_2), 1)
+
+	// OSO End received for recent snapshot
+	// ts is still 10, since some mutations are not sent.
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
+	raiseEventAndTest(commonEvent, syncCh, true, true, 11, 11, 1, 0, 10, 0, 0, 10)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_1), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_2), 1)
+
+	// seqno 11 sent. With this throughSeqno will move to 11.
+	// this session should close.
+	mutationEvent.Seqno = 11
+	dataSentAdditional.Seqno = 11
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	// there will be no more sessions, therefore just check for throughSeqno
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(11))
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 0)
 }

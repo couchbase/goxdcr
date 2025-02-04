@@ -1588,7 +1588,6 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper().SetGlobalContext()
 	var combinedKeys []string
 	combinedKeys = append(combinedKeys, base.OutNozzleVBMetricKeys...)
-	combinedKeys = append(combinedKeys, base.CLogTargetMetricKeys...)
 	err := outNozzle_collector.vbMetricHelper.Initialize(outNozzle_collector.Id(), combinedKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
 	if err != nil {
 		return err
@@ -2084,8 +2083,6 @@ func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event
 	case service_def.GET_DOCS_CAS_CHANGED_METRIC:
 		fallthrough
 	case service_def.TRUE_CONFLICTS_DETECTED:
-		fallthrough
-	case service_def.CLOG_HIBERNATED_COUNT:
 		fallthrough
 	case service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:
 		srcvb := event.DerivedData[0].(uint16)
@@ -4042,6 +4039,8 @@ func (cLogCollector *cLogCollector) handleVBEvent(event *common.Event, metricKey
 	case service_def.SRC_CONFLICT_DOCS_WRITTEN:
 		fallthrough
 	case service_def.TGT_CONFLICT_DOCS_WRITTEN:
+		fallthrough
+	case service_def.CLOG_HIBERNATED_COUNT:
 		fallthrough
 	case service_def.CRD_CONFLICT_DOCS_WRITTEN:
 		vbucket := event.DerivedData[0].(uint16)

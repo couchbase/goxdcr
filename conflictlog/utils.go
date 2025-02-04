@@ -194,9 +194,6 @@ func (w writeError) noRetryNeeded() bool {
 type CLogReqT struct {
 	Vbno  uint16
 	Seqno uint64
-
-	// The req event needs to be synchronous.
-	SyncCh chan bool
 }
 
 type CLogRespT struct {
