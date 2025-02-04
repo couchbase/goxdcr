@@ -70,8 +70,7 @@ func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
 				return
 			}
 		}
-	default:
-		l.event_chan <- event
+	case l.event_chan <- event:
 	}
 }
 
