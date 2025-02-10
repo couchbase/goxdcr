@@ -210,3 +210,5 @@ type CLogRespT struct {
 	CLogStatusRelated bool
 	CLogStatus        base.CLogHibernationStatusGauge
 }
+
+var GenerateAsyncListenerId func(common.Pipeline, string, int) string

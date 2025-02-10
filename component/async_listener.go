@@ -85,35 +85,49 @@ func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
 }
 
 func handleFin(event *common.Event) {
-	if event == nil {
+	if event == nil || !event.EventType.IsSynchronousEvent() {
 		return
 	}
 
-	// if the event is synchronous, unblock the caller by closing the blocking channel.
-	if event.EventType.IsSynchronousEvent() {
-		syncErrCh, ok1 := event.OtherInfos.(chan error)
-		if ok1 {
-			select {
-			case <-syncErrCh:
-				// channel might already be closed
-			default:
-				close(syncErrCh)
-			}
+	// If the event is synchronous, unblock the caller by closing the blocking channel.
+	// Make sure we only close an unclosed channel.
 
-			return
+	syncErrCh, ok1 := event.OtherInfos.(chan error)
+	if ok1 {
+		var closeable bool
+		select {
+		case _, ok := <-syncErrCh:
+			if ok {
+				closeable = true
+			}
+		default:
+			closeable = true
 		}
 
-		syncBoolCh, ok2 := event.OtherInfos.(chan bool)
-		if ok2 {
-			select {
-			case <-syncBoolCh:
-				// channel might already be closed
-			default:
-				close(syncBoolCh)
-			}
-
-			return
+		if closeable {
+			close(syncErrCh)
 		}
+
+		return
+	}
+
+	syncBoolCh, ok2 := event.OtherInfos.(chan bool)
+	if ok2 {
+		var closeable bool
+		select {
+		case _, ok := <-syncBoolCh:
+			if ok {
+				closeable = true
+			}
+		default:
+			closeable = true
+		}
+
+		if closeable {
+			close(syncBoolCh)
+		}
+
+		return
 	}
 }
 
@@ -124,7 +138,9 @@ func (b *AsyncComponentEventListenerImpl) ListenerPipelineType() common.Listener
 func (l *AsyncComponentEventListenerImpl) Start() error {
 	if atomic.CompareAndSwapUint32(&l.isStarted, 0, 1) {
 		go l.run()
-		l.logger.Infof("%v started processing events\n", l.id)
+		l.logger.Infof("%v started processing events", l.id)
+	} else {
+		l.logger.Infof("%v already started processing events", l.id)
 	}
 	return nil
 }
@@ -139,7 +155,7 @@ func (l *AsyncComponentEventListenerImpl) run() {
 			for _, handler := range l.handlers {
 				err := handler.ProcessEvent(event)
 				if err != nil {
-					l.logger.Errorf("%v Error processing event %v. err = %v\n", handler.Id(), event, err)
+					l.logger.Errorf("%v Error processing event %v. err = %v", handler.Id(), event, err)
 				}
 			}
 		}
@@ -148,15 +164,22 @@ func (l *AsyncComponentEventListenerImpl) run() {
 
 func (l *AsyncComponentEventListenerImpl) Stop() error {
 	var err error
+	var triedToStop bool
 	l.stopOnce.Do(func() {
-		l.logger.Infof("%v stopping processing events\n", l.id)
+		triedToStop = true
+		l.logger.Infof("%v stopping processing events", l.id)
 		err = base.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
 		if err == nil {
-			l.logger.Infof("%v stopped processing events\n", l.id)
+			l.logger.Infof("%v stopped processing events", l.id)
 		} else {
-			l.logger.Warnf("%v failed to stop processing events. Leaving it alone to die. err=%v\n", l.id, err)
+			l.logger.Warnf("%v failed to stop processing events. Leaving it alone to die. err=%v", l.id, err)
 		}
 	})
+
+	if !triedToStop {
+		l.logger.Infof("%v already stopped processing events", l.id)
+	}
+
 	return err
 }
 
@@ -169,6 +192,8 @@ func (l *AsyncComponentEventListenerImpl) stop() error {
 		// Start was called before Stop, so do a wait
 		// Otherwise, if Start runs after this routine is finished, not a big deal and don't wait
 		<-l.done_ch
+	} else {
+		l.logger.Infof("%v hadn't started processing events", l.id)
 	}
 
 	return nil
@@ -181,7 +206,7 @@ func (l *AsyncComponentEventListenerImpl) Id() string {
 func (l *AsyncComponentEventListenerImpl) PrintStatusSummary() {
 	event_chan_size := len(l.event_chan)
 	if event_chan_size > base.ThresholdForEventChanSizeLogging {
-		l.logger.Infof("%v chan size =%v ", l.id, event_chan_size)
+		l.logger.Infof("%v chan size = %v ", l.id, event_chan_size)
 	}
 }
 
@@ -189,6 +214,6 @@ func (l *AsyncComponentEventListenerImpl) RegisterComponentEventHandler(handler 
 	if handler != nil {
 		// no need to lock since this is done during pipeline construction, which is way before any event can be generated and handlers accessed
 		l.handlers[handler.Id()] = handler
-		l.logger.Debugf("Registering handler %v on listener %v\n", handler.Id(), l.id)
+		l.logger.Debugf("Registering handler %v on listener %v", handler.Id(), l.id)
 	}
 }

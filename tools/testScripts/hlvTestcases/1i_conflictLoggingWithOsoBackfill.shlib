@@ -155,7 +155,7 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=150
+	sleepTime=200
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 

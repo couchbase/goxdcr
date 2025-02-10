@@ -2052,8 +2052,11 @@ func (xdcrf *XDCRFactory) ConstructConflictLogger(pipeline common.Pipeline, logg
 		conflictLogger = baseclog.LoggerFromService(parentCtx.Service(base.CONFLICT_LOGGER))
 	}
 
+	if conflictLogger != nil {
+		xdcrf.logger.Infof("conflict logger: %s will be set for pipeline %s", conflictLogger.Id(), pipeline.FullTopic())
+	}
+
 	// register the conflict logger to the outnozzle
-	// i.e. in the xmem nozzles.
 	targets := pipeline.Targets()
 	for _, target := range targets {
 		err := target.(common.OutNozzle).SetConflictLogger(conflictLogger)

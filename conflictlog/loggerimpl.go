@@ -1180,9 +1180,44 @@ func (l *LoggerImpl) IsSharable() bool {
 	return true
 }
 
-// If sharable, allow service to be detached
+// If sharable, allow service to be detached.
+// Here we will unregister all the listeners of conflict logger.
 func (l *LoggerImpl) Detach(pipeline common.Pipeline) error {
-	// no-op
+	listener1Id := GenerateAsyncListenerId(pipeline, base.CLogWriteStatusEventListener, 0)
+	listener2Id := GenerateAsyncListenerId(pipeline, base.CLogDocsWrittenEventListener, 0)
+	allListeners := pipeline.GetAsyncListenerMap()
+	for _, listener := range allListeners {
+		lid := listener.Id()
+
+		var eventType common.ComponentEventType
+		if lid == listener1Id {
+			eventType = common.CLogWriteStatus
+		} else if lid == listener2Id {
+			eventType = common.CLogDocsWritten
+		} else {
+			// not a CLog event listener.
+			continue
+		}
+
+		// we will stop the listener here before unregistering to avoid a deadlock situation wherein listener
+		// queue is full and RaiseEvent is holding on to the listener lock. CLogger will extensively raise
+		// events and there is a high chance of this deadlock situation. Moreover the Stop below is idempotent,
+		// in the sense that trying to stop the same listener again during pipeline stop should not cause any issues.
+		err := listener.Stop()
+		if err != nil {
+			l.logger.Errorf("Detaching CLogger for %v, error while stopping the listener=%s, of conflict logger rid=%s lid=%s, err=%v",
+				pipeline.FullTopic(), listener.Id(), l.replId, l.id, err)
+			return err
+		}
+
+		err = l.UnRegisterComponentEventListener(eventType, listener)
+		if err != nil {
+			l.logger.Errorf("Detaching CLogger for %v, error while unregistering the listener=%s, of conflict logger rid=%s lid=%s, err=%v",
+				pipeline.FullTopic(), listener.Id(), l.replId, l.id, err)
+			return err
+		}
+	}
+
 	return nil
 }
 

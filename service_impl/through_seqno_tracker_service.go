@@ -529,7 +529,7 @@ type OsoSession struct {
 
 	// The following two variables are not guarenteed to be protected under
 	// the "lock" RWMutex above. Instead atomics is used to ensure their safety to avoid
-	// holding on to the write mutex all the time in isDoneNoLock, given it's a hotspot.
+	// holding on to the write mutex all the time in isDoneNoLock (which is always under the read lock).
 	// cLogRequested indicates the number of conflict logging requests
 	// for this session.
 	cLogRequestedCnt atomic.Uint64

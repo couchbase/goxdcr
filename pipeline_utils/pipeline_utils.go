@@ -13,8 +13,13 @@ import (
 	"strings"
 
 	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/parts"
 )
+
+func init() {
+	conflictlog.GenerateAsyncListenerId = GetElementIdFromNameAndIndex
+}
 
 func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	ret := []uint16{}
