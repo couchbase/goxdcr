@@ -1138,7 +1138,7 @@ func Test_retryAfterCasLockingFailureWithXmemRetry(t *testing.T) {
 	req := &base.WrappedMCRequest{}
 	req.Req = &mc.MCRequest{}
 	req.Req.Opaque = 1
-	req.SubdocCmdOptions = &base.SubdocCmdOptions{SubdocOp: base.SubdocSet, ExtrasPreSubdocCmd: make([]byte, 24)}
+	req.SubdocCmdOptions = &base.SubdocCmdOptions{SubdocOp: base.SubdocSet, ExtrasPreSubdocCmd: make([]byte, 24), ReplacedBody: true}
 
 	xmem.receive_token_ch = make(chan int, 10)
 	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger())
