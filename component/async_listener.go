@@ -62,28 +62,46 @@ func NewDefaultAsyncComponentEventListenerImpl(id, fullTopic string, logger_cont
 	return NewAsyncComponentEventListenerImpl(id, fullTopic, logger_context, base.EventChanSize)
 }
 
-func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
+func (l *AsyncComponentEventListenerImpl) isClosed() bool {
 	select {
 	case <-l.fin_ch:
-		if event == nil {
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
+	if l.isClosed() {
+		handleFin(event)
+		return
+	}
+
+	select {
+	case <-l.fin_ch:
+		handleFin(event)
+	case l.event_chan <- event:
+	}
+}
+
+func handleFin(event *common.Event) {
+	if event == nil {
+		return
+	}
+
+	// if the event is synchronous, unblock the caller by closing the blocking channel.
+	if event.EventType.IsSynchronousEvent() {
+		syncErrCh, ok1 := event.OtherInfos.(chan error)
+		if ok1 {
+			close(syncErrCh)
 			return
 		}
 
-		// if the event is synchronous, unblock the caller by closing the blocking channel.
-		if event.EventType.IsSynchronousEvent() {
-			syncErrCh, ok1 := event.OtherInfos.(chan error)
-			if ok1 {
-				close(syncErrCh)
-				return
-			}
-
-			syncBoolCh, ok2 := event.OtherInfos.(chan bool)
-			if ok2 {
-				close(syncBoolCh)
-				return
-			}
+		syncBoolCh, ok2 := event.OtherInfos.(chan bool)
+		if ok2 {
+			close(syncBoolCh)
+			return
 		}
-	case l.event_chan <- event:
 	}
 }
 
