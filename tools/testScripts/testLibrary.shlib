@@ -247,6 +247,38 @@ function grepForTgtColNamespaceNilError {
 	return 0
 }
 
+function grepForNonMonotonicThroughSeqno {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "nonMonoThroughSeqnos=[1-9]" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'nonMonoThroughSeqnos' in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForFaultyCLogTrackers {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "faultyCLogTrackers=[1-9]" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'faultyCLogTrackers' in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
 function getDataReplicated {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -2085,6 +2117,16 @@ function grepForAbnormalities {
 	if (($? != 0)); then
 		exit 1
 	fi
+
+	grepForFaultyCLogTrackers
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForNonMonotonicThroughSeqno
+	if (($? != 0)); then
+		exit 1
+	fi
 }
 
 function grepForLastMappingDocUpdateInMetaKvLogs {
@@ -2126,4 +2168,81 @@ function updateNsServerSimpleStore {
 
 	echo "simple store update failed"
 	exit 1
+}
+
+# clog stats that require monitoring
+declare -A requiredClogStats=(["xdcr_clog_src_docs_written_total"]=0 ["xdcr_clog_tgt_docs_written_total"]=0 ["xdcr_clog_crd_docs_written_total"]=0 ["xdcr_clog_hibernated_count_total"]=0 ["xdcr_clog_docs_filtered_total"]=0 ["xdcr_true_conflicts_detected_total"]=0 ["xdcr_subdoc_cmd_docs_skipped_total"]=0 ["xdcr_get_docs_cas_changed_total"]=0)
+
+function getClogStatsBefore {
+	local clusterName=$1
+	local sourceBucketName=$2
+	local targetBucketName=$3
+	local replicationKey="${sourceBucketName}_${targetBucketName}"
+
+	echo "Getting clog stats for cluster $clusterName bucket $sourceBucketName -> $targetBucketName"
+
+	# Dynamically create and access the associative array
+	eval "declare -gA clogStatsBefore_${replicationKey}"
+
+	for statKey in "${!requiredClogStats[@]}"; do
+		# Fetch the value from Prometheus
+		newVal=$(getReplicationSpecificStatFromPrometheus "$clusterName" "$sourceBucketName" "$targetBucketName" "$statKey")
+
+		eval "oldVal=\${clogStatsBefore_${replicationKey}[$statKey]:-0}"
+		sum=$((oldVal + newVal))
+
+		# Update the array
+		eval "clogStatsBefore_${replicationKey}[$statKey]=$sum"
+
+		echo "BEFORE: logging $statKey with $sum"
+	done
+}
+
+function getClogStatsAfter {
+	local clusterName=$1
+	local sourceBucketName=$2
+	local targetBucketName=$3
+	local replicationKey="${sourceBucketName}_${targetBucketName}"
+
+	echo "Getting clog stats for cluster $clusterName bucket $sourceBucketName -> $targetBucketName"
+
+	# Dynamically create and access the associative array
+	eval "declare -gA clogStatsAfter_${replicationKey}"
+
+	for statKey in "${!requiredClogStats[@]}"; do
+		# Fetch the value from Prometheus
+		newVal=$(getReplicationSpecificStatFromPrometheus "$clusterName" "$sourceBucketName" "$targetBucketName" "$statKey")
+
+		eval "oldVal=\${clogStatsAfter_${replicationKey}[$statKey]:-0}"
+		sum=$((oldVal + newVal))
+
+		# Update the array
+		eval "clogStatsAfter_${replicationKey}[$statKey]=$sum"
+
+		echo "AFTER: logging $statKey with $sum"
+	done
+}
+
+function verifyClogStats {
+	local sourceBucketName=$1
+	local targetBucketName=$2
+	local replicationKey="${sourceBucketName}_${targetBucketName}"
+
+	echo "Verifying clog stats for replication: $sourceBucketName -> $targetBucketName"
+
+	declare -n beforeStats="clogStatsBefore_${replicationKey}"
+	declare -n afterStats="clogStatsAfter_${replicationKey}"
+
+	for statKey in "${!beforeStats[@]}"; do
+		beforeVal=${beforeStats[$statKey]:-0}
+		afterVal=${afterStats[$statKey]:-0}
+
+		if ((afterVal < beforeVal)); then
+			echo "ERROR: $statKey decreased! Before: $beforeVal, After: $afterVal"
+			exit 1
+		fi
+	done
+
+	echo "All clog stats are correct for replication $sourceBucketName -> $targetBucketName."
+	return 0
 }

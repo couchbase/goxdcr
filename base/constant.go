@@ -1917,7 +1917,7 @@ var RouterVBMetricKeys = []string{DocsFiltered, DocsUnableToFilter, ExpiryFilter
 var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, GuardrailDiskSpace,
 	DocsSentWithSubdocSet, DocsSentWithSubdocDelete,
 	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode,
-	GetDocsCasChangedCount, TrueConflictsDetected, CLogHibernatedCount, SubdocCmdsSkippedCount}
+	GetDocsCasChangedCount, TrueConflictsDetected, SubdocCmdsSkippedCount}
 
 var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, CLogHibernatedCount}
 

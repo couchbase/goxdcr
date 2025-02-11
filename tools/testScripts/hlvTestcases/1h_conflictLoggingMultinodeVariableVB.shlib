@@ -33,6 +33,18 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty_128
 conflictLoggingMap="{\"bucket\":\"B2\", \"collection\": \"_default._default\"}"
 declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true")
 
+function fetchClogStatsBefore {
+	getClogStatsBefore "C1" "B0" "B1"
+	getClogStatsBefore "C2" "B1" "B0"
+}
+
+function fetchClogStatsAfter {
+	getClogStatsAfter "C1" "B0" "B1"
+	getClogStatsAfter "C1P" "B0" "B1"
+	getClogStatsAfter "C2" "B1" "B0"
+	getClogStatsAfter "C2P" "B1" "B0"
+}
+
 function runDataLoad {
 	echo "RUNNING dataload..."
 	prefix=$1
@@ -158,6 +170,10 @@ function runOneReplicationCycleAndPause {
 	pauseReplication "C2" "B1" "C1" "B0"
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
+
+	# fetch clog stats before rebalance operation
+	fetchClogStatsBefore
+
 	lookForAbnormalities
 
 	runDataLoad "conflictY"
@@ -233,6 +249,13 @@ function runReplicationResume {
 	checkChangesLeftInternal "C2" "B1" "C1" "B0"
 	lookForAbnormalities
 
+	# fetch clog stats after rebalance operation
+	fetchClogStatsAfter
+
+	# verify clog stats post rebalance operation
+	verifyClogStats "B0" "B1"
+	verifyClogStats "B1" "B0"
+
 	checkItemCnt "C1" "B0" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
 	checkItemCnt "C2" "B1" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
 
@@ -240,8 +263,7 @@ function runReplicationResume {
 	numConflictDocsC2=$(getBucketItemCount "C2" "B2")
 	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2"
 	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)); then
-		echo "conflicts were not written"
-		exit 1
+		echo "no conflicts were detected"
 	fi
 	NumConflictDocsC1=$numConflictDocsC1
 	NumConflictDocsC2=$numConflictDocsC2
@@ -261,8 +283,7 @@ function runReplicationResume {
 	numConflictDocsC2=$(getBucketItemCount "C2" "B2")
 	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC1"
 	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)); then
-		echo "conflicts were not written"
-		exit 1
+		echo "no conflicts were detected"
 	fi
 	NumConflictDocsC1=$numConflictDocsC1
 	NumConflictDocsC2=$numConflictDocsC2

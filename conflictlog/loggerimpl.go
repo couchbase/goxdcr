@@ -315,7 +315,7 @@ func (l *LoggerImpl) Log(c baseclog.Conflict) (err error) {
 			Err:                 *eventError,
 		}
 		l.RaisePipelineSpecificEvent(common.NewEvent(common.CLogWriteStatus, info, l,
-			[]interface{}{record.Source.VBNo, record.Target.VBNo, record.Source.Seqno},
+			[]interface{}{record.Source.VBNo, record.Source.Seqno},
 			nil), record.OriginatingPipeline,
 		)
 	}()
@@ -986,9 +986,10 @@ func (l *LoggerImpl) Start(_ metadata.ReplicationSettingsMap) error {
 	l.logger.Infof("spawning conflict logger workers replId=%s count=%d id=%s", l.replId, l.opts.workerCount, l.id)
 
 	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
-	// to mark the prometheus stat as unhibernated or running
+	// to mark the prometheus stat as running
 	info := CLogRespT{
-		Err: baseclog.ErrLoggerRunning,
+		CLogStatusRelated: true,
+		CLogStatus:        base.CLogRunning,
 	}
 	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
@@ -1227,7 +1228,8 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
 	// to mark the prometheus stat as hibernated.
 	info := CLogRespT{
-		Err: baseclog.ErrLoggerHibernated,
+		CLogStatusRelated: true,
+		CLogStatus:        base.CLogHibernated,
 	}
 	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
@@ -1263,7 +1265,8 @@ func (l *LoggerImpl) unhibernate() {
 	// send an event down to the statsMgr of both main and backfill (if exists) pipelines,
 	// to mark the prometheus stat as unhibernated
 	info := CLogRespT{
-		Err: baseclog.ErrLoggerRunning,
+		CLogStatusRelated: true,
+		CLogStatus:        base.CLogRunning,
 	}
 	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 

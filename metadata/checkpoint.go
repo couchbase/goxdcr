@@ -686,8 +686,6 @@ type SourceVBCounters struct {
 	CLogHibernatedCnt      uint64 `json:"clog_hibernated_cnt"`
 	// Number of items that did not send due to source document CAS clock out of bounds
 	CasPoisonCnt uint64 `json:"cas_poison_cnt"`
-	// Number of subdoc commands skipped due to maximum paths limit.
-	SubdocCmdSkippedCnt uint64 `json:"subdoc_cmd_skipped_cnt"`
 }
 
 func (s *SourceVBCounters) Size() int {
@@ -719,7 +717,6 @@ func (s *SourceVBCounters) SameAs(other *SourceVBCounters) bool {
 		s.TgtConflictDocsWritten == other.TgtConflictDocsWritten &&
 		s.CRDConflictDocsWritten == other.CRDConflictDocsWritten &&
 		s.CasPoisonCnt == other.CasPoisonCnt &&
-		s.SubdocCmdSkippedCnt == other.SubdocCmdSkippedCnt &&
 		s.CLogHibernatedCnt == other.CLogHibernatedCnt
 }
 
@@ -733,6 +730,8 @@ type TargetPerVBCounters struct {
 	// Number of subdoc commands used, instead of set_with_meta/delete_with_meta
 	DocsSentWithSubdocSetCnt    uint64 `json:"docs_sent_with_subdoc_set"`
 	DocsSentWithSubdocDeleteCnt uint64 `json:"docs_sent_with_subdoc_delete"`
+	// Number of subdoc commands skipped due to maximum paths limit.
+	SubdocCmdSkippedCnt uint64 `json:"subdoc_cmd_skipped_cnt"`
 	// Docs sent with a poisoned CAS value
 	DocsSentWithPoisonedCasErrorMode   uint64 `json:"docs_sent_with_poisoned_cas_error_mode"`
 	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
@@ -773,7 +772,8 @@ func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
 		t.DocsSentWithPoisonedCasErrorMode == other.DocsSentWithPoisonedCasErrorMode &&
 		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode &&
 		t.TrueConflictsDetected == other.TrueConflictsDetected &&
-		t.GetDocsCasChangedCnt == other.GetDocsCasChangedCnt
+		t.GetDocsCasChangedCnt == other.GetDocsCasChangedCnt &&
+		t.SubdocCmdSkippedCnt == other.SubdocCmdSkippedCnt
 }
 
 func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
@@ -826,6 +826,10 @@ func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
 	getDocsCasChangedCnt, ok := fieldMap[GetDocsCasChangedCnt]
 	if ok {
 		t.GetDocsCasChangedCnt = uint64(getDocsCasChangedCnt.(float64))
+	}
+	subdocCmdSkippedCnt, ok := fieldMap[SubdocCmdSkippedCnt]
+	if ok {
+		t.SubdocCmdSkippedCnt = uint64(subdocCmdSkippedCnt.(float64))
 	}
 
 	return nil
@@ -1319,7 +1323,6 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			CRDConflictDocsWritten:             crdConflictDocsWritten,
 			CLogHibernatedCnt:                  clogHibernatedCnt,
 			CasPoisonCnt:                       casPoisonItems,
-			SubdocCmdSkippedCnt:                subdocCmdSkippedCnt,
 		},
 		CreationTime: creationTime,
 		TargetPerVBCounters: TargetPerVBCounters{
@@ -1332,6 +1335,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
 			GetDocsCasChangedCnt:               getDocsCasChangedCnt,
 			TrueConflictsDetected:              trueConflictsDetected,
+			SubdocCmdSkippedCnt:                subdocCmdSkippedCnt,
 		},
 	}
 	return record
@@ -1430,10 +1434,7 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			case base.GetDocsCasChangedCount:
 				globalCntrs[vb].GetDocsCasChangedCnt = uint64(count)
 			case base.SubdocCmdsSkippedCount:
-				if len(vbCountMap) > 1 {
-					return nil, fmt.Errorf("global stats %v should only have 1 vb", outNozzleKey)
-				}
-				srcFilteredCntrs.SubdocCmdSkippedCnt = uint64(count)
+				globalCntrs[vb].SubdocCmdSkippedCnt = uint64(count)
 			}
 		}
 	}
@@ -2767,7 +2768,6 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			TgtConflictDocsWritten:             c.TgtConflictDocsWritten,
 			CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
 			CasPoisonCnt:                       c.CasPoisonCnt,
-			SubdocCmdSkippedCnt:                c.SubdocCmdSkippedCnt,
 			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
 		},
 
@@ -2782,6 +2782,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
 			TrueConflictsDetected:              c.TrueConflictsDetected,
 			GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
+			SubdocCmdSkippedCnt:                c.SubdocCmdSkippedCnt,
 		},
 
 		GlobalTimestamp:       c.GlobalTimestamp.CloneGlobalTimestamp(),

@@ -50,6 +50,26 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]} ["B3"]=${sc
 declare -a collection1Arr=("col1")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
 
+function fetchClogStatsBefore {
+	getClogStatsBefore "C1" "B1" "B2"
+	getClogStatsBefore "C2" "B2" "B1"
+	getClogStatsBefore "C1" "B1" "B3"
+	getClogStatsBefore "C3" "B3" "B1"
+	getClogStatsBefore "C2" "B2" "B3"
+	getClogStatsBefore "C3" "B3" "B2"
+	getClogStatsBefore "C1" "B4" "B0"
+}
+
+function fetchClogStatsAfter {
+	getClogStatsAfter "C1" "B1" "B2"
+	getClogStatsAfter "C2" "B2" "B1"
+	getClogStatsAfter "C1" "B1" "B3"
+	getClogStatsAfter "C3" "B3" "B1"
+	getClogStatsAfter "C2" "B2" "B3"
+	getClogStatsAfter "C3" "B3" "B2"
+	getClogStatsAfter "C1" "B4" "B0"
+}
+
 function waitForChangesLeft0ForTopology {
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	waitForChangesLeft0 "C1" "B1" "C3" "B3"
@@ -97,6 +117,15 @@ function verifyPromStats {
 	validateBinaryFilteredIs0 "C1" "B4" "B0"
 	validatePrometheusStatsDocsFilteredNon0 "C1" "B4" "B0"
 	validateDatapoolFailIs0 "C1" "B4" "B0"
+
+	# verify clog stats post replication resume
+	verifyClogStats "B1" "B2"
+	verifyClogStats "B1" "B3"
+	verifyClogStats "B2" "B1"
+	verifyClogStats "B2" "B3"
+	verifyClogStats "B3" "B1"
+	verifyClogStats "B3" "B2"
+	verifyClogStats "B4" "B0"
 }
 
 function testReplicationWithConflictLogging {
@@ -170,6 +199,12 @@ function testReplicationWithConflictLogging {
 	pauseReplication "C2" "B2" "C3" "B3"
 	pauseReplication "C3" "B3" "C2" "B2"
 
+	echo "sleep 30seconds for pause to complete"
+	sleep 30
+
+	# fetch clog stats before replication resume
+	fetchClogStatsBefore
+
 	createCollection "C1" "B4" "S1" "col2"
 	createCollection "C2" "B5" "S1" "col2"
 	createCollection "C3" "B6" "S1" "col2"
@@ -191,6 +226,9 @@ function testReplicationWithConflictLogging {
 	sleep 30
 
 	waitForChangesLeft0ForTopology
+
+	# fetch clog stats after replication resume
+	fetchClogStatsAfter
 
 	grepForAbnormalities
 

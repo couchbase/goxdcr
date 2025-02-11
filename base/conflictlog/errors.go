@@ -27,7 +27,6 @@ var (
 	ErrLogWaitAborted        error = errors.New("conflict log handle received abort")
 	ErrLoggerHibernated      error = errors.New("conflict logger hibernated")
 	ErrScopeColNotFound      error = errors.New("scope or collection not found")
-	ErrLoggerRunning         error = errors.New("conflict logger running") // fake error for the purpose of raising event
 
 	// errors mapped to setMeta gomemcached responses.
 	ErrTMPFAIL           error = errors.New("temporary write failure")

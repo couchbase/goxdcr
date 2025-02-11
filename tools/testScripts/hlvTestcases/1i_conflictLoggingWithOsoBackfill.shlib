@@ -103,7 +103,7 @@ function testReplicationWithConflictLogging {
 	enableDcpOsoBackfill "C1" "B1"
 	enableDcpOsoBackfill "C2" "B2"
 	enableDcpOsoBackfill "C3" "B3"
-	
+
 	echo "Setting enableCrossClusterVersioning to true"
 	setCrossClusterVersioningForBucket "C1" "B1"
 	setCrossClusterVersioningForBucket "C2" "B2"

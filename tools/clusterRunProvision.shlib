@@ -2925,6 +2925,25 @@ function getSpecificStatFromPrometheus {
 	echo $statVal
 }
 
+function getReplicationSpecificStatFromPrometheus {
+	local clusterName=$1
+	local sourceBucketName=$2
+	local targetBucketName=$3
+	local statName=$4
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	# get the next word after regex match
+	statVal=$($CURL -X GET http://localhost:$port/_prometheusMetrics -u $DEFAULT_ADMIN:$DEFAULT_PW |
+		grep "sourceBucketName=\"${sourceBucketName}\"" |
+		grep "targetBucketName=\"${targetBucketName}\"" |
+		awk -v regex=$statName+".*Main.*} " 'BEGIN{FS=regex}{if ($2!="") print $2}')
+	echo $statVal
+}
+
 function checkResidentRatioGuardrail {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}

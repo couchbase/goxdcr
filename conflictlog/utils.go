@@ -205,4 +205,8 @@ type CLogRespT struct {
 	// errors for statistics
 	Err     error
 	NwError bool
+
+	// hibernation status update, running <-> hibernated.
+	CLogStatusRelated bool
+	CLogStatus        base.CLogHibernationStatusGauge
 }

@@ -251,6 +251,13 @@ func getGlobalMetrics(record *metadata.CheckpointRecord, srcvb uint16) base.VBCo
 		}
 	}
 
+	// initialize for Clog stats
+	for _, key := range base.CLogVBMetricKeys {
+		if _, exists := vbStatMap[key]; !exists {
+			vbStatMap[key] = make(map[uint16]int64)
+		}
+	}
+
 	// Add sourceVB based metrics to a non-traditional data structure
 	vbStatMap[service_def.DOCS_FILTERED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsCnt)
 	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredFailedCnt)
@@ -265,6 +272,12 @@ func getGlobalMetrics(record *metadata.CheckpointRecord, srcvb uint16) base.VBCo
 	vbStatMap[service_def.DOCS_FILTERED_MOBILE_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnMobileRecords)
 	vbStatMap[service_def.DOCS_FILTERED_USER_DEFINED_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredItemsOnUserDefinedFilters)
 	vbStatMap[service_def.DOCS_FILTERED_CAS_POISONING_METRIC][srcvb] = base.Uint64ToInt64(record.CasPoisonCnt)
+	// clog stats
+	vbStatMap[service_def.DOCS_FILTERED_CLOG_METRIC][srcvb] = base.Uint64ToInt64(record.FilteredConflictDocs)
+	vbStatMap[service_def.SRC_CONFLICT_DOCS_WRITTEN][srcvb] = base.Uint64ToInt64(record.SrcConflictDocsWritten)
+	vbStatMap[service_def.TGT_CONFLICT_DOCS_WRITTEN][srcvb] = base.Uint64ToInt64(record.TgtConflictDocsWritten)
+	vbStatMap[service_def.CRD_CONFLICT_DOCS_WRITTEN][srcvb] = base.Uint64ToInt64(record.CRDConflictDocsWritten)
+	vbStatMap[service_def.CLOG_HIBERNATED_COUNT][srcvb] = base.Uint64ToInt64(record.CLogHibernatedCnt)
 
 	// Add targetVB based metrics
 	for tgtvb, gcntrs := range record.GlobalCounters {
@@ -275,6 +288,10 @@ func getGlobalMetrics(record *metadata.CheckpointRecord, srcvb uint16) base.VBCo
 		vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithSubdocDeleteCnt)
 		vbStatMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithPoisonedCasErrorMode)
 		vbStatMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE][tgtvb] = base.Uint64ToInt64(gcntrs.DocsSentWithPoisonedCasReplaceMode)
+		// clog stats
+		vbStatMap[service_def.TRUE_CONFLICTS_DETECTED][tgtvb] = base.Uint64ToInt64(gcntrs.TrueConflictsDetected)
+		vbStatMap[service_def.GET_DOCS_CAS_CHANGED_METRIC][tgtvb] = base.Uint64ToInt64(gcntrs.GetDocsCasChangedCnt)
+		vbStatMap[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC][srcvb] = base.Uint64ToInt64(gcntrs.SubdocCmdSkippedCnt)
 	}
 
 	return globalMetrics
@@ -1586,9 +1603,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_collector.stats_mgr = stats_mgr
 	outNozzle_collector.component_map = make(map[string]map[string]interface{})
 	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper().SetGlobalContext()
-	var combinedKeys []string
-	combinedKeys = append(combinedKeys, base.OutNozzleVBMetricKeys...)
-	err := outNozzle_collector.vbMetricHelper.Initialize(outNozzle_collector.Id(), combinedKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
+	err := outNozzle_collector.vbMetricHelper.Initialize(outNozzle_collector.Id(), base.OutNozzleVBMetricKeys, stats_mgr.GetAllSourceVbs, stats_mgr.GetAllTargetVbs, stats_mgr.variableVBMode)
 	if err != nil {
 		return err
 	}
@@ -3980,14 +3995,19 @@ func (cLogCollector *cLogCollector) ProcessEvent(event *common.Event) error {
 		}
 	case common.CLogWriteStatus:
 		info := event.Data.(conflictlog.CLogRespT)
-		if info.Err == nil {
-			return nil
-		}
 
 		if info.NwError {
 			// when it is a network error, we do not want to have any stat incremeneted
 			// based on info.Err, including the stat clog_other_errors.
 			metricMap[service_def.CLOG_NW_ERROR_COUNT].(metrics.Counter).Inc(1)
+			return nil
+		}
+
+		if info.CLogStatusRelated {
+			metricMap[service_def.CLOG_STATUS].(metrics.Gauge).Update(int64(info.CLogStatus))
+		}
+
+		if info.Err == nil {
 			return nil
 		}
 
@@ -4008,10 +4028,6 @@ func (cLogCollector *cLogCollector) ProcessEvent(event *common.Event) error {
 			metricMap[service_def.CLOG_NOT_MY_VB_COUNT].(metrics.Counter).Inc(1)
 		case baseclog.ErrUnknownCollection:
 			metricMap[service_def.CLOG_UNKNOWN_COLLECTION_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrLoggerHibernated:
-			metricMap[service_def.CLOG_STATUS].(metrics.Gauge).Update(int64(base.CLogHibernated))
-		case baseclog.ErrLoggerRunning:
-			metricMap[service_def.CLOG_STATUS].(metrics.Gauge).Update(int64(base.CLogRunning))
 		case baseclog.ErrTimeout:
 			metricMap[service_def.CLOG_WRITE_TIMEDOUT].(metrics.Counter).Inc(1)
 		case baseclog.ErrThrottle:
