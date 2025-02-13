@@ -1085,16 +1085,14 @@ function getGoroutinesStack {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
-	echo "Goroutines for cluster $clusterName..."
-	$CURL http://localhost:$sourcePort/debug/pprof/goroutine?debug=1
+	$CURL -s http://localhost:$sourcePort/debug/pprof/goroutine?debug=1
 }
 
 function getGoHeap {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
-	echo "Go heap for cluster $clusterName..."
-	$CURL http://localhost:$sourcePort/debug/pprof/heap?debug=1
+	$CURL -s http://localhost:$sourcePort/debug/pprof/heap?debug=1
 }
 
 function xdcrMemRss {
