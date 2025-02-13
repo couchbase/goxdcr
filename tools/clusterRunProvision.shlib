@@ -1260,10 +1260,14 @@ function setupTopologies {
 # 1- Source cluster name
 # 2- Target cluster name
 # 3- Target Hostname override
+# 4- username override
+# 5- password override
 function createRemoteClusterReference {
 	local source=$1
 	local target=$2
 	local targetHost=${3:-"127.0.0.1"}
+	local remoteUser=${4:-$DEFAULT_ADMIN}
+	local remotePassword=${5:-$DEFAULT_PW}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
@@ -1279,8 +1283,8 @@ function createRemoteClusterReference {
 		targetPort="8091"
 	fi
 
-	echo "Creating remote cluster reference from $source to $target"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+	echo "Creating remote cluster reference from $source to $target using $remoteUser"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword
 	echo ""
 }
 
@@ -1288,6 +1292,8 @@ function createHalfSecureRemoteClusterReference {
 	local source=$1
 	local target=$2
 	local targetHost=${3:-"127.0.0.1"}
+	local remoteUser=${4:-$DEFAULT_ADMIN}
+	local remotePassword=${5:-$DEFAULT_PW}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
@@ -1296,8 +1302,8 @@ function createHalfSecureRemoteClusterReference {
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
 	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 
-	echo "Creating remote cluster reference from $source to $target"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=half -d demandEncryption=on
+	echo "Creating half secure remote cluster reference from $source to $target using $remoteUser"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword -d encryptionType=half -d demandEncryption=on
 	echo ""
 }
 
@@ -2912,4 +2918,13 @@ function disableInternalResidentRatioGuardrail {
 	local bucket=$2
 
 	$CURL -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag/eval -d "ns_memcached:set_data_ingress(\"${bucket}\", ok)."
+}
+
+function setupXdcrInboundUser {
+	local clusterName=$1
+	local username=$2
+	local password=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_target[*]
 }
