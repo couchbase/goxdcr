@@ -256,6 +256,7 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 		go func() {
 			defer waitGrp.Done()
 			feed, err := mccClient.NewUprFeed()
+			defer feed.Close()
 			if err != nil {
 				errMapMtx.Lock()
 				errMap[kv] = err
@@ -270,7 +271,6 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 				errMapMtx.Unlock()
 				return
 			}
-			defer feed.Close()
 
 			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[kv])
 			if err != nil {
