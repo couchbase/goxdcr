@@ -3215,10 +3215,11 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
 		tgtFailoverLogs, err = ckmgr.GetOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
 		if err != nil {
-			ckmgr.logger.Errorf("unable to get failoverlog from target(s) %v", err)
-			return err
+			ckmgr.logger.Warnf("unable to get failoverlog from target(s) %v - using pre_replicate", err)
+			filteredMaps = ckmgr.filterInvalidCkptsBasedOnPreReplicate(filteredMaps)
+		} else {
+			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
 		}
-		filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
 	}
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
@@ -4161,4 +4162,56 @@ func (ckmgr *CheckpointManager) ClearBrokenmapHistory(tgtManifestIdsUsed map[uin
 			delete(ckmgr.cachedBrokenMap.brokenMapHistories, manifestId)
 		}
 	}
+}
+
+func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps []metadata.VBsCkptsDocMap) []metadata.VBsCkptsDocMap {
+	preReplicateCtx := ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
+		time.Duration(base.GlobalPreReplicateCacheErrorExpireTimeSecs)*time.Second)
+
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
+	var combinedMap metadata.VBsCkptsDocMap
+
+	for i, oneCkptsMap := range ckptsMaps {
+		switch i {
+		case int(common.MainPipeline):
+			combinedMap = mainPipelineMap
+		case int(common.BackfillPipeline):
+			combinedMap = backfillPipelineMap
+		default:
+			panic(fmt.Sprintf("wrong integer %v", i))
+		}
+		if oneCkptsMap == nil {
+			continue
+		}
+		for vbno, ckptDoc := range oneCkptsMap {
+			_, exists := combinedMap[vbno]
+			if !exists {
+				// It's ok for checkpointRecords to be emptyList
+				combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
+			}
+			for _, ckptRecord := range ckptDoc.Checkpoint_records {
+				if ckptRecord == nil {
+					continue
+				}
+
+				targetTimestamp := &service_def.RemoteVBReplicationStatus{
+					VBOpaque: ckptRecord.Target_vb_opaque,
+					VBSeqno:  ckptRecord.Target_Seqno,
+					VBNo:     vbno,
+				}
+
+				bMatch, _, err := preReplicateCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp)
+				if err != nil {
+					ckmgr.logger.Errorf("filterInvalidCkptBasedOnPreReplicate tgtTs (%v,%v,%v) error: %v",
+						vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
+					continue
+				}
+				if bMatch {
+					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+				}
+			}
+		}
+	}
+	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
