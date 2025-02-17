@@ -413,7 +413,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 	default:
 		// Serialize the requests - goes to run()
 		b.incomingReqCh <- reqAndResp
-		b.logger.Infof("sent backfill request reason=%s, forceFlag=%v, req=%T", reason, reqAndResp.Force, req)
+		b.logger.Infof("For %v sent backfill request reason=%s, forceFlag=%v, req=%T", b.id, reason, reqAndResp.Force, req)
 
 		select {
 		// In case we didn't catch it in time

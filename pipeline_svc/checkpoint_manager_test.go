@@ -26,6 +26,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	mocks2 "github.com/couchbase/goxdcr/v8/metadata/mocks"
+	"github.com/couchbase/goxdcr/v8/parts"
 	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -1441,4 +1442,108 @@ func generateMergeCkptArgs() *MergeCkptArgs {
 		PushRespChs:             nil,
 	}
 	return retVal
+}
+
+func TestCheckpointManager_OnEvent(t *testing.T) {
+	assert := assert.New(t)
+	settings := metadata.ReplicationSettingsMap{}
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
+
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc, xmemNozzle)
+
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
+	assert.NotNil(statsMgr)
+
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
+	ckptManager.pipeline = pipeline
+	pipeline.On("SetBrokenMap", mock.Anything).Return()
+
+	// initialise the settings and start the checkpointMgr
+	settings["checkpoint_interval"] = 600
+	err := ckptManager.Start(settings)
+	assert.Nil(err)
+
+	var info parts.CollectionsRoutingInfo
+	// create namespace mappings
+	c1 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C1"}
+	c2 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C2"}
+	c3 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C3"}
+
+	//c1_c2_mapping and c3_mapping denote the backfill mapping to be raised
+	brokenMapping := make(metadata.CollectionNamespaceMapping)
+	c1_c2_mapping := make(metadata.CollectionNamespaceMapping)
+	c3_mapping := make(metadata.CollectionNamespaceMapping)
+
+	brokenMapping.AddSingleMapping(c1, c1)
+	brokenMapping.AddSingleMapping(c2, c2)
+	brokenMapping.AddSingleMapping(c3, c3)
+
+	c1_c2_mapping.AddSingleMapping(c1, c1)
+	c1_c2_mapping.AddSingleMapping(c2, c2)
+
+	c3_mapping.AddSingleMapping(c3, c3)
+
+	// initially the broken map should be nil
+	assert.Equal(len(ckptManager.cachedBrokenMap.brokenMap), 0)
+
+	// 1. First raise an event to add the broken mapping. Lets say tgt manifest 1
+	info.BrokenMap = brokenMapping
+	info.TargetManifestId = 1
+	// The sync channel here is of no use. Hence no harm in making it buffered
+	syncCh := make(chan error, 1)
+	event := common.NewEvent(common.BrokenRoutingUpdateEvent, info, nil, nil, syncCh)
+	ckptManager.OnEvent(event)
+	assert.Equal(3, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(1), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+
+	// 2. Raise a backfill event with c1,c2 fixed (say router1 raised it)
+	info.BrokenMap = metadata.CollectionNamespaceMapping{}
+	info.BackfillMap = c1_c2_mapping
+	info.TargetManifestId = 3
+	syncCh = make(chan error, 1)
+	event = common.NewEvent(common.BrokenRoutingUpdateEvent, info, nil, nil, syncCh)
+	ckptManager.OnEvent(event)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(3), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+	assert.Equal(2, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+
+	// 3. Raise a another backfill event with c1,c2 fixed (say router2 raised it)
+	info.BrokenMap = metadata.CollectionNamespaceMapping{}
+	info.BackfillMap = c1_c2_mapping
+	info.TargetManifestId = 3
+	syncCh = make(chan error, 1)
+	event = common.NewEvent(common.BrokenRoutingUpdateEvent, info, nil, nil, syncCh)
+	ckptManager.OnEvent(event)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(3), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+	assert.Equal(2, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+
+	// 4. Raise a another backfill event with c3 fixed (say router3 raised it)
+	info.BrokenMap = metadata.CollectionNamespaceMapping{}
+	info.BackfillMap = c3_mapping
+	info.TargetManifestId = 3
+	syncCh = make(chan error, 1)
+	event = common.NewEvent(common.BrokenRoutingUpdateEvent, info, nil, nil, syncCh)
+	ckptManager.OnEvent(event)
+	assert.Equal(0, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(3), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+	assert.Equal(2, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+
+	// 5. Raise a another brokenMap event
+	info.BrokenMap = c3_mapping
+	info.BackfillMap = metadata.CollectionNamespaceMapping{}
+	info.TargetManifestId = 4
+	syncCh = make(chan error, 1)
+	event = common.NewEvent(common.BrokenRoutingUpdateEvent, info, nil, nil, syncCh)
+	ckptManager.OnEvent(event)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(4), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+	assert.Equal(3, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+
 }

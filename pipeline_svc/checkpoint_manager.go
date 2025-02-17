@@ -2740,17 +2740,33 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			// No need to re-check because OnEvent() is serialized
 			// First, absorb any new broken mappings (case 1 and 2)
 			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
+
+			// Consider three collection routers: A, B, and C.
+			// - A and B initially had broken mappings: c1 -> c1 and c2 -> c2.
+			// - C had a separate broken mapping: c3 -> c3.
+			// - When c1, c2, and c3 are created on the target, the target manifest ID increments (e.g., to 4).
+			// - Router A resolves its broken mappings (c1 -> c1, c2 -> c2) and triggers an event for the checkpoint manager and we update the cachedBrokenMap.brokenMap to c3->c3
+			//   and cachedBrokenMap.correspondingTargetManifest to 4 here.
+			// - Router B, upon resolving the same mappings (c1 -> c1, c2 -> c2), also triggers an event, but this becomes a no-op.
+			// - When Router C resolves its broken mapping (c3 -> c3), it triggers an event for checkpoint manager
+			//   and updates the cachedBrokenMap.brokenMap to []
+			// - At this point, `ckmgr.cachedBrokenMap` is cleared, and `correspondingTargetManifest` remains 4.
+			// - Note that we bump the ckmgr.cachedBrokenMap.correspondingTargetManifest only when the incoming TargetManifestID is greater
+			// - If routingInfo.TargetManifestId == ckmgr.cachedBrokenMap.correspondingTargetManifest, then we just clear the ckmgr's broken map.
+			//	 Note that we do not update the cachedBrokenMap.brokenMapHistories because it should not have entry corresponding to the `current` manifest
 			if routingInfo.TargetManifestId > ckmgr.cachedBrokenMap.correspondingTargetManifest {
 				oldManifestIdToRecord := ckmgr.cachedBrokenMap.correspondingTargetManifest
-
 				// Newer version means potentially backfill maps that were fixed (case 2)
 				// Remove those from the broken mapppings
 				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
-
 				// As part of bumping, save the pre-bumped manifest - brokenMap pair
 				ckmgr.cachedBrokenMap.brokenMapHistories[oldManifestIdToRecord] = olderMap
+			} else if routingInfo.TargetManifestId == ckmgr.cachedBrokenMap.correspondingTargetManifest {
+				// remove the broken mappings
+				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 			}
+
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
 			ckmgr.wait_grp.Add(2)
