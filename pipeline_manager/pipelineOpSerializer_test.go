@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -21,10 +22,9 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
-	replicationStatus "github.com/couchbase/goxdcr/pipeline"
 	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
-	"github.com/couchbase/goxdcr/utils"
+	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -153,24 +153,28 @@ func TestPipelineOpSerializerReinit(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPipelineOpSerializerReinit =================")
 	serializer, pipelineMgr := setupBoilerPlateSerializer()
+	testReplicationSettings := metadata.DefaultReplicationSettings()
+	settingsMap := make(map[string]interface{})
+	settingsMap[metadata.FailureRestartIntervalKey] = 10
+	settingsMap[metadata.CompressionTypeKey] = (int)(base.CompressionTypeSnappy)
+	testReplicationSettings.UpdateSettingsFromMap(settingsMap)
+	testTopic := "testTopic"
+	testReplicationSpec := &metadata.ReplicationSpecification{Id: testTopic, Settings: testReplicationSettings, Revision: 1}
+	replSpecSvcMock := &service_def.ReplicationSpecSvc{}
+	replSpecSvcMock.On("ReplicationSpec", mock.Anything).Return(testReplicationSpec, nil)
+
+	specGetter := func(string) (*metadata.ReplicationSpecification, error) {
+		return testReplicationSpec, nil
+	}
+	utils := &utilsMock.UtilsIface{}
+	repStatusPtr := pipeline.NewReplicationStatus(testTopic, specGetter, &log.CommonLogger{}, nil, utils)
+	pipelineMgr.On("GetOrCreateReplicationStatus", mock.Anything, mock.Anything).Return(repStatusPtr, nil)
 	pipelineMgr.On("CleanupPipeline", mock.Anything).Return(nil).Times(1)
 	pipelineMgr.On("Update", mock.Anything, mock.Anything).Return(nil).Times(1)
-
-	// boilerplate for xdcrDevPipelineReinitCleanupDelayProofNode
-	testTopic := "TestTopic"
-	testReplicationSpec := &metadata.ReplicationSpecification{Id: testTopic, Settings: metadata.DefaultReplicationSettings(), Revision: 1}
-	replSpecSvc := &service_def.ReplicationSpecSvc{}
-	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(testReplicationSpec, nil)
-	pipelineMgr.On("GetReplSpecSvc").Return(replSpecSvc)
-
-	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
-	utilsNew := utils.NewUtilities()
-	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
-	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger, nil, utilsNew)
-	pipelineMgr.On("GetOrCreateReplicationStatus", mock.Anything, mock.Anything).Return(testReplicationStatus, nil)
+	pipelineMgr.On("GetReplSpecSvc").Return(replSpecSvcMock)
 
 	assert.Nil(serializer.ReInit(testTopic))
-	time.Sleep(serializerSleepTime + base.PipelineReinitStreamDelaySec)
+	time.Sleep(5 * time.Second)
 	assert.Equal(0, len(serializer.jobTopicMap))
 	fmt.Println("============== Test case end: TestPipelineOpSerializerReinit =================")
 }

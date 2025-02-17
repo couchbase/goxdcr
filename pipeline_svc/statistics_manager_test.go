@@ -179,6 +179,11 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	connector.On("AsyncComponentEventListeners").Return(nil)
 	connector.On("DownStreams").Return(nil)
 	connector.On("Id").Return(testRouter)
+	connector.On("RegisterUpstreamPart", mock.Anything).Return(nil)
+	utils.On("GetIntSettingFromSettings", mock.Anything, mock.Anything).Return(0, nil)
+	ckptService.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(nil, nil)
 
 	dcpNozzle.SetConnector(connector)
 
@@ -207,6 +212,11 @@ func setupCheckpointMgr(
 	backfillReplSvc *service_def.BackfillReplSvc) *CheckpointManager {
 
 	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqSvc, activeVBs, "targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, nil, nil)
+
+	// initialise the broken maps
+	ckptManager.cachedBrokenMap.lock.Lock()
+	ckptManager.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+	ckptManager.cachedBrokenMap.lock.Unlock()
 
 	return ckptManager
 }
