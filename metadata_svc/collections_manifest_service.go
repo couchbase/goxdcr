@@ -513,8 +513,7 @@ type CollectionsManifestAgent struct {
 	bucketTopologySvc service_def.BucketTopologySvc
 	bucketSvcId       string
 
-	remoteClusterRefPopulated uint32
-	remoteClusterRef          *metadata.RemoteClusterReference
+	remoteClusterRef *metadata.RemoteClusterReference
 
 	// Last pulled manifest
 	srcMtx         sync.RWMutex
@@ -538,15 +537,16 @@ type CollectionsManifestAgent struct {
 	persistedTgtListHash [sha256.Size]byte
 
 	// atomics to prevent races
-	started                uint32
-	srcLoadedFromMetakv    bool
-	tgtLoadedFromMetaKv    bool
-	metakvInitDone         chan bool
-	refreshAndNotifyIsRdy  chan bool
-	persistHandlerStarted  uint32
-	singlePersistReq       chan bool
-	singlePersistResultReq chan bool
-	singlePersistResp      chan AgentPersistResult
+	started                  uint32
+	srcLoadedFromMetakv      bool
+	tgtLoadedFromMetaKv      bool
+	metakvInitDone           chan bool
+	refreshAndNotifyIsRdy    chan bool
+	persistHandlerStarted    uint32
+	singlePersistReq         chan bool
+	singlePersistResultReq   chan bool
+	singlePersistResp        chan AgentPersistResult
+	remoteClusterRefInitDone chan bool
 
 	// If agent is used as part of spec creation/validation process, then this is considered a tempAgent
 	tempAgent bool
@@ -558,29 +558,30 @@ type CollectionsManifestAgent struct {
 
 func NewCollectionsManifestAgent(name string, internalId string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, bucketTopoSvc service_def.BucketTopologySvc, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback, peerManifestsGetter service_def.PeerManifestsGetter) *CollectionsManifestAgent {
 	manifestAgent := &CollectionsManifestAgent{
-		id:                     name,
-		internalId:             internalId,
-		remoteClusterSvc:       remoteClusterSvc,
-		checkpointsSvc:         checkpointsSvc,
-		bucketTopologySvc:      bucketTopoSvc,
-		bucketSvcId:            fmt.Sprintf("colManifestAgt_%v", base.GetIterationId(&collectionManifestCounter)),
-		logger:                 logger,
-		utilities:              utilities,
-		replicationSpec:        replicationSpec,
-		manifestOps:            manifestOps,
-		srcManifestGetter:      srcManifestGetter,
-		finCh:                  make(chan bool, 1),
-		ckptDocsCache:          make(map[uint16]*metadata.CheckpointsDoc),
-		sourceCache:            make(metadata.ManifestsCache),
-		targetCache:            make(metadata.ManifestsCache),
-		metakvSvc:              metakvSvc,
-		metadataChangeCb:       metadataChangeCb,
-		singlePersistReq:       make(chan bool, 1),
-		singlePersistResultReq: make(chan bool, 10),
-		singlePersistResp:      make(chan AgentPersistResult, 11),
-		metakvInitDone:         make(chan bool),
-		refreshAndNotifyIsRdy:  make(chan bool),
-		peerManifestGetter:     peerManifestsGetter,
+		id:                       name,
+		internalId:               internalId,
+		remoteClusterSvc:         remoteClusterSvc,
+		checkpointsSvc:           checkpointsSvc,
+		bucketTopologySvc:        bucketTopoSvc,
+		bucketSvcId:              fmt.Sprintf("colManifestAgt_%v", base.GetIterationId(&collectionManifestCounter)),
+		logger:                   logger,
+		utilities:                utilities,
+		replicationSpec:          replicationSpec,
+		manifestOps:              manifestOps,
+		srcManifestGetter:        srcManifestGetter,
+		finCh:                    make(chan bool, 1),
+		ckptDocsCache:            make(map[uint16]*metadata.CheckpointsDoc),
+		sourceCache:              make(metadata.ManifestsCache),
+		targetCache:              make(metadata.ManifestsCache),
+		metakvSvc:                metakvSvc,
+		metadataChangeCb:         metadataChangeCb,
+		singlePersistReq:         make(chan bool, 1),
+		singlePersistResultReq:   make(chan bool, 10),
+		singlePersistResp:        make(chan AgentPersistResult, 11),
+		metakvInitDone:           make(chan bool),
+		refreshAndNotifyIsRdy:    make(chan bool),
+		peerManifestGetter:       peerManifestsGetter,
+		remoteClusterRefInitDone: make(chan bool),
 	}
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	manifestAgent.sourceCache[0] = &defaultManifest
@@ -913,7 +914,7 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 		// as in, load the remote cluster reference first, then load the specs
 		panic(fmt.Sprintf("RemoteCluster service bootstrapping did not finish within %v and XDCR must restart to try again", base.DefaultHttpTimeout))
 	}
-	atomic.StoreUint32(&a.remoteClusterRefPopulated, 1)
+	close(a.remoteClusterRefInitDone)
 	return nil
 }
 
@@ -1278,6 +1279,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 
 	hasSupport, err := a.remoteClusterHasNoCollectionsCapability()
 	if err != nil {
+		a.logger.Errorf("%v - remoteClusterHasNoCollectionsCapability experienced err=%v", a.id, err)
 		return nil, nil, err
 	} else if !hasSupport {
 		return nil, nil, base.ErrorTargetCollectionsNotSupported
@@ -1619,8 +1621,12 @@ func (a *CollectionsManifestAgent) testGetMetaLists(srcUids, tgtUids []uint64) (
 }
 
 func (a *CollectionsManifestAgent) remoteClusterHasNoCollectionsCapability() (bool, error) {
-	if atomic.LoadUint32(&a.remoteClusterRefPopulated) == 0 {
-		return false, fmt.Errorf("%v - RemoteClusterReference has not finished populating", a.id)
+	// wait until remote cluster reference is initialised
+	select {
+	case <-a.finCh:
+		return false, parts.PartStoppedError
+	case <-a.remoteClusterRefInitDone:
+		// No action here
 	}
 
 	capability, err := a.remoteClusterSvc.GetCapability(a.remoteClusterRef)
