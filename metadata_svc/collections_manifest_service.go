@@ -11,17 +11,18 @@ package metadata_svc
 import (
 	"crypto/sha256"
 	"fmt"
+	"math"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"math"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const sourceRefreshStr = "sourceRefresh"
@@ -327,7 +328,7 @@ func (c *CollectionsManifestService) metadataChangeCb(specId string, oldManifest
 	return lastErr
 }
 
-//  When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
+// When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
 func (c *CollectionsManifestService) GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
@@ -338,7 +339,7 @@ func (c *CollectionsManifestService) GetSpecificSourceManifest(spec *metadata.Re
 	return agent.GetSpecificSourceManifest(manifestVersion)
 }
 
-//  When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
+// When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
 func (c *CollectionsManifestService) GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
@@ -406,8 +407,7 @@ type CollectionsManifestAgent struct {
 	// The target side manifest getter
 	remoteClusterSvc service_def.RemoteClusterSvc
 
-	remoteClusterRefPopulated uint32
-	remoteClusterRef          *metadata.RemoteClusterReference
+	remoteClusterRef *metadata.RemoteClusterReference
 
 	// Last pulled manifest
 	srcMtx         sync.RWMutex
@@ -431,15 +431,16 @@ type CollectionsManifestAgent struct {
 	persistedTgtListHash [sha256.Size]byte
 
 	// atomics to prevent races
-	started                uint32
-	srcLoadedFromMetakv    bool
-	tgtLoadedFromMetaKv    bool
-	metakvInitDone         chan bool
-	refreshAndNotifyIsRdy  chan bool
-	persistHandlerStarted  uint32
-	singlePersistReq       chan bool
-	singlePersistResultReq chan bool
-	singlePersistResp      chan AgentPersistResult
+	started                  uint32
+	srcLoadedFromMetakv      bool
+	tgtLoadedFromMetaKv      bool
+	metakvInitDone           chan bool
+	refreshAndNotifyIsRdy    chan bool
+	persistHandlerStarted    uint32
+	singlePersistReq         chan bool
+	singlePersistResultReq   chan bool
+	singlePersistResp        chan AgentPersistResult
+	remoteClusterRefInitDone chan bool
 
 	// If agent is used as part of spec creation/validation process, then this is considered a tempAgent
 	tempAgent bool
@@ -447,25 +448,26 @@ type CollectionsManifestAgent struct {
 
 func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
 	manifestAgent := &CollectionsManifestAgent{
-		id:                     name,
-		remoteClusterSvc:       remoteClusterSvc,
-		checkpointsSvc:         checkpointsSvc,
-		logger:                 logger,
-		utilities:              utilities,
-		replicationSpec:        replicationSpec,
-		manifestOps:            manifestOps,
-		srcManifestGetter:      srcManifestGetter,
-		finCh:                  make(chan bool, 1),
-		ckptDocsCache:          make(map[uint16]*metadata.CheckpointsDoc),
-		sourceCache:            make(metadata.ManifestsCache),
-		targetCache:            make(metadata.ManifestsCache),
-		metakvSvc:              metakvSvc,
-		metadataChangeCb:       metadataChangeCb,
-		singlePersistReq:       make(chan bool, 1),
-		singlePersistResultReq: make(chan bool, 10),
-		singlePersistResp:      make(chan AgentPersistResult, 11),
-		metakvInitDone:         make(chan bool),
-		refreshAndNotifyIsRdy:  make(chan bool),
+		id:                       name,
+		remoteClusterSvc:         remoteClusterSvc,
+		checkpointsSvc:           checkpointsSvc,
+		logger:                   logger,
+		utilities:                utilities,
+		replicationSpec:          replicationSpec,
+		manifestOps:              manifestOps,
+		srcManifestGetter:        srcManifestGetter,
+		finCh:                    make(chan bool, 1),
+		ckptDocsCache:            make(map[uint16]*metadata.CheckpointsDoc),
+		sourceCache:              make(metadata.ManifestsCache),
+		targetCache:              make(metadata.ManifestsCache),
+		metakvSvc:                metakvSvc,
+		metadataChangeCb:         metadataChangeCb,
+		singlePersistReq:         make(chan bool, 1),
+		singlePersistResultReq:   make(chan bool, 10),
+		singlePersistResp:        make(chan AgentPersistResult, 11),
+		metakvInitDone:           make(chan bool),
+		refreshAndNotifyIsRdy:    make(chan bool),
+		remoteClusterRefInitDone: make(chan bool),
 	}
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	manifestAgent.sourceCache[0] = &defaultManifest
@@ -777,7 +779,7 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 		// as in, load the remote cluster reference first, then load the specs
 		panic(fmt.Sprintf("RemoteCluster service bootstrapping did not finish within %v and XDCR must restart to try again", base.DefaultHttpTimeout))
 	}
-	atomic.StoreUint32(&a.remoteClusterRefPopulated, 1)
+	close(a.remoteClusterRefInitDone)
 	return nil
 }
 
@@ -1079,6 +1081,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 
 	hasSupport, err := a.remoteClusterHasNoCollectionsCapability()
 	if err != nil {
+		a.logger.Errorf("%v - remoteClusterHasNoCollectionsCapability experienced err=%v", a.id, err)
 		return nil, nil, err
 	} else if !hasSupport {
 		return nil, nil, base.ErrorTargetCollectionsNotSupported
@@ -1411,8 +1414,12 @@ func (a *CollectionsManifestAgent) testGetMetaLists(srcUids, tgtUids []uint64) (
 }
 
 func (a *CollectionsManifestAgent) remoteClusterHasNoCollectionsCapability() (bool, error) {
-	if atomic.LoadUint32(&a.remoteClusterRefPopulated) == 0 {
-		return false, fmt.Errorf("%v - RemoteClusterReference has not finished populating", a.id)
+	// wait until remote cluster reference is initialised
+	select {
+	case <-a.finCh:
+		return false, parts.PartStoppedError
+	case <-a.remoteClusterRefInitDone:
+		// No action here
 	}
 
 	capability, err := a.remoteClusterSvc.GetCapability(a.remoteClusterRef)
