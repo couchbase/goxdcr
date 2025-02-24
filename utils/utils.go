@@ -1288,7 +1288,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}
 		// instead of a host address with port
 		hostName, missingHostname, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
 		if err != nil {
-			return nil, nil, false, nodeServicesInfoParseError(nodesList, logger)
+			return nil, nil, false, fmt.Errorf("%v | err=%v", nodeServicesInfoParseError(nodesList, logger), err)
 		}
 
 		if missingHostname {
