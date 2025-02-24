@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func setupCommonMocks() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CheckpointsService, *serviceDefMocks.BucketTopologySvc, *serviceDefMocks.CollectionsManifestOps, *serviceDefMocks.ManifestsService, *serviceDefMocks.PeerManifestsGetter, *serviceDefMocks.SourceNotification) {
+func setupCommonMocks() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CheckpointsService, *serviceDefMocks.BucketTopologySvc, *serviceDefMocks.CollectionsManifestOps, *serviceDefMocks.ManifestsService, *serviceDefMocks.PeerManifestsGetter, *serviceDefMocks.SourceNotification, *utils.Utilities) {
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 	ckptSvc := &serviceDefMocks.CheckpointsService{}
 	bucketTopSvc := &serviceDefMocks.BucketTopologySvc{}
@@ -31,12 +31,13 @@ func setupCommonMocks() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.Che
 	manifestSvc := &serviceDefMocks.ManifestsService{}
 	peerManifestGetter := &serviceDefMocks.PeerManifestsGetter{}
 	notification := &serviceDefMocks.SourceNotification{}
+	utils := utils.NewUtilities()
 
-	return remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, notification
+	return remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, notification, utils
 }
 
-func setupMocksForCBSE19371() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CheckpointsService, *serviceDefMocks.BucketTopologySvc, *serviceDefMocks.CollectionsManifestOps, *serviceDefMocks.ManifestsService, *serviceDefMocks.PeerManifestsGetter, *metadata.ReplicationSpecification) {
-	remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, notification := setupCommonMocks()
+func setupMocksForCBSE19371() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CheckpointsService, *serviceDefMocks.BucketTopologySvc, *serviceDefMocks.CollectionsManifestOps, *serviceDefMocks.ManifestsService, *serviceDefMocks.PeerManifestsGetter, *metadata.ReplicationSpecification, *utils.Utilities) {
+	remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, notification, utils := setupCommonMocks()
 
 	spec, _ := metadata.NewReplicationSpecification("B1", "B1", "T", "B2", "B2")
 	// shorten the test time of runPeriodicRefresh
@@ -85,15 +86,14 @@ func setupMocksForCBSE19371() (*serviceDefMocks.RemoteClusterSvc, *serviceDefMoc
 		delete(subscribers, subId)
 	}).Return(nil)
 
-	return remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, spec
+	return remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, spec, utils
 }
 
 func TestCollectionsManifestAgent_Start(t *testing.T) {
 	a := assert.New(t)
 
-	remoteClusterSvc, checkpointsSvc, bucketTopoSvc, manifestOps, manifestSvc, peerManifestGetter, spec := setupMocksForCBSE19371()
+	remoteClusterSvc, checkpointsSvc, bucketTopoSvc, manifestOps, manifestSvc, peerManifestGetter, spec, utils := setupMocksForCBSE19371()
 	logger := log.NewLogger("test", log.DefaultLoggerContext)
-	utils := utils.NewUtilities()
 	manifestGetter := NewBucketManifestGetter(spec.SourceBucketName, manifestOps, time.Duration(base.ManifestRefreshSrcInterval)*time.Second, spec)
 	metadataCallback := func(metadataId string, oldMetadata, newMetadata interface{}) error { return nil }
 
@@ -101,4 +101,45 @@ func TestCollectionsManifestAgent_Start(t *testing.T) {
 	a.Nil(agent.Start())
 	time.Sleep(2 * base.TopologyChangeCheckInterval)
 	agent.Stop()
+}
+
+func TestCollectionsManifestAgent_remoteClusterHasNoCollectionsCapability(t *testing.T) {
+	remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, _, utils := setupCommonMocks()
+
+	manifestSvc.On("GetSourceManifests", mock.Anything).Return(nil, nil)
+	manifestSvc.On("GetTargetManifests", mock.Anything).Return(nil, nil)
+	remoteClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
+	remoteClusterSvc.On("GetCapability", mock.Anything).Return(metadata.Capability{}, nil)
+	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(&metadata.RemoteClusterReference{}, nil)
+	notificationCh := make(chan service_def.SourceNotification, 1)
+	bucketTopSvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(notificationCh, nil)
+	bucketTopSvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(nil)
+
+	spec, _ := metadata.NewReplicationSpecification("B1", "B1", "T", "B2", "B2")
+	logger := log.NewLogger("test", log.DefaultLoggerContext)
+	manifestGetter := NewBucketManifestGetter(spec.SourceBucketName, manifestOps, time.Duration(base.ManifestRefreshSrcInterval)*time.Second, spec)
+	metadataCallback := func(metadataId string, oldMetadata, newMetadata interface{}) error { return nil }
+	agent := NewCollectionsManifestAgent("test", "testId", remoteClusterSvc, ckptSvc, bucketTopSvc, logger, utils, spec, manifestOps, manifestGetter.GetManifest, manifestSvc, metadataCallback, peerManifestGetter.Execute)
+	var finch = make(chan bool)
+	var startTime time.Time
+	go func() {
+		startTime = time.Now()
+		agent.remoteClusterHasNoCollectionsCapability()
+		close(finch)
+	}()
+
+	time.AfterFunc(10*time.Second, func() {
+		agent.Start()
+	})
+
+	<-finch
+	elapsedTime := time.Since(startTime)
+
+	// agent.remoteClusterHasNoCollectionsCapability() will be blocking on `remoteClusterRefInitDone`
+	// `remoteClusterRefInitDone` is closed by the agent.Start() code path which starts after 20sec
+	// so if the finch is closed before 20sec then we are not achieving the required synchronization
+	if elapsedTime < 10*time.Second {
+		t.Fatalf("Test failed: finch closed too early after %v", elapsedTime)
+	}
+
 }
