@@ -93,7 +93,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(returnedSpec, nil)
 	replSpecSvc.On("AllReplicationSpecIds").Return(specList, nil)
 	pipelineMgr.On("GetMainPipelineThroughSeqnos", mock.Anything).Return(seqnoGetter(), nil)
-	pipelineMgr.On("BackfillMappingStatusUpdate", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	pipelineMgr.On("BackfillMappingStatusUpdate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	pipelineMgr.On("RequestBackfill", mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)

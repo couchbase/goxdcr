@@ -125,7 +125,7 @@ type PipelineMgrForSerializer interface {
 	CleanupBackfillPipeline(topic string) error
 	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEvent(eventId int) error
-	BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
+	BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error
 }
 
 // Specifically APIs used by backfill manager
@@ -140,7 +140,7 @@ type PipelineMgrBackfillIface interface {
 	WaitForMainPipelineCkptMgrToStop(topic, internalID string)
 
 	ReInitStreams(pipelineName string) error
-	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error
 }
 
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64, getBackfillMgr func() service_def.BackfillMgrIface) *PipelineManager {
@@ -1286,12 +1286,12 @@ func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
 }
 
 // External
-func (pipelineMgr *PipelineManager) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error {
-	return pipelineMgr.serializer.BackfillMappingStatusUpdate(topic, diffPair, srcManifestDelta)
+func (pipelineMgr *PipelineManager) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	return pipelineMgr.serializer.BackfillMappingStatusUpdate(topic, diffPair, srcManifestDelta, latestTgtManifestId)
 }
 
 // Internal
-func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
+func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
 	repStatusMap := pipelineMgr.ReplicationStatusMap()
 	replStatus, ok := repStatusMap[topic]
 	if !ok {
@@ -1305,6 +1305,7 @@ func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair
 			settingsMap := make(metadata.ReplicationSettingsMap)
 			settingsMap[metadata.CkptMgrBrokenmapIdleUpdateDiffPair] = diffPair
 			settingsMap[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta] = srcManifestsDelta
+			settingsMap[metadata.CkptMgrBrokenmapIdleUpdateLatestTgtManId] = latestTgtManifestId
 			ckptMgr.UpdateSettings(settingsMap)
 		}
 	}
