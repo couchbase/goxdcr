@@ -1040,6 +1040,93 @@ func TestCheckpointManager_OnEvent(t *testing.T) {
 
 }
 
+func TestCheckpointManager_CleanupInMemoryBrokenMap(t *testing.T) {
+	assert := assert.New(t)
+	settings := metadata.ReplicationSettingsMap{}
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
+
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc, xmemNozzle)
+	setupSpecSettings(replicationSpec)
+
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil)
+	assert.NotNil(statsMgr)
+
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
+	ckptManager.pipeline = pipeline
+	pipeline.On("SetBrokenMap", mock.Anything).Return()
+
+	// initialise the settings and start the checkpointMgr
+	settings["checkpoint_interval"] = 600
+	err := ckptManager.Start(settings)
+	assert.Nil(err)
+
+	// create namespace mappings
+	c1 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C1"}
+	c2 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C2"}
+	c3 := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "C3"}
+
+	//c1_c2_mapping and c3_mapping denote the backfill mapping to be raised
+	brokenMapping := make(metadata.CollectionNamespaceMapping)
+	c1_c2_mapping := make(metadata.CollectionNamespaceMapping)
+	c3_mapping := make(metadata.CollectionNamespaceMapping)
+	defaultMan := metadata.NewDefaultCollectionsManifest()
+
+	brokenMapping.AddSingleMapping(c1, c1)
+	brokenMapping.AddSingleMapping(c2, c2)
+	brokenMapping.AddSingleMapping(c3, c3)
+
+	c1_c2_mapping.AddSingleMapping(c1, c1)
+	c1_c2_mapping.AddSingleMapping(c2, c2)
+
+	c3_mapping.AddSingleMapping(c3, c3)
+
+	// initially the broken map should be nil
+	assert.Equal(0, len(ckptManager.cachedBrokenMap.brokenMap))
+
+	// 1. First initialise the broken mapping. Lets say tgt manifest 1
+	ckptManager.cachedBrokenMap.brokenMap = brokenMapping
+	ckptManager.cachedBrokenMap.correspondingTargetManifest = 1
+
+	// 2. Say collection Manifest Service fixed broken mapping c1->c1 and c2->c2
+	settings1 := metadata.ReplicationSettingsMap{}
+	diffPair := &metadata.CollectionNamespaceMappingsDiffPair{}
+	diffPair.Added = c1_c2_mapping
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateDiffPair] = diffPair
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta] = []*metadata.CollectionsManifest{&defaultMan, &defaultMan}
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateLatestTgtManId] = uint64(3)
+	ckptManager.UpdateSettings(settings1)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(3), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+
+	// 3. Say collection Manifest Service fixed broken mapping c1->c1 and c2->c2 (but by this time say router already fixed it)
+	// In this case this should be a no-op
+	settings1 = metadata.ReplicationSettingsMap{}
+	diffPair = &metadata.CollectionNamespaceMappingsDiffPair{}
+	diffPair.Added = c1_c2_mapping
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateDiffPair] = diffPair
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta] = []*metadata.CollectionsManifest{&defaultMan, &defaultMan}
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateLatestTgtManId] = uint64(3)
+	ckptManager.UpdateSettings(settings1)
+	assert.Equal(1, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(3), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+
+	// 4. Say now c3->c3 mapping is fixed and the target manifest is now 4
+	settings1 = metadata.ReplicationSettingsMap{}
+	diffPair = &metadata.CollectionNamespaceMappingsDiffPair{}
+	diffPair.Added = c3_mapping
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateDiffPair] = diffPair
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta] = []*metadata.CollectionsManifest{&defaultMan, &defaultMan}
+	settings1[metadata.CkptMgrBrokenmapIdleUpdateLatestTgtManId] = uint64(4)
+	ckptManager.UpdateSettings(settings1)
+	assert.Equal(0, len(ckptManager.cachedBrokenMap.brokenMap))
+	assert.Equal(uint64(4), ckptManager.cachedBrokenMap.correspondingTargetManifest)
+}
+
 func TestBackfillCollectionIdStamping(t *testing.T) {
 	fmt.Println("============== Test case start: TestBackfillCollectionIdStamping =================")
 	defer fmt.Println("============== Test case end: TestBackfillCollectionIdStamping =================")

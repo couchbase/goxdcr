@@ -1562,8 +1562,9 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSett
 	// Before interval, check for idle brokenMap update
 	diffPair, bmUpdateOk := settings[metadata.CkptMgrBrokenmapIdleUpdateDiffPair].(*metadata.CollectionNamespaceMappingsDiffPair)
 	srcManifestsDelta, bmUpdateOk2 := settings[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta].([]*metadata.CollectionsManifest)
-	if bmUpdateOk && bmUpdateOk2 {
-		ckmgr.CleanupInMemoryBrokenMap(diffPair, srcManifestsDelta)
+	latestTgtManifestId, bmUpdateOk3 := settings[metadata.CkptMgrBrokenmapIdleUpdateLatestTgtManId].(uint64)
+	if bmUpdateOk && bmUpdateOk2 && bmUpdateOk3 {
+		ckmgr.CleanupInMemoryBrokenMap(diffPair, srcManifestsDelta, latestTgtManifestId)
 		return nil
 	}
 
@@ -2601,8 +2602,8 @@ func (ckmgr *CheckpointManager) NotifyBackfillMgrRollbackTo0(vbno uint16) {
 // This potentially is needed if no I/O is ongoing, which means that router won't be cleaning it up
 // Without this function, brokenMap is only updated if a doc flow through the collection router of the VB
 // and the router raises brokenMap event. This function supplements that and can happen concurrently
-func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManDelta []*metadata.CollectionsManifest) {
-	sourceChanged := len(srcManDelta) == 2 && srcManDelta[0] != nil && srcManDelta[1] != nil
+func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) {
+	sourceChanged := len(srcManDelta) == 2 && srcManDelta[0] != nil && srcManDelta[1] != nil && srcManDelta[0].Uid() != srcManDelta[1].Uid()
 	// This must be deferred first as defer calls are FILO and this needs a lock
 	defer ckmgr.updateReplStatusBrokenMap()
 	// This path only gets called when manifest changes... so it shouldn't be too often/expensive to clone
@@ -2610,10 +2611,26 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 	defer ckmgr.cachedBrokenMap.lock.Unlock()
 
 	oldMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
-	// pair.Added means backfillMgr detected these and need to be backfilled, which means they're no longer broken
-	ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Added)
-	// pair.Removed means these mappings no longer exist and are obsolete, and should be cleaned up too
-	ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Removed)
+	oldTargetManifestId := ckmgr.cachedBrokenMap.correspondingTargetManifest
+
+	if latestTgtManifestId > oldTargetManifestId {
+		// bump the cached manifest
+		ckmgr.cachedBrokenMap.correspondingTargetManifest = latestTgtManifestId
+		// pair.Added means backfillMgr detected these and need to be backfilled, which means they're no longer broken
+		ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Added)
+		// pair.Removed means these mappings no longer exist and are obsolete, and should be cleaned up too
+		ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Removed)
+	} else if oldTargetManifestId == latestTgtManifestId {
+		// This can happen in 2 cases
+		// 1. A router event updated the manifest+brokenMappings even before this function call
+		// 2. Only source manifest changed. - In this case the below code will be a no-op
+
+		// pair.Added means backfillMgr detected these and need to be backfilled, which means they're no longer broken
+		ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Added)
+		// pair.Removed means these mappings no longer exist and are obsolete, and should be cleaned up too
+		ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Removed)
+	}
+
 	newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 
 	if sourceChanged {
@@ -2634,8 +2651,9 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 				}
 			}
 		}
+		newerMap = ckmgr.cachedBrokenMap.brokenMap.Clone()
 	}
-	newerMap = ckmgr.cachedBrokenMap.brokenMap.Clone()
+
 	if len(diffPair.Added) > 0 {
 		// Only repaired should be logged
 		// Things that are removed due to things being removed should not be logged

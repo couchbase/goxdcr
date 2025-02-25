@@ -1190,7 +1190,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		}
 	}
 
-	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
+	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest}, latestTgtManifest.Uid())
 
 	// Only raise backfill req if necessary because each req will result in a metakv set (could be expensive)
 	if len(diffPair.Added) > 0 || len(diffPair.Removed) > 0 {
@@ -1321,10 +1321,10 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 		}
 		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForExplicitMapping(replId, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest, spec, modes, backfillReq)
 		backfillReqDiffPair := backfillReq.(metadata.CollectionNamespaceMappingsDiffPair)
-		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, backfillReqDiffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, backfillReqDiffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest}, newTargetManifest.Uid())
 	} else {
 		backfillReq, diffPair, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
-		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest}, newTargetManifest.Uid())
 	}
 	if !skipRaiseBackfillReq {
 		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid(), "diffManifestsAndRaiseBackfill")
@@ -1353,8 +1353,8 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 }
 
 // The srcManifestsDiff is needed to detect any removed source namespaces that are not part of the implicit mapping
-func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string, sentPair metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDiff []*metadata.CollectionsManifest) error {
-	err := b.pipelineMgr.BackfillMappingStatusUpdate(replId, &sentPair, srcManifestsDiff)
+func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string, sentPair metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDiff []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	err := b.pipelineMgr.BackfillMappingStatusUpdate(replId, &sentPair, srcManifestsDiff, latestTgtManifestId)
 	if err != nil {
 		// error could occur only if serializer is stopped which shouldn't happen in normal circumstances
 		b.logger.Warnf("Unable to raise BackfillMappingStatusUpdate %v", err)

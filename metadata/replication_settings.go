@@ -109,9 +109,10 @@ const (
 	SourceTopologyChangeStatusKey = "sourceTopologyChangeStatus"
 	TargetTopologyChangeStatusKey = "targetTopologyChangeStatus"
 
-	CkptMgrBrokenmapIdleUpdateDiffPair    = "ckmgrBrokenMapIdleUpdateDiffPair"
-	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
-	CkptMgrBypassCkpt                     = "ckmgrBypassCkpt"
+	CkptMgrBrokenmapIdleUpdateDiffPair       = "ckmgrBrokenMapIdleUpdateDiffPair"
+	CkptMgrBrokenmapIdleUpdateSrcManDelta    = "ckmgrBrokenMapIdleUpdateSrcManDelta"
+	CkptMgrBrokenmapIdleUpdateLatestTgtManId = "ckmgrBrokenMapIdleUpdateLatestTgtManId"
+	CkptMgrBypassCkpt                        = "ckmgrBypassCkpt"
 
 	PreReplicateVBMasterCheckKey = base.PreReplicateVBMasterCheckKey
 	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey
