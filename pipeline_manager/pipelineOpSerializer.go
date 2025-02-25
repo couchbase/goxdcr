@@ -13,11 +13,12 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/pipeline"
-	"sync"
 )
 
 type PipelineMgtOpType int
@@ -98,7 +99,7 @@ type PipelineOpSerializerIface interface {
 
 	// Event Framework
 	DismissEvent(topic string, eventId int) error
-	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error
 }
 
 type SerializerRepStatusPair struct {
@@ -121,10 +122,11 @@ type Job struct {
 	errorCbForFailedStoppedOp        base.StoppedPipelineErrCallback
 
 	// Event and backfill related
-	eventId           int
-	diffPair          *metadata.CollectionNamespaceMappingsDiffPair
-	srcManifestsDelta []*metadata.CollectionsManifest
-	skipBackfillCkpt  bool
+	eventId             int
+	diffPair            *metadata.CollectionNamespaceMappingsDiffPair
+	srcManifestsDelta   []*metadata.CollectionsManifest
+	skipBackfillCkpt    bool
+	latestTgtManifestId uint64
 
 	// Optional outputs from jobs
 	repStatusCh chan SerializerRepStatusPair
@@ -465,7 +467,7 @@ forloop:
 					serializer.logger.Warnf("Error dismissing event %v for pipeline %v. err=%v", job.eventId, job.pipelineTopic, err)
 				}
 			case BackfillMappingStatusUpdate:
-				err := serializer.pipelineMgr.BackfillMappingUpdate(job.pipelineTopic, job.diffPair, job.srcManifestsDelta)
+				err := serializer.pipelineMgr.BackfillMappingUpdate(job.pipelineTopic, job.diffPair, job.srcManifestsDelta, job.latestTgtManifestId)
 				if err != nil {
 					serializer.logger.Warnf("Error updating backfill mapping for pipeline %v. err=%v", job.pipelineTopic, err)
 				}
@@ -548,7 +550,7 @@ func (serializer *PipelineOpSerializer) DismissEvent(topic string, eventId int) 
 	return serializer.distributeJob(dismissJob)
 }
 
-func (serializer *PipelineOpSerializer) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
+func (serializer *PipelineOpSerializer) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
 	if serializer.isStopped() {
 		return SerializerStoppedErr
 	}
@@ -558,6 +560,7 @@ func (serializer *PipelineOpSerializer) BackfillMappingStatusUpdate(topic string
 	statusUpdateJob.pipelineTopic = topic
 	statusUpdateJob.diffPair = diffPair
 	statusUpdateJob.srcManifestsDelta = srcManifestsDelta
+	statusUpdateJob.latestTgtManifestId = latestTgtManifestId
 
 	return serializer.distributeJob(statusUpdateJob)
 }
