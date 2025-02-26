@@ -1648,6 +1648,15 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 
 	mutex.Lock()
 	defer mutex.Unlock()
+
+	if _, ok := specifiedChs[fullSubscriberId]; ok {
+		// The subscriber can potentially be stuck when this happens.
+		// It's the caller's responsibility that it doesn't happen. The logging
+		// is just for debugging purposes.
+		bw.logger.Warnf("Notification channel will be overwritten for subscriberId=%v, chType=%v, source=%v, watcher=%v (%v), cachePopulated=%v",
+			fullSubscriberId, chType, bw.source, bw.bucketName, bw.bucketUUID, bw.cachePopulated)
+	}
+
 	if bw.source {
 		newCh := make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen)
 		specifiedChs[fullSubscriberId] = newCh
