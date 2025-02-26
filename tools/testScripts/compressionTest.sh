@@ -182,30 +182,30 @@ function runTestCase {
 	echo "PASSED TEST CASE $testCaseName"
 	echo "============================================================================"
 	echo ""
-	
+
 	cleanupBucketReplications
 	cleanupBuckets
 	sleep $sleepTime
 }
 
-runTestCase "1a" "Active" "Active" "Auto" \
-&& runTestCase "1b" "Active" "Active" "None" \
-&& runTestCase "2a" "Active" "Passive" "Auto" \
-&& runTestCase "2b" "Active" "Passive" "None" \
-&& runTestCase "3a" "Active" "None" "Auto" \
-&& runTestCase "3b" "Active" "None" "None" \
-&& runTestCase "4a" "Passive" "Active" "Auto" \
-&& runTestCase "4b" "Passive" "Active" "None" \
-&& runTestCase "5a" "Passive" "Passive" "Auto" \
-&& runTestCase "5b" "Passive" "Passive" "None" \
-&& runTestCase "6a" "Passive" "None" "Auto" \
-&& runTestCase "6b" "Passive" "None" "None" \
-&& runTestCase "7a" "None" "Active" "Auto" \
-&& runTestCase "7b" "None" "Active" "None" \
-&& runTestCase "8a" "None" "Passive" "Auto" \
-&& runTestCase "8b" "None" "Passive" "None" \
-&& runTestCase "9a" "None" "None" "Auto" \
-&& runTestCase "9b" "None" "None" "None"
+runTestCase "1a" "Active" "Active" "Auto" &&
+	runTestCase "1b" "Active" "Active" "None" &&
+	runTestCase "2a" "Active" "Passive" "Auto" &&
+	runTestCase "2b" "Active" "Passive" "None" &&
+	runTestCase "3a" "Active" "None" "Auto" &&
+	runTestCase "3b" "Active" "None" "None" &&
+	runTestCase "4a" "Passive" "Active" "Auto" &&
+	runTestCase "4b" "Passive" "Active" "None" &&
+	runTestCase "5a" "Passive" "Passive" "Auto" &&
+	runTestCase "5b" "Passive" "Passive" "None" &&
+	runTestCase "6a" "Passive" "None" "Auto" &&
+	runTestCase "6b" "Passive" "None" "None" &&
+	runTestCase "7a" "None" "Active" "Auto" &&
+	runTestCase "7b" "None" "Active" "None" &&
+	runTestCase "8a" "None" "Passive" "Auto" &&
+	runTestCase "8b" "None" "Passive" "None" &&
+	runTestCase "9a" "None" "None" "Auto" &&
+	runTestCase "9b" "None" "None" "None"
 
 if (($? != 0)); then
 	echo "============================================================================"

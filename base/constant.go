@@ -1806,5 +1806,13 @@ const (
 
 const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"
 
+// After a successful pre_replicate call, how long the information stays around for
+var GlobalPreReplicateCacheExpireTimeSecs = 10
+
+// After a failed pre_replicate call that returns an error, how long the error stays around for before a retry
+// Generally speaking, pre_replicate should not fail. If it fails, ckpt resume/rollback
+// would generally error out and XDCR should avoid hammering ns_server
+var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
+
 // from https://github.com/couchbase/kv_engine/blob/master/docs/SubDocument.md#limits
 const SUBDOC_MULTI_MAX_PATHS int = 16

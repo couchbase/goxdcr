@@ -247,6 +247,109 @@ func newCheckpointSyncHelper() *checkpointSyncHelper {
 	return helper
 }
 
+// globalCkptPrereplicateCtx is used to cache retrieved target pre-replicate information to be reused
+// with the caveat that if a period of time has passed, the cache will expire to ensure that
+// no outdateed information is reused
+type globalCkptPrereplicateCacheCtx struct {
+	lastQueriedTimers map[string]*time.Timer
+	lastQueriedbMatch map[string]bool
+	lastQueriedOpaque map[string]metadata.TargetVBOpaque
+	lastQueriedError  map[string]error
+	mtx               *sync.RWMutex
+	expireThreshold   time.Duration
+	errorThreshold    time.Duration
+
+	_preReplicate func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error)
+}
+
+// write-lock must be held already
+func (g *globalCkptPrereplicateCacheCtx) createTimer(tgtTs *service_def.RemoteVBReplicationStatus, err error) {
+	threshold := g.expireThreshold
+	if err != nil {
+		threshold = g.errorThreshold
+	}
+	g.lastQueriedTimers[tgtTs.String()] = time.AfterFunc(threshold, func() {
+		g.mtx.Lock()
+		delete(g.lastQueriedTimers, tgtTs.String())
+		delete(g.lastQueriedbMatch, tgtTs.String())
+		delete(g.lastQueriedOpaque, tgtTs.String())
+		delete(g.lastQueriedError, tgtTs.String())
+		g.mtx.Unlock()
+	})
+}
+
+func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.RemoteBucketInfo, tgtTs *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error) {
+	var needToExecuteRPC bool
+
+	for !needToExecuteRPC {
+		// First see if there is acceptable value to return
+		g.mtx.RLock()
+		lastMatch, lastMatchExists := g.lastQueriedbMatch[tgtTs.String()]
+		lastOpaque, lastOpaqueExists := g.lastQueriedOpaque[tgtTs.String()]
+		lastErr, lastErrExists := g.lastQueriedError[tgtTs.String()]
+		_, timerExists := g.lastQueriedTimers[tgtTs.String()]
+		g.mtx.RUnlock()
+		if lastMatchExists || lastOpaqueExists || lastErrExists {
+			return lastMatch, lastOpaque, lastErr
+		}
+
+		if timerExists {
+			// a RPC call is under way, wait and try again
+			time.Sleep(1 * time.Second)
+		} else {
+			// First, claim myself as the function to execute the RPC
+			g.mtx.Lock()
+			_, timerExists = g.lastQueriedTimers[tgtTs.String()]
+			if !timerExists {
+				needToExecuteRPC = true
+				g.createTimer(tgtTs, nil)
+				// Someone claimed a timer first and is calling the RPC. Let's wait again for it to come back and populate
+			}
+			g.mtx.Unlock()
+		}
+	}
+
+	// At this point, need to query
+	bMatch, currentRemoteVBOpaque, err := g._preReplicate(remoteBucket, tgtTs)
+	// store the info for others to pull
+	g.mtx.Lock()
+	if _, exists := g.lastQueriedTimers[tgtTs.String()]; !exists {
+		// The timer has fired and deleted everything already
+		// Recreate a timer since we have exclusive lock and the lack of a timer means that
+		// no one else has claimed to try to perform an RPC call
+		g.createTimer(tgtTs, err)
+	} else if err != nil {
+		// timer was created with regular threshold by default
+		// In error cases, replace it
+		g.lastQueriedTimers[tgtTs.String()].Stop()
+		g.createTimer(tgtTs, err)
+	}
+
+	// Note that it's possible the timer's clean up func is fired and is attempting to clean up
+	// If that's the case, it's unfortunate, but the next call will trigger another clean pre_replicate call
+	// which is not the end of the world
+	g.lastQueriedbMatch[tgtTs.String()] = bMatch
+	g.lastQueriedOpaque[tgtTs.String()] = currentRemoteVBOpaque
+	g.lastQueriedError[tgtTs.String()] = err
+	g.mtx.Unlock()
+	return bMatch, currentRemoteVBOpaque, err
+}
+
+func (ckptMgr *CheckpointManager) newGlobalCkptPrereplicateCacheCtx(expireThreshold, errThreshold time.Duration) *globalCkptPrereplicateCacheCtx {
+	return &globalCkptPrereplicateCacheCtx{
+		lastQueriedTimers: map[string]*time.Timer{},
+		lastQueriedbMatch: map[string]bool{},
+		lastQueriedOpaque: map[string]metadata.TargetVBOpaque{},
+		lastQueriedError:  map[string]error{},
+		mtx:               &sync.RWMutex{},
+		expireThreshold:   expireThreshold,
+		errorThreshold:    errThreshold,
+		_preReplicate: func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error) {
+			return ckptMgr.capi_svc.PreReplicate(info, status, true)
+		},
+	}
+}
+
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
 type checkpointRecordWithLock struct {
 	ckpt *metadata.CheckpointRecord
@@ -2582,10 +2685,11 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
 		tgtFailoverLogs, err = ckmgr.GetOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
 		if err != nil {
-			ckmgr.logger.Errorf("unable to get failoverlog from target(s) %v", err)
-			return err
+			ckmgr.logger.Warnf("unable to get failoverlog from target(s) %v - using pre_replicate", err)
+			filteredMaps = ckmgr.filterInvalidCkptsBasedOnPreReplicate(filteredMaps)
+		} else {
+			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
 		}
-		filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
 	}
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
@@ -3381,4 +3485,56 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 			ckmgr.checkpoints_svc.EnableRefCntDecrement(backfillTopic)
 		}
 	}
+}
+
+func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps []metadata.VBsCkptsDocMap) []metadata.VBsCkptsDocMap {
+	preReplicateCtx := ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
+		time.Duration(base.GlobalPreReplicateCacheErrorExpireTimeSecs)*time.Second)
+
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
+	var combinedMap metadata.VBsCkptsDocMap
+
+	for i, oneCkptsMap := range ckptsMaps {
+		switch i {
+		case int(common.MainPipeline):
+			combinedMap = mainPipelineMap
+		case int(common.BackfillPipeline):
+			combinedMap = backfillPipelineMap
+		default:
+			panic(fmt.Sprintf("wrong integer %v", i))
+		}
+		if oneCkptsMap == nil {
+			continue
+		}
+		for vbno, ckptDoc := range oneCkptsMap {
+			_, exists := combinedMap[vbno]
+			if !exists {
+				// It's ok for checkpointRecords to be emptyList
+				combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
+			}
+			for _, ckptRecord := range ckptDoc.Checkpoint_records {
+				if ckptRecord == nil {
+					continue
+				}
+
+				targetTimestamp := &service_def.RemoteVBReplicationStatus{
+					VBOpaque: ckptRecord.Target_vb_opaque,
+					VBSeqno:  ckptRecord.Target_Seqno,
+					VBNo:     vbno,
+				}
+
+				bMatch, _, err := preReplicateCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp)
+				if err != nil {
+					ckmgr.logger.Errorf("filterInvalidCkptBasedOnPreReplicate tgtTs (%v,%v,%v) error: %v",
+						vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
+					continue
+				}
+				if bMatch {
+					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+				}
+			}
+		}
+	}
+	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }

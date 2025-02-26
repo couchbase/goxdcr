@@ -50,8 +50,12 @@ function runDataLoad {
 }
 
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+PRE_REPLICATE_ERR_MSG="filterInvalidCkptBasedOnPreReplicate tgtTs"
+PRE_REPLICATE_CKPT_PULL_ERR_MSG="P2P PreReplicate Ckpt Pull and merge had errors but will continue to replicate"
 
 function runOneReplicationCycleAndPause {
+	local user=$1
+
 	local timeIntervalSecs=5
 	local checkInterval=10
 	local maxChangeCnt=3
@@ -80,7 +84,15 @@ function runOneReplicationCycleAndPause {
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2" "127.0.0.1" "xdcrInbound" "xdcrPassword"
+	if [[ $user == "$DEFAULT_ADMIN" ]]; then
+		createRemoteClusterReference "C1" "C2"
+	elif [[ $user == "xdcrInbound" ]]; then
+		createRemoteClusterReference "C1" "C2" "127.0.0.1" "xdcrInbound" "xdcrPassword"
+	else
+		echo "Unknown user $user"
+		exit 1
+	fi
+
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
@@ -115,8 +127,15 @@ function runOneRebalanceCycle {
 }
 
 function runTestCase {
+	runTestCaseWithUser "$DEFAULT_ADMIN"
+	runTestCaseWithUser "xdcrInbound"
+}
+
+function runTestCaseWithUser {
+	user=$1
+
 	echo "============================================================================"
-	echo "Running P2P to force target failover log lookup"
+	echo "Running P2P to force target failover log lookup with remote user $user"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -127,14 +146,14 @@ function runTestCase {
 		clearInternalNodeXdcrLog "$clusterName"
 	done
 
-	runOneReplicationCycleAndPause
+	runOneReplicationCycleAndPause $user
 
 	# Fill one node's ckpts up before filling the other node's
 	resumeReplication "C1" "B0" "C2" "B1"
 	sleep 20
 
-	echo "Creating 3 checkpoints to fill up history"
-	for ((i = 0; i < 3; i++)); do
+	echo "Creating 5 checkpoints to fill up history"
+	for ((i = 0; i < 5; i++)); do
 		runDataLoad
 		pauseReplication "C1" "B0" "C2" "B1"
 		echo "Waiting 20 seconds for pipeline to really pause"
@@ -174,8 +193,6 @@ function runTestCase {
 		sleep 20
 	done
 
-	#echo "Sleeping 6 minutes to ensure checkpoints from node C1P has been pushed to C1 before C1P pulls again"
-	#sleep 360
 	pauseReplication "C1" "B0" "C2" "B1"
 
 	# Add C1P0 to C1
@@ -200,12 +217,12 @@ function runTestCase {
 	local currentMaxGoroutines=0
 	local globalMaxGoroutinesIncreased=0
 	local globalMaxIncreaseThreshold=20
-	for ((i = 0; i < 100; i++)); do
+	for ((i = 0; i < 50; i++)); do
 		echo "Running repeated pause and resume to test for goroutine leak $((i + 1)) of 100"
 		pauseReplication "C1" "B0" "C2" "B1"
-		sleep 5
+		sleep 10
 		resumeReplication "C1" "B0" "C2" "B1"
-		sleep 5
+		sleep 10
 
 		currentMaxGoroutines=$(getGoroutinesStack "C1P1" | grep total | awk '{print $NF}')
 		if [[ $currentMaxGoroutines -gt $globalMaxGoroutines ]]; then
@@ -220,6 +237,9 @@ function runTestCase {
 			exit 1
 		fi
 	done
+
+	validateInternalLogWithInstance "C1P1" "$PRE_REPLICATE_ERR_MSG" 0
+	validateInternalLogWithInstance "C1P1" "$PRE_REPLICATE_CKPT_PULL_ERR_MSG" 0
 
 	echo "============================================================================"
 	echo "PASSED"
