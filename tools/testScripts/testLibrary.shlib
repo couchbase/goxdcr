@@ -1446,43 +1446,43 @@ function validateVBTasksProgress {
 
 # Validates that the result is greater than 0
 function validatePrometheusStatsNon0 {
- 	local node=$1
- 	local sourceBucket=$2
- 	local targetBucket=$3
- 	local prometheusStatsName=$4
- 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
- 	local prometheusOut
- 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local prometheusStatsName=$4
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
 
- 	local count
- 	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
- 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
- 	if (($count == 0)); then
- 		echo "Guardrail resident ratio shows 0"
- 		exit 1
- 	fi
+	if (($count == 0)); then
+		echo "Guardrail resident ratio shows 0"
+		exit 1
+	fi
 }
 
 function validatePrometheusStatsRRNon0 {
-  local node=$1
-  local sourceBucket=$2
-  local targetBucket=$3
-  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_guardrail_resident_ratio_total"
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_guardrail_resident_ratio_total"
 }
 
 function validatePrometheusStatsSystemEventsNon0 {
-  local node=$1
-  local sourceBucket=$2
-  local targetBucket=$3
-  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_system_events_received_from_dcp_total"
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_system_events_received_from_dcp_total"
 }
 
 function validatePrometheusStatsSeqAdvNon0 {
-  local node=$1
-  local sourceBucket=$2
-  local targetBucket=$3
-  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_seqno_adv_received_from_dcp_total"
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_seqno_adv_received_from_dcp_total"
 }
 
 function validateDatapoolFailIs0 {

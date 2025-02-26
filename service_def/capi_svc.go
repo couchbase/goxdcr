@@ -178,6 +178,18 @@ func (rep_status *RemoteVBReplicationStatus) IsEmpty() bool {
 	return rep_status.VBOpaque == nil
 }
 
+func (rep_status *RemoteVBReplicationStatus) String() string {
+	if rep_status == nil {
+		return ""
+	}
+
+	vbOpaqueStr := "<>"
+	if rep_status.VBOpaque != nil {
+		vbOpaqueStr = fmt.Sprintf("%v", rep_status.VBOpaque.Value())
+	}
+	return fmt.Sprintf("%v.%v.%v", rep_status.VBNo, vbOpaqueStr, rep_status.VBSeqno)
+}
+
 func NewEmptyRemoteVBReplicationStatus(vbno uint16) *RemoteVBReplicationStatus {
 	return &RemoteVBReplicationStatus{VBNo: vbno}
 }
