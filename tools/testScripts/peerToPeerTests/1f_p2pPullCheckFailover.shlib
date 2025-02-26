@@ -51,6 +51,7 @@ function runDataLoad {
 
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
 PRE_REPLICATE_ERR_MSG="filterInvalidCkptBasedOnPreReplicate tgtTs"
+PRE_REPLICATE_CKPT_PULL_ERR_MSG="P2P PreReplicate Ckpt Pull and merge had errors but will continue to replicate"
 
 function runOneReplicationCycleAndPause {
 	local user=$1
@@ -242,6 +243,7 @@ function runTestCaseWithUser {
 	done
 
 	validateInternalLogWithInstance "C1P1" "$PRE_REPLICATE_ERR_MSG" 0
+	validateInternalLogWithInstance "C1P1" "$PRE_REPLICATE_CKPT_PULL_ERR_MSG" 0
 
 	echo "============================================================================"
 	echo "PASSED"
