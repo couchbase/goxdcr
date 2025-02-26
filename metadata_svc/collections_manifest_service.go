@@ -61,6 +61,8 @@ type CollectionsManifestService struct {
 	peerManifestGetter    service_def.PeerManifestsGetter
 
 	xdcrInjDelaySec uint32
+
+	subscriptionCnter atomic.Uint64
 }
 
 func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc,
@@ -88,6 +90,10 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 		metakvSvc:              metakvSvc,
 	}
 	return svc, svc.start()
+}
+
+func (c *CollectionsManifestService) nextSubscriptionId() string {
+	return fmt.Sprintf("%s_%v", c.bucketSvcId, c.subscriptionCnter.Add(1))
 }
 
 // When it first starts up, it needs to load the necessary information, including
@@ -193,12 +199,14 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 // This implements the source side manifest getter. It will not issue REST command if the manifest UID has not changed.
 func (c *CollectionsManifestService) CollectionManifestGetter(bucketName string, hasStoredManifest bool, storedManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error) {
 	if hasStoredManifest {
+		subscriptionId := c.nextSubscriptionId()
+
 		// Check if the stored manifest UID is the same as the current one
-		if notificationCh, err := c.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, c.bucketSvcId); err == nil {
+		if notificationCh, err := c.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, subscriptionId); err == nil {
 			notification := <-notificationCh
 			currentManifestUid := notification.GetSourceCollectionManifestUid()
 			notification.Recycle()
-			c.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, c.bucketSvcId)
+			c.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, subscriptionId)
 			if currentManifestUid == storedManifestUid {
 				return nil, base.ErrorCollectionManifestNotChanged
 			}
@@ -545,6 +553,8 @@ type CollectionsManifestAgent struct {
 	tempAgent bool
 
 	peerManifestGetter service_def.PeerManifestsGetter
+
+	subscriptionCnter atomic.Uint64
 }
 
 func NewCollectionsManifestAgent(name string, internalId string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, bucketTopoSvc service_def.BucketTopologySvc, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback, peerManifestsGetter service_def.PeerManifestsGetter) *CollectionsManifestAgent {
@@ -577,6 +587,10 @@ func NewCollectionsManifestAgent(name string, internalId string, remoteClusterSv
 	manifestAgent.sourceCache[0] = &defaultManifest
 	manifestAgent.targetCache[0] = &defaultManifest
 	return manifestAgent
+}
+
+func (a *CollectionsManifestAgent) nextSubscriptionId() string {
+	return fmt.Sprintf("%s_%v", a.bucketSvcId, a.subscriptionCnter.Add(1))
 }
 
 func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
@@ -623,6 +637,12 @@ func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt,
 }
 
 func (a *CollectionsManifestAgent) runPeriodicRefresh() {
+	select {
+	case <-a.refreshAndNotifyIsRdy:
+	case <-a.finCh:
+		return
+	}
+
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
 	defer ticker.Stop()
 
@@ -1197,11 +1217,13 @@ func (a *CollectionsManifestAgent) registerSourcePull(lock bool, manifest *metad
 }
 
 func (a *CollectionsManifestAgent) getCurrentCollectionManifestUid() (uint64, error) {
-	notificationCh, err := a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.replicationSpec, a.bucketSvcId)
+	subscriptionId := a.nextSubscriptionId()
+
+	notificationCh, err := a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.replicationSpec, subscriptionId)
 	if err != nil {
 		return 0, err
 	}
-	defer a.bucketTopologySvc.UnSubscribeLocalBucketFeed(a.replicationSpec, a.bucketSvcId)
+	defer a.bucketTopologySvc.UnSubscribeLocalBucketFeed(a.replicationSpec, subscriptionId)
 	notification := <-notificationCh
 	defer notification.Recycle()
 	manifestUid := notification.GetSourceCollectionManifestUid()

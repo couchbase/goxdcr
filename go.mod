@@ -29,10 +29,10 @@ replace github.com/couchbase/hebrew => ../../../../../hebrew
 replace github.com/couchbase/cbauth => ../cbauth
 
 require (
-	github.com/couchbase/cbauth v0.1.12
+	github.com/couchbase/cbauth v0.1.13
 	github.com/couchbase/eventing-ee v0.0.0-00010101000000-000000000000
 	github.com/couchbase/go-couchbase v0.1.1
-	github.com/couchbase/gocb/v2 v2.5.4
+	github.com/couchbase/gocb/v2 v2.9.4
 	github.com/couchbase/gocbcore/v9 v9.1.11
 	github.com/couchbase/gomemcached v0.2.2-0.20230407174933-7d7ce13da8cc
 	github.com/couchbase/goutils v0.1.2
