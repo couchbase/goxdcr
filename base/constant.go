@@ -1296,7 +1296,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration) {
+	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration,
+	backfillSpecSvcSetCompleteBackfillRaiserDelay int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1457,6 +1458,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 	PipelineReinitStreamDelaySec = pipelineReinitStreamDelaySec
+
+	BackfillReplSvcSetBackfillRaiserDelaySec = backfillSpecSvcSetCompleteBackfillRaiserDelay
 }
 
 // XDCR Dev hidden replication settings
@@ -1473,6 +1476,9 @@ const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 const DevPreCheckMaxCasErrorInjection = "xdcrDevPreCheckMaxCasErrorInjection"
 const DevBackfillMgrVbsTasksDoneNotifierDelay = "xdcrDevBackfillMgrVbsTasksDoneNotifierDelay"
 const DevPipelineReinitCleanupDelayProofNode = "xdcrDevPipelineReinitCleanupDelayProofNode" // To specify IP address of the node which won't face cleanup delay (i.e. is delay-proof)
+const DevBackfillReqHandlerStartOnceDelay = "xdcrDevBackfillReqHandlerStartOnceDelaySec"
+const DevBackfillReqHandlerHandleVBTaskDoneHang = "xdcrDevBackfillReqHandlerHandleVBTaskDoneHang"
+const DevBackfillUnrecoverableErrorInj = "xdcrDevBackfillUnrecoverableErrorInj"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1824,3 +1830,5 @@ const IsPipelineReinitStreamKey = "isPipelineReinitStream"
 
 // Duration of delay for allowing lagging peer nodes to catch up when processing a `PipelineReinitStream` update
 var PipelineReinitStreamDelaySec = 3 * time.Second
+
+var BackfillReplSvcSetBackfillRaiserDelaySec int = 0

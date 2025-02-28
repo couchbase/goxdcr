@@ -711,6 +711,11 @@ func (b *BackfillReplicationService) AllActiveBackfillSpecsReadOnly() (map[strin
 }
 
 func (b *BackfillReplicationService) SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error {
+	if base.BackfillReplSvcSetBackfillRaiserDelaySec > 0 {
+		b.logger.Warnf("Dev inj backfill raiser delay %v seconds", base.BackfillReplSvcSetBackfillRaiserDelaySec)
+		time.Sleep(time.Duration(base.BackfillReplSvcSetBackfillRaiserDelaySec) * time.Second)
+	}
+
 	b.completeBackfillCbMtx.Lock()
 	defer b.completeBackfillCbMtx.Unlock()
 
@@ -722,14 +727,18 @@ func (b *BackfillReplicationService) SetCompleteBackfillRaiser(backfillCallback 
 func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 	atomic.StoreUint32(&b.recoveringBackfill, 1)
 	defer atomic.StoreUint32(&b.recoveringBackfill, 0)
+	var injDelayOnce sync.Once
 
 	// Wait 1 second for backfillCb to be registered
 	time.Sleep(1 * time.Second)
 
 	for len(b.unrecoverableBackfillIds) > 0 {
+		var shouldInjAndDelay bool
+
 		b.completeBackfillCbMtx.RLock()
 		if b.completeBackfillCb == nil {
 			// BackfillMgr hasn't had a chance to set the callback yet
+			b.logger.Warnf("handleUnrecoverableBackfills waiting for backfillCb to be set waiting 10 seconds")
 			time.Sleep(10 * time.Second)
 			b.completeBackfillCbMtx.RUnlock()
 			continue
@@ -744,6 +753,15 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 		for _, backfillPair := range b.unrecoverableBackfillIds {
 			backfillSpecId := backfillPair[0]
 			internalId := backfillPair[1]
+
+			specToCheck, specCheckErr := b.replSpecSvc.ReplicationSpec(backfillSpecId)
+			if specCheckErr == nil {
+				shouldInjAndDelay = specToCheck.Settings.GetBoolSettingValue(metadata.DevBackfillUnrecoverableErrorInj)
+			}
+			if shouldInjAndDelay {
+				b.logger.Warnf("Dev inj spec has specified error injection %v\n", backfillSpecId)
+			}
+
 			err := b.CleanupMapping(backfillSpecId, b.utils)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when cleaning up mappings. Backfill may not raise correctly", backfillSpecId)
@@ -761,12 +779,25 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 			}
 		}
 
+		first := false
+
 		var replacementList [][2]string
 		// Once the mapping is cleared, then call the raiser to raise a complete backfill, which should be able to
 		// properly write the spec and the corresponding mappings correctly
 		for _, backfillPair := range b.unrecoverableBackfillIds {
 			backfillSpecId := backfillPair[0]
-			err := b.completeBackfillCb(backfillSpecId)
+			var err error
+			if shouldInjAndDelay {
+				injDelayOnce.Do(func() {
+					first = true
+					err = fmt.Errorf("DevBackfillUnrecoverableErrorInj")
+				})
+				if !first {
+					err = b.completeBackfillCb(backfillSpecId)
+				}
+			} else {
+				err = b.completeBackfillCb(backfillSpecId)
+			}
 			if err != nil {
 				b.logger.Errorf("Unable to raise complete backfill for %v - %v. Will try again in 10 seconds", backfillSpecId, err)
 				replacementList = append(replacementList, backfillPair)
@@ -780,8 +811,13 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 		b.unrecoverableBackfillIds = replacementList
 		b.completeBackfillCbMtx.RUnlock()
 
-		if len(replacementList) > 0 {
-			time.Sleep(10 * time.Second)
+		if shouldInjAndDelay && len(replacementList) > 0 {
+			if !first {
+				time.Sleep(10 * time.Second)
+			} else {
+				b.logger.Warnf("Dev inj sleeping for 1.5mins for P2P push to kick in")
+				time.Sleep(90 * time.Second)
+			}
 		}
 	}
 }

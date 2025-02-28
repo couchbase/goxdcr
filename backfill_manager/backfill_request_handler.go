@@ -108,6 +108,11 @@ type BackfillRequestHandler struct {
 	//specUpdate status cb
 	getSpecUpdateStatus func() (base.BackfillSpecUpdateStatus, error)
 	setSpecUpdateStatus func(base.BackfillSpecUpdateStatus)
+
+	// debugging helpers
+	waitSync                sync.Once
+	devVbNotToBeDoneEnabled bool
+	vbNotToBeDone           uint16
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -160,6 +165,17 @@ func (b *BackfillRequestHandler) Start() error {
 	var err error
 	b.startOnce.Do(func() {
 		atomic.StoreUint32(&b.stopRequested, 0)
+
+		startDelaySec := b.spec.Settings.GetIntSettingValue(metadata.DevBackfillReqHandlerStartOnceDelay)
+		if startDelaySec > 0 {
+			b.logger.Warnf("Dev injecton Sleeping %v sec for backfill repl service to load the spec before we poll it", startDelaySec)
+			time.Sleep(time.Duration(startDelaySec) * time.Second)
+		}
+		vbDoneDelayEnabled := b.spec.Settings.GetBoolSettingValue(metadata.DevBackfillReqHandlerHandleVBTaskDoneHang)
+		if vbDoneDelayEnabled {
+			b.logger.Warnf("vbNotToBeDone delay injection is enabled")
+			b.devVbNotToBeDoneEnabled = true
+		}
 
 		var backfillSpec *metadata.BackfillReplicationSpec
 		backfillSpec, err = b.backfillReplSvc.BackfillReplSpec(b.id)
@@ -980,6 +996,20 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			}
 			return err
 		}
+
+		if b.devVbNotToBeDoneEnabled {
+			b.waitSync.Do(func() {
+				b.logger.Warnf("Dev inj HandleVBTaskDone waiting for 120s after P2P push is done setting VB to %v", vbno)
+				time.Sleep(120 * time.Second)
+				b.vbNotToBeDone = vbno
+			})
+
+			if vbno != b.vbNotToBeDone {
+				// don't persist to make sure we have pipeline restarts.
+				return nil
+			}
+		}
+
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil && err != errorVbAlreadyDone && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
 			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
