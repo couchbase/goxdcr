@@ -85,10 +85,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 		specList = append(specList, extraId)
 	}
 
-	defaultManifest := metadata.NewDefaultCollectionsManifest()
-
 	manifestSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
-	manifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&defaultManifest, &defaultManifest, nil)
 	replSpecSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(returnedSpec, nil)
 	replSpecSvc.On("AllReplicationSpecIds").Return(specList, nil)
@@ -265,7 +262,24 @@ func setupStartupManifests(manifestSvc *service_def.CollectionsManifestSvc,
 		if ok {
 			manifestSvc.On("GetLastPersistedManifests", spec).Return(manifestPair, nil)
 		} else {
-			manifestSvc.On("GetLastPersistedManifests", spec).Return(nil, fmt.Errorf("DummyErr"))
+			manifestSvc.On("GetLastPersistedManifests", spec).Return(nil, service_def_real.ManifestNotFoundErr)
+		}
+	}
+}
+
+func mockGetLatestManifests(manifestSvc *service_def.CollectionsManifestSvc,
+	specMap map[string]*metadata.ReplicationSpecification,
+	colMap map[string]*metadata.CollectionsManifestPair) {
+
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+
+	for replId, spec := range specMap {
+		manifestPair, ok := colMap[replId]
+		if ok {
+			manifestSvc.On("GetLatestManifests", spec, false).Return(manifestPair.Source, manifestPair.Target, nil)
+		} else {
+			// return default manifest incase not found
+			manifestSvc.On("GetLatestManifests", spec, false).Return(&defaultManifest, &defaultManifest, nil)
 		}
 	}
 }
@@ -278,6 +292,7 @@ func TestBackfillMgrLaunchSpecs(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
@@ -301,6 +316,7 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 
 	utilsExpoRetMap := make(map[string]*backfillMgrTestUtilsRetStruct)
 	utilsExpoRetMap[fmt.Sprintf("retrieveLastPersistedManifest.getAgent(%s)", getSpecId(3))] = &backfillMgrTestUtilsRetStruct{
@@ -342,6 +358,7 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
@@ -426,6 +443,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
@@ -524,6 +542,7 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 	specs, manifestPairs := setupStartupSpecs(5)
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
@@ -630,6 +649,8 @@ func TestBackfillMgrSpecChangeWithNamespaceChange(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	manifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&defaultManifest, &defaultManifest, nil)
 
 	var ckptMappingsCleanupCallback base.StoppedPipelineCallback = func() error {
 		// Sleeping 10 seconds here to simulate pipelineMgr busy trying to raise a backfill while backfill
@@ -821,4 +842,41 @@ func TestRemovedNamespacesDiff(t *testing.T) {
 	assert.Equal(len(diff), 2)
 	assert.Equal(len(diff["S1"].Collections), 2)
 	assert.Equal(len(diff["S2"].Collections), 2)
+}
+
+func TestBackfillMgrUpdateCache(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillMgrUpdateCache =================")
+	defer fmt.Println("============== Test case end: TestBackfillMgrUpdateCache =================")
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils := setupBoilerPlate()
+	specs, manifestPairs := setupStartupSpecs(5)
+	// delete an entry to simulate service_def_real.ManifestNotFoundErr error
+	delete(manifestPairs, getSpecId(1))
+
+	//setup mocks
+	setupReplStartupSpecs(replSpecSvc, specs)
+	setupBackfillSpecs(backfillReplSvc, specs)
+	utilsExpoRetMap := make(map[string]*backfillMgrTestUtilsRetStruct)
+	utilsExpoRetMap["explicitMapChange"] = &backfillMgrTestUtilsRetStruct{
+		err: nil,
+	}
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, utilsExpoRetMap)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
+	setupStartupManifests(manifestSvc, specs, manifestPairs)
+
+	// start backfill manager
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
+	assert.NotNil(backfillMgr)
+	assert.Nil(backfillMgr.Start())
+
+	// for each spec, check if the backfillMgr's cached maifests is same as the latest manifests
+	for replID, spec := range specs {
+		src, tgt, err := manifestSvc.GetLatestManifests(spec, false)
+		assert.Nil(err)
+		backfillMgr.cacheMtx.RLock()
+		srcEqual := src.Uid() == backfillMgr.cacheSpecSourceMap[replID].Uid()
+		tgtEqual := tgt.Uid() == backfillMgr.cacheSpecTargetMap[replID].Uid()
+		assert.True(srcEqual)
+		assert.True(tgtEqual)
+	}
 }

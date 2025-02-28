@@ -12,8 +12,9 @@ package service_def
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"strings"
+
+	"github.com/couchbase/goxdcr/base"
 )
 
 var MetadataNotFoundErr error = errors.New("key not found")
@@ -23,6 +24,7 @@ var MetaKVFailedAfterMaxTriesBaseString = "metakv failed for max number of retri
 var MetaKVFailedAfterMaxTries error = fmt.Errorf("%v = %v", MetaKVFailedAfterMaxTriesBaseString, base.MaxNumOfMetakvRetries)
 var ErrorNotFound = errors.New("Not found") // corresponds to metakv
 var ErrorSourceDefaultCollectionDNE = errors.New("Source bucket's default collection has been removed")
+var ManifestNotFoundErr = errors.New("no manifests exist in metakv")
 
 func DelOpConsideredPass(err error) bool {
 	if err == ErrorRevisionMismatch || (err != nil && strings.Contains(err.Error(), MetaKVFailedAfterMaxTriesBaseString)) {

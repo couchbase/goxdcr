@@ -1295,7 +1295,7 @@ func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair
 	repStatusMap := pipelineMgr.ReplicationStatusMap()
 	replStatus, ok := repStatusMap[topic]
 	if !ok {
-		pipelineMgr.logger.Errorf("%v unable to find replication status %v to send backfill mapping update", topic)
+		pipelineMgr.logger.Errorf("%v unable to find replication status to send backfill mapping update", topic)
 		return base.ErrorNotFound
 	}
 	pipeline := replStatus.Pipeline()

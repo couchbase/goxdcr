@@ -33,6 +33,7 @@ declare -a collectionArr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArr[@]} ["S2"]=${collectionArr[@]} ["S3"]=${collectionArr[@]})
 
 BACKFILL_MSG="These collections need to backfill"
+CKPT_MAPPING_CHANGE_MSG="checkpoints mapping changed due to collections manifest changes"
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
@@ -94,6 +95,18 @@ function runTestCase {
 
 	echo "Waiting 40sec for CollectionManifestService to detect the mapping change and resolve the brokenMapping"
 	sleep 40
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	ckptMappingChangeCnt=$(echo "$currentXdcrLog" | grep -c "$CKPT_MAPPING_CHANGE_MSG")
+	if (($ckptMappingChangeCnt == 0)); then
+
+		echo "Failed to resolve the broken mapping when they are no longer valid"
+		echo "============================================================================"
+		echo "FAILED"
+		echo "============================================================================"
+
+		exit 1
+	fi
 
 	# kill goxdcr process
 	killGoXdcr "C1"
