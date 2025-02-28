@@ -389,6 +389,10 @@ func (b *BackfillMgr) initCache() error {
 		if err != nil {
 			return err
 		}
+		err = b.updateCacheAndRaiseBackfillIfNeeded(spec)
+		if err != nil {
+			b.logger.Errorf("Failed to update the cache for spec %v. err=%v", replId, err)
+		}
 	}
 
 	return nil
@@ -511,22 +515,32 @@ func (b *BackfillMgr) deleteBackfillUpdateStatus(replId string) {
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
-	// Returns non-nil err if neither source nor target were retrieved
 	manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
 
-	// If neither or at least one is not retrieved, default to default manifest
-	if err != nil || manifestPair.Source == nil || manifestPair.Target == nil {
-		if err != nil {
-			b.logger.Warnf("GetLastPersistedManifests(%v) returned %v", spec.Id, err)
-			manifestPair = &metadata.CollectionsManifestPair{}
+	// A non-nil err is returned if neither source nor target were retrieved
+	if err != nil {
+		b.logger.Warnf("Failed to retrieve last persisted manifests for replication %v: %v", spec.Id, err)
+		// set the manifest pair to the default ones
+		manifestPair = metadata.NewDefaultCollectionsManifestPair()
+
+		// If non-nil error is because manifests were not found in metakv, attempt to get the latest ones
+		if err == service_def.ManifestNotFoundErr {
+			srcMan, tgtMan, err1 := b.collectionsManifestSvc.GetLatestManifests(spec, false)
+			if err1 != nil {
+				b.logger.Errorf("Failed to retrieve latest manifests for replication %v: %v", spec.Id, err1)
+			} else {
+				manifestPair.Source = srcMan
+				manifestPair.Target = tgtMan
+			}
 		}
-		defaultManifest := metadata.NewDefaultCollectionsManifest()
-		if manifestPair.Source == nil {
-			manifestPair.Source = &defaultManifest
-		}
-		if manifestPair.Target == nil {
-			manifestPair.Target = &defaultManifest
-		}
+	}
+	// ensure the manifests are not nil
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	if manifestPair.Source == nil {
+		manifestPair.Source = &defaultManifest
+	}
+	if manifestPair.Target == nil {
+		manifestPair.Target = &defaultManifest
 	}
 	b.cacheMtx.Lock()
 	b.logger.Infof("Backfill Manager for replication %v initialized last persisted manifests of %v and %v",
@@ -535,6 +549,46 @@ func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSp
 	b.cacheSpecLastSuccessfulManifestId[spec.Id] = manifestPair.Source.Uid()
 	b.cacheSpecTargetMap[spec.Id] = manifestPair.Target
 	b.cacheMtx.Unlock()
+	return nil
+}
+
+// This function updates the backfill manager's cache with the latest manifests.
+// When CollectionManifestService starts up, it fetches the latest manifests (source and target) as part of initialisation
+// As a part of the backfillMgr's startup, we fetch and initialize the manifest cache from metaKV
+// If the fetched manifests from metakv is older than the latest manifests, then we update the backfillMgr's cache here and raise backfill if needed
+func (b *BackfillMgr) updateCacheAndRaiseBackfillIfNeeded(spec *metadata.ReplicationSpecification) error {
+	// fetch the latest manifests
+	NewsrcMan, NewtgtMan, err := b.collectionsManifestSvc.GetLatestManifests(spec, false)
+	if err != nil {
+		return fmt.Errorf("Failed to fetch the latest manifests. err=%v", err)
+	}
+	// cached manifests represent the old ones
+	b.cacheMtx.RLock()
+	oldSrcMan := b.cacheSpecSourceMap[spec.Id]
+	oldTgtMan := b.cacheSpecTargetMap[spec.Id]
+	b.cacheMtx.RUnlock()
+
+	srcChanged := NewsrcMan.Uid() > oldSrcMan.Uid()
+	tgtChanged := NewtgtMan.Uid() > oldTgtMan.Uid()
+
+	// update cache and raise backfill if necessary
+	if srcChanged && tgtChanged {
+		// both source and target manifests changed
+		b.handleSrcAndTgtChanges(spec.Id, oldSrcMan, NewsrcMan, oldTgtMan, NewtgtMan)
+	} else if srcChanged {
+		// only source changed
+		b.handleSourceOnlyChange(spec.Id, oldSrcMan, NewsrcMan)
+	} else if tgtChanged {
+		// only tgt changed
+		b.handleSrcAndTgtChanges(spec.Id, nil, nil, oldTgtMan, NewtgtMan)
+	} else {
+		// neither source nor target changed. no-op
+	}
+
+	b.cacheMtx.RLock()
+	defer b.cacheMtx.RUnlock()
+	b.logger.Infof("In updateCacheAndRaiseBackfillIfNeeded(%v). srcChanged %v tgtChanged %v latestSource %v latestTarget %v", spec.Id, srcChanged, tgtChanged, b.cacheSpecSourceMap[spec.Id].Uid(), b.cacheSpecTargetMap[spec.Id].Uid())
+
 	return nil
 }
 

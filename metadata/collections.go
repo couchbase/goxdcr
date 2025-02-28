@@ -280,6 +280,14 @@ func NewDefaultCollectionsManifest() CollectionsManifest {
 	return defaultManifest
 }
 
+func NewDefaultCollectionsManifestPair() *CollectionsManifestPair {
+	manifestPair := CollectionsManifestPair{}
+	defaultManifest := NewDefaultCollectionsManifest()
+	manifestPair.Source = &defaultManifest
+	manifestPair.Target = &defaultManifest
+	return &manifestPair
+}
+
 func NewCollectionsManifestFromMap(manifestInfo map[string]interface{}) (CollectionsManifest, error) {
 	metaObj := newCollectionsMetaObj()
 	var manifest CollectionsManifest

@@ -1557,7 +1557,7 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error) {
 	<-a.metakvInitDone
 	if !a.srcLoadedFromMetakv && !a.tgtLoadedFromMetaKv {
-		return nil, fmt.Errorf("no manifests exist in metakv")
+		return nil, service_def.ManifestNotFoundErr
 	} else if a.isStopped() {
 		return nil, parts.PartStoppedError
 	}

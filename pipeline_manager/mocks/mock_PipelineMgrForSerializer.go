@@ -72,17 +72,17 @@ func (_c *PipelineMgrForSerializer_AutoPauseReplication_Call) RunAndReturn(run f
 	return _c
 }
 
-// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta
-func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair, srcManifestsDelta)
+// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta, latestTgtManifestId
+func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	ret := _m.Called(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BackfillMappingUpdate")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
-		r0 = rf(topic, diffPair, srcManifestsDelta)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error); ok {
+		r0 = rf(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -99,13 +99,14 @@ type PipelineMgrForSerializer_BackfillMappingUpdate_Call struct {
 //   - topic string
 //   - diffPair *metadata.CollectionNamespaceMappingsDiffPair
 //   - srcManifestsDelta []*metadata.CollectionsManifest
-func (_e *PipelineMgrForSerializer_Expecter) BackfillMappingUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
-	return &PipelineMgrForSerializer_BackfillMappingUpdate_Call{Call: _e.mock.On("BackfillMappingUpdate", topic, diffPair, srcManifestsDelta)}
+//   - latestTgtManifestId uint64
+func (_e *PipelineMgrForSerializer_Expecter) BackfillMappingUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}, latestTgtManifestId interface{}) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+	return &PipelineMgrForSerializer_BackfillMappingUpdate_Call{Call: _e.mock.On("BackfillMappingUpdate", topic, diffPair, srcManifestsDelta, latestTgtManifestId)}
 }
 
-func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest)) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64)) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest))
+		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest), args[3].(uint64))
 	})
 	return _c
 }
@@ -115,7 +116,7 @@ func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Return(_a0 error)
 	return _c
 }
 
-func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
