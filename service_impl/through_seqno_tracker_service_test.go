@@ -62,10 +62,8 @@ func setupMocks(pipeline *commonMock.Pipeline, sourceNozzle *commonMock.SourceNo
 	targetMap := make(map[string]common.Nozzle)
 	targetMap["dummy"] = targetNozzles
 	if len(targetVBListToReplace) > 0 {
-		fmt.Printf("NEIL DEBUG target setup to return %v\n", targetVBListToReplace)
 		targetNozzles.On("ResponsibleVBs").Return(targetVBListToReplace)
 	} else {
-		fmt.Printf("NEIL DEBUG target setup to return %v\n", vbList)
 		targetNozzles.On("ResponsibleVBs").Return(vbList)
 	}
 	targetNozzles.On("Id").Return("TestOutNozzleId")

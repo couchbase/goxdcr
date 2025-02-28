@@ -1225,7 +1225,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
-	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int) {
+	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
+	backfillSpecSvcSetCompleteBackfillRaiserDelay int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1404,6 +1405,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
+
+	BackfillReplSvcSetBackfillRaiserDelaySec = backfillSpecSvcSetCompleteBackfillRaiserDelay
 }
 
 // XDCR Dev hidden replication settings
@@ -1418,6 +1421,9 @@ const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 const DevPreCheckMaxCasErrorInjection = "xdcrDevPreCheckMaxCasErrorInjection"
+const DevBackfillReqHandlerStartOnceDelay = "xdcrDevBackfillReqHandlerStartOnceDelaySec"
+const DevBackfillReqHandlerHandleVBTaskDoneHang = "xdcrDevBackfillReqHandlerHandleVBTaskDoneHang"
+const DevBackfillUnrecoverableErrorInj = "xdcrDevBackfillUnrecoverableErrorInj"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1929,3 +1935,5 @@ var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
 
 // from https://github.com/couchbase/kv_engine/blob/master/docs/SubDocument.md#limits
 const SUBDOC_MULTI_MAX_PATHS int = 16
+
+var BackfillReplSvcSetBackfillRaiserDelaySec int = 0

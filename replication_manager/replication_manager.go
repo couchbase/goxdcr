@@ -372,6 +372,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
 		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepVariableVBKey].(int),
 		internal_settings.Values[metadata.MaxCheckpointRecordsToReadVariableVBKey].(int),
+		internal_settings.Values[metadata.BackfillReplSvcSetBackfillRaiserDelaySecKey].(int),
 	)
 }
 

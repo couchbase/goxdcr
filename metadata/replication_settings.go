@@ -21,17 +21,20 @@ import (
 
 // keys for replication settings
 const (
-	DevMainPipelineSendDelay        = base.DevMainPipelineSendDelay
-	DevBackfillPipelineSendDelay    = base.DevBackfillPipelineSendDelay
-	DevBackfillRollbackTo0VB        = base.DevBackfillRollbackTo0VB
-	DevMainPipelineRollbackTo0VB    = base.DevMainPipelineRollbackTo0VB
-	DevCkptMgrForceGCWaitSec        = base.DevCkptMgrForceGCWaitSec
-	DevColManifestSvcDelaySec       = base.DevColManifestSvcDelaySec
-	DevNsServerPortSpecifier        = base.DevNsServerPortSpecifier
-	DevBackfillReplUpdateDelay      = base.DevBackfillReplUpdateDelay
-	DevCasDriftForceDocKey          = base.DevCasDriftForceDocKey
-	DevPreCheckCasDriftForceVbKey   = base.DevPreCheckCasDriftForceVbKey
-	DevPreCheckMaxCasErrorInjection = base.DevPreCheckMaxCasErrorInjection
+	DevMainPipelineSendDelay                  = base.DevMainPipelineSendDelay
+	DevBackfillPipelineSendDelay              = base.DevBackfillPipelineSendDelay
+	DevBackfillRollbackTo0VB                  = base.DevBackfillRollbackTo0VB
+	DevMainPipelineRollbackTo0VB              = base.DevMainPipelineRollbackTo0VB
+	DevCkptMgrForceGCWaitSec                  = base.DevCkptMgrForceGCWaitSec
+	DevColManifestSvcDelaySec                 = base.DevColManifestSvcDelaySec
+	DevNsServerPortSpecifier                  = base.DevNsServerPortSpecifier
+	DevBackfillReplUpdateDelay                = base.DevBackfillReplUpdateDelay
+	DevCasDriftForceDocKey                    = base.DevCasDriftForceDocKey
+	DevPreCheckCasDriftForceVbKey             = base.DevPreCheckCasDriftForceVbKey
+	DevPreCheckMaxCasErrorInjection           = base.DevPreCheckMaxCasErrorInjection
+	DevBackfillReqHandlerStartOnceDelay       = base.DevBackfillReqHandlerStartOnceDelay
+	DevBackfillReqHandlerHandleVBTaskDoneHang = base.DevBackfillReqHandlerHandleVBTaskDoneHang
+	DevBackfillUnrecoverableErrorInj          = base.DevBackfillUnrecoverableErrorInj
 
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
@@ -160,7 +163,8 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
 	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey, DevPreCheckMaxCasErrorInjection}
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey,
+	DevPreCheckMaxCasErrorInjection, DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang, DevBackfillUnrecoverableErrorInj}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -203,6 +207,9 @@ var XDCRDevBackfillReplUpdateDelayConfig = &SettingsConfig{0 /*not specified*/, 
 var XDCRDevCasDriftForceDocConfig = &SettingsConfig{"", nil}
 var XDCRDevPreCheckCasDriftForceVBConfig = &SettingsConfig{-1, &Range{-1, 1023}}
 var XDCRDevPreCheckMaxCasErrorInjectionConfig = &SettingsConfig{false, nil}
+var XDCRDevBackfillReqHandlerStartOnceDelayConfig = &SettingsConfig{0, &Range{0, 1000}}
+var XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig = &SettingsConfig{false, nil}
+var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -284,17 +291,20 @@ var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
-	DevMainPipelineSendDelay:        XDCRDevMainPipelineSendDelayConfig,
-	DevBackfillPipelineSendDelay:    XDCRDevBackfillPipelineSendDelayConfig,
-	DevMainPipelineRollbackTo0VB:    XDCRDevMainPipelineRollbackConfig,
-	DevBackfillRollbackTo0VB:        XDCRDevBackfillPipelineRollbackConfig,
-	DevCkptMgrForceGCWaitSec:        XDCRDevCkptGcWaitConfig,
-	DevColManifestSvcDelaySec:       XDCRDevColManifestSvcDelayConfig,
-	DevNsServerPortSpecifier:        XDCRDevNsServerPortSpecifierConfig,
-	DevBackfillReplUpdateDelay:      XDCRDevBackfillReplUpdateDelayConfig,
-	DevCasDriftForceDocKey:          XDCRDevCasDriftForceDocConfig,
-	DevPreCheckCasDriftForceVbKey:   XDCRDevPreCheckCasDriftForceVBConfig,
-	DevPreCheckMaxCasErrorInjection: XDCRDevPreCheckMaxCasErrorInjectionConfig,
+	DevMainPipelineSendDelay:                  XDCRDevMainPipelineSendDelayConfig,
+	DevBackfillPipelineSendDelay:              XDCRDevBackfillPipelineSendDelayConfig,
+	DevMainPipelineRollbackTo0VB:              XDCRDevMainPipelineRollbackConfig,
+	DevBackfillRollbackTo0VB:                  XDCRDevBackfillPipelineRollbackConfig,
+	DevCkptMgrForceGCWaitSec:                  XDCRDevCkptGcWaitConfig,
+	DevColManifestSvcDelaySec:                 XDCRDevColManifestSvcDelayConfig,
+	DevNsServerPortSpecifier:                  XDCRDevNsServerPortSpecifierConfig,
+	DevBackfillReplUpdateDelay:                XDCRDevBackfillReplUpdateDelayConfig,
+	DevCasDriftForceDocKey:                    XDCRDevCasDriftForceDocConfig,
+	DevPreCheckCasDriftForceVbKey:             XDCRDevPreCheckCasDriftForceVBConfig,
+	DevPreCheckMaxCasErrorInjection:           XDCRDevPreCheckMaxCasErrorInjectionConfig,
+	DevBackfillReqHandlerStartOnceDelay:       XDCRDevBackfillReqHandlerStartOnceDelayConfig,
+	DevBackfillReqHandlerHandleVBTaskDoneHang: XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig,
+	DevBackfillUnrecoverableErrorInj:          XDCRDevBackfillUnrecoverableErrorInjConfig,
 
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
