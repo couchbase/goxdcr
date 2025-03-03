@@ -74,6 +74,7 @@ func (s *ShaRefCounterService) GetShaGlobalInfoMap(topic string) (metadata.ShaTo
 
 // Idempotent No-op if already exists
 // Init doesn't set the count to 1 - it sets it to 0 - and then individual counts need to be counted using recorder
+// i.e. only an entry is created for the topic with 0-values.
 func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internalId string) (alreadyExists bool) {
 	s.topicMapMtx.RLock()
 	_, alreadyExists = s.topicMaps[topic]

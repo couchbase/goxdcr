@@ -2271,10 +2271,11 @@ function setInternalSettings {
 	local i=0
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} >/dev/null 2>&1
-		if (($? == 0)); then
+		ret=$?
+		if (($ret == 0)); then
 			break
 		fi
-		echo "Failed to set internal settings, retrying in 10 seconds..."
+		echo "Failed to set internal settings because return=$ret, retrying in 10 seconds..."
 		sleep 10
 	done
 }

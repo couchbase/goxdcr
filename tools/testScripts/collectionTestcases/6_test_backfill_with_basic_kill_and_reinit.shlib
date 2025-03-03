@@ -1,4 +1,4 @@
-# Copyright 2019-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -11,8 +11,8 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C1P0"]=9002)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C1P0"]=13002)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
@@ -26,7 +26,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
-declare -A BackfillHangLooseDelayProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=10000 ["preReplicateVBMasterCheck"]="false" ["xdcrDevBackfillReqHandlerStartOnceDelaySec"]=5 ["xdcrDevBackfillReqHandlerHandleVBTaskDoneHang"]=true ["xdcrDevBackfillUnrecoverableErrorInj"]=true)
+declare -A BackfillHangLooseDelayProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=10000 ["preReplicateVBMasterCheck"]="false")
 
 # Bucket -> Scopes
 # -----------------
@@ -35,15 +35,14 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1" "col2" "col3")
-declare -a collection2Arr=("col1" "col2" "col3")
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
 	waitForBgJobs
 }
 
@@ -55,10 +54,11 @@ function cleanupTestCaseInternalSettings {
 
 ERR_WHEN_PERSISTING_ERR_MSG="experienced error when persisting (type 1) - Invalid input given"
 TRY_TO_FIX_PIPELINE_MSG="Try to fix Pipeline"
+UNRECOVERABLE_BACKFILLS="Starting to handle unrecoverable backfills for"
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running live rediscover test case with XDCR kill"
+	echo "Running live rediscover test case with basic XDCR kill"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -98,23 +98,10 @@ function runTestCase {
 	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
-
-	# Add C1P0 to C1
-	echo "Sleeping 5 secs before rebalancing one-node in"
-	sleep 5
-
-	addOneNodeIn "C1P0" "C1"
-	sleep 5
-	startRebalancing "C1"
-	echo "Rebalancing node in is completed"
-
-	echo "Sleeping before checking logs"
-	sleep 15
-
 	grepForPanics
 
-	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	sleep 5
+	echo "sleep 30s for process to restart"
+	sleep 30
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
@@ -125,7 +112,7 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
-	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" 0
 
 	# Then re-setup the implicit matching that matches
@@ -137,12 +124,16 @@ function runTestCase {
 
 	# After sleeping, the backfill manager should have triggered the backfill
 	validateLastBackfillContainsVBTask "C1" "C2" 0
+	grepForPanics
 
 	# at this time, kill goxdcr
 	killGoXdcr "C1"
 
 	# sleep 10 sec for XDCR to restart
 	sleep 10
+
+	echo "There should be one broken mapping with SHA 9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074"
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074\\"'
 
 	# Workaround for MB-63879
 	createCollection "C1" "B1" "S1" "colA"
@@ -155,14 +146,21 @@ function runTestCase {
 	echo "Sleeping for backfill to be raised"
 	sleep 30
 
-	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevBackfillSendDelayMs=0"
-	sleep 2
+	echo "There should be two broken mappings with SHAs 9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074 and f6540dc1323757ae791247289d319f847ccf28bca7d2ef0387fe917991e95692"
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074\\"'
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"f6540dc1323757ae791247289d319f847ccf28bca7d2ef0387fe917991e95692\\"'
+
+	grepForPanics
 
 	# at this time, kill goxdcr
 	killGoXdcr "C1"
 
-	echo "Sleeping for 30s some initialisations to finish"
-	sleep 30s
+	echo "Sleeping for 10s for some initialisations to finish"
+	sleep 10
+
+	echo "There should still be two broken mappings with SHAs 9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074 and f6540dc1323757ae791247289d319f847ccf28bca7d2ef0387fe917991e95692"
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074\\"'
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"f6540dc1323757ae791247289d319f847ccf28bca7d2ef0387fe917991e95692\\"'
 
 	# Workaround for MB-63879
 	createCollection "C1" "B1" "S1" "colC"
@@ -170,15 +168,21 @@ function runTestCase {
 	# sleep 15 sec for source manifest to refresh
 	sleep 15
 
-	# now create a third missing target collection so that backfill pipeline
-	# is created and errors out with Invalid input given restarting the main pipeline in loop.
-	createCollection "C2" "B2" "S1" "col3"
-	echo "Sleeping for backfill to be raised"
+	# speeden-up backfill before checking for changes_left and doc count
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevBackfillSendDelayMs=0"
+	sleep 2
+
+	echo "Waiting 30 seconds before checking item count first pass"
 	sleep 30
 
-	echo "Sleeping for 250 for errors to popup after P2P push and HandleVBTaskDone"
-	sleep 250
+	checkBidirectionalChangesLeft
 
+	grepForPanics
+
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+
+	validateInternalLogWithInstance "C1" "$UNRECOVERABLE_BACKFILLS" 0
 	validateInternalLogWithInstance "C1" "$ERR_WHEN_PERSISTING_ERR_MSG" 0
 	validateInternalLogWithInstance "C1" "$TRY_TO_FIX_PIPELINE_MSG" 0
 
