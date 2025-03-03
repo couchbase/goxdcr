@@ -1536,20 +1536,32 @@ const (
 	DefaultCLogPoolGetTimeoutMs       int = 5000 // in milliseconds
 	DefaultCLogNetworkRetryCount      int = 5
 	DefaultCLogNetworkRetryIntervalMs int = 2000 // in milliseconds
-	DefaultCLogWorkerCount            int = 3
-	DefaultCLogQueueCapacity          int = 5
-	DefaultCLogMaxErrorCount          int = 10
-	DefaultCLogErrorTimeWindowMs      int = 120000         // in milliseconds
-	DefaultCLogReattemptDurationMs    int = 30 * 60 * 1000 // in milliseconds
+	DefaultCLogWorkerCount            int = 20
+	// Assuming a default of 3 node capella cluster, and a default of 2 xmem nozzles
+	// per target node and 1000 is the default max buffer size for a given xmem nozzle.
+	DefaultCLogQueueCapacity int = 3 * 2 * 1000
+
+	// The following means that the logger will have a tolerance for less than 10 timeout/throttling/mapping errors in the last 2 minutes.
+	// If we see 10 errors, the conflict logger will hibernate and stop accepting requests for the next 10 minutes.
+	DefaultCLogMaxErrorCount       int = 10
+	DefaultCLogErrorTimeWindowMs   int = 2 * 60 * 1000  // in milliseconds (2 minutes)
+	DefaultCLogReattemptDurationMs int = 10 * 60 * 1000 // in milliseconds (10 minutes)
 
 	// conflict logger's Connection Pool consts
-	// maximum number of connection objects for a given bucket in the pool
-	DefaultCLogPoolConnLimit = 10
+	// maximum number of connection objects for a given bucket in the pool.
+	// It is assumed that an average of 3 replications with conflict logging to the same bucket could exist.
+	DefaultCLogPoolConnLimit = 3 * 10
 	// DefaultPoolGCInterval is the GC frequency for connection pool
 	DefaultCLogConnPoolGCIntervalMs = 60000 // in milliseconds
 	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
 	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
 )
+
+// Used for internal testing with self-signed certs.
+// Exposed as an internal setting.
+var CLogSkipTlsVerify bool
+var CLogResourceManagerBoost int
+var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
 
 // Required for conflict resolution
 const (
@@ -1888,12 +1900,6 @@ var RMTokenDistribution = []int{
 	8,  // Low priority replication %
 	3,  // Conflict log %
 }
-
-// Used for internal testing with self-signed certs.
-// Exposed as an internal setting.
-var CLogSkipTlsVerify bool
-var CLogResourceManagerBoost int
-var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
 
 const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"
 
