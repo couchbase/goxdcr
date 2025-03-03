@@ -1009,7 +1009,7 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil && err != errorVbAlreadyDone && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
-			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
+			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for %v vbno %v resulted with %v", b.Id(), vbno, err)
 			// When err is not nil, the backfill job needs to be redone
 			b.pipelinesMtx.RLock()
 			_, i := b.getPipeline(common.BackfillPipeline)
