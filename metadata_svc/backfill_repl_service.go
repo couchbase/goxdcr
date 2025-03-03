@@ -173,33 +173,62 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 
 		backfillSpec.SetReplicationSpec(actualSpec)
 
-		// Last step is to make sure that the sha mapping is retrieved
+		// Last step is to make sure that the sha mapping is retrieved and loaded
+
+		// 1. initialise the topic with 0-values in SHA reference counter service.
 		b.InitTopicShaCounterWithInternalId(backfillSpec.Id, backfillSpec.InternalId)
-		mappingsDoc, err := b.GetMappingsDoc(backfillSpec.Id, false /*initIfNotFound*/)
+
+		// 2. perform a metakv get for previously persisted mapping doc
+		var mappingsDoc *metadata.CollectionNsMappingsDoc
+		getMappingDoc := func() error {
+			doc, getErr := b.GetMappingsDoc(backfillSpec.Id, false /*initIfNotFound*/)
+			if getErr != nil {
+				b.logger.Warnf("Error while trying to get mapping doc for backfill replication %v, err=%v. May retry",
+					backfillSpec.Id, err)
+				return getErr
+			}
+
+			mappingsDoc = doc
+			return nil
+		}
+		err = b.utils.ExponentialBackoffExecutor(fmt.Sprintf("getMappingDoc(%v)", backfillSpec.Id), base.RetryIntervalMetakv,
+			base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getMappingDoc)
 		if err != nil {
-			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v", backfillSpec.Id)
+			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v. err=%v", backfillSpec.Id, err)
 			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
+
+		// 3. convert mappingDoc to SHA->CollectionNS mapping
 		shaMapping, err := b.GetShaToCollectionNsMap(backfillSpec.Id, mappingsDoc)
 		if err != nil {
-			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v for %v", err, backfillSpec.Id)
 			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
 
+		// 4. load the backfill spec with SHA->CollectionNS mapping
 		err = backfillSpec.VBTasksMap.LoadFromMappingsShaMap(shaMapping)
 		if err != nil {
-			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			b.logger.Errorf("Error - unable to load from shaToCollectionsMap %v for %v", err, backfillSpec.Id)
 			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
 
-		// Finally, done
+		// 5. load the SHA reference counter initialised in step (1) with information
+		// persisted previously in metaKV.
+		_, _, err = b.loadSHARefMappings(backfillSpec, shaMapping, false)
+		if err != nil {
+			b.logger.Errorf("Error - unable to load SHA reference counter. err=%v for %v", err, backfillSpec.Id)
+			b.appendUnrecoverableBackfillSpec(backfillSpec)
+			continue
+		}
+
+		// 6. update the local cached backfill spec with the computed spec from steps 1-5.
 		err = b.updateCacheInternal(replicationId, backfillSpec, false /*lock*/)
 		if err != nil {
 			// A clean cache should not have CAS mismatch error - don't panic but log a serious warning
-			b.logger.Fatalf("updateCacheInternal failed with %v", err)
+			b.logger.Fatalf("updateCacheInternal failed with %v for %v", err, backfillSpec.Id)
 		}
 	}
 
@@ -422,25 +451,18 @@ func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.Backfill
 	return b.updateCache(spec.Id, spec)
 }
 
-// Each node is responsible for all VBs and all mappings now with P2P
-func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec, addOp bool) error {
-	mappingsDoc, err := b.GetMappingsDoc(spec.Id, addOp /*initIfNotFound*/)
-	if err != nil {
-		return err
-	}
-	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, mappingsDoc)
-	if err != nil {
-		b.logger.Errorf("persising backfill mapping for %v has err %v", err)
-		return err
-	}
+// Initialises the data-structures for SHA reference counter service (reference counter and SHA mappings) in memory
+// with the input shaToNsMapping, for the input backfill spec.
+func (b *BackfillReplicationService) loadSHARefMappings(spec *metadata.BackfillReplicationSpec, shaToNsMapping metadata.ShaToCollectionNamespaceMap, addOp bool) (metadata.ShaToCollectionNamespaceMap, metadata.ShaToCollectionNamespaceMap, error) {
 	var toDecrementMap metadata.ShaToCollectionNamespaceMap
-	if addOp && len(inflatedMapping) > 0 {
+	if addOp && len(shaToNsMapping) > 0 {
 		b.logger.Warnf("Adding a new backfill spec %v should not have pre-existing mappings", spec.Id)
-		toDecrementMap = inflatedMapping.Clone()
+		toDecrementMap = shaToNsMapping.Clone()
 	}
-	err = b.InitCounterShaToActualMappings(spec.Id, spec.InternalId, inflatedMapping)
+
+	err := b.InitCounterShaToActualMappings(spec.Id, spec.InternalId, shaToNsMapping)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	consolidatedMap := make(metadata.ShaToCollectionNamespaceMap)
@@ -457,7 +479,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 
 	incrementer, err := b.GetIncrementerFunc(spec.Id)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	for sha, mapping := range consolidatedMap {
@@ -468,16 +490,44 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 		decrementer, err := b.GetDecrementerFunc(spec.Id)
 		if err != nil {
 			b.logger.Errorf("Unable to get decrementerFunc for %v", spec.Id)
-			return err
+			return nil, nil, err
 		}
-		for sha, _ := range toDecrementMap {
+		for sha := range toDecrementMap {
 			decrementer(sha)
 		}
 	}
 
+	return consolidatedMap, toDecrementMap, nil
+}
+
+// Each node is responsible for all VBs and all mappings now with P2P.
+// This routine also initialises the in-memory data-structures (SHA reference counter and SHA to actual mappings)
+// for the spec before persisting.
+func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec, addOp bool) error {
+	mappingsDoc, err := b.GetMappingsDoc(spec.Id, addOp /*initIfNotFound*/)
+	if err != nil {
+		b.logger.Errorf("error while getting mapping doc for %v. err=%v (addOp=%v)",
+			spec.Id, addOp, err)
+		return err
+	}
+
+	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, (*metadata.CollectionNsMappingsDoc)(mappingsDoc))
+	if err != nil {
+		b.logger.Errorf("error while getting SHA to NS mapping for %v. err=%v (addOp=%v)",
+			spec.Id, addOp, err)
+		return err
+	}
+
+	incrementedMap, decrementedMap, err := b.loadSHARefMappings(spec, inflatedMapping, addOp)
+	if err != nil {
+		b.logger.Errorf("Error while calling loadSHARefMappings, err=%v, id=%v, add=%v", err, spec.Id, addOp)
+		return err
+	}
+
 	err = b.UpsertMapping(spec.Id, spec.InternalId)
 	if err != nil {
-		b.logger.Errorf("BackfillReplService error upserting mapping for spec %v. Consolidated mapping: %v", spec.Id, consolidatedMap)
+		b.logger.Errorf("BackfillReplService error upserting mapping for spec %v. addOp=%v, Inc=%v, Dec=%v",
+			spec.Id, addOp, incrementedMap, decrementedMap)
 	}
 	return err
 }
@@ -725,6 +775,7 @@ func (b *BackfillReplicationService) SetCompleteBackfillRaiser(backfillCallback 
 
 // This method's job is to ensure that all of the unrecoverable backfills are able to be
 func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
+	b.logger.Infof("Starting to handle unrecoverable backfills for %v", b.unrecoverableBackfillIds)
 	atomic.StoreUint32(&b.recoveringBackfill, 1)
 	defer atomic.StoreUint32(&b.recoveringBackfill, 0)
 	var injDelayOnce sync.Once

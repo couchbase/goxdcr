@@ -505,6 +505,25 @@ function getInternalNodeXdcrLog {
 	cat $goxdcrLogFile
 }
 
+function getInternalNodeMetaKvLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local metaKvLog=${logfileDir}/metakv.log
+	if ! [[ -f "$metaKvLog" ]]; then
+		echo "Unable to find file $metaKvLog"
+		return 1
+	fi
+
+	cat $metaKvLog
+}
+
 # Used only if the log needs to be clean for parsing purposes
 function clearInternalNodeXdcrLog {
 	local clusterName=$1
@@ -1896,4 +1915,27 @@ function grepForAbnormalities {
 	if (($? != 0)); then
 		exit 1
 	fi
+}
+
+function grepForLastMappingDocUpdateInMetaKvLogs {
+	clusterName=$1
+	pattern=$2
+	updateRegex="Updating data.*backfillMappings"
+
+	logs=$(getInternalNodeMetaKvLog "$clusterName")
+	if ((!$? == 0)); then
+		echo "Unable to get metakv log for validation"
+		exit 1
+	fi
+
+	# 2 lines comprise of one update
+	lastUpdate=$(echo "$logs" | grep -A 1 "$updateRegex" | tail -n 2)
+	cnt=$(echo "$lastUpdate" | grep -c "$pattern")
+	if (($cnt == 0)); then
+		echo "0 occurances found of $pattern in lastUpdate of metakv.log"
+		exit 1
+	fi
+
+	echo "$pattern found in lastUpdate of metakv.log"
+	return
 }
