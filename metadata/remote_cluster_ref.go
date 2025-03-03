@@ -574,7 +574,8 @@ func (ref *RemoteClusterReference) isEssentiallySameNoLock(ref2 *RemoteClusterRe
 	} else {
 		ref2.mutex.RLock()
 		defer ref2.mutex.RUnlock()
-		return ref.Id_ == ref2.Id_ && ref.Uuid_ == ref2.Uuid_ && ref.Name_ == ref2.Name_ && ref.HostName_ == ref2.HostName_
+		return ref.Id_ == ref2.Id_ && ref.Uuid_ == ref2.Uuid_ && ref.Name_ == ref2.Name_ &&
+			ref.HostName_ == ref2.HostName_ && ref.HttpsHostName_ == ref2.HttpsHostName_
 	}
 }
 
