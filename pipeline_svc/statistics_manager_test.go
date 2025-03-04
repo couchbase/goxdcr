@@ -157,6 +157,8 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc, xdcrTopologyS
 	utils.On("GetIntSettingFromSettings", mock.Anything, mock.Anything).Return(0, nil)
 	ckptService.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
+	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(nil, nil)
+
 	dcpNozzle.SetConnector(connector)
 }
 

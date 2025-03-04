@@ -1444,15 +1444,26 @@ func generateMergeCkptArgs() *MergeCkptArgs {
 	return retVal
 }
 
+func setupSpecSettings(replicationSpec *metadata.ReplicationSpecification) {
+	specSetting := &metadata.ReplicationSettings{}
+	specSetting.Settings = metadata.EmptySettings(func() map[string]*metadata.SettingsConfig {
+		configMap := make(map[string]*metadata.SettingsConfig)
+		configMap["CollectionsMgtMulti"] = metadata.CollectionsMgtConfig
+		return configMap
+	})
+	replicationSpec.Settings = specSetting
+}
+
 func TestCheckpointManager_OnEvent(t *testing.T) {
 	assert := assert.New(t)
 	settings := metadata.ReplicationSettingsMap{}
-	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
 
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
 	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc, xmemNozzle)
+	setupSpecSettings(replicationSpec)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
@@ -1557,6 +1568,8 @@ func TestCheckpointManager_CleanupInMemoryBrokenMap(t *testing.T) {
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc, xmemNozzle)
+
+	setupSpecSettings(replicationSpec)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
