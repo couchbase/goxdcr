@@ -110,9 +110,7 @@ type BackfillRequestHandler struct {
 	setSpecUpdateStatus func(base.BackfillSpecUpdateStatus)
 
 	// debugging helpers
-	waitSync                sync.Once
-	devVbNotToBeDoneEnabled bool
-	vbNotToBeDone           uint16
+	devVbDelayEnabled bool
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -174,7 +172,7 @@ func (b *BackfillRequestHandler) Start() error {
 		vbDoneDelayEnabled := b.spec.Settings.GetBoolSettingValue(metadata.DevBackfillReqHandlerHandleVBTaskDoneHang)
 		if vbDoneDelayEnabled {
 			b.logger.Warnf("vbNotToBeDone delay injection is enabled")
-			b.devVbNotToBeDoneEnabled = true
+			b.devVbDelayEnabled = true
 		}
 
 		var backfillSpec *metadata.BackfillReplicationSpec
@@ -609,7 +607,7 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 			return nil
 		}
 
-		shouldSkipFirst := b.figureOutIfCkptExists(reqRO, seqnosMap)
+		shouldSkipFirst := b.shouldSkipFirst(reqRO, seqnosMap)
 		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
 		b.recordSrcManifestIdAsLatestHandled(srcManifestId)
 		err = b.requestPersistence(SetOp, persistResponse)
@@ -641,7 +639,8 @@ func (b *BackfillRequestHandler) checkIfReqIsOutdated(force bool, srcManifestId 
 	return nil
 }
 
-func (b *BackfillRequestHandler) figureOutIfCkptExists(reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) bool {
+// returns true if the first task for a vb should be skipped and not to be merged with.
+func (b *BackfillRequestHandler) shouldSkipFirst(reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) bool {
 	var shouldSkipFirst = true
 	if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(b.getVBsClone(false)) {
 		b.pipelinesMtx.RLock()
@@ -1008,17 +1007,10 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			return err
 		}
 
-		if b.devVbNotToBeDoneEnabled {
-			b.waitSync.Do(func() {
-				b.logger.Warnf("Dev inj HandleVBTaskDone waiting for 120s after P2P push is done setting VB to %v", vbno)
-				time.Sleep(120 * time.Second)
-				b.vbNotToBeDone = vbno
-			})
-
-			if vbno != b.vbNotToBeDone {
-				// don't persist to make sure we have pipeline restarts.
-				return nil
-			}
+		if b.devVbDelayEnabled {
+			// dev injection.
+			b.logger.Warnf("Dev inj HandleVBTaskDone waiting for 120s after P2P push is done setting VB to %v", vbno)
+			time.Sleep(120 * time.Second)
 		}
 
 		err := b.HandleVBTaskDone(vbno)

@@ -301,18 +301,31 @@ func (b *BackfillMgr) Start() error {
 	// once all pipelines have restarted and stabilized
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.CollectionsManifestChangeCb)
 
-	// Spawn the goroutine first else any error in subsequent will bail out early
-	go b.runRetryMonitor()
-
-	err := b.initCache()
+	err := b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
 	if err != nil {
-		b.logger.Errorf("Unable to initCache: %v", err.Error())
+		b.logger.Errorf("Unable to set backfill raiser: %v", err.Error())
 		return err
 	}
 
-	err = b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
+	err = b.backfillReplSvc.SetBackfillCkptsCleanupCb(b.pipelineMgr.CleanupBackfillCkpts)
 	if err != nil {
-		b.logger.Errorf("Unable to set backfill raiser: %v", err.Error())
+		b.logger.Errorf("Unable to set backfill cleanup: %v", err.Error())
+		return err
+	}
+
+	// Before we init the cache and start backfill handlers,
+	// try to perform unrecoverable backfills if any.
+	// This needs to be done before the backfill request handler's run() function
+	// is spun up to make sure other backfill requests won't interfere with cleanups.
+	initDoneCh := b.backfillReplSvc.RaiseUnrecoverableBackfillsIfNeeded()
+	defer close(initDoneCh)
+
+	// Spawn the goroutine first else any error in subsequent will bail out early
+	go b.runRetryMonitor()
+
+	err = b.initCache()
+	if err != nil {
+		b.logger.Errorf("Unable to initCache: %v", err.Error())
 		return err
 	}
 
@@ -1550,6 +1563,8 @@ func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
 	delete(b.replSpecHandlerMap, specId)
 }
 
+// we will not force update this backfill request
+// to ensure that it will not race with other backfill requests.
 func (b *BackfillMgr) RequestCompleteBackfill(specId string) error {
 	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, nil)
 	if err != nil {
@@ -1564,10 +1579,15 @@ func (b *BackfillMgr) RequestCompleteBackfill(specId string) error {
 		return nil
 	}
 
-	err = b.onDemandBackfillRaiseRequest(specId, backfillReq)
+	err = b.onDemandBackfillRaiseRequest(specId, backfillReq, false)
 	return err
 }
 
+// WARNING: On demand backfill might not fully work if there are some old backfill checkpoints
+// left over on the node. In such cases recreating replication is the only way to acheive the same.
+// Also be sure that no other backfill pipelines are running when this codepath is triggered since
+// backfill spec will be forcefully overwritten with the new tasks of this request, losing the current
+// backfill tasks from the spec forever and could potentially race with existing backfill pipeline.
 func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings metadata.CollectionNamespaceMapping) error {
 	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, pendingMappings)
 	if err != nil {
@@ -1590,12 +1610,12 @@ func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings met
 		return nil
 	}
 
-	err = b.onDemandBackfillRaiseRequest(specId, backfillReq)
+	err = b.onDemandBackfillRaiseRequest(specId, backfillReq, true)
 	return err
 }
 
-func (b *BackfillMgr) onDemandBackfillRaiseRequest(specId string, backfillReq interface{}) error {
-	err := b.raiseBackfillReq(specId, backfillReq, true, 0, "onDemandBackfillRequest")
+func (b *BackfillMgr) onDemandBackfillRaiseRequest(specId string, backfillReq interface{}, force bool) error {
+	err := b.raiseBackfillReq(specId, backfillReq, force, 0, "onDemandBackfillRequest")
 	if err == base.GetBackfillFatalDataLossError(specId) {
 		// fatal error means restream is happening - everything is deleted, so let it pass
 		err = nil

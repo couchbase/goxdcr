@@ -29,7 +29,10 @@ type BackfillReplSvc interface {
 
 	// In case of backfill mapping corruption, the backfillCallback is needed to capture a wide net of backfill
 	SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error
+	SetBackfillCkptsCleanupCb(func(string) error) error
 
 	//Returns the vbs owned by 'this' node
 	GetMyVBs(replSpec *metadata.ReplicationSpecification) ([]uint16, error)
+
+	RaiseUnrecoverableBackfillsIfNeeded() chan bool
 }
