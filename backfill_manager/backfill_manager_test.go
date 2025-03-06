@@ -96,6 +96,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	pipelineMgr.On("RequestBackfill", mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)
+	backfillReplSvc.On("RaiseUnrecoverableBackfillsIfNeeded").Return(make(chan bool))
 
 	sourceCh := make(chan service_def_real.SourceNotification, base.BucketTopologyWatcherChanLen)
 	var vbsList []uint16
@@ -153,6 +154,8 @@ func setupBackfillReplSvcMock(backfillReplSvc *service_def.BackfillReplSvc) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Return(nil)
 	backfillReplSvc.On("SetCompleteBackfillRaiser", mock.Anything).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Return(nil, nil)
+	backfillReplSvc.On("SetBackfillCkptsCleanupCb", mock.Anything).Return(nil)
+	backfillReplSvc.On("RaiseUnrecoverableBackfillsIfNeeded", mock.Anything).Return(make(chan bool))
 }
 
 func setupBackfillReplSvcNegMock(backfillReplSvc *service_def.BackfillReplSvc) {
@@ -162,6 +165,8 @@ func setupBackfillReplSvcNegMock(backfillReplSvc *service_def.BackfillReplSvc) {
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Return(nil, base.ErrorInvalidInput)
 	// SetCompleteBackfillRaiser for now can only return nil
 	backfillReplSvc.On("SetCompleteBackfillRaiser", mock.Anything).Return(nil)
+	backfillReplSvc.On("SetBackfillCkptsCleanupCb", mock.Anything).Return(nil)
+	backfillReplSvc.On("RaiseUnrecoverableBackfillsIfNeeded", mock.Anything).Return(make(chan bool))
 }
 
 func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,

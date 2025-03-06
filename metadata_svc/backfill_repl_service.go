@@ -62,8 +62,8 @@ type BackfillReplicationService struct {
 	metadataChangeCbMtx     sync.RWMutex
 
 	unrecoverableBackfillIds [][2]string
-	completeBackfillCbMtx    sync.RWMutex
 	completeBackfillCb       func(string) error
+	backfillCkptsCleanupCb   func(string) error
 	recoveringBackfill       uint32
 
 	bucketTopologySvc service_def.BucketTopologySvc
@@ -230,10 +230,6 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			// A clean cache should not have CAS mismatch error - don't panic but log a serious warning
 			b.logger.Fatalf("updateCacheInternal failed with %v for %v", err, backfillSpec.Id)
 		}
-	}
-
-	if len(b.unrecoverableBackfillIds) > 0 {
-		go b.handleUnrecoverableBackfills()
 	}
 
 	return nil
@@ -761,96 +757,136 @@ func (b *BackfillReplicationService) AllActiveBackfillSpecsReadOnly() (map[strin
 }
 
 func (b *BackfillReplicationService) SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error {
-	if base.BackfillReplSvcSetBackfillRaiserDelaySec > 0 {
-		b.logger.Warnf("Dev inj backfill raiser delay %v seconds", base.BackfillReplSvcSetBackfillRaiserDelaySec)
-		time.Sleep(time.Duration(base.BackfillReplSvcSetBackfillRaiserDelaySec) * time.Second)
-	}
-
-	b.completeBackfillCbMtx.Lock()
-	defer b.completeBackfillCbMtx.Unlock()
-
 	b.completeBackfillCb = backfillCallback
 	return nil
 }
 
-// This method's job is to ensure that all of the unrecoverable backfills are able to be
-func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
+func (b *BackfillReplicationService) SetBackfillCkptsCleanupCb(backfillCallback func(specId string) error) error {
+	b.backfillCkptsCleanupCb = backfillCallback
+	return nil
+}
+
+func (b *BackfillReplicationService) handleUnrecoverableBackfillFatality(specId string) {
+	msg := fmt.Sprintf("Backfill %v was not able to be loaded correctly. "+
+		"A thorough backfill was tried, but was not possible. Please recreate the replication to ensure document count matches", specId)
+	b.logger.Fatalf(msg)
+	b.uiLogSvc.Write(msg)
+}
+
+// This method's job is to ensure that:
+// 1. All the replications that need complete backfill have a cleanup: this happens synchronously.
+// 2. Raise a complete backfill request for all such replications: this happens asynchronously.
+func (b *BackfillReplicationService) RaiseUnrecoverableBackfillsIfNeeded() chan bool {
+	initDoneCh := make(chan bool)
+	if len(b.unrecoverableBackfillIds) == 0 {
+		return initDoneCh
+	}
+
 	b.logger.Infof("Starting to handle unrecoverable backfills for %v", b.unrecoverableBackfillIds)
 	atomic.StoreUint32(&b.recoveringBackfill, 1)
-	defer atomic.StoreUint32(&b.recoveringBackfill, 0)
-	var injDelayOnce sync.Once
 
-	// Wait 1 second for backfillCb to be registered
-	time.Sleep(1 * time.Second)
+	// make sure the cleanup happens synchronously to avoid any races with future backfill requests
+	// like P2P push, collection manifest diff backfill request or others.
+	var replacementList [][2]string
+	for _, backfillPair := range b.unrecoverableBackfillIds {
+		backfillSpecId := backfillPair[0]
+		internalId := backfillPair[1]
 
-	for len(b.unrecoverableBackfillIds) > 0 {
-		var shouldInjAndDelay bool
-
-		b.completeBackfillCbMtx.RLock()
-		if b.completeBackfillCb == nil {
-			// BackfillMgr hasn't had a chance to set the callback yet
-			b.logger.Warnf("handleUnrecoverableBackfills waiting for backfillCb to be set waiting 10 seconds")
-			time.Sleep(10 * time.Second)
-			b.completeBackfillCbMtx.RUnlock()
-			continue
-		}
-		// backfillMgr has had a chance to set the callback - begin recovery process
-
-		// The key point here is to ensure that an empty backfill spec still exists,
-		// but the erroneous mapping files are all cleared
-		// The ensures that if at any point during this handling process XDCR is restarted, or if the backfill raise fails,
-		// then the init call will see that there's a backfill but the corresponding mapping file isn't there, and we
-		// will hit this handleUnrecoverableBackfills() method again
-		for _, backfillPair := range b.unrecoverableBackfillIds {
-			backfillSpecId := backfillPair[0]
-			internalId := backfillPair[1]
-
-			specToCheck, specCheckErr := b.replSpecSvc.ReplicationSpec(backfillSpecId)
-			if specCheckErr == nil {
-				shouldInjAndDelay = specToCheck.Settings.GetBoolSettingValue(metadata.DevBackfillUnrecoverableErrorInj)
-			}
-			if shouldInjAndDelay {
-				b.logger.Warnf("Dev inj spec has specified error injection %v\n", backfillSpecId)
-			}
-
+		backfillStateCleanup := func() error {
 			err := b.CleanupMapping(backfillSpecId, b.utils)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when cleaning up mappings. Backfill may not raise correctly", backfillSpecId)
+				return err
 			}
 
-			// Ensure that backfillspecs are empty so raising the complete backfill will become the first task
+			err = b.backfillCkptsCleanupCb(base.GetMainPipelineSpecIdFromBackfillId(backfillSpecId))
+			if err != nil {
+				b.logger.Warnf("Unable to clean up backfill pipeline checkpoint %v - %v", base.GetMainPipelineSpecIdFromBackfillId(backfillSpecId), err)
+				return err
+			}
+
 			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, metadata.NewVBTasksMap(), nil, 0)
 			marshalledData, err := json.Marshal(emptyBackfillSpec)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when marshalling empty backfill spec. Backfill may not raise correctly", backfillSpecId)
+				return err
 			}
+
 			err = b.setBackfillSpecUsingMarshalledData(emptyBackfillSpec, marshalledData)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when setting empty backfill spec into metakv. Backfill may not raise correctly", backfillSpecId)
+				return err
 			}
+
+			return nil
 		}
 
-		first := false
+		err := b.utils.ExponentialBackoffExecutor(fmt.Sprintf("backfillStateCleanup(%v)", backfillSpecId), base.RetryIntervalMetakv,
+			2*base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, backfillStateCleanup)
+		if err != nil {
+			// we cannot go ahead with complete backfill for this replication anymore
+			// since the cleanup was not successful.
+			b.logger.Errorf("Unable to clear backfill state for backfill replication %v. err=%v", backfillSpecId, err)
+			b.handleUnrecoverableBackfillFatality(backfillSpecId)
+			continue
+		}
+
+		replacementList = append(replacementList, backfillPair)
+	}
+
+	b.unrecoverableBackfillIds = replacementList
+
+	// now that we have successfully cleaned up the old backfill state,
+	// we can asynchronously raise complete backfill requests.
+	go b.raiseCompleteBackfillsReqsAfterCleanup(initDoneCh)
+	return initDoneCh
+}
+
+// The key point here is to ensure that an empty backfill spec still exists,
+// but the erroneous mapping files are all cleared
+// The ensures that if at any point during this handling process XDCR is restarted, or if the backfill raise fails,
+// then the init call will see that there's a backfill but the corresponding mapping file isn't there, and we
+// will hit this RaiseUnrecoverableBackfillsIfNeeded method again.
+// All backfill requests are serialised by the backfill request handler, so no real synchronisation needed
+// to avoid race. The routine will keep retrying until all the replications that need complete backfill have
+// completely persisted their requests in the backfill spec.
+func (b *BackfillReplicationService) raiseCompleteBackfillsReqsAfterCleanup(initDoneCh chan bool) {
+	// wait until b is fully initialised
+	<-initDoneCh
+	defer atomic.StoreUint32(&b.recoveringBackfill, 0)
+
+	retryInterval := base.RetryIntervalMetakv
+	backoffFactor := base.MetaKvBackoffFactor
+	maxInterval := retryInterval * time.Duration(backoffFactor*2*base.MaxNumOfMetakvRetries)
+	var injected bool
+
+	for len(b.unrecoverableBackfillIds) > 0 {
+		var shouldInjAndDelay bool
 
 		var replacementList [][2]string
 		// Once the mapping is cleared, then call the raiser to raise a complete backfill, which should be able to
 		// properly write the spec and the corresponding mappings correctly
 		for _, backfillPair := range b.unrecoverableBackfillIds {
 			backfillSpecId := backfillPair[0]
-			var err error
-			if shouldInjAndDelay {
-				injDelayOnce.Do(func() {
-					first = true
-					err = fmt.Errorf("DevBackfillUnrecoverableErrorInj")
-				})
-				if !first {
-					err = b.completeBackfillCb(backfillSpecId)
+
+			specToCheck, specCheckErr := b.replSpecSvc.ReplicationSpec(backfillSpecId)
+			if specCheckErr == nil {
+				shouldInjAndDelay = specToCheck.Settings.GetBoolSettingValue(metadata.DevBackfillUnrecoverableErrorInj)
+				if shouldInjAndDelay {
+					b.logger.Warnf("Dev inj spec has specified error injection %v", backfillSpecId)
 				}
+			}
+
+			var err error
+			if shouldInjAndDelay && !injected {
+				// dev injection.
+				injected = true
+				err = fmt.Errorf("DevBackfillUnrecoverableErrorInj")
 			} else {
 				err = b.completeBackfillCb(backfillSpecId)
 			}
 			if err != nil {
-				b.logger.Errorf("Unable to raise complete backfill for %v - %v. Will try again in 10 seconds", backfillSpecId, err)
+				b.logger.Errorf("Unable to raise complete backfill for %v - %v. Will try again in %v", backfillSpecId, err, retryInterval)
 				replacementList = append(replacementList, backfillPair)
 			} else {
 				msg := fmt.Sprintf("Backfill %v was not able to be loaded correctly. It has since been re-initialized and a thorough backfill has been raised to recover any missing data", backfillSpecId)
@@ -860,15 +896,17 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 		}
 
 		b.unrecoverableBackfillIds = replacementList
-		b.completeBackfillCbMtx.RUnlock()
 
 		if shouldInjAndDelay && len(replacementList) > 0 {
-			if !first {
-				time.Sleep(10 * time.Second)
-			} else {
-				b.logger.Warnf("Dev inj sleeping for 1.5mins for P2P push to kick in")
-				time.Sleep(90 * time.Second)
-			}
+			// dev injection.
+			b.logger.Warnf("Dev inj sleeping for 90s for P2P push to kick in")
+			time.Sleep(90 * time.Second)
+		}
+
+		time.Sleep(retryInterval)
+		backoff := retryInterval * time.Duration(backoffFactor)
+		if backoff < maxInterval {
+			retryInterval = backoff
 		}
 	}
 }

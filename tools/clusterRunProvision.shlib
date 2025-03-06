@@ -3035,3 +3035,9 @@ cb_coll.mutate_in(
 
 END
 }
+
+function cleanupGoxdcrLogs {
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+}

@@ -46,6 +46,10 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 	utilsIn.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogBackfillReplicationSpec", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { (args.Get(4)).(utilsReal.ExponentialOpFunc)() }).Return(nil)
 	utilsIn.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
+	utilsIn.On("ExponentialBackoffExecutor", "getMappingDoc(testSpec)", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) { (args.Get(4)).(utilsReal.ExponentialOpFunc)() }).Return(nil)
+	utilsIn.On("ExponentialBackoffExecutor", "backfillStateCleanup(testSpec)", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) { (args.Get(4)).(utilsReal.ExponentialOpFunc)() }).Return(nil)
 
 	for specName, actualSpec := range replSpecMap {
 		replSpecSvc.On("ReplicationSpec", specName).Return(actualSpec, nil)
@@ -423,13 +427,18 @@ func TestBackfillMappingError(t *testing.T) {
 
 	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, xdcrTopologyMock, bucketTopologySvc)
 	assert.NotNil(backfillReplSvc)
-	backfillReplSvc.completeBackfillCbMtx.Lock()
 	var completeCbCnt uint32
 	backfillReplSvc.completeBackfillCb = func(replId string) error {
+		time.Sleep(3 * time.Second)
 		atomic.AddUint32(&completeCbCnt, 1)
 		return nil
 	}
-	backfillReplSvc.completeBackfillCbMtx.Unlock()
+	backfillReplSvc.backfillCkptsCleanupCb = func(replId string) error {
+		return nil
+	}
+
+	initCh := backfillReplSvc.RaiseUnrecoverableBackfillsIfNeeded()
+	close(initCh)
 
 	time.Sleep(1 * time.Second)
 	assert.True(backfillReplSvc.unitTestIsRecoveringBackfill())
