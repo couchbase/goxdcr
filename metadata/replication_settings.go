@@ -80,10 +80,17 @@ const (
 
 	CollectionsMappingRulesKey    = base.CollectionsMappingRulesKey
 	CollectionsSkipSourceCheckKey = base.CollectionsSkipSourceCheckKey
-	CollectionsManualBackfillKey  = base.ManualBackfillKey
-	CollectionsDelAllBackfillKey  = base.CollectionsDelAllBackfillKey
-	CollectionsDelVbBackfillKey   = base.CollectionsDelSingleVBBackfillKey
-	CollectionsVBRollbackTo0Key   = "vbRollbackToZero"
+	// WARNING: manualBackfill might not fully work if there are some old backfill checkpoints
+	// left over on the node. In such cases recreating replication is the only way to acheive the same.
+	// Also be sure that no other backfill pipelines are running when manualBackfill is triggered since
+	// backfill spec will be forcefully overwritten with the new tasks of manualBackfill, losing the current
+	// backfill tasks from the spec forever and could potentially race with existing backfill pipeline.
+	// So when it comes to customer issues, make sure a backfill pipeline is not running when insisting
+	// the customer to run this command.
+	CollectionsManualBackfillKey = base.ManualBackfillKey
+	CollectionsDelAllBackfillKey = base.CollectionsDelAllBackfillKey
+	CollectionsDelVbBackfillKey  = base.CollectionsDelSingleVBBackfillKey
+	CollectionsVBRollbackTo0Key  = "vbRollbackToZero"
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey

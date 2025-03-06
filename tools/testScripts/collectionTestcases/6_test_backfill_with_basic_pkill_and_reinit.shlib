@@ -73,32 +73,10 @@ function runTestCase {
 	# Before doing provisioning, get old internal settings
 	setCustomManifestRefreshInterval "C1"
 
-	# Set delaysecs for this test
-	setInternalSettings "C1" "BackfillReplSvcSetBackfillRaiserDelaySec=20"
-
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
 
-	# Get current instance
-	local -i currentBrokenInstanceCnt
-	local -i currentRepairedInstanceCnt
-	local -i currentBackfillInstanceCnt
-	local -i currentVBTasksDoneInstanceCnt
-	local -i currentBackfillAppendInstanceCnt
-	local -i currentBackfillOsoDocCnt
-
-	local currentClusterLog
-	currentClusterLog=$(getClusterLogs "C1")
-	currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
-	currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
-
-	local currentXdcrLog
-	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
-	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
-	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
-	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
-	grepForPanics
+	cleanupGoxdcrLogs
 
 	echo "sleep 30s for process to restart"
 	sleep 30
@@ -132,14 +110,14 @@ function runTestCase {
 	# sleep 10 sec for XDCR to restart
 	sleep 10
 
-	echo "There should be one broken mapping with SHA 9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074"
-	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074\\"'
-
 	# Workaround for MB-63879
 	createCollection "C1" "B1" "S1" "colA"
 	createCollection "C1" "B1" "S1" "colB"
 	# sleep 15 sec for source manifest to refresh
 	sleep 15
+
+	echo "There should be one broken mapping with SHA 9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074"
+	grepForLastMappingDocUpdateInMetaKvLogs "C1" '\\"Sha256Digest\\":\\"9d702dc4bcdd1886f84d4c37242f9a0e8ba241f4be09d36f63f16188eb5b9074\\"'
 
 	# now create the second missing target collection
 	createCollection "C2" "B2" "S1" "col2"

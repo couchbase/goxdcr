@@ -79,9 +79,9 @@ for directory in ${DIRS_WITH_UT[@]}; do
 	cd ${ROOT_DIR}/${directory}
 	fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 	if [[ -z "$runAllTests" ]]; then
-		go test -short >/tmp/${fileFriendlyFileName}.out 2>&1 &
+		go test -timeout 100s -short >/tmp/${fileFriendlyFileName}.out 2>&1 &
 	else
-		go test >/tmp/${fileFriendlyFileName}.out 2>&1 &
+		go test -timeout 100s >/tmp/${fileFriendlyFileName}.out 2>&1 &
 	fi
 	lastPid="$!"
 	echo "Test $directory with background PID $lastPid"

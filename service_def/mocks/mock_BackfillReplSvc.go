@@ -301,6 +301,53 @@ func (_c *BackfillReplSvc_GetMyVBs_Call) RunAndReturn(run func(*metadata.Replica
 	return _c
 }
 
+// RaiseUnrecoverableBackfillsIfNeeded provides a mock function with given fields:
+func (_m *BackfillReplSvc) RaiseUnrecoverableBackfillsIfNeeded() chan bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RaiseUnrecoverableBackfillsIfNeeded")
+	}
+
+	var r0 chan bool
+	if rf, ok := ret.Get(0).(func() chan bool); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(chan bool)
+		}
+	}
+
+	return r0
+}
+
+// BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RaiseUnrecoverableBackfillsIfNeeded'
+type BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call struct {
+	*mock.Call
+}
+
+// RaiseUnrecoverableBackfillsIfNeeded is a helper method to define mock.On call
+func (_e *BackfillReplSvc_Expecter) RaiseUnrecoverableBackfillsIfNeeded() *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call {
+	return &BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call{Call: _e.mock.On("RaiseUnrecoverableBackfillsIfNeeded")}
+}
+
+func (_c *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call) Run(run func()) *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call) Return(_a0 chan bool) *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call) RunAndReturn(run func() chan bool) *BackfillReplSvc_RaiseUnrecoverableBackfillsIfNeeded_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal, wg
 func (_m *BackfillReplSvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
@@ -346,6 +393,52 @@ func (_c *BackfillReplSvc_ReplicationSpecChangeCallback_Call) Return(_a0 error) 
 }
 
 func (_c *BackfillReplSvc_ReplicationSpecChangeCallback_Call) RunAndReturn(run func(string, interface{}, interface{}, *sync.WaitGroup) error) *BackfillReplSvc_ReplicationSpecChangeCallback_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetBackfillCkptsCleanupCb provides a mock function with given fields: _a0
+func (_m *BackfillReplSvc) SetBackfillCkptsCleanupCb(_a0 func(string) error) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetBackfillCkptsCleanupCb")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(func(string) error) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// BackfillReplSvc_SetBackfillCkptsCleanupCb_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBackfillCkptsCleanupCb'
+type BackfillReplSvc_SetBackfillCkptsCleanupCb_Call struct {
+	*mock.Call
+}
+
+// SetBackfillCkptsCleanupCb is a helper method to define mock.On call
+//   - _a0 func(string) error
+func (_e *BackfillReplSvc_Expecter) SetBackfillCkptsCleanupCb(_a0 interface{}) *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call {
+	return &BackfillReplSvc_SetBackfillCkptsCleanupCb_Call{Call: _e.mock.On("SetBackfillCkptsCleanupCb", _a0)}
+}
+
+func (_c *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call) Run(run func(_a0 func(string) error)) *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(func(string) error))
+	})
+	return _c
+}
+
+func (_c *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call) Return(_a0 error) *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call) RunAndReturn(run func(func(string) error) error) *BackfillReplSvc_SetBackfillCkptsCleanupCb_Call {
 	_c.Call.Return(run)
 	return _c
 }

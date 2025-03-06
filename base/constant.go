@@ -1230,7 +1230,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
 	capellaHostNameSuffix string, datapoolLogFrequency int,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration, backfillSpecSvcSetCompleteBackfillRaiserDelay int) {
+	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1385,7 +1385,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 	PipelineReinitStreamDelaySec = pipelineReinitStreamDelaySec
-	BackfillReplSvcSetBackfillRaiserDelaySec = backfillSpecSvcSetCompleteBackfillRaiserDelay
 }
 
 // XDCR Dev hidden replication settings
@@ -1686,4 +1685,3 @@ const IsPipelineReinitStreamKey = "isPipelineReinitStream"
 
 // Duration of delay for allowing lagging peer nodes to catch up when processing a `PipelineReinitStream` update
 var PipelineReinitStreamDelaySec = 3 * time.Second
-var BackfillReplSvcSetBackfillRaiserDelaySec int = 0

@@ -125,8 +125,8 @@ function runTestCase {
 	# until the max retry
 	# ... backfill raise and push due to explicit mapping change had error ExplicitMapChangePushRetry Operation failed after max retries.  Last error: Nothing to send yet
 	# Because of the asyn nature, the backfill will now be raised, but should not be an issue
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt+1))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt+1))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
