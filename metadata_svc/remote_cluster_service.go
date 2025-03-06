@@ -2986,11 +2986,20 @@ func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.Utils
 	refHostName := ref.HostName()
 	refHttpsHostName := ref.HttpsHostName()
 	if ref.IsDnsSRV() {
-		// We will overwrite both with DNS SRV entries
-		// When user set up DNS SRV with encryption, they should have coded the correct port
+		// We will use updated http & https hostnames in this method.
+		// When user set up DNS SRV with encryption, they should have coded the correct port.
 		srvHosts := ref.GetSRVHostNames()
 		if len(srvHosts) > 0 {
-			refHostName = srvHosts[0]
+			// Select the refHostName deterministically, so that concurrent node re-bootstraps all pick the same (lexicographically smallest) hostname.
+			// This is done to try and avoid different refHttpsHostName (& acc. HttpsHostNames_) from being picked by the nodes concurrently (and thus avoid multiple metakv updates).
+			minHostName := srvHosts[0]
+			for i := 1; i < len(srvHosts); i++ {
+				if srvHosts[i] < minHostName {
+					minHostName = srvHosts[i]
+				}
+			}
+			refHostName = minHostName
+			refHttpsHostName = ""
 		}
 	}
 	var err error
