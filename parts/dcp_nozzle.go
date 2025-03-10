@@ -1180,7 +1180,7 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64, flag uint32) er
 				// The streamRequest sent a same start and end and so no data was transferred
 				go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbno, dcp, nil, nil))
 			} else {
-				go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+				go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, seqno))
 			}
 		}
 	} else {
