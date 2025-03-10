@@ -1,0 +1,118 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C1P0"]=9002)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C1P0"]=13002)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1024)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
+declare -A BackfillHangLooseDelayProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=10000 ["preReplicateVBMasterCheck"]="false")
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	waitForBgJobs
+}
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+ERR_WHEN_PERSISTING_ERR_MSG="experienced error when persisting"
+TRY_TO_FIX_PIPELINE_MSG="Try to fix Pipeline"
+function runTestCase {
+	echo "============================================================================"
+	echo "Running slow backfill and simultaneous repairs test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	echo "Sleeping before checking logs"
+	sleep 15
+	grepForPanics
+	echo "sleep 30s for process to restart"
+	sleep 30
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	# this test is unique from other tests because of the backfill mutation delay.
+	# second broken map is repaired when first backfill is still ongoing.
+	# Also since we have a huge delay there will be mutations unprocessed by the Pipeline
+	# when backfill pipeline restarts.
+	createBucketReplication "C1" "B1" "C2" "B2" BackfillHangLooseDelayProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+	echo "Waiting 5 seconds before checking item count first pass"
+	sleep 5
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" 0
+
+	# Then re-setup the implicit matching that matches
+	createScope "C2" "B2" "S1"
+	createCollection "C2" "B2" "S1" "col1"
+	printGlobalScopeAndCollectionInfo
+	echo "Sleeping 100 seconds for discovery and automatic backfill"
+	sleep 100
+
+	# now create the second missing target collection
+	createCollection "C2" "B2" "S1" "col2"
+	echo "Sleeping 100 seconds for backfill to be raised"
+	sleep 100
+
+	# speeden-up backfill before checking for changes_left and doc count
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevBackfillSendDelayMs=0"
+	sleep 30
+
+	checkUnidirectionalChangesLeft
+	grepForPanics
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	validateInternalLogWithInstance "C1" "$ERR_WHEN_PERSISTING_ERR_MSG" 0
+	validateInternalLogWithInstance "C1" "$TRY_TO_FIX_PIPELINE_MSG" 0
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	cleanupTestCaseInternalSettings
+	# remove trap as no longer needed
+	trap - EXIT
+}

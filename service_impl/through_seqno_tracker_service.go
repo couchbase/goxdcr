@@ -1203,14 +1203,21 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 	case common.StreamingEnd:
 		vbno, ok := event.Data.(uint16)
 		if !ok {
-			err := fmt.Errorf("Invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
+			err := fmt.Errorf("invalid vbno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.Data))
+			tsTracker.logger.Errorf(err.Error())
+			tsTracker.handleGeneralError(err)
+			return err
+		}
+		endSeqno, ok := event.OtherInfos.(uint64)
+		if !ok {
+			err := fmt.Errorf("invalid endSeqno data type raised for StreamingEnd. Type: %v", reflect.TypeOf(event.OtherInfos))
 			tsTracker.logger.Errorf(err.Error())
 			tsTracker.handleGeneralError(err)
 			return err
 		}
 		receiveAsOSO, _ := tsTracker.shouldReceiveAsOso(vbno)
 		if !receiveAsOSO {
-			tsTracker.handleBackfillStreamEnd(vbno)
+			tsTracker.handleBackfillStreamEnd(vbno, endSeqno)
 		} else {
 			err := fmt.Errorf("Received streamEND before receiving oso end")
 			tsTracker.logger.Errorf(err.Error())
@@ -1264,14 +1271,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamBypass(vbno uint16)
 	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(VBSeqnoBypassed)
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16) {
+func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16, endSeqno uint64) {
 	if atomic.CompareAndSwapUint32(&tsTracker.vbBackfillHelperActive, 0, 1) {
 		go tsTracker.bgScanForThroughSeqno()
 	}
 
-	lastSeenSeqno := tsTracker.vb_last_seen_seqno_map[vbno].GetSeqno()
-	tsTracker.vbBackfillLastDCPSeqnoMap[vbno].SetSeqno(lastSeenSeqno)
-
+	tsTracker.vbBackfillLastDCPSeqnoMap[vbno].SetSeqno(endSeqno)
 	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(VBSeqnoStreamEndReceived)
 }
 
