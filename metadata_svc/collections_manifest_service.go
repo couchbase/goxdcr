@@ -483,7 +483,7 @@ func (c *CollectionsManifestService) waitForManifestGetter() {
 	}
 }
 
-type AgentSrcManifestGetter func() *metadata.CollectionsManifest
+type AgentSrcManifestGetter func(forceRefresh bool) *metadata.CollectionsManifest
 
 type AgentPersistResult struct {
 	SrcErr     error
@@ -1157,7 +1157,7 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 
 	var manifest *metadata.CollectionsManifest
 	getRetry := func() error {
-		manifest = a.srcManifestGetter()
+		manifest = a.srcManifestGetter(false /*forceRefresh*/)
 		if manifest == nil {
 			return fmt.Errorf("Unable to retrieve manifest from source bucket %v\n", a.replicationSpec.SourceBucketName)
 		} else {

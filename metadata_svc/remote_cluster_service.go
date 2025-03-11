@@ -2326,8 +2326,9 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string, has
 	return agent.utils.GetCollectionsManifest(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
 }
 
-// refreshIfPossible to prevent overwhelming target outside of refresh interval
-func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
+// forceRefresh triggers a target manifest fetch outside the regular refresh interval.
+// Use with caution to avoid overwhelming the target.
+func (agent *RemoteClusterAgent) GetManifest(bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	// Avoid get to avoid clone since this is a high-volume call
 	if !agent.currentCapability.HasInitialized() || atomic.LoadUint32(&agent.initDone) == 0 {
 		return nil, RefreshNotEnabledYet
@@ -2355,24 +2356,7 @@ func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossibl
 		return agent.OneTimeGetRemoteBucketManifest(bucketName)
 	}
 
-	return getter.GetManifest(), nil
-}
-
-func (agent *RemoteClusterAgent) refreshBucketsManifests() {
-	var waitGrp sync.WaitGroup
-	agent.bucketMtx.RLock()
-	defer agent.bucketMtx.RUnlock()
-
-	for _, getter := range agent.bucketManifestGetters {
-		waitGrp.Add(1)
-		refreshFunc := func() {
-			getter.GetManifest()
-			waitGrp.Done()
-		}
-		go refreshFunc()
-	}
-
-	waitGrp.Wait()
+	return getter.GetManifest(forceRefresh), nil
 }
 
 func (agent *RemoteClusterAgent) InitDone() bool {
@@ -3966,7 +3950,7 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName strin
 		panic("Getter should be found")
 	}
 	agent.bucketMtx.RUnlock()
-	manifest := manifestGetter.GetManifest()
+	manifest := manifestGetter.GetManifest(false /*forceRefresh */)
 	agent.UnRegisterBucketRefresh(bucketName)
 
 	if manifest == nil {
