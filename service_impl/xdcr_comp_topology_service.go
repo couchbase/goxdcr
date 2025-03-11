@@ -59,10 +59,10 @@ type XDCRTopologySvc struct {
 	cachedClusterCompatErr   error
 	cachedClusterCompatTimer *time.Timer
 
-	cachedClientCertMandatoryMtx   sync.RWMutex
-	cachedClientCertMandatory      bool
-	cachedClientCertMandatoryErr   error
-	cachedClientCertMandatoryTimer *time.Timer
+	cachedClientCertLevelMtx          sync.RWMutex
+	cachedClientCertMandatoryOrHybrid bool
+	cachedClientCertLevelErr          error
+	cachedClientCertLevelTimer        *time.Timer
 
 	clusterCompatRLO *RateLimitOperatorCache
 	terseInfoRLO     *RateLimitOperatorCache
@@ -664,26 +664,26 @@ func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
 	}
 }
 
-func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
-	top_svc.cachedClientCertMandatoryMtx.RLock()
+func (top_svc *XDCRTopologySvc) ClientCertIsMandatoryOrHybrid() (bool, error) {
+	top_svc.cachedClientCertLevelMtx.RLock()
 	// Timer's existence determines whether or not we're in cool down period
-	if top_svc.cachedClientCertMandatoryTimer != nil {
+	if top_svc.cachedClientCertLevelTimer != nil {
 		// still within cooldown period - return cached information
-		defer top_svc.cachedClientCertMandatoryMtx.RUnlock()
-		return top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr
+		defer top_svc.cachedClientCertLevelMtx.RUnlock()
+		return top_svc.cachedClientCertMandatoryOrHybrid, top_svc.cachedClientCertLevelErr
 	}
 
 	// Upgrade lock
-	top_svc.cachedClientCertMandatoryMtx.RUnlock()
-	top_svc.cachedClientCertMandatoryMtx.Lock()
-	defer top_svc.cachedClientCertMandatoryMtx.Unlock()
+	top_svc.cachedClientCertLevelMtx.RUnlock()
+	top_svc.cachedClientCertLevelMtx.Lock()
+	defer top_svc.cachedClientCertLevelMtx.Unlock()
 
-	if top_svc.cachedClientCertMandatoryTimer != nil {
+	if top_svc.cachedClientCertLevelTimer != nil {
 		// someone sneaked in
-		return top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr
+		return top_svc.cachedClientCertMandatoryOrHybrid, top_svc.cachedClientCertLevelErr
 	}
 
-	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.ClientCertIsMandatory()", base.DiagInternalThreshold)
+	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.ClientCertIsMandatoryOrHybrid()", base.DiagInternalThreshold)
 	defer stopFunc()
 
 	var cooldownPeriod = base.TopologySvcCoolDownPeriod
@@ -693,20 +693,20 @@ func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
 		base.ShortHttpTimeout, &clientCertOutput, nil, false, top_svc.logger, nil)
 	if err != nil || statusCode != http.StatusOK {
 		err = fmt.Errorf("ClientCertIsMandatory.Query(%v) status %v err %v", base.ClientCertAuthPath, statusCode, err)
-		top_svc.cachedClientCertMandatoryErr = err
-		top_svc.cachedClientCertMandatory = false
+		top_svc.cachedClientCertLevelErr = err
+		top_svc.cachedClientCertMandatoryOrHybrid = false
 		// ns_server call failed means we need to elongate the cooldown period
 	} else {
 		// If parsing fails, it is either coding bug (unlikely since it would have been tested)
 		// or ns_server is returning odd things. In either case, should still try to cooldown
-		top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr = top_svc.utils.ParseClientCertOutput(clientCertOutput)
+		top_svc.cachedClientCertMandatoryOrHybrid, top_svc.cachedClientCertLevelErr = top_svc.utils.ParseClientCertOutput(clientCertOutput)
 	}
-	if top_svc.cachedClientCertMandatoryErr != nil {
+	if top_svc.cachedClientCertLevelErr != nil {
 		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
 	}
 
-	top_svc.cachedClientCertMandatoryTimer = time.AfterFunc(cooldownPeriod, top_svc.clearCachedClientCertCache)
-	return top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr
+	top_svc.cachedClientCertLevelTimer = time.AfterFunc(cooldownPeriod, top_svc.clearCachedClientCertCache)
+	return top_svc.cachedClientCertMandatoryOrHybrid, top_svc.cachedClientCertLevelErr
 }
 
 func (top_svc *XDCRTopologySvc) setClientCertSettingChangeCb() {
@@ -714,11 +714,11 @@ func (top_svc *XDCRTopologySvc) setClientCertSettingChangeCb() {
 }
 
 func (top_svc *XDCRTopologySvc) clearCachedClientCertCache() {
-	top_svc.cachedClientCertMandatoryMtx.Lock()
-	top_svc.cachedClientCertMandatoryTimer = nil
-	top_svc.cachedClientCertMandatoryErr = nil
-	top_svc.cachedClientCertMandatory = false
-	top_svc.cachedClientCertMandatoryMtx.Unlock()
+	top_svc.cachedClientCertLevelMtx.Lock()
+	top_svc.cachedClientCertLevelTimer = nil
+	top_svc.cachedClientCertLevelErr = nil
+	top_svc.cachedClientCertMandatoryOrHybrid = false
+	top_svc.cachedClientCertLevelMtx.Unlock()
 }
 
 func (top_svc *XDCRTopologySvc) getTerseInfoOp() (interface{}, error) {

@@ -222,18 +222,10 @@ func (sec *SecurityService) refresh(code uint64) error {
 			sec.logger.Errorf("error refreshing client certs for CFG_CHANGE_CLIENT_CERTS_TLSCONFIG change, err=%v", err)
 			return err
 		}
-	}
 
-	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
-		if err := sec.refreshTLSConfig(); err != nil {
-			sec.logger.Errorf("error refreshing tlsConfig for CFG_CHANGE_CERTS_TLSCONFIG change, err=%v", err)
-			return err
-		}
-
-		// When a user changes the client cert config (i.e. off -> mandatory, or mandatory -> off)
-		// CFG_CHANGE_CERTS_TLSCONFIG is sent down but not CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
-		// because the client certs themselves did not change
-		// XDCR needs to ensure that any decision-making based on mandatory cert or not should be refreshed
+		// Also sent when a user modifies NS server's internal "ShouldClientsUseClientCert" boolean flag;
+		// by changing the client cert config from 'disabled'/'enabled' to 'hybrid'/'mandatory', or vice-versa.
+		// Hence updating to ensure that any decision-making based on the client-cert-auth level gets the correct state.
 		go func() {
 			sec.clientCertSettingChangeCbMtx.RLock()
 			if sec.clientCertSettingChangeCb != nil {
@@ -241,6 +233,13 @@ func (sec *SecurityService) refresh(code uint64) error {
 			}
 			sec.clientCertSettingChangeCbMtx.RUnlock()
 		}()
+	}
+
+	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
+		if err := sec.refreshTLSConfig(); err != nil {
+			sec.logger.Errorf("error refreshing tlsConfig for CFG_CHANGE_CERTS_TLSCONFIG change, err=%v", err)
+			return err
+		}
 
 		if err := sec.refreshCert(); err != nil {
 			sec.logger.Errorf("error refreshing certs for CFG_CHANGE_CERTS_TLSCONFIG change, err=%v", err)

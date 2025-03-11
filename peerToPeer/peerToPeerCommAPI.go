@@ -137,9 +137,9 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 			}, base.ErrorNilCertificateStrictMode
 		}
 
-		// If n2n encryption is "strict/all" and client cert is "mandatory", then the traditional cbauth
+		// If n2n encryption is 'strict'/'all' and client cert is 'mandatory'/'hybrid', then the traditional cbauth
 		// username/pw "superuser" pairing will not work - and thus we must use clientCert and key provided by the ns_server
-		if isMandatory, _ := p2p.xdcrCompTopSvc.ClientCertIsMandatory(); isMandatory {
+		if isMandatoryOrHybrid, _ := p2p.xdcrCompTopSvc.ClientCertIsMandatoryOrHybrid(); isMandatoryOrHybrid {
 			clientCertKeyPair = p2p.securitySvc.GetClientCertAndKeyPair()
 		}
 	}

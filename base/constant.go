@@ -1863,6 +1863,7 @@ const (
 	ErrorStringClientCertMandatory = "tls: certificate required"
 	StateKey                       = "state"
 	MandatoryVal                   = "mandatory"
+	HybridVal                      = "hybrid"
 )
 
 // Target Awareness (Heartbeat) related Internal Setting

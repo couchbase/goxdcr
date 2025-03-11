@@ -3651,8 +3651,8 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isCluster
 	return vbReplicaMap, kvToNsServerTranslateMap, numOfReplicas, vbListForBeingAReplica, nil
 }
 
-// ParseClientCertOutput takes the output of /settings/clientCertAuth endpoint and checks if client cert is mandatory
-func (u *Utilities) ParseClientCertOutput(clientCertInput map[string]interface{}) (isMandatory bool, err error) {
+// ParseClientCertOutput takes the output of /settings/clientCertAuth endpoint and checks if client cert is 'mandatory' or 'hybrid'
+func (u *Utilities) ParseClientCertOutput(clientCertInput map[string]interface{}) (isMandatoryOrHybrid bool, err error) {
 	if clientCertInput == nil {
 		err = fmt.Errorf("ClientCert input is empty")
 		return
@@ -3670,7 +3670,7 @@ func (u *Utilities) ParseClientCertOutput(clientCertInput map[string]interface{}
 		return
 	}
 
-	isMandatory = stateStr == base.MandatoryVal
+	isMandatoryOrHybrid = (stateStr == base.MandatoryVal) || (stateStr == base.HybridVal)
 	return
 }
 

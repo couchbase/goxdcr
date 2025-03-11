@@ -420,9 +420,9 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 				}, base.ErrorNilCertificateStrictMode
 			}
 
-			// If n2n encryption is "strict/all" and client cert is "mandatory", then the traditional cbauth
+			// If n2n encryption is 'strict'/'all' and client cert is 'mandatory'/'hybrid', then the traditional cbauth
 			// username/pw "superuser" pairing will not work - and thus we must use clientCert and key provided by the ns_server
-			if isMandatory, _ := xdcrCompTopologySvc.ClientCertIsMandatory(); isMandatory {
+			if isMandatoryOrHybrid, _ := xdcrCompTopologySvc.ClientCertIsMandatoryOrHybrid(); isMandatoryOrHybrid {
 				clientCertKeyPair = securitySvc.GetClientCertAndKeyPair()
 			}
 		}
