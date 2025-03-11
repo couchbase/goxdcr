@@ -718,6 +718,8 @@ type WrappedMCRequest struct {
 	SrcColNamespaceMtx         sync.RWMutex
 	ColInfo                    *TargetCollectionInfo
 	ColInfoMtx                 sync.RWMutex
+	TgtColNamespace            *CollectionNamespace
+	TgtColNamespaceMtx         sync.RWMutex
 	SlicesToBeReleasedByXmem   [][]byte
 	SlicesToBeReleasedByRouter [][]byte
 	SlicesToBeReleasedMtx      sync.Mutex

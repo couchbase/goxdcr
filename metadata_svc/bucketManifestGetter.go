@@ -9,10 +9,11 @@
 package metadata_svc
 
 import (
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"time"
+
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 )
 
 /**
@@ -54,8 +55,8 @@ func NewBucketManifestGetter(bucketName string, manifestOps service_def.Collecti
 	return getter
 }
 
-func (s *BucketManifestGetter) runGetOp() {
-	if time.Now().Sub(s.lastQueryTime) > (s.checkInterval) {
+func (s *BucketManifestGetter) runGetOp(forceRefresh bool) {
+	if time.Now().Sub(s.lastQueryTime) > (s.checkInterval) || forceRefresh {
 		// Prevent overwhelming the ns_server, only query every "checkInterval" seconds
 		manifest, err := s.getterFunc(s.bucketName)
 		if err == nil {
@@ -74,7 +75,7 @@ func (s *BucketManifestGetter) runGetOp() {
 // This is so that if a second caller calls after
 // the first caller, the second caller will be able to receive
 // the most up-to-date lastStoredManifest
-func (s *BucketManifestGetter) GetManifest() *metadata.CollectionsManifest {
+func (s *BucketManifestGetter) GetManifest(forceRefresh bool) *metadata.CollectionsManifest {
 	s.callersMtx.Lock()
 	defer s.callersMtx.Unlock()
 	s.callersCnt++
@@ -82,7 +83,7 @@ func (s *BucketManifestGetter) GetManifest() *metadata.CollectionsManifest {
 	case stateNone:
 		// First caller
 		s.getterState = stateRunning
-		go s.runGetOp()
+		go s.runGetOp(forceRefresh)
 		for s.getterState == stateRunning {
 			s.callersCv.Wait()
 		}

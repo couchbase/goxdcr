@@ -485,7 +485,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *base.WrappedUprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *base.WrappedUprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, targetManifest *metadata.CollectionsManifest, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -532,6 +532,8 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		err = fmt.Errorf("received nil latest target manifest")
 		return
 	}
+
+	targetManifest = latestTargetManifest
 
 	if !isImplicitMapping {
 		err = c.handleExplicitMappingUpdate(latestSourceManifest, latestTargetManifest)
@@ -1208,21 +1210,167 @@ func (c *CollectionsRouter) brokenMapIdleDoubleCheck() {
 	}
 }
 
+// Retrieves the latest target manifest, validating the cache first and fetching a new one only if necessary.
+func (c *CollectionsRouter) getLatestTargetManifestId(spec *metadata.ReplicationSpecification, reqManifestId uint64, reqColId uint32, tgtColNamespace *base.CollectionNamespace) (uint64, error) {
+	// Read the latest cached manifest
+	cachedManifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(spec, math.MaxUint64)
+	if err != nil {
+		return 0, fmt.Errorf("unable to retrieve target manifest from cache: %v", err)
+	}
+
+	// If cache is newer than request manifest ID, validate the cache
+	if cachedManifest != nil && cachedManifest.Uid() > reqManifestId {
+
+		if tgtColNamespace == nil {
+			// we should never hit this case
+			return 0, fmt.Errorf("manifest cache validation failed: unexpected nil target collection namespace (partId=%v, reqManifestId=%v, reqColId=%v)", c.parentRouterId, reqManifestId, reqColId)
+		}
+
+		// Check if the request's target namespace exists in the cached manifest
+		colId, err := cachedManifest.GetCollectionId(tgtColNamespace.ScopeName, tgtColNamespace.CollectionName)
+		if err == base.ErrorNotFound || (err == nil && colId != reqColId) {
+			// Case 1: The request's manifest includes the collection, but the cached manifest does not.
+			//         → This indicates the cache is valid, so return the cached UID.
+			// Case 2: A collection may have been deleted and recreated, with XDCR fetching the manifest after the recreation.
+			//         → Return the cached manifest UID, as there is no way to retrieve the manifest ID
+			//           corresponding to the deletion (this scenario is very rare).
+			return cachedManifest.Uid(), nil
+		}
+	}
+
+	// At this point, the cache is invalid → Fetch the latest manifest
+	// This is an expensive call, so it was deferred until absolutely necessary
+	err = c.collectionsManifestSvc.ForceTargetManifestRefresh(spec)
+	if err != nil {
+		return 0, fmt.Errorf("failed to refresh target manifest: %v", err)
+	}
+
+	// fetch the new manifest
+	newManifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(spec, math.MaxUint64)
+	if err != nil {
+		return 0, fmt.Errorf("unable to retrieve target manifest after refresh: %v", err)
+	}
+	// verify the new manifest
+	if newManifest.Uid() > reqManifestId {
+		return newManifest.Uid(), nil
+	}
+
+	return 0, fmt.Errorf("manifest refresh did not yield a newer manifest (partId=%v, manifestIdBeforeRefresh=%v, manifestIdAfterRefresh=%v, reqManifestId=%v)", c.parentRouterId, cachedManifest.Uid(), newManifest.Uid(), reqManifestId)
+}
+
+// Checks if XMEM reported a unknown collection error upstream possibly due to a manifest change.
+// Note that the caller must exclusively lock c.brokenDenyMtx before invoking this function
+func (c *CollectionsRouter) checkIfXmemReportedCollectionError(spec *metadata.ReplicationSpecification, reqManifestId uint64, reqColId uint32, tgtColNamespace *base.CollectionNamespace) (xmemReportedColError bool, manifestId uint64, err error) {
+	if reqColId == 0 {
+		// reqColId == 0 suggests this was likely not triggered by XMEM.
+		return false, 0, nil
+	}
+
+	lastKnownTgtManifestId := c.lastKnownTgtManifest.Uid()
+	manifestChanged := reqManifestId != lastKnownTgtManifestId
+
+	// Check if the last known manifest contains the requested collection ID
+	_, _, findErr := c.lastKnownTgtManifest.GetScopeAndCollectionName(reqColId)
+
+	if findErr == nil {
+		// Collection(with the same colId) exists in the last known manifest
+		// → This suggests a manifest change that XDCR has not yet processed
+		// Fetch the latest target manifest to record the broken mapping against it
+		xmemReportedColError = true
+		manifestId, err = c.getLatestTargetManifestId(spec, reqManifestId, reqColId, tgtColNamespace)
+		return
+	}
+
+	if manifestChanged {
+		// Two possibilities:
+		// 1. The new manifest does not contain the target collection namespace.
+		// 2. The new manifest contains the target collection namespace but was recreated after deletion.
+		//    (e.g., if XDCR pulled the manifest after the collection was recreated)
+		//    In this case return the lastKnownManifestId since there is no way to fetch the manifestId against which
+		//    the collection was deleted (this is very rare)
+		xmemReportedColError = true
+		manifestId = lastKnownTgtManifestId
+		return
+	}
+
+	// This case should never happen:
+	// If a request has a collection ID, it must have existed in the request's manifest.
+	// Given that the manifest ID has not changed, the collection should still be present.
+	c.logger.Errorf(
+		"%v received a request with colId %v that is absent. reqManifestId: %v, lastKnownTargetManifestId: %v",
+		c.parentRouterId, reqColId, reqManifestId, lastKnownTgtManifestId,
+	)
+
+	return
+}
+
 // When "shouldIgnore" is true, the wrappedMCR is recycled
 func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMcr *base.WrappedMCRequest, unmappedNamespaces metadata.CollectionNamespaceMapping, shouldIgnore bool) {
 	var routingInfo CollectionsRoutingInfo
+
 	if !c.IsRunning() {
 		return
 	}
 
+	// Read collection info from wrapped request
 	wrappedMcr.ColInfoMtx.RLock()
 	colId := wrappedMcr.ColInfo.ColId
-	manifestId := wrappedMcr.ColInfo.ManifestId
+	reqManifestId := wrappedMcr.ColInfo.ManifestId
 	wrappedMcr.ColInfoMtx.RUnlock()
 
+	wrappedMcr.TgtColNamespaceMtx.RLock()
+	tgtColNamespace := wrappedMcr.TgtColNamespace
+	wrappedMcr.TgtColNamespaceMtx.RUnlock()
+
 	c.brokenDenyMtx.Lock()
-	_, _, findErr := c.lastKnownTgtManifest.GetScopeAndCollectionName(colId)
-	if findErr == nil {
+
+	// Check if XMEM reported a collection error in a separate goroutine
+	var xmemReportedColError bool
+	var manifestId uint64
+	var err error
+	xmemCheckCompleted := make(chan bool)
+
+	go func() {
+		xmemReportedColError, manifestId, err = c.checkIfXmemReportedCollectionError(c.spec, reqManifestId, colId, tgtColNamespace)
+		if err != nil {
+			c.logger.Debugf("Failed to check if XMEM reported collection error (partId: %v), error: %v", c.parentRouterId, err)
+		}
+		close(xmemCheckCompleted)
+	}()
+
+	// Add the unmappedNamespaces to broken map
+	var raiseBrokenEvent bool
+	var allAlreadyExist = true
+	for sourceNs, targetNamespaces := range unmappedNamespaces {
+		for _, targetNamespace := range targetNamespaces {
+			alreadyExists := c.brokenMapping.AddSingleMapping(sourceNs.CollectionNamespace, targetNamespace)
+			if !alreadyExists {
+				allAlreadyExist = false
+			}
+		}
+	}
+	if !allAlreadyExist {
+		c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
+		raiseBrokenEvent = true
+	}
+
+	// Wait for XMEM check to complete
+	<-xmemCheckCompleted
+
+	// Ensure manifestId is valid
+	if manifestId == 0 {
+		// 0 indicates an error
+		// we tried our best to fetch the right manifestId
+		// the show shoundn't stop - fallback to reqManifestId for tagging the broken map
+		manifestId = reqManifestId
+	}
+
+	if !allAlreadyExist && c.logger.GetLogLevel() > log.LogLevelDebug {
+		c.logger.Debugf("Based on target manifest %v brokenmap: %v", manifestId, c.brokenMapping.String())
+	}
+
+	// Handle if XMEM-reported collection error
+	if xmemReportedColError {
 		// If this function hits here given the wrappedMCR and it is actually found using lastKnownTgtManifest
 		// then it means that this is being called by downstream XMEM reporting back saying that the target KV does
 		// not know about the collection... because XMEM doesn't do manifest checks, it just raises the error and comes
@@ -1237,23 +1385,7 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 			c.brokenMapDblChkKicker = time.AfterFunc(5*c.targetManifestRefresh, c.brokenMapIdleDoubleCheck)
 		}
 	}
-	var raiseBrokenEvent bool
-	var allAlreadyExist = true
-	for sourceNs, targetNamespaces := range unmappedNamespaces {
-		for _, targetNamespace := range targetNamespaces {
-			alreadyExists := c.brokenMapping.AddSingleMapping(sourceNs.CollectionNamespace, targetNamespace)
-			if !alreadyExists {
-				allAlreadyExist = false
-			}
-		}
-		if !allAlreadyExist && c.logger.GetLogLevel() > log.LogLevelDebug {
-			c.logger.Debugf("Based on target manifest %v brokenmap: %v", manifestId, c.brokenMapping.String())
-		}
-	}
-	if !allAlreadyExist {
-		c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
-		raiseBrokenEvent = true
-	}
+
 	routingInfo.BrokenMap = c.brokenMapping.Clone()
 	routingInfo.TargetManifestId = manifestId
 	c.brokenDenyMtx.Unlock()
@@ -1774,12 +1906,16 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 	var migrationColIdNamespaceMap map[uint32]*base.CollectionNamespace
 
 	collectionMode := router.collectionModes.Get()
+	var targetManifest *metadata.CollectionsManifest
 	if collectionMode.IsImplicitMapping() &&
 		(mcRequest.GetSourceCollectionNamespace() == nil || mcRequest.GetSourceCollectionNamespace().IsDefault()) {
 		colIds = append(colIds, 0)
+		mcRequest.TgtColNamespaceMtx.Lock()
+		mcRequest.TgtColNamespace = &base.DefaultCollectionNamespace
+		mcRequest.TgtColNamespaceMtx.Unlock()
 	} else {
 		var backfillPersistHadErr bool
-		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, origUprEvent)
+		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, targetManifest, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, origUprEvent)
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward
@@ -1813,7 +1949,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 		}
 	}
 
-	err = router.prepareMcRequest(colIds, mcRequest, origUprEvent, migrationColIdNamespaceMap)
+	err = router.prepareMcRequest(colIds, mcRequest, origUprEvent, migrationColIdNamespaceMap, targetManifest)
 	if err != nil {
 		return err
 	}
@@ -1825,7 +1961,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 // Sets up the unique Key
 // If a request is meant to replicate to >1 target collections, prepare the sibling requests as well
 // and notify throughSeqnoTracker svc that there are sibling requests coming for this given source seqno
-func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMCRequest, origUprEvent *base.WrappedUprEvent, migrationNamespaceMap map[uint32]*base.CollectionNamespace) error {
+func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMCRequest, origUprEvent *base.WrappedUprEvent, migrationNamespaceMap map[uint32]*base.CollectionNamespace, targetManifest *metadata.CollectionsManifest) error {
 	var err error
 	var syncCh chan bool = nil
 	numCols := len(colIds)
@@ -1878,6 +2014,18 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 			reqToProcess.ColInfo.TargetNamespace = migrationNamespaceMap[colId]
 		}
 		reqToProcess.ColInfoMtx.Unlock()
+
+		if targetManifest != nil {
+			scopeName, collectionName, err := targetManifest.GetScopeAndCollectionName(colId)
+			if err == nil {
+				reqToProcess.TgtColNamespaceMtx.Lock()
+				reqToProcess.TgtColNamespace = &base.CollectionNamespace{
+					ScopeName:      scopeName,
+					CollectionName: collectionName,
+				}
+				reqToProcess.TgtColNamespaceMtx.Unlock()
+			}
+		}
 	}
 	if numCols > 1 {
 		firstReq.Cloned = true
@@ -2058,6 +2206,9 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq.SrcColNamespaceMtx.Lock()
 	newReq.SrcColNamespace = nil
 	newReq.SrcColNamespaceMtx.Unlock()
+	newReq.TgtColNamespaceMtx.Lock()
+	newReq.TgtColNamespace = nil
+	newReq.TgtColNamespaceMtx.Unlock()
 	newReq.Cloned = false
 	return newReq, nil
 }

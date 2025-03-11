@@ -18,7 +18,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,6 +158,7 @@ func setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc 
 	}
 	collectionsManifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&manifest, &manifest, nil)
 	collectionsManifestSvc.On("GetSpecificTargetManifest", mock.Anything, mock.Anything).Return(&manifest, nil)
+	collectionsManifestSvc.On("ForceTargetManifestRefresh", mock.Anything).Return(nil)
 	pair.Source = &manifest
 	pair.Target = &manifest
 	return
@@ -818,8 +821,8 @@ func TestRouterRaceyBrokenMap(t *testing.T) {
 
 	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
 	wrappedMCR.ColInfo = &base.TargetCollectionInfo{
-		ManifestId:          0,
-		ColId:               0,
+		ManifestId:          7,
+		ColId:               8,
 		ColIDPrefixedKey:    nil,
 		ColIDPrefixedKeyLen: 0,
 		TargetNamespace: &base.CollectionNamespace{
@@ -901,8 +904,8 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 
 	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
 	wrappedMCR.ColInfo = &base.TargetCollectionInfo{
-		ManifestId:          0,
-		ColId:               0,
+		ManifestId:          7,
+		ColId:               8,
 		ColIDPrefixedKey:    nil,
 		ColIDPrefixedKeyLen: 0,
 		TargetNamespace: &base.CollectionNamespace{
@@ -931,6 +934,7 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
 	assert.Equal(1, ignoreCnt)
+	// Note that brokenMapDblChkTicker and brokenMapDblChkKicker will be not nil only when xmem raises collection error
 	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
 	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
 	assert.Nil(lastCalledBackfillMap)
@@ -1121,4 +1125,150 @@ func TestMigrationFilterAfterStrippingTxnXattr(t *testing.T) {
 	_, errMap, errMcReq := c.GetTargetUsingMigrationFilter(uprEvent, mcReq, nil)
 	a.Equal(len(errMap), 0)
 	a.Equal(len(errMcReq), 0)
+}
+
+func setupCollectionManifestSvcMocksForGetLatestTargetManifest(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification) {
+	manifestFileDir := "../metadata/testdata"
+	manifestFileNamev8 := "targetManifestv1.json"
+	manifestFileNamev9 := "targetManifestv2.json"
+
+	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileNamev8))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest8, err := metadata.NewCollectionsManifestFromBytes(data) // contains S2.C3
+
+	data, err = ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileNamev9))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest9, err := metadata.NewCollectionsManifestFromBytes(data) // does not S2.C3
+
+	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(math.MaxUint64)).Return(&manifest8, nil).Once() // before refresh
+	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(math.MaxUint64)).Return(&manifest9, nil)        // after refresh
+	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(8)).Return(&manifest8, nil)
+	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(9)).Return(&manifest9, nil)
+	collectionsManifestSvc.On("ForceTargetManifestRefresh", mock.Anything).Return(nil)
+	collectionsManifestSvc.On("GetLatestManifests", spec, false).Return(&manifest8, &manifest8, nil)
+}
+
+func TestCollectionsRouter_getLatestTargetManifest(t *testing.T) {
+	fmt.Println("============== Test case start: getLatestTargetManifest =================")
+	defer fmt.Println("============== Test case end: getLatestTargetManifest =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	setupCollectionManifestSvcMocksForGetLatestTargetManifest(collectionsManifestSvc, spec)
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, collectionsCap, nil, connectivityStatus, nil)
+	assert.Nil(err)
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+
+	reqManifestId := 8
+	reqColId, _ := strconv.ParseUint("d", base.CollectionsUidBase, 64)
+	tgtColNameSpace := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col1"}
+
+	// cache is stale - needs refresh
+	id, err := collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId), tgtColNameSpace)
+	assert.Nil(err)
+	assert.Equal(uint64(9), id)
+
+	// next pass should read from cache
+	collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId), tgtColNameSpace)
+	assert.Nil(err)
+	assert.Equal(uint64(9), id)
+
+	// error injection - to verify that we hitting the cache path
+	manifestFileDir := "../metadata/testdata"
+	manifestFileNamev8a := "targetManifestv1a.json"
+	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileNamev8a))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest8a, err := metadata.NewCollectionsManifestFromBytes(data) // contains S2.C3 with
+	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(7)).Return(&manifest8a, nil)
+	_, err1 := collectionsRouter.getLatestTargetManifestId(spec, uint64(7), uint32(reqColId), nil)
+	assert.NotNil(err1)
+}
+
+func TestCollectionsRouter_checkIfXmemReportedCollectionError(t *testing.T) {
+	fmt.Println("============== Test case start: checkIfXmemReportedCollectionError =================")
+	defer fmt.Println("============== Test case end: checkIfXmemReportedCollectionError =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	setupCollectionManifestSvcMocksForGetLatestTargetManifest(collectionsManifestSvc, spec)
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, collectionsCap, nil, connectivityStatus, nil)
+	assert.Nil(err)
+
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	assert.Nil(collectionsRouter.Start())
+
+	reqManifestId := 8
+	reqColId, _ := strconv.ParseUint("d", base.CollectionsUidBase, 64)
+
+	uprEvent, err := RetrieveUprFile("./testdata/MB-33010Upr.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: uprEvent,
+		ColNamespace: &base.CollectionNamespace{
+			ScopeName:      "S2",
+			CollectionName: "col3",
+		},
+	}
+	wrappedEvent.UprEvent = uprEvent
+
+	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
+	wrappedMCR.ColInfo = &base.TargetCollectionInfo{
+		ManifestId:          7,
+		ColId:               uint32(reqColId),
+		ColIDPrefixedKey:    nil,
+		ColIDPrefixedKeyLen: 0,
+		TargetNamespace: &base.CollectionNamespace{
+			ScopeName:      "S1",
+			CollectionName: "col1",
+		},
+	}
+
+	// routing updater receiver
+	var lastCalledBackfillMap metadata.CollectionNamespaceMapping
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		lastCalledBackfillMap = info.BackfillMap
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+	// route one request through the router
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+	// manifest 8 contains S2.C3 and hence error should be nil
+	_, _, _, _, _, _, err = collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
+	assert.Nil(err)
+	assert.Nil(lastCalledBackfillMap)
+	assert.Equal(0, ignoreCnt)
+
+	xmemReported, manId, err := collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId), wrappedMCR.ColInfo.TargetNamespace)
+	assert.Equal(true, xmemReported)
+	assert.Equal(uint64(9), manId)
+	assert.Nil(err)
+
+	// route another req through the router so that the lastKnownTgtManifest updates to 9
+	_, _, _, _, _, _, err = collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
+	assert.NotNil(err)
+	collectionsRouter.recordUnroutableRequest(wrappedMCR)
+	assert.Equal(1, ignoreCnt)
+	assert.Nil(lastCalledBackfillMap)
+
+	// denotes the case where router updated its cache after xmem raises a collection error for the reqs routed with older manifest ID
+	xmemReported, manId, err = collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId), wrappedMCR.ColInfo.TargetNamespace)
+	assert.Equal(true, xmemReported)
+	assert.Equal(uint64(9), manId)
+	assert.Nil(err)
 }

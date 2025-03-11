@@ -144,6 +144,52 @@ function grepForInvalidCommand {
 	return 0
 }
 
+function grepForCollectionIdAbsentError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	local found=0
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "received a request with colId" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'received a request with colId' in ${logsDir}/${dir}"
+				found=1
+			fi
+		done
+	done
+
+	# If occurrences are found, exit
+	if (($found != 0)); then
+		exit 1
+	fi
+
+	return 0
+}
+
+function grepForTgtColNamespaceNilError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	local found=0
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "manifest cache validation failed: unexpected nil target collection namespace" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'manifest cache validation failed: unexpected nil target collection namespace' in ${logsDir}/${dir}"
+				found=1
+			fi
+		done
+	done
+
+	# If occurrences are found, exit
+	if (($found != 0)); then
+		exit 1
+	fi
+
+	return 0
+}
+
 function getDataReplicated {
 	local srcCluster=$1
 	local srcBucket=$2
