@@ -10,13 +10,14 @@ package metadata_svc
 
 import (
 	"fmt"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/v8/metadata"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"sync"
-	"testing"
-	"time"
 )
 
 func TestBucketManifestGetter(t *testing.T) {
@@ -33,22 +34,31 @@ func TestBucketManifestGetter(t *testing.T) {
 	var manifest1Ptr *metadata.CollectionsManifest
 	var manifest2Ptr *metadata.CollectionsManifest
 	var manifest3Ptr *metadata.CollectionsManifest
+	var manifest4Ptr *metadata.CollectionsManifest
 	var wg sync.WaitGroup
 
 	// When the manifest returned is nil, the getter should return a default manifest
 	bgFunc := func(ptr **metadata.CollectionsManifest, wg *sync.WaitGroup) {
-		*ptr = getter.GetManifest()
+		*ptr = getter.GetManifest(false /*forceRefresh */)
 		wg.Done()
 	}
 
-	wg.Add(3)
+	bgFunc1 := func(ptr **metadata.CollectionsManifest, wg *sync.WaitGroup) {
+		*ptr = getter.GetManifest(true /*forceRefresh */)
+		wg.Done()
+	}
+
+	wg.Add(4)
 	go bgFunc(&manifest1Ptr, &wg)
-	go bgFunc(&manifest2Ptr, &wg)
+	go bgFunc1(&manifest2Ptr, &wg)
 	go bgFunc(&manifest3Ptr, &wg)
+	go bgFunc1(&manifest4Ptr, &wg)
+
 	wg.Wait()
 
 	assert.True(manifest1Ptr.IsSameAs(manifest2Ptr))
 	assert.True(manifest2Ptr.IsSameAs(manifest3Ptr))
+	assert.True(manifest3Ptr.IsSameAs(manifest4Ptr))
 
 	assert.Equal(stateNone, getter.getterState)
 	fmt.Println("============== Test case end: TestBucketManifestGetter =================")

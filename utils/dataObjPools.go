@@ -118,7 +118,10 @@ func (t *TargetCollectionInfoPool) Get() *base.TargetCollectionInfo {
 }
 
 func (t *TargetCollectionInfoPool) Put(tc *base.TargetCollectionInfo) {
+	tc.ManifestId = 0
+	tc.ColId = 0
 	tc.ColIDPrefixedKey = nil
+	tc.ColIDPrefixedKeyLen = 0
 	tc.TargetNamespace = nil
 	t.pool.Put(tc)
 }
