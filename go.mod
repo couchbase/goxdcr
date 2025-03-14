@@ -4,6 +4,8 @@ go 1.23
 
 toolchain go1.23.4
 
+replace github.com/couchbase/eventing => ../eventing
+
 replace github.com/couchbase/eventing-ee => ../eventing-ee
 
 replace github.com/couchbase/gomemcached => ../gomemcached

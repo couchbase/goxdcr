@@ -84,3 +84,5 @@ IF (BUILD_ENTERPRISE)
 ENDIF ()
 
 AddMetricsMetadata (JSON etc/metrics_metadata.json COMPONENT goxdcr)
+
+GoModTidySetup()
