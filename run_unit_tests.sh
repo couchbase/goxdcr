@@ -127,7 +127,7 @@ for directory in ${DIRS_WITH_UT[@]}; do
 			break
 		fi
 	done
-	if [[ "$pcreTestsFound" == "true" ]]; then
+	if [[ "$pcreTestsFound" == "true" ]] && [[ ! -z "$runAllTests" ]]; then
 		fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 		if [[ -z "$runAllTests" ]]; then
 			go test -short -tags=pcre >/tmp/${fileFriendlyFileName}_pcre.out 2>&1 &
