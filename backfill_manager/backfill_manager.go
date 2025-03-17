@@ -1386,6 +1386,29 @@ func (b *BackfillMgr) populateBackfillReqForImplicitMapping(newTargetManifest *m
 	return backfillMapping, addedRemovedPair, false
 }
 
+func (b *BackfillMgr) createExplicitMappingFromManifests(replId string, sourceManifest, targetManifest *metadata.CollectionsManifest, modes base.CollectionsMgtType,
+	rules metadata.CollectionsMappingRulesType, ensureSourceExists bool, migrationBackfillDiff bool) (metadata.CollectionNamespaceMapping, error) {
+	manifestsPair := metadata.CollectionsManifestPair{
+		Source: sourceManifest,
+		Target: targetManifest,
+	}
+
+	explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, rules, ensureSourceExists, migrationBackfillDiff)
+	if err != nil {
+		mappingType := "explicit"
+		loggingRules := rules
+		if modes.IsMigrationOn() {
+			mappingType = "migration"
+			loggingRules = rules.CloneAndRedact()
+		}
+		b.logger.Fatalf("%v Unable to create %v mapping from manifestsPair %v modes %v rules %v - err %v",
+			replId, mappingType, manifestsPair, modes, loggingRules, err)
+		return nil, err
+	}
+
+	return explicitMapping, nil
+}
+
 func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newTargetManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification, modes base.CollectionsMgtType, backfillReq interface{}) (interface{}, bool) {
 	// TODO - revisit this logic - some of these may not be needed
 	if oldSourceManifest != nil && oldTargetManifest != nil && newSourceManifest != nil && newTargetManifest != nil {
@@ -1412,22 +1435,12 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 		if sourceManifest == nil {
 			return nil, true
 		}
-		manifestsPair := metadata.CollectionsManifestPair{
-			Source: sourceManifest,
-			Target: newTargetManifest,
-		}
-		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules(), false, false)
+
+		explicitMapping, err := b.createExplicitMappingFromManifests(replId, sourceManifest, newTargetManifest, modes, spec.Settings.GetCollectionsRoutingRules(), false, false)
 		if err != nil {
-			mappingType := "explicit"
-			rules := spec.Settings.GetCollectionsRoutingRules()
-			if modes.IsMigrationOn() {
-				mappingType = "migration"
-				rules = spec.Settings.GetCollectionsRoutingRules().CloneAndRedact()
-			}
-			b.logger.Fatalf("%v Unable to create %v mapping from manifestsPair %v modes %v rules %v - err %v",
-				replId, mappingType, manifestsPair, modes, rules, err)
 			return nil, true
 		}
+
 		diffPair := metadata.CollectionNamespaceMappingsDiffPair{
 			Added:                      explicitMapping,
 			Removed:                    nil,
@@ -1438,6 +1451,42 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 		// Invalid function call
 		panic("Invalid functionc call")
 	}
+
+	// If the target manifest changed, we need to handle the case where collections were deleted and recreated
+	// This is detected by comparing the collection UIDs
+	if oldTargetManifest != nil && newTargetManifest != nil && oldTargetManifest.Uid() != newTargetManifest.Uid() {
+
+		// Perform a diff between the old and new target manifests to identify collections
+		// where the UID changed (indicating deletion and recreation)
+		// These target collections need to be backfilled that couldn't be discovered from the namespacemappings
+		// because they were never "missing", but their collection UID changed
+		_, changedTargets, _, err := newTargetManifest.Diff(oldTargetManifest)
+		if err != nil {
+			return nil, true
+		}
+
+		sourceManifest := b.getLatestSourceManifestClone(replId)
+		if sourceManifest == nil {
+			return nil, true
+		}
+
+		explicitMapping, err := b.createExplicitMappingFromManifests(replId, sourceManifest, newTargetManifest, modes, spec.Settings.GetCollectionsRoutingRules(), false, false)
+		if err != nil {
+			return nil, true
+		}
+
+		// Filter the explicit mapping to include only collections that were identified as changed
+		// These are the collections that need backfilling due to target recreation
+		backfillsNeededDueToTargetRecreation := explicitMapping.GetSubsetBasedOnSpecifiedTargets(changedTargets)
+
+		diffPair := backfillReq.(metadata.CollectionNamespaceMappingsDiffPair)
+
+		// Add the newly identified backfill requirements to the existing requirements
+		// This ensures that recreated collections are properly backfilled
+		diffPair.Added.Consolidate(backfillsNeededDueToTargetRecreation)
+		backfillReq = diffPair
+	}
+
 	return backfillReq, false
 }
 
