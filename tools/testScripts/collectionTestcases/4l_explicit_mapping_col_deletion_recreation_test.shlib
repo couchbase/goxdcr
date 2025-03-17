@@ -1,0 +1,96 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S3"]=${collection1Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	waitForBgJobs
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running explicit mapping test case with collection deletion + recreation"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Setting explicit mapping to true and creating explicit mapping rules"
+	setReplicationSettings "C1" "B1" "C2" "B2" "collectionsExplicitMapping=true" 'colMappingRules={"S1.col1":"S3.col1"}'
+
+	runDataLoad
+
+	echo "Waiting 10 seconds before checking item count first pass"
+	sleep 10
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	#now delete and recreate the collection S3.col1 from target bucket
+
+	echo "Deleting col S3.col1 from bucket B2 on cluster C2"
+	deleteCollection "C2" "B2" "S3" "col1"
+
+	sleep 5
+
+	echo "Recreating collection S3.col1 from bucket B2 on cluster C2"
+	createCollection "C2" "B2" "S3" "col1"
+
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 20 seconds before checking item count after the collection deletion recreation process"
+	sleep 20
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
