@@ -2899,6 +2899,10 @@ function getPrometheusStats {
 	echo "$output"
 }
 
+# Makes sure that KV will always do an OSO backfill when requested for a stream of one collection
+# with start seqno 0. Without this (i.e. the default behaviour) KV might or might not start an OSO
+# backfill, depending on some heuristics based on which they decide to perform an OSO backfill whenever
+# they think OSO will be faster than the normal seqno backfill.
 function enableDcpOsoBackfill {
 	local clusterName=$1
 	local bucketName=$2

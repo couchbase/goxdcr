@@ -252,10 +252,26 @@ function grepForNonMonotonicThroughSeqno {
 	local logsDir="${ns_serverDir}/logs"
 
 	for dir in $(ls $logsDir); do
-		counts=$(grep -crhn "nonMonoThroughSeqnos=[1-9]" ${logsDir}/${dir})
+		counts=$(grep -crhn "nonMonoTS=[1-9]" ${logsDir}/${dir})
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
-				echo "WARNING Found 'nonMonoThroughSeqnos' in ${logsDir}/${dir}"
+				echo "WARNING Found 'nonMonoTS' in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForUnusualOSOSessionEnds {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "unusualEnd=[1-9]" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'unusualEnd' in ${logsDir}/${dir}"
 				exit 1
 			fi
 		done
@@ -268,10 +284,10 @@ function grepForFaultyCLogTrackers {
 	local logsDir="${ns_serverDir}/logs"
 
 	for dir in $(ls $logsDir); do
-		counts=$(grep -crhn "faultyCLogTrackers=[1-9]" ${logsDir}/${dir})
+		counts=$(grep -crhn "faultyCLog=[1-9]" ${logsDir}/${dir})
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
-				echo "WARNING Found 'faultyCLogTrackers' in ${logsDir}/${dir}"
+				echo "WARNING Found 'faultyCLog' in ${logsDir}/${dir}"
 				exit 1
 			fi
 		done
@@ -2124,6 +2140,11 @@ function grepForAbnormalities {
 	fi
 
 	grepForNonMonotonicThroughSeqno
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForUnusualOSOSessionEnds
 	if (($? != 0)); then
 		exit 1
 	fi

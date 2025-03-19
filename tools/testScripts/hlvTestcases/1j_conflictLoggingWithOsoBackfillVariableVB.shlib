@@ -1,4 +1,4 @@
-# Copyright 2024-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -20,11 +20,12 @@ declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
-insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+declare -A BucketProperty1=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=128)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty1
 insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty # conflict bucket for C1.B1
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty # conflict bucket for C2.B2
-insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty1
 insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty # conflict bucket for C3.B3
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty # bucket to test conflict records are not replicated
 
@@ -155,7 +156,7 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=300
+	sleepTime=350
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 
@@ -199,7 +200,7 @@ function testReplicationWithConflictLogging {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running conflict logging with OSO backfill test case"
+	echo "Running conflict logging with OSO backfill test case for variable vbuckets"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -230,7 +231,7 @@ function runTestCase {
 	testReplicationWithConflictLogging
 
 	echo "============================================================================"
-	echo "Running conflict logging with OSO backfill test case passed"
+	echo "Conflict logging with OSO backfill test case for variable vbuckets passed"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets

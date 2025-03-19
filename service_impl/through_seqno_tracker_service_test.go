@@ -12,6 +12,7 @@ package service_impl
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sync/atomic"
 	"testing"
@@ -430,10 +431,13 @@ func TestOsoModeSimple(t *testing.T) {
 	assert.Equal(uint64(1), through_seqno)
 
 	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 1
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -453,10 +457,13 @@ func TestOsoModeSimple(t *testing.T) {
 
 	// Finish things up, say DCP turns off OSO
 	osoSnapshotSeqnoCheck = 2
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(2)
+	helperItems[3] = uint64(2)
+	helperItems[4] = uint64(1)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -516,10 +523,13 @@ func TestOsoMode(t *testing.T) {
 	assert.Equal(uint64(2), through_seqno)
 
 	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 2
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -552,10 +562,13 @@ func TestOsoMode(t *testing.T) {
 
 	// Before 7 is has been sent acknowledged, osomode is turned off
 	osoSnapshotSeqnoCheck = 7
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(3)
+	helperItems[3] = uint64(7)
+	helperItems[4] = uint64(3)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -581,10 +594,13 @@ func TestOsoMode(t *testing.T) {
 	assert.Equal(uint64(2), through_seqno)
 
 	// Lets start a new OSO session for fun, before the 7 has been handled
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -613,10 +629,13 @@ func TestOsoMode(t *testing.T) {
 
 	// Finish things up, say DCP turns off OSO
 	osoSnapshotSeqnoCheck = 11
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(11)
+	helperItems[3] = uint64(11)
+	helperItems[4] = uint64(1)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -684,10 +703,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	assert.Equal(uint64(2), through_seqno)
 
 	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 2
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -703,10 +725,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	osoSnapshotSeqnoCheck = 3
 	// OSO mode is off - we're still waiting for seqno3 to hear back from Downstream part
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(3)
+	helperItems[3] = uint64(3)
+	helperItems[4] = uint64(1)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -769,10 +794,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	assert.Equal(0, len(gap2))
 
 	// Part1: Session 1 begins
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -794,10 +822,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// Session 1 ends
 	osoSnapshotSeqnoCheck = 10
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(8)
+	helperItems[3] = uint64(10)
+	helperItems[4] = uint64(3)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -821,10 +852,14 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	assert.Equal(uint64(5), through_seqno)
 
 	// Part3: Session 2 begins
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
+
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -846,10 +881,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// Session 2 ends
 	osoSnapshotSeqnoCheck = 15
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(13)
+	helperItems[3] = uint64(15)
+	helperItems[4] = uint64(3)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -906,10 +944,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	// Throwing in another OSO session here for good measure to try to see if the system should still behave correctly
 	// This section tests to make sure that the new session's lastSeenDcpSeqno should reflect that of the previous session's
 	// maxDCPSeen
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -945,10 +986,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// OSO now ends -
 	osoSnapshotSeqnoCheck = 17
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(17)
+	helperItems[3] = uint64(17)
+	helperItems[4] = uint64(1)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1002,10 +1046,13 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	// 1. OSO start
 	through_seqno := svc.GetThroughSeqno(1)
 	assert.Equal(uint64(0), through_seqno)
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1068,10 +1115,13 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 
 	// OSO now ends -
 	osoSnapshotSeqnoCheck = 4
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(1)
+	helperItems[3] = uint64(4)
+	helperItems[4] = uint64(4)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1129,10 +1179,13 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	// 1. OSO start
 	through_seqno := svc.GetThroughSeqno(1)
 	assert.Equal(uint64(0), through_seqno)
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1187,10 +1240,13 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 
 	// 9. OSO now ends - should raise snapshot of {4,4}
 	osoSnapshotSeqnoCheck = 4
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(1)
+	helperItems[3] = uint64(4)
+	helperItems[4] = uint64(4)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1367,10 +1423,13 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 	// 1. OSO start
 	through_seqno := svc.GetThroughSeqno(1)
 	assert.Equal(uint64(0), through_seqno)
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1449,10 +1508,13 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 
 	// OSO now ends -
 	osoSnapshotSeqnoCheck = 4
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = uint16(1)
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(1)
+	helperItems[3] = uint64(4)
+	helperItems[4] = uint64(4)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	select {
@@ -1686,8 +1748,8 @@ func TestOSOModeWithCLogger(t *testing.T) {
 		assert.Equal(session.seqnosFromDCPCnt, uint64(seqnoFroDcp))
 		assert.Equal(session.seqnosHandledCnt, uint64(seqnoHandled))
 		assert.Equal(session.dcpSeqnoWhenSessionStarts, uint64(seqnoBeforeSessionStart))
-		assert.Equal(session.cLogRequestedCnt.Load(), uint64(cLogReqCnt))
-		assert.Equal(session.cLogRespondedCnt.Load(), uint64(cLogResCnt))
+		assert.Equal(session.cLogRequestedCnt, uint64(cLogReqCnt))
+		assert.Equal(session.cLogRespondedCnt, uint64(cLogResCnt))
 		assert.Equal(svc.GetThroughSeqno(vbno), uint64(ts))
 	}
 
@@ -1695,10 +1757,13 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// and CLogReqs were generated for 3 4 8 and 10.
 
 	// OSO snapshot start
-	var helperItems = make([]interface{}, 2)
+	var helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh := make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
@@ -1779,19 +1844,25 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// OSO End received for current snapshot
 	// ts is still 0, since some mutations are not sent + conflict logged.
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(1)
+	helperItems[3] = uint64(5)
+	helperItems[4] = uint64(5)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, nil, false, true, 1, 5, 5, 4, 0, 2, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// New OSO snapshot start. However the previous snapshot shouldn't close.
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 5, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
@@ -1879,10 +1950,13 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// OSO End received for current snapshot
 	// ts is still 5, since some mutations are not sent + conflict logged.
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(6)
+	helperItems[3] = uint64(10)
+	helperItems[4] = uint64(5)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 2, 5, 1, 1, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
@@ -1918,10 +1992,13 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// New OSO snapshot start. However the previous snapshot shouldn't close.
-	helperItems = make([]interface{}, 2)
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, syncCh, true, false, ^0, 0, 0, 0, 10, 0, 0, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
@@ -1968,15 +2045,21 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// OSO End received for recent snapshot
 	// ts is still 10, since some mutations are not sent.
-	helperItems = make([]interface{}, 2)
+	// unsure buffer needs to be processed fully.
+	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
 	helperItems[1] = syncCh
+	helperItems[2] = uint64(11)
+	helperItems[3] = uint64(11)
+	helperItems[4] = uint64(1)
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, syncCh, true, true, 11, 11, 1, 0, 10, 0, 0, 10)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
-	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_1), 1)
-	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_2), 1)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_1), 0)
+	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_2), 0)
+	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_1), 0)
+	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_2), 0)
 
 	// seqno 11 sent. With this throughSeqno will move to 11.
 	// this session should close.
@@ -1987,4 +2070,72 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(11))
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 0)
+}
+
+func TestOSOModeWithAsyncDataReceived(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestOSOModeWithAsyncDataReceived =================")
+	defer fmt.Println("============== Test case end: TestOSOModeWithAsyncDataReceived =================")
+
+	// Setup
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
+	vbno := uint16(1)
+	mutationEvent := &mcc.UprEvent{
+		VBucket: vbno,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = vbno
+
+	// OSO snapshot start
+	var helperItems = make([]interface{}, 5)
+	helperItems[0] = vbno
+	syncCh := make(chan bool)
+	helperItems[1] = syncCh
+	helperItems[2] = uint64(math.MaxUint64)
+	helperItems[3] = uint64(0)
+	helperItems[4] = uint64(0)
+	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*OSO start*/, nil, helperItems, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
+
+	// seqno 5 received
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
+
+	// seqno 5 sent.
+	mutationEvent.Seqno = 5
+	dataSentAdditional.Seqno = 5
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
+
+	// OSO End received for recent snapshot
+	helperItems[0] = vbno
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	helperItems[2] = uint64(4)
+	helperItems[3] = uint64(5)
+	helperItems[4] = uint64(2)
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
+	go svc.ProcessEvent(commonEvent)
+	<-syncCh
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
+
+	// seqno 4 received
+	mutationEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
+
+	// seqno 4 sent.
+	mutationEvent.Seqno = 4
+	dataSentAdditional.Seqno = 4
+	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	assert.Equal(svc.GetThroughSeqno(vbno), uint64(5))
 }

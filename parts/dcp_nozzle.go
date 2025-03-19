@@ -291,9 +291,6 @@ type DcpNozzle struct {
 	vbnosLock sync.RWMutex
 	vbnos     []uint16
 
-	backfillTasksVbnosParseOnce sync.Once
-	backfillTasksVbnos          []uint16
-
 	vb_stream_status map[uint16]*streamStatusWithLock
 
 	// immutable fields
@@ -381,6 +378,18 @@ type DcpNozzle struct {
 	// vbno -> vbuuid mapping
 	vbuuidMap    map[uint16]uint64
 	vbuuidMapMtx sync.RWMutex
+
+	// mapping of vbno to a boolean indicating if the current ongoing dcp snapshot
+	// is a OSO snapshot at that given instant of time. No synchronisation is needed
+	// for these as of now because mutations are read from the dcp queue in a synchronous
+	// manner.
+	isOsoSnapshot map[uint16]bool
+	// if isOsoSnapshot[vbno] is true at any instant, then the corresponding entries of the following
+	// maps will have min, max and number of seqnos seen so far in the current snapshot.
+	// This will help throughSeqnoSvc make decisions given that the various data events are asynchronous.
+	minSeqnoOfOsoSnapshot map[uint16]uint64
+	maxSeqnoOfOsoSnapshot map[uint16]uint64
+	numSeqnoOfOsoSnapshot map[uint16]uint64
 }
 
 func NewDcpNozzle(id string,
@@ -427,6 +436,10 @@ func NewDcpNozzle(id string,
 		backfillTaskStreamEndReceived:  make(map[uint16]*uint32),
 		nonOKVbStreamEnds:              make(map[uint16]bool),
 		vbuuidMap:                      make(map[uint16]uint64),
+		isOsoSnapshot:                  make(map[uint16]bool),
+		minSeqnoOfOsoSnapshot:          make(map[uint16]uint64),
+		maxSeqnoOfOsoSnapshot:          make(map[uint16]uint64),
+		numSeqnoOfOsoSnapshot:          make(map[uint16]uint64),
 	}
 
 	// Allow one caller the ability to execute
@@ -1003,6 +1016,42 @@ func (dcp *DcpNozzle) Receive(data interface{}) error {
 	return nil
 }
 
+// If the current snapshot is OSO, marks mutation to be part
+// of various OSO tracking.
+// For any m that contributes to (*OsoSession).seqnosFromDCPCnt
+// in throughSeqnoSvc should be input to this function. Currently m
+// can be a UPR_MUTATION, UPR_DELETION, UPR_EXPIRATION and
+// DCP_SEQNO_ADV dcp mutations.
+func (dcp *DcpNozzle) markThroughSeqnoRelatedOsoEvent(m *mcc.UprEvent) {
+	if !dcp.isOsoSnapshot[m.VBucket] {
+		return
+	}
+
+	dcp.numSeqnoOfOsoSnapshot[m.VBucket]++
+	dcp.minSeqnoOfOsoSnapshot[m.VBucket] = min(dcp.minSeqnoOfOsoSnapshot[m.VBucket], m.Seqno)
+	dcp.maxSeqnoOfOsoSnapshot[m.VBucket] = max(dcp.maxSeqnoOfOsoSnapshot[m.VBucket], m.Seqno)
+}
+
+// returns minSeqno, maxSeqno, numSeqnos of the latest OSO snapshot.
+func (dcp *DcpNozzle) handleOsoSnapshotEvent(m *mcc.UprEvent, osoBegins bool) (minSeqno uint64, maxSeqno uint64, numSeqno uint64) {
+	if m == nil {
+		return
+	}
+
+	if osoBegins {
+		// reset the trackers for a new incoming OSO snapshot.
+		dcp.minSeqnoOfOsoSnapshot[m.VBucket] = math.MaxUint64
+		dcp.maxSeqnoOfOsoSnapshot[m.VBucket] = 0
+		dcp.numSeqnoOfOsoSnapshot[m.VBucket] = 0
+	}
+
+	dcp.isOsoSnapshot[m.VBucket] = osoBegins
+	minSeqno = dcp.minSeqnoOfOsoSnapshot[m.VBucket]
+	maxSeqno = dcp.maxSeqnoOfOsoSnapshot[m.VBucket]
+	numSeqno = dcp.numSeqnoOfOsoSnapshot[m.VBucket]
+	return
+}
+
 // Handles any UPR event coming in from the UPR feed channel
 func (dcp *DcpNozzle) processData() (err error) {
 	dcp.Logger().Infof("%v processData starts..........\n", dcp.Id())
@@ -1108,10 +1157,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleSeqnoAdv(m)
 			} else if m.IsOsoSnapshot() {
 				osoBegins, _ := m.GetOsoBegin()
-				var helperItems = make([]interface{}, 2)
+				minSeqno, maxSeqno, numSeqno := dcp.handleOsoSnapshotEvent(m, osoBegins)
+				var helperItems = make([]interface{}, 5)
 				helperItems[0] = m.VBucket
 				syncCh := make(chan bool)
 				helperItems[1] = syncCh
+				helperItems[2] = minSeqno
+				helperItems[3] = maxSeqno
+				helperItems[4] = numSeqno
 				dcp.RaiseEvent(common.NewEvent(common.OsoSnapshotReceived, osoBegins, dcp, helperItems, nil))
 				select {
 				case <-syncCh:
@@ -1130,6 +1183,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						if m.IsSnappyDataType() {
 							dcp.incCompressedCounterReceived()
 						}
+						dcp.markThroughSeqnoRelatedOsoEvent(m)
 						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 						dcp.endSeqnoForDcp[m.VBucket].SetSeqno(m.Seqno)
 						wrappedUpr, err := dcp.composeWrappedUprEvent(m)
@@ -1235,6 +1289,10 @@ func (dcp *DcpNozzle) handleSeqnoAdv(event *mcc.UprEvent) {
 		return
 	}
 
+	// throughSeqnoSvc processes SeqnoAdv events as a combination of
+	// DataReceived + DataSent events. So we mark it as a throughSeqno
+	// related OSO event, incase of a OSO processing.
+	dcp.markThroughSeqnoRelatedOsoEvent(event)
 	dcp.RaiseEvent(common.NewEvent(common.SeqnoAdvReceived, event, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 }
 
