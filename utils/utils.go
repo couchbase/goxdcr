@@ -2239,6 +2239,82 @@ func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeIn
 	return hostAddr, nil
 }
 
+// getExternalHostName returns the alternate hostName configured for the given node.
+func (u *Utilities) getExternalHostName(nodeInfo map[string]interface{}) (string, error) {
+	alternateObjRaw, exists := nodeInfo[base.AlternateKey]
+	if !exists {
+		return "", base.ErrorResourceDoesNotExist
+	}
+
+	alternateObj, ok := alternateObjRaw.(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("expected alternateObj to be map[string]interface{}, got %T", alternateObjRaw)
+	}
+
+	externalObjRaw, exists := alternateObj[base.ExternalKey]
+	if !exists {
+		return "", base.ErrorResourceDoesNotExist
+	}
+
+	externalObj, ok := externalObjRaw.(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("expected externalObj to be map[string]interface{}, got %T", externalObjRaw)
+	}
+
+	hostAddrObjRaw, exists := externalObj[base.HostNameKey]
+	if !exists {
+		return "", base.ErrorResourceDoesNotExist
+	}
+
+	hostAddr, ok := hostAddrObjRaw.(string)
+	if !ok {
+		return "", fmt.Errorf("expected hostAddrObj to be string, got %T", hostAddrObjRaw)
+	}
+	if hostAddr == "" {
+		return "", fmt.Errorf("external hostname cannot be empty")
+	}
+
+	return hostAddr, nil
+}
+
+// Checks if alternate address setup for the cluster is valid.
+// Note that XDCR does not support the alternate address setup for private links
+func (u *Utilities) TargetHasSharedExternalHostname(targetBucketInfo map[string]interface{}) (bool, error) {
+	uniqueAddresses := make(map[string]bool)
+
+	nodesList, err := u.GetNodeListFromInfoMap(targetBucketInfo, u.logger_utils)
+	if err != nil {
+		return false, err
+	}
+
+	for _, nodeInfoRaw := range nodesList {
+		nodeInfo, ok := nodeInfoRaw.(map[string]interface{})
+		if !ok {
+			u.logger_utils.Warnf("TargetHasSharedExternalHostname: unable to cast nodeInfo as map[string]interface{}, got: %v", nodeInfoRaw)
+			return false, fmt.Errorf("expected nodeInfo to be map[string]interface{}, got %T", nodeInfoRaw)
+		}
+
+		externalAddr, err := u.getExternalHostName(nodeInfo)
+		if err != nil {
+			if err == base.ErrorResourceDoesNotExist {
+				// In a valid private endpoint setup, all the nodes should have alternate address configured
+				// Hence if any node is missing an alternate address, private endpoint is not set up
+				return false, nil
+			}
+			return false, err
+		}
+
+		uniqueAddresses[externalAddr] = true
+	}
+
+	// If all nodes share the same alternate address, private endpoints are set up
+	if len(uniqueAddresses) == 1 && len(nodesList) > 1 {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // Note - the translated map should be in the k->v form of:
 // internalNodeAddress:directPort -> externalNodeAddress:kvPort
 func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error) {

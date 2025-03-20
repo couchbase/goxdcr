@@ -6535,6 +6535,62 @@ func (_c *UtilsIface_StartDiagStopwatch_Call) RunAndReturn(run func(string, time
 	return _c
 }
 
+// TargetHasSharedExternalHostname provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) TargetHasSharedExternalHostname(bucketInfo map[string]interface{}) (bool, error) {
+	ret := _m.Called(bucketInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TargetHasSharedExternalHostname")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) (bool, error)); ok {
+		return rf(bucketInfo)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) bool); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_TargetHasSharedExternalHostname_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TargetHasSharedExternalHostname'
+type UtilsIface_TargetHasSharedExternalHostname_Call struct {
+	*mock.Call
+}
+
+// TargetHasSharedExternalHostname is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) TargetHasSharedExternalHostname(bucketInfo interface{}) *UtilsIface_TargetHasSharedExternalHostname_Call {
+	return &UtilsIface_TargetHasSharedExternalHostname_Call{Call: _e.mock.On("TargetHasSharedExternalHostname", bucketInfo)}
+}
+
+func (_c *UtilsIface_TargetHasSharedExternalHostname_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_TargetHasSharedExternalHostname_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_TargetHasSharedExternalHostname_Call) Return(_a0 bool, _a1 error) *UtilsIface_TargetHasSharedExternalHostname_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_TargetHasSharedExternalHostname_Call) RunAndReturn(run func(map[string]interface{}) (bool, error)) *UtilsIface_TargetHasSharedExternalHostname_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // TranslateKvVbMap provides a mock function with given fields: kvVBMap, targetBucketInfo
 func (_m *UtilsIface) TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{}) {
 	_m.Called(kvVBMap, targetBucketInfo)

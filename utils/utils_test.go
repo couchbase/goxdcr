@@ -1005,3 +1005,39 @@ func TestGetHostAddrFromNodeInfo(t *testing.T) {
 	assert.NotNil(err)
 
 }
+
+func TestTargetHasSharedExternalHostname(t *testing.T) {
+	assert := assert.New(t)
+
+	// Case 1 : with alternate address setup + privateLinks
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json")
+	bucketInfo, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+	exists, err := testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(true, exists)
+
+	// Case 2 : no alternate addresses setup
+	fileName = fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_b2.json")
+	bucketInfo, _, err = readJsonHelper(fileName)
+	assert.Nil(err)
+	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+
+	//Case 3 : with alternate address setup and no Private Links
+	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
+	bucketInfo, _, err = readJsonHelper(fileName)
+	assert.Nil(err)
+	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+
+	//Case 4 : Private Links setup but alternate address isn't setup on all the nodes
+	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
+	bucketInfo, _, err = readJsonHelper(fileName)
+	assert.Nil(err)
+	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+}

@@ -1931,3 +1931,5 @@ var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
 
 // from https://github.com/couchbase/kv_engine/blob/master/docs/SubDocument.md#limits
 const SUBDOC_MULTI_MAX_PATHS int = 16
+
+const ExternalAddressSetup = "externalAddressSetup"
