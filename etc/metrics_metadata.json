@@ -747,7 +747,7 @@
     "xdcr_docs_sent_with_subdoc_delete_total": {
         "type": "counter",
         "help": "The number of deletes issued using subdoc command instead of delete_with_meta to avoid cas rollback on target",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -759,7 +759,7 @@
     "xdcr_docs_sent_with_subdoc_set_total": {
         "type": "counter",
         "help": "The number of sets issued using subdoc command instead of set_with_meta to avoid cas rollback on target",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -969,7 +969,7 @@
     "xdcr_hlv_pruned_at_merge_total": {
         "type": "counter",
         "help": "Number of mutations with HLV pruned when it is merged with target document",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -981,7 +981,7 @@
     "xdcr_hlv_pruned_total": {
         "type": "counter",
         "help": "Number of mutations with HLV pruned",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -993,7 +993,7 @@
     "xdcr_hlv_updated_total": {
         "type": "counter",
         "help": "Number of mutations with HLV updated",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -1005,7 +1005,7 @@
     "xdcr_import_docs_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of mobile import mutations failed Source side Conflict Resolution. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -1017,7 +1017,7 @@
     "xdcr_import_docs_written_total": {
         "type": "counter",
         "help": "Number of import mutations sent",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -1238,7 +1238,7 @@
     "xdcr_source_sync_xattr_removed_total": {
         "type": "counter",
         "help": "Number of mutations with source mobile extended attributes removed",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -1250,7 +1250,19 @@
     "xdcr_subdoc_cmd_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Subdoc sets and delete operations that failed because the CAS on the Target changed",
-        "added": "7.6.4",
+        "added": "7.6.6",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_subdoc_cmd_docs_skipped_total": {
+        "type": "counter",
+        "help": "Number of document mutations that were not replicated to the target because they resulted in subdoc commands breaching the maximum paths limit.",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -1299,7 +1311,7 @@
     "xdcr_target_sync_xattr_preserved_total": {
         "type": "counter",
         "help": "Number of mutations with target mobile extended attributes preserved",
-        "added": "7.6.4",
+        "added": "7.6.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
