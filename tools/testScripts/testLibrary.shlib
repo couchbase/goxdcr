@@ -374,6 +374,26 @@ function checkChangesLeftInternal {
 	local srcBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+
+	checkChangesLeftInternalWithSpecifiedCount "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" 0
+}
+
+# SGW Active Active will have heartbeat document so changes left == 1
+function checkChangesLeftInternalSGW {
+ 	local srcCluster=$1
+ 	local srcBucket=$2
+ 	local targetCluster=$3
+ 	local targetBucket=$4
+
+	checkChangesLeftInternalWithSpecifiedCount "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" 1
+}
+
+function checkChangesLeftInternalWithSpecifiedCount {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local specifiedCount=$5
 	local i
 
 	local lastChangesLeft=0
@@ -383,17 +403,17 @@ function checkChangesLeftInternal {
 		if [[ -z "${changesLeft:-}" ]] || [[ "$changesLeft" == "null" ]]; then
 			changesLeft=999999
 		fi
-		if (($changesLeft == 0)); then
-			echo "Node $srcCluster changes_left is 0"
+		if (($changesLeft <= $specifiedCount)); then
+			echo "Node $srcCluster changes_left is $changesLeft"
 			checkNonNegativeChangesLeft "$srcCluster"
 			return 0
 		else
 			if (($changesLeft == $lastChangesLeft)); then
-				echo "Node $srcCluster Changes left is not 0. It is $changesLeft"
+				echo "Node $srcCluster Changes left is not $specifiedCount. It is $changesLeft"
 			else
 				lastChangesLeft=$changesLeft
 				i=$(($i - 1))
-				echo "Node $srcCluster Changes left is not 0. It is $changesLeft... it is decreasing"
+				echo "Node $srcCluster Changes left is not $specifiedCount. It is $changesLeft... it is decreasing"
 			fi
 			sleep 10
 		fi
@@ -409,6 +429,11 @@ function checkUnidirectionalChangesLeft {
 function checkBidirectionalChangesLeft {
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 	checkChangesLeftInternal "C2" "B2" "C1" "B1"
+}
+
+function checkBidirectionalChangesLeftSGW {
+	checkChangesLeftInternalSGW "C1" "B1" "C2" "B2"
+	checkChangesLeftInternalSGW "C2" "B2" "C1" "B1"
 }
 
 function checkDataReplicatedIsZero {
@@ -1912,11 +1937,15 @@ function validatePrometheusStatsIs0 {
 	local prometheusStatsName=$4
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
 	local prometheusOut
-	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+	local cmd
 
+	prometheusOut=$(getPrometheusStats "$node")
 	local count
 	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
 
 	if (($count > 0)); then
 		echo "Stat $prometheusStatsName shows $count"
@@ -2064,14 +2093,27 @@ function setCrossClusterVersioningForBucket {
 	local bucketName=$2
 	local setting="enableCrossClusterVersioning"
 	local value="true"
+	local output
 
 	echo "setBucket $cluster $bucketName $setting $value"
-	output=$(setBucket $cluster $bucketName $setting $value)
+
+	if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
+		# not vagrant
+		output=$(setBucket $cluster $bucketName $setting $value)
+	else
+		output=$(vagrantSetBucket $cluster $bucketName $setting $value)
+	fi
+
 	echo $output
-	while [[ "$output" != "" && "$output" != "Cross cluster versioning already enabled" ]]; do
+	while [[ ! -z "${output:-}" ]] && [[ ! "$output" =~ Cross\ cluster\ versioning\ already\ enabled ]]; do
 		echo "retrying..."
 		sleep 2
-		output=$(setBucket $cluster $bucketName $setting $value)
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
+			# not vagrant
+			output=$(setBucket $cluster $bucketName $setting $value)
+		else
+			output=$(vagrantSetBucket $cluster $bucketName $setting $value)
+		fi
 		echo $output
 	done
 }

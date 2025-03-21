@@ -28,14 +28,14 @@ unset CLUSTER_SETUP_DONE_MAP
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A LWWBucketProperty=(["ramQuotaMB"]=100 ["conflictResolutionType"]="lww")
+declare -A LWWBucketProperty=(["ramQuotaMB"]=100 ["conflictResolutionType"]="lww" ["storageBackend"]="couchstore")
 insertPropertyIntoBucketNamePropertyMap "B0" LWWBucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" LWWBucketProperty
 insertPropertyIntoBucketNamePropertyMap "B2" LWWBucketProperty
 insertPropertyIntoBucketNamePropertyMap "B3" LWWBucketProperty
 insertPropertyIntoBucketNamePropertyMap "B4" LWWBucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A MobileBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
 
 #BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
 #SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
@@ -45,16 +45,47 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "col_" &
+
+	runCbWorkloadGenBucket "C2" "B2" &
+	runCbWorkloadGenCollection "C2" "B2" "S1" "col1" "col_" &
 	waitForBgJobs
 }
 
 function setupSGW {
 	local clusterName=$1
 	vagrantRemoveSGW "$clusterName"
-	vagrantInstallSGW "$clusterName" "4.0.0-2"
+	vagrantInstallSGW "$clusterName" "4.0.0"
 	vagrantStopSGW "$clusterName"
 	vagrantSetConfigSGW "$clusterName"
 	vagrantStartSGW "$clusterName"
+}
+
+function verifyPromStats {
+	# verify no data-corruption
+	# This is tricky because we have all sorts of binary docs in a real SGW case
+
+	# Will do some replication gymnastics
+	createRemoteClusterReference "C1" "C1"
+	createRemoteClusterReference "C2" "C2"
+
+	# First replicate from "target" buckets to temporary buckets
+	# These replications will have binary filtered, and the end result will be purely loaded data
+	createBucketReplication "C1" "B1" "C1" "B3" MobileBucketReplProperties
+	createBucketReplication "C2" "B2" "C2" "B3" MobileBucketReplProperties
+
+	checkChangesLeftInternalSGW "C1" "B1" "C1" "B3"
+	checkChangesLeftInternalSGW "C2" "B2" "C2" "B3"
+
+	# Then, re-replicate to another end result target
+	createBucketReplication "C1" "B3" "C1" "B4" MobileBucketReplProperties
+	createBucketReplication "C2" "B3" "C2" "B4" MobileBucketReplProperties
+
+	validateBinaryFilteredIs0 "C1" "B3" "B4"
+	validateBinaryFilteredIs0 "C2" "B3" "B4"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B3" "B4"
+	validateDatapoolFailIs0 "C2" "B3" "B4"
 }
 
 function runTestCase {
@@ -65,9 +96,15 @@ function runTestCase {
 
 	vagrantRemoveCbServerAll
 	vagrantRemoveSGWAll
-	vagrantInstallCBServerAll "trinity"
+	vagrantInstallCBServerAll "morpheus"
 
 	setupTopologies
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+	setCrossClusterVersioningForBucket "C1" "B3"
+	setCrossClusterVersioningForBucket "C2" "B3"
+	setCrossClusterVersioningForBucket "C1" "B4"
+	setCrossClusterVersioningForBucket "C2" "B4"
 
 	# Shorten the amount of time pipeline restarts
 	local checkInterval=10
@@ -85,23 +122,29 @@ function runTestCase {
 	startRebalancing "C2"
 
 	setupSGW "C1"
+	setupSGW "C2"
 	vagrantSGWAddDbConfig "C1" "B1" "b1db"
+	vagrantSGWAddDbConfig "C2" "B2" "b2db"
 	echo "Waiting 30 sec for SGW to finish init"
 	sleep 20
 
 	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" MobileBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" MobileBucketReplProperties
 
 	runDataLoad
 
 	sleep 30
-	checkUnidirectionalChangesLeft
-
+	checkBidirectionalChangesLeftSGW
 	vagrantGrepForPanicAll
+	verifyPromStats
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
+	cleanupRemoteClusterRefs
 	cleanupBuckets
 }

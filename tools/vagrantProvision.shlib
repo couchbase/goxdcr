@@ -61,7 +61,8 @@ declare -A CBServerLink=(
 )
 
 declare -A SGWLink=(
-	["4.0.0-2"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/2/couchbase-sync-gateway-enterprise_4.0.0-2_x86_64.deb"
+	# There is no "latest" link so manually update this over time
+	["4.0.0"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/119/couchbase-sync-gateway-enterprise_4.0.0-119_x86_64.deb"
 )
 
 function vagrantUp {
@@ -743,6 +744,8 @@ function vagrantSGWAddDbConfig {
 	#${VSSH[$idx]} "curl -X PUT http://127.0.0.1:8091/settings/rbac/users/local/$DEFAULT_ADMIN -u $DEFAULT_ADMIN:$DEFAULT_PW -d password=$DEFAULT_PW -d roles='mobile_sync_gateway[*]'"
 
 	# the following will create a sync gateway database config
+	# Sync Gateway will need either query nodes to be avail or views.
+	# But views can only be run on Couchstore buckets
 	${VSSH[$idx]} "curl -X PUT 'http://127.0.0.1:4985/$dbName/' --header \"Authorization: Basic $digest\"  --header 'Content-Type: application/json' --data-raw '{\"bucket\": \"$bucketName\", \"num_index_replicas\": 0, \"use_views\": true}'"
 }
 
@@ -829,4 +832,16 @@ function vagrantValidateDifferResults {
 
 	resultOutput=$(cat $tmpFile)
 	validateDifferResultsInternal "$resultOutput" "$expectedMismatchCnt" "$expectedMissingSrcCnt" "$expectedMissingTgtCnt" "$expectedDeletedSrcCnt" "$expectedDeletedTgtCnt"
+}
+
+function vagrantSetBucket {
+	local clusterName="$1"
+	local bucketName="$2"
+	local setting=$3
+	local value=$4
+	local idx="$(getClusterIdx "$clusterName")"
+
+	# Set bucket properties
+	cmd="${VSSH[$idx]} \"curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/pools/default/buckets/$bucketName -d $setting=$value\""
+	eval $cmd
 }
