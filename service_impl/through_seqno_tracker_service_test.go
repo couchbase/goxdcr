@@ -2046,6 +2046,9 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// OSO End received for recent snapshot
 	// ts is still 10, since some mutations are not sent.
 	// unsure buffer needs to be processed fully.
+	session := svc.vbOsoModeSessionDCPTracker[vbno].sessions[0]
+	oldCLogReqCnt := int(session.cLogRequestedCnt)
+	oldCLogResCnt := int(session.cLogRespondedCnt)
 	helperItems = make([]interface{}, 5)
 	helperItems[0] = vbno
 	syncCh = make(chan bool)
@@ -2056,8 +2059,9 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /* OSO snapshot end */, nil, helperItems, nil)
 	raiseEventAndTest(commonEvent, syncCh, true, true, 11, 11, 1, 0, 10, 0, 0, 10)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
-	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_1), 0)
-	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[0].unsureBufferedCLogSeqnos.seqno_list_2), 0)
+	// verify that whole of unsure buffer was processed
+	assert.Equal(int(session.cLogRequestedCnt), oldCLogReqCnt+len(session.unsureBufferedCLogSeqnos.seqno_list_1))
+	assert.Equal(int(session.cLogRespondedCnt), oldCLogResCnt+len(session.unsureBufferedCLogSeqnos.seqno_list_2))
 	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_1), 0)
 	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_2), 0)
 
