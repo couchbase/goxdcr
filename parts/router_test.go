@@ -1108,27 +1108,21 @@ func TestCollectionsRouter_getLatestTargetManifest(t *testing.T) {
 
 	reqManifestId := 8
 	reqColId, _ := strconv.ParseUint("d", base.CollectionsUidBase, 64)
+	tgtColNameSpace := &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col1"}
 
 	// cache is stale - needs refresh
-	id, err := collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId))
+	id, err := collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId), tgtColNameSpace)
 	assert.Nil(err)
 	assert.Equal(uint64(9), id)
 
 	// next pass should read from cache
-	collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId))
+	id, err = collectionsRouter.getLatestTargetManifestId(spec, uint64(reqManifestId), uint32(reqColId), tgtColNameSpace)
 	assert.Nil(err)
 	assert.Equal(uint64(9), id)
 
-	// error injection - to verify that we hitting the cache path
-	manifestFileDir := "../metadata/testdata"
-	manifestFileNamev8a := "targetManifestv1a.json"
-	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileNamev8a))
-	if err != nil {
-		panic(err.Error())
-	}
-	manifest8a, err := metadata.NewCollectionsManifestFromBytes(data) // contains S2.C3 with
-	collectionsManifestSvc.On("GetSpecificTargetManifest", spec, uint64(7)).Return(&manifest8a, nil)
-	_, err1 := collectionsRouter.getLatestTargetManifestId(spec, uint64(7), uint32(reqColId))
+	// error injection - to verify that we are hitting the cache path
+	// Since we pass the tgtColNamespace field as nil, the cache path should return an error.
+	_, err1 := collectionsRouter.getLatestTargetManifestId(spec, uint64(7), uint32(reqColId), nil)
 	assert.NotNil(err1)
 }
 
@@ -1194,7 +1188,7 @@ func TestCollectionsRouter_checkIfXmemReportedCollectionError(t *testing.T) {
 	assert.Nil(lastCalledBackfillMap)
 	assert.Equal(0, ignoreCnt)
 
-	xmemReported, manId, err := collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId))
+	xmemReported, manId, err := collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId), wrappedMCR.ColInfo.TargetNamespace)
 	assert.Equal(true, xmemReported)
 	assert.Equal(uint64(9), manId)
 	assert.Nil(err)
@@ -1207,7 +1201,7 @@ func TestCollectionsRouter_checkIfXmemReportedCollectionError(t *testing.T) {
 	assert.Nil(lastCalledBackfillMap)
 
 	// denotes the case where router updated its cache after xmem raises a collection error for the reqs routed with older manifest ID
-	xmemReported, manId, err = collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId))
+	xmemReported, manId, err = collectionsRouter.checkIfXmemReportedCollectionError(spec, uint64(reqManifestId), uint32(reqColId), wrappedMCR.ColInfo.TargetNamespace)
 	assert.Equal(true, xmemReported)
 	assert.Equal(uint64(9), manId)
 	assert.Nil(err)
