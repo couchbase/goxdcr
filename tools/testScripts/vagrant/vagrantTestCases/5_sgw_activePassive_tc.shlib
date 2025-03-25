@@ -67,7 +67,7 @@ function verifyPromStats {
 	createBucketReplication "C2" "B2" "C2" "B3" MobileBucketReplProperties
 	checkChangesLeftInternal "C2" "B2" "C2" "B3"
 
-  # The replication should only contain user docs, do binary check to see if user docs were corrupted
+	# The replication should only contain user docs, do binary check to see if user docs were corrupted
 	validateBinaryFilteredIs0 "C2" "B2" "B3"
 
 	# verify no datapool get failures

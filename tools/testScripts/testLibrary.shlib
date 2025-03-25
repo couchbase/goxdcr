@@ -380,10 +380,10 @@ function checkChangesLeftInternal {
 
 # SGW Active Active will have heartbeat document so changes left == 1
 function checkChangesLeftInternalSGW {
- 	local srcCluster=$1
- 	local srcBucket=$2
- 	local targetCluster=$3
- 	local targetBucket=$4
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
 
 	checkChangesLeftInternalWithSpecifiedCount "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" 1
 }

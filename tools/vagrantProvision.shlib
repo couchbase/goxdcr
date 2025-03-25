@@ -61,8 +61,10 @@ declare -A CBServerLink=(
 )
 
 declare -A SGWLink=(
-	# There is no "latest" link so manually update this over time
-	["4.0.0"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/119/couchbase-sync-gateway-enterprise_4.0.0-119_x86_64.deb"
+	# version is going to be substituted
+	["latestmanifest"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/version/lastSuccessful.xml"
+	# The string "buildNum" is going to be substituted at run time
+	["4.0.0"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/buildNum/couchbase-sync-gateway-enterprise_4.0.0-buildNum_aarch64.deb"
 )
 
 function vagrantUp {
@@ -140,7 +142,9 @@ function vagrantGetLocalCBServerDebFileName {
 
 function vagrantGetLocalSGWDebFileName {
 	local version="$1"
-	echo "couchbase-sync-gateway-enterprise_${version}_x86_64.deb"
+	local fileStr="couchbase-sync-gateway-enterprise_${version}_aarch64.deb"
+	fileStr=$(sgwDebArchSubstitute "$fileStr")
+	echo "$fileStr"
 }
 
 function wgetWithProgress {
@@ -153,7 +157,9 @@ function wgetWithProgress {
 
 function downloadCBServerDeb {
 	local version="$1"
-	local localFileName=$(vagrantGetLocalCBServerDebFileName "$version")
+	local localFileName
+
+	localFileName=$(vagrantGetLocalCBServerDebFileName "$version")
 	if [[ -z "${CBServerLink[$version]:-}" ]]; then
 		echo "Version $version is not linked"
 		return 1
@@ -175,20 +181,46 @@ function downloadCBServerDeb {
 
 function downloadSGWDeb {
 	local version="$1"
-	local localFileName=$(vagrantGetLocalSGWDebFileName "$version")
+	local manifestFile
+	local localManifestFile="/tmp/sgwManifest.xml"
+	local localFileName
+	local buildNum
+	local downloadName
 
 	if [[ -z "${SGWLink[$version]:-}" ]]; then
 		echo "SGW Version $version is not linked"
 		return 1
 	fi
 
+	localFileName=$(vagrantGetLocalSGWDebFileName "$version")
 	if [[ -f "$localFileName" ]]; then
 		echo "Found pre-downloaded file $localFileName"
 		return 0
 	fi
 
+	manifestFile=$(echo ${SGWLink["latestmanifest"]} | sed "s/version/$version/g")
+	wgetWithProgress "$manifestFile" "$localManifestFile"
+	buildNum=$(xmllint --xpath "string(//annotation[@name='BLD_NUM'][1]/@value)" "$localManifestFile")
+
+	if [[ -z "${buildNum:-}" ]]; then
+		echo "Failed to extract buildNum from the XML file $localManifestFile"
+		exit 1
+	fi
+
+	downloadName="${SGWLink[$version]:-}"
+	downloadName=$(echo "$downloadName" | sed "s/buildNum/$buildNum/g")
+	downloadName=$(sgwDebArchSubstitute "$downloadName")
+
 	checkBuildServerAccessibility
-	wgetWithProgress "${SGWLink[$version]}" "$localFileName"
+	wgetWithProgress "$downloadName" "$localFileName"
+}
+
+function sgwDebArchSubstitute {
+	local fileName="$1"
+	if [[ $(uname -m) == "x86_64" ]]; then
+		fileName=$(echo $fileName | sed 's/aarch64/x86_64/g')
+	fi
+	echo "$fileName"
 }
 
 function vagrantInstallCBServerAll {
