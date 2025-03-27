@@ -363,6 +363,7 @@ type DcpNozzle struct {
 	backfillTaskEndSeqno          map[uint16]*base.SeqnoWithLock // seqno supposed to end for a VB task
 	backfillTaskStreamCloseSent   map[uint16]*uint32
 	backfillTaskStreamEndReceived map[uint16]*uint32
+	backfillReceivedData          map[uint16]*uint32 // Track cornercase where this VB backfill did not receive data
 
 	osoRequested           bool
 	getHighSeqnoOneAtATime chan bool
@@ -421,6 +422,7 @@ func NewDcpNozzle(id string,
 		backfillTaskEndSeqno:           make(map[uint16]*base.SeqnoWithLock),
 		backfillTaskStreamCloseSent:    make(map[uint16]*uint32),
 		backfillTaskStreamEndReceived:  make(map[uint16]*uint32),
+		backfillReceivedData:           make(map[uint16]*uint32),
 		nonOKVbStreamEnds:              make(map[uint16]bool),
 	}
 
@@ -437,6 +439,8 @@ func NewDcpNozzle(id string,
 		dcp.backfillTaskStreamCloseSent[vbno] = &seqnoEndForVB
 		var streamEndReceived uint32
 		dcp.backfillTaskStreamEndReceived[vbno] = &streamEndReceived
+		var receivedDataAtomic uint32
+		dcp.backfillReceivedData[vbno] = &receivedDataAtomic
 	}
 
 	dcp.composeUserAgent()
@@ -1132,8 +1136,11 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
-						if !dcp.isMainPipeline() && !dcp.osoRequested && m.Seqno > dcp.backfillTaskEndSeqno[m.VBucket].GetSeqno() {
-							dcp.sendStreamCloseIfNecessary(m.VBucket)
+						if !dcp.isMainPipeline() {
+							if !dcp.osoRequested && m.Seqno > dcp.backfillTaskEndSeqno[m.VBucket].GetSeqno() {
+								dcp.sendStreamCloseIfNecessary(m.VBucket)
+							}
+							atomic.CompareAndSwapUint32(dcp.backfillReceivedData[m.VBucket], 0, 1)
 						}
 					case mc.UPR_SNAPSHOT:
 						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
@@ -1175,8 +1182,7 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64, flag uint32) er
 	if dcp.vbStreamEndIsOk(vbno) {
 		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
 		if dcp.vbStreamEndShouldRaiseEvt(vbno) {
-			startTs, getTsErr := dcp.getTS(vbno, true)
-			if getTsErr == nil && startTs != nil && seqno == startTs.Seqno {
+			if atomic.LoadUint32(dcp.backfillReceivedData[vbno]) == uint32(0) {
 				// The streamRequest sent a same start and end and so no data was transferred
 				go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbno, dcp, nil, nil))
 			} else {
@@ -1526,10 +1532,6 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			}
 		}
 
-		// In a corner case where startSeq == endSeqno, DCP will not send down a streamEnd and instead just
-		// close the connection. Mark the endSeqno here first to check if this is the case
-		// Update: streamEnd will be sent but there will be no data, so still need to set endSeqnoForDcp for bypass check
-		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
 		dcp.backfillTaskEndSeqno[vbno].SetSeqno(seqEnd)
 	}
 
