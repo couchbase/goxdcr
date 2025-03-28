@@ -2937,11 +2937,6 @@ from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions
 import couchbase.subdocument as SD
 
-doc_content = {
-    'field1': 'value1',
-    'field2': 'value2'
-}
-
 bootstrap="127.0.0.1:$kvPort"
 bucket_name="$bucketName"
 
@@ -2990,4 +2985,50 @@ function setupXdcrInboundUser {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_target[*]
+}
+
+function cleanupGoxdcrLogs {
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+}
+
+function insertTxnXattr {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local kvPort=${CLUSTER_NAME_KV_PORT_MAP[$clusterName]:-}
+
+	pipCheckCouchbase
+
+	python3 <<END
+
+from couchbase.auth import PasswordAuthenticator
+from couchbase.bucket import Bucket
+from couchbase.cluster import Cluster
+from couchbase.options import ClusterOptions
+import couchbase.subdocument as SD
+
+bootstrap="127.0.0.1:$kvPort"
+bucket_name="$bucketName"
+
+# Connect options - authentication
+auth = PasswordAuthenticator(
+    "$DEFAULT_ADMIN",
+    "$DEFAULT_PW",
+)
+
+cluster = Cluster('couchbase://{}'.format(bootstrap), ClusterOptions(auth))
+bucket = cluster.bucket(bucket_name)
+
+specs = []
+specs.append(SD.upsert('txn', '{}', xattr=True))
+
+cb_coll = bucket.default_collection()
+cb_coll.mutate_in(
+	"$docName",
+	specs
+)
+
+END
 }
