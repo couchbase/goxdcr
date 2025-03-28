@@ -1251,28 +1251,46 @@ func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
-	tsTracker.validateVbno(vbno, "addSentSeqno")
+	ok := tsTracker.validateVbno(vbno, "addSentSeqno")
+	if !ok {
+		return
+	}
+
 	tsTracker.vb_sent_seqno_list_map[vbno].AppendSeqno(sent_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFilteredSeqno(vbno uint16, filtered_seqno uint64) {
-	tsTracker.validateVbno(vbno, "addFilteredSeqno")
+	ok := tsTracker.validateVbno(vbno, "addFilteredSeqno")
+	if !ok {
+		return
+	}
+
 	tsTracker.vb_filtered_seqno_list_map[vbno].AppendSeqno(filtered_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addIgnoredSeqno(vbno uint16, ignoredSeqno uint64) {
-	tsTracker.validateVbno(vbno, "addIgnoredSeqno")
+	ok := tsTracker.validateVbno(vbno, "addIgnoredSeqno")
+	if !ok {
+		return
+	}
+
 	tsTracker.vbIgnoredSeqnoListMap[vbno].AppendSeqno(ignoredSeqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addFailedCRSeqno(vbno uint16, failed_cr_seqno uint64) {
-	tsTracker.validateVbno(vbno, "addFailedCRSeqno")
+	ok := tsTracker.validateVbno(vbno, "addFailedCRSeqno")
+	if !ok {
+		return
+	}
 
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].AppendSeqno(failed_cr_seqno)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_seqno uint64) {
-	tsTracker.validateVbno(vbno, "processGapSeqnos")
+	ok := tsTracker.validateVbno(vbno, "processGapSeqnos")
+	if !ok {
+		return
+	}
 
 	last_seen_seqno_obj := tsTracker.vb_last_seen_seqno_map[vbno]
 
@@ -1295,12 +1313,20 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEventSeqno, manifestId uint64) {
-	tsTracker.validateVbno(vbno, "addSystemSeqno")
+	ok := tsTracker.validateVbno(vbno, "addSystemSeqno")
+	if !ok {
+		return
+	}
+
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) setSourceSeqnoManifestIdPair(vbno uint16, seqno, manifestId uint64) {
-	tsTracker.validateVbno(vbno, "setSourceSeqnoManifestIdPair")
+	ok := tsTracker.validateVbno(vbno, "setSourceSeqnoManifestIdPair")
+	if !ok {
+		return
+	}
+
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].lock.Lock()
 	defer tsTracker.vbSystemEventsSeqnoListMap[vbno].lock.Unlock()
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].seqno_list_1 = []uint64{seqno}
@@ -1308,7 +1334,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) setSourceSeqnoManifestIdPair(vbno uint1
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) setTargetSeqnoManifestIdPair(vbno uint16, seqno, manifestId uint64) {
-	tsTracker.validateVbno(vbno, "setTargetSeqnoManifestIdPair")
+	ok := tsTracker.validateVbno(vbno, "setTargetSeqnoManifestIdPair")
+	if !ok {
+		return
+	}
+
 	tsTracker.vbTgtSeqnoManifestMap[vbno].lock.Lock()
 	defer tsTracker.vbTgtSeqnoManifestMap[vbno].lock.Unlock()
 	tsTracker.vbTgtSeqnoManifestMap[vbno].seqno_list_1 = []uint64{seqno}
@@ -1316,7 +1346,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) setTargetSeqnoManifestIdPair(vbno uint1
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addManifestId(vbno uint16, seqno, manifestId uint64) {
-	tsTracker.validateVbno(vbno, "addManifestId")
+	ok := tsTracker.validateVbno(vbno, "addManifestId")
+	if !ok {
+		return
+	}
+
 	tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(vbno, seqno, manifestId)
 }
 
@@ -1348,7 +1382,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
  * which only keeps track of physically sent numbers.
  */
 func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
-	tsTracker.validateVbno(vbno, "GetThroughSeqno")
+	ok := tsTracker.validateVbno(vbno, "GetThroughSeqno")
+	if !ok {
+		return 0
+	}
 
 	// lock through_seqno_map[vbno] throughout the computation to ensure that
 	// two GetThroughSeqno() routines won't interleave, which would cause issues
@@ -1628,8 +1665,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair) {
-	tsTracker.validateVbno(vbno, "setStartSeqno")
-	obj, _ := tsTracker.through_seqno_map[vbno]
+	ok := tsTracker.validateVbno(vbno, "setStartSeqno")
+	if !ok {
+		return
+	}
+
+	obj := tsTracker.through_seqno_map[vbno]
 	obj.SetSeqno(seqno)
 	// When Pipeline starts from a checkpoint (SetVBTimeStamp) or rollback occurs (UpdateVBTimeStamp)
 	// the throughSeqno is set to "seqno"
@@ -1641,12 +1682,16 @@ func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64
 	tsTracker.setTargetSeqnoManifestIdPair(vbno, seqno, manifestIds.TargetManifestId)
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {
+func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) bool {
 	if _, ok := tsTracker.vb_map[vbno]; !ok {
 		err := fmt.Errorf("method %v in tracker service for pipeline %v received invalid vbno. vbno=%v; valid vbnos=%v",
 			caller, tsTracker.id, vbno, tsTracker.vb_map)
 		tsTracker.handleGeneralError(err)
+
+		return false
 	}
+
+	return true
 }
 
 // handle fatal error, raise error event to pipeline supervisor
