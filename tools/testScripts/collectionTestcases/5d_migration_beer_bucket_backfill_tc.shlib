@@ -11,12 +11,13 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C1P0"]=9002)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C1P0"]=13002)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+CLUSTER_NAME_KV_PORT_MAP=(["C1"]=12000 ["C2"]=12002)
 
 declare -A BucketProperty=(["ramQuotaMB"]=100)
 declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
@@ -62,6 +63,8 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
 }
+
+INVALID_VBS_ERR="received invalid vbno. vbno="
 
 function runTestCase {
 	echo "============================================================================"
@@ -138,6 +141,23 @@ function runTestCase {
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
+
+	# CBSE-19697 fix validation.
+	echo "Sleeping 5 secs before rebalancing one-node in"
+	sleep 5
+	addOneNodeIn "C1P0" "C1"
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	# txnDoc maps to a non-0 vb of n_2 node causing a panic pre-fix.
+	writeJSONDocument "C1" "B1" "txnDoc" '{"foo":"bar"}'
+	insertTxnXattr "C1" "B1" "txnDoc"
+	echo "sleep for 10seconds"
+	sleep 10
+	grepForPanics
+	validateInternalLogWithInstance "C1" "$INVALID_VBS_ERR" "0"
+	validateInternalLogWithInstance "C1P0" "$INVALID_VBS_ERR" "0"
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -682,6 +682,7 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 	var matchedNamespaces metadata.CollectionNamespaceMapping
 
 	var errMap base.ErrorMap
+	var filteringFailedForMainReq bool
 	if !c.collectionMode.IsMigrationOn() {
 		var tgtCollections metadata.CollectionNamespaceList
 		tgtCollections, err = c.regularExplicitMap(srcNamespace)
@@ -712,14 +713,20 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 					continue
 				}
 				unableToFilterCnt++
-				c.ignoreDataFunc(errMCReqMap[key])
+
+				failedMcReq := errMCReqMap[key]
+				c.ignoreDataFunc(failedMcReq)
+
+				// note down if filtering failed for the input wrappedMCReq so that we need not
+				// call ignoreDataFunc again, given it's already called once above.
+				filteringFailedForMainReq = (failedMcReq.UniqueKey == wrappedMCReq.UniqueKey)
 			}
 			wrappedMCReq.SiblingReqsMtx.RLock()
 			totalInstances := len(wrappedMCReq.SiblingReqs) + 1
 			wrappedMCReq.SiblingReqsMtx.RUnlock()
 			if totalInstances == unableToFilterCnt {
 				// The original req + the siblings were all not able be replicated
-				err = base.ErrorIgnoreRequest
+				err = base.ErrorRequestAlreadyIgnored
 				return
 			}
 		}
@@ -738,7 +745,11 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 
 	if allEmpty {
 		// The source mutation is on the deny list
-		err = base.ErrorIgnoreRequest
+		if filteringFailedForMainReq {
+			err = base.ErrorRequestAlreadyIgnored
+		} else {
+			err = base.ErrorIgnoreRequest
+		}
 	}
 
 	if c.collectionMode.IsMigrationOn() {
