@@ -238,7 +238,7 @@ var EnableDcpPurgeRollbackConfig = &SettingsConfig{false, nil}
 var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFreqVal, &Range{0, 60480}}
 
 // 0 means it is off
-var CasDriftThresholdSecsConfig = &SettingsConfig{100, &Range{0, math.MaxInt}}
+var CasDriftThresholdSecsConfig = &SettingsConfig{3900, &Range{0, math.MaxInt}}
 var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
 var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
