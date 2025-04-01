@@ -49,6 +49,10 @@ func (r *Rules) GetTargetBuckets() (blist []string) {
 	m[r.Target.Bucket] = true
 
 	for _, target := range r.Mapping {
+		if target.IsBlacklistTarget() {
+			continue
+		}
+
 		m[target.Bucket] = true
 	}
 
