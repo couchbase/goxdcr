@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -1623,6 +1624,25 @@ func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(wrappedUprEve
 		errMap = make(base.ErrorMap)
 		errMap["GetTargetUsingMigrationFilter"] = base.ErrorInvalidInput
 		return
+	}
+
+	// FilterUprEvent would have been already called once before this, so reuse the
+	// decompressed body computed the first time. This is important because the xattr
+	// bit in wrappedUprEvent.UprEvent.DataType could have been already stripped to reflect
+	// the datatype of wrappedUprEvent.DecompressedValue, and not wrappedUprEvent.UprEvent.Value.
+	if wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
+		originalBody := wrappedUprEvent.UprEvent.Value
+		originalDatatype := wrappedUprEvent.UprEvent.DataType
+		defer func() {
+			// set it back to original value before returning.
+			wrappedUprEvent.UprEvent.Value = originalBody
+			wrappedUprEvent.UprEvent.DataType = originalDatatype
+		}()
+
+		wrappedUprEvent.UprEvent.Value = wrappedUprEvent.DecompressedValue
+		if wrappedUprEvent.UprEvent.IsSnappyDataType() {
+			wrappedUprEvent.UprEvent.DataType &^= mcc.SnappyDataType
+		}
 	}
 
 	matchedNamespaces = make(CollectionNamespaceMapping)

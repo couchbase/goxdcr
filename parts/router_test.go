@@ -28,6 +28,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -35,6 +36,7 @@ import (
 	service_def_mocks "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 	UtilitiesMock "github.com/couchbase/goxdcr/v8/utils/mocks"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -1205,4 +1207,62 @@ func TestCollectionsRouter_checkIfXmemReportedCollectionError(t *testing.T) {
 	assert.Equal(true, xmemReported)
 	assert.Equal(uint64(9), manId)
 	assert.Nil(err)
+}
+
+func TestMigrationFilterAfterStrippingTxnXattr(t *testing.T) {
+	fmt.Println("============== Test case start: TestMigrationFilterAfterStrippingTxnXattr =================")
+	defer fmt.Println("============== Test case end: TestMigrationFilterAfterStrippingTxnXattr =================")
+	a := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, _, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilities.NewUtilities(), throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	a.Nil(err)
+
+	val := `{}`
+	txnXattrKey := base.TransactionXattrKey
+	txnXattrVal := `{}`
+	body := make([]byte, len(txnXattrKey)+len(txnXattrVal)+4+4+2+len(val))
+	composer := base.NewXattrComposer(body)
+	err = composer.WriteKV([]byte(txnXattrKey), []byte(txnXattrVal))
+	a.Nil(err)
+	body, _ = composer.FinishAndAppendDocValue([]byte(val), nil, nil)
+	body = snappy.Encode(nil, body)
+
+	uprEvent := &base.WrappedUprEvent{
+		UprEvent: &mcc.UprEvent{
+			Opcode:   gomemcached.UPR_MUTATION,
+			VBucket:  0,
+			DataType: base.JSONDataType | base.XattrDataType | base.SnappyDataType,
+			Value:    body,
+		},
+		ByteSliceGetter: func(u uint64) ([]byte, error) {
+			return make([]byte, u), nil
+		},
+	}
+
+	router.filter, err = filter.NewFilterWithSharedDP("", "", utilities.NewUtilities(), base.NewFakeDataPool(), 0, base.MobileCompatibilityOff)
+	a.Nil(err)
+
+	// 1. first FilterUprEvent is applied in router.Route to strip out txn xattrs.
+	// xattr bit is stripped from datatype because txn was the only xattr.
+	replicate, err, errDesc, dpFails, status := router.filter.FilterUprEvent(uprEvent)
+	a.True(replicate)
+	a.Nil(err)
+	a.Equal(len(errDesc), 0)
+	a.Equal(dpFails, int64(0))
+	a.Equal(status, filter.NotFiltered)
+
+	mcReq, err := router.ComposeMCRequest(uprEvent)
+	a.Nil(err)
+
+	// 2. Now apply some regex based on document body in the migration codepath.
+	// It should resue the decompressed value in (1) and should not have any errors.
+	srcNs, err := metadata.NewSourceMigrationNamespace(`REGEXP_CONTAINS(type, "foo")`, base.NewFakeDataPool())
+	a.Nil(err)
+	c := &metadata.CollectionNamespaceMapping{
+		srcNs: metadata.CollectionNamespaceList{&base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}},
+	}
+	_, errMap, errMcReq := c.GetTargetUsingMigrationFilter(uprEvent, mcReq, nil)
+	a.Equal(len(errMap), 0)
+	a.Equal(len(errMcReq), 0)
 }
