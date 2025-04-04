@@ -88,6 +88,51 @@ func (_c *ReplicatorAgent_GetAndClearInfoToReplicate_Call) RunAndReturn(run func
 	return _c
 }
 
+// IsRunning provides a mock function with no fields
+func (_m *ReplicatorAgent) IsRunning() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsRunning")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// ReplicatorAgent_IsRunning_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsRunning'
+type ReplicatorAgent_IsRunning_Call struct {
+	*mock.Call
+}
+
+// IsRunning is a helper method to define mock.On call
+func (_e *ReplicatorAgent_Expecter) IsRunning() *ReplicatorAgent_IsRunning_Call {
+	return &ReplicatorAgent_IsRunning_Call{Call: _e.mock.On("IsRunning")}
+}
+
+func (_c *ReplicatorAgent_IsRunning_Call) Run(run func()) *ReplicatorAgent_IsRunning_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *ReplicatorAgent_IsRunning_Call) Return(_a0 bool) *ReplicatorAgent_IsRunning_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ReplicatorAgent_IsRunning_Call) RunAndReturn(run func() bool) *ReplicatorAgent_IsRunning_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RequestImmediateDataGather provides a mock function with no fields
 func (_m *ReplicatorAgent) RequestImmediateDataGather() error {
 	ret := _m.Called()

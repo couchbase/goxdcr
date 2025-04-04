@@ -10,6 +10,7 @@ package replication_manager
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -393,10 +394,16 @@ var SettingsValueToRestValueMap = map[string]map[interface{}]interface{}{
 
 var logger_msgutil *log.CommonLogger = log.NewLogger(base.MsgUtilsKey, log.GetOrCreateContext(base.MsgUtilsKey))
 
-func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
+func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference, includeStagedCreds bool) (*ap.Response, error) {
 	remoteClusterArr := make([]map[string]interface{}, 0)
 	for _, remoteCluster := range remoteClusters {
-		remoteClusterArr = append(remoteClusterArr, remoteCluster.ToMap())
+		mapOutput := remoteCluster.ToMap()
+		if !includeStagedCreds {
+			// staged credentials should be returned only when explicitly asked for
+			delete(mapOutput, base.StageCredentials)
+		}
+		remoteClusterArr = append(remoteClusterArr, mapOutput)
+
 	}
 	return EncodeObjectIntoResponseSensitive(remoteClusterArr)
 }
@@ -618,15 +625,11 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 	if len(name) == 0 {
 		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
 	}
+
 	if len(hostName) == 0 {
 		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
 	}
-	if secureType != base.SecureTypeFull && len(userName) == 0 {
-		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given when secure type is not full")
-	}
-	if secureType != base.SecureTypeFull && len(password) == 0 {
-		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given when secure type is not full")
-	}
+
 	if secureType == base.SecureTypeFull && len(certificate) == 0 && !metadata.IsCapellaHostname(hostName) {
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given when secure type is full")
 	}
@@ -635,16 +638,28 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate cannot be given when secure type is none")
 	}
 
+	if hostnameMode != metadata.HostnameMode_None && hostnameMode != metadata.HostnameMode_External && hostnameMode != metadata.HostnameMode_Internal {
+		errorsMap[base.RemoteClusterHostnameMode] = fmt.Errorf("%v specified is invalid", base.RemoteClusterHostnameMode)
+	}
+
+	validateRemoteClusterAuthParameters(userName, password, secureType, clientCertificate, clientKey, errorsMap)
+}
+
+func validateRemoteClusterAuthParameters(userName, password, secureType string, clientCertificate, clientKey []byte, errorsMap map[string]error) {
+	if secureType != base.SecureTypeFull && len(userName) == 0 {
+		errorsMap[base.RemoteClusterUserName] = errors.New("username must be given when secure type is not full")
+	}
+
+	if secureType != base.SecureTypeFull && len(password) == 0 {
+		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given when secure type is not full")
+	}
+
 	if secureType != base.SecureTypeFull && len(clientCertificate) > 0 {
 		errorsMap[base.RemoteClusterClientCertificate] = errors.New("client certificate cannot be given when secure type is not full")
 	}
 
 	if secureType != base.SecureTypeFull && len(clientKey) > 0 {
 		errorsMap[base.RemoteClusterClientKey] = errors.New("client key cannot be given when secure type is not full")
-	}
-
-	if hostnameMode != metadata.HostnameMode_None && hostnameMode != metadata.HostnameMode_External && hostnameMode != metadata.HostnameMode_Internal {
-		errorsMap[base.RemoteClusterHostnameMode] = fmt.Errorf("%v specified is invalid", base.RemoteClusterHostnameMode)
 	}
 
 	// full secure type is special in that it is the only mode where
@@ -669,6 +684,12 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 				// client certificate is given
 				if len(clientKey) == 0 {
 					errorsMap[base.RemoteClusterClientKey] = errors.New("client key must be given when client certificate is specified")
+				} else {
+					// verify if the enterned client certificate and client key pair is valid
+					_, err := tls.X509KeyPair(clientCertificate, clientKey)
+					if err != nil {
+						errorsMap[base.ErrKeyInvalidClientCert] = fmt.Errorf("failed to parse client certificate/key pair; err=%v", err)
+					}
 				}
 				if len(password) > 0 {
 					errorsMap[base.RemoteClusterPassword] = errors.New("password cannot be given when username is not specified")
@@ -676,6 +697,63 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 			}
 		}
 	}
+}
+
+func DecodeRemoteClusterStagingRequest(request *http.Request, remoteClusterName string) (stagedCredentials *metadata.Credentials, errorsMap map[string]error, err error) {
+	errorsMap = make(map[string]error)
+	var userName, password string
+	var clientCertificate, clientKey []byte
+	var invalidParams = []string{}
+	remoteClusterService := RemoteClusterService()
+	remoteClusterRef, err := remoteClusterService.RemoteClusterByRefName(remoteClusterName, false)
+	if err != nil {
+		err = fmt.Errorf("failed to fetch remoteClusterReference %v. err=%v", remoteClusterName, err)
+		return
+	}
+
+	if err = request.ParseForm(); err != nil {
+		err = ErrorParsingForm
+		return
+	}
+
+	for key, valArr := range request.Form {
+		switch key {
+		case base.RemoteClusterUserName:
+			userName = getStringFromValArr(valArr)
+		case base.RemoteClusterPassword:
+			password = getStringFromValArr(valArr)
+		case base.RemoteClusterClientCertificate:
+			clientCertificateStr := getStringFromValArr(valArr)
+			clientCertificate = []byte(clientCertificateStr)
+		case base.RemoteClusterClientKey:
+			clientKeyStr := getStringFromValArr(valArr)
+			clientKey = []byte(clientKeyStr)
+		case base.StageCredentials:
+			// indicates that this is a staging request.
+			// Do nothing
+		default:
+			invalidParams = append(invalidParams, key)
+		}
+	}
+	// If there are invalid parameters, build an error message.
+	if len(invalidParams) > 0 {
+		err = fmt.Errorf("invalid parameters provided: %v. Valid parameters for staging are '%s', '%s', '%s', '%s'",
+			invalidParams, base.RemoteClusterUserName, base.RemoteClusterPassword,
+			base.RemoteClusterClientCertificate, base.RemoteClusterClientKey)
+		return
+	}
+	validateRemoteClusterAuthParameters(userName, password, remoteClusterRef.SecureTypeString(), clientCertificate, clientKey, errorsMap)
+	if len(errorsMap) > 0 {
+		return
+	}
+
+	stagedCredentials = &metadata.Credentials{
+		UserName_:          userName,
+		Password_:          password,
+		ClientCertificate_: clientCertificate,
+		ClientKey_:         clientKey,
+	}
+	return
 }
 
 // convert secureType parameter to demandEncryption and encrytionType

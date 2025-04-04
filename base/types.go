@@ -165,6 +165,8 @@ func (vbts *VBTimestamp) Sanitize() {
 	}
 }
 
+type MyCredentialsGetter func() (string, string, HttpAuthMech, []byte, bool, []byte, []byte, error)
+
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
 	// returns username, password, http auth mechanism, certificate, whether certificate contains SAN, client certificate, client key

@@ -3193,6 +3193,7 @@ function createSecureRemoteClusterReference {
 	local source=$1
 	local target=$2
 	local remoteClusterCert=${3:-}
+	local userName=${4:-}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
@@ -3201,6 +3202,11 @@ function createSecureRemoteClusterReference {
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
 	local targetSecurePort=${CLUSTER_NAME_SECURE_PORT_MAP[$target]:-$targetPort}
 	local targetHost="127.0.0.1"
+
+	local clientMapKey="$target"
+	if [[ -n "$userName" ]]; then
+		clientMapKey="${target}_${userName}"
+	fi
 
 	# special case handling for Vagrant
 	if [[ ! -z "${VAGRANT_VM_IP_MAP[$target]:-}" ]]; then
@@ -3220,8 +3226,8 @@ function createSecureRemoteClusterReference {
 	fi
 
 	# See if client cert and keys exist
-	local clientCertFile=${CLIENT_CERT_MAP[$target]:-}
-	local clientKeyFile=${CLIENT_KEY_MAP[$target]:-}
+	local clientCertFile=${CLIENT_CERT_MAP[$clientMapKey]:-}
+	local clientKeyFile=${CLIENT_KEY_MAP[$clientMapKey]:-}
 
 	# Get the target cluster's root certificate if not provided
 	if [[ -z "${remoteClusterCert:-}" ]]; then
@@ -3600,10 +3606,79 @@ function setupXdcrInboundUser {
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_target[*]
 }
 
+function setupXdcrAdminUser {
+	local clusterName=$1
+	local username=$2
+	local password=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_admin
+}
+
 function cleanupGoxdcrLogs {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"
 	done
+}
+
+function changeUserPassword {
+	local clusterName=$1
+	local username=$2
+	local oldPassword=$3
+	local newPassword=$4
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -v -u $username:$oldPassword -X POST http://localhost:${port}/controller/changePassword -d password=${newPassword}
+}
+
+function getRemoteClusterConnectivityStatus {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Error: No port found for cluster '$clusterName'"
+		return 1
+	fi
+
+	output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/pools/default/remoteClusters)
+	if [[ $? -ne 0 || -z "$output" ]]; then
+		echo "Error: Failed to fetch remote clusters"
+		return 1
+	fi
+
+	connStatus=$(echo "$output" | jq '.[0]' | jq '.connectivityStatus')
+	echo "$connStatus"
+}
+
+function checkRemoteClusterConnectivity {
+	local clusterName=$1
+	local notOK=0
+	connStatus=$(getRemoteClusterConnectivityStatus "$clusterName")
+	connStatus=${connStatus//\"/} # strip any double qoutes
+	if (($? != 0)); then
+		echo "Failed to fetch remoteClusters on node $clusterName"
+		notOK=1
+	elif [[ "$connStatus" != "RC_OK" ]]; then
+		echo "Failed. Expected remote cluster status is RC_OK but got $connStatus on node $clusterName"
+		notOK=1
+	fi
+
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		if [[ "${CLUSTER_DEPENDENCY_MAP["$dependentNodeName"]}" == "$clusterName" ]]; then
+			connStatus=$(getRemoteClusterConnectivityStatus "$dependentNodeName")
+			connStatus=${connStatus//\"/} # strip any double qoutes
+			if (($? != 0)); then
+				echo "Failed to fetch remoteClusters on node $dependentNodeName"
+				notOK=1
+			elif [[ "$connStatus" != "RC_OK" ]]; then
+				echo "Failed. Expected remote cluster status is RC_OK but got $connStatus on node $dependentNodeName"
+				notOK=1
+			fi
+		fi
+	done
+
+	if (($notOK != 0)); then
+		exit 1
+	fi
 }
 
 function insertTxnXattr {

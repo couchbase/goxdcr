@@ -283,6 +283,10 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 		remoteClusters[rcClone.Id()] = rcClone
 	} else {
 		remoteClusters, err = RemoteClusterService().RemoteClusters()
+		if err != nil {
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		}
+
 		if remoteClusterGetOpts.RedactRequested {
 			remoteClustersClone := make(map[string]*metadata.RemoteClusterReference)
 			for k, v := range remoteClusters {
@@ -290,11 +294,8 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 			}
 			remoteClusters = remoteClustersClone
 		}
-		if err != nil {
-			return EncodeRemoteClusterErrorIntoResponse(err)
-		}
 	}
-	return NewGetRemoteClustersResponse(remoteClusters)
+	return NewGetRemoteClustersResponse(remoteClusters, remoteClusterGetOpts.IncludeStagedCredentials)
 }
 
 type getOptsCommon struct {
@@ -310,6 +311,7 @@ type getRemoteClusterOpts struct {
 	getOptsCommon
 	BucketManifestBucketName string
 	RemoteClusterUuid        string
+	IncludeStagedCredentials bool
 }
 
 type getSourcesOpt struct {
@@ -341,6 +343,10 @@ func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOp
 				opt.RemoteClusterUuid = uuidAndBucketName[0]
 				opt.BucketManifestBucketName = uuidAndBucketName[1]
 			}
+		}
+		if key == base.StageCredentials && len(valArr) == 1 {
+			includeStagedCreds, _ := strconv.ParseBool(strings.ToLower(strings.TrimSpace(valArr[0])))
+			opt.IncludeStagedCredentials = includeStagedCreds
 		}
 	}
 	return opt
@@ -462,34 +468,69 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
-	justValidate, remoteClusterRef, errorsMap, err := DecodeRemoteClusterRequest(request)
+	var (
+		justValidate         bool
+		remoteClusterRef     *metadata.RemoteClusterReference
+		errorsMap            map[string]error
+		stagedCredentials    *metadata.Credentials
+		setErr               error
+		remoteClusterService = RemoteClusterService()
+	)
+
+	isStagingReq, err := adminport.checkIfStagingRequest(request)
 	if err != nil {
-		return nil, err
-	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
+		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, remoteClusterRef=%v\n",
-		justValidate, remoteClusterRef.CloneAndRedact())
-
-	remoteClusterService := RemoteClusterService()
-
-	if justValidate {
-		err = remoteClusterService.ValidateSetRemoteCluster(remoteClusterName, remoteClusterRef)
-		return EncodeRemoteClusterErrorIntoResponse(err)
-	} else {
-		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
+	switch isStagingReq {
+	case false:
+		justValidate, remoteClusterRef, errorsMap, err = DecodeRemoteClusterRequest(request)
 		if err != nil {
-			if isAccessDeniedErr(err) {
-				go writeRemoteAccessDeniedEvent(service_def.UpdateRemoteAccessDeniedEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), err.Error())
-			}
-			return EncodeRemoteClusterErrorIntoResponse(err)
-		} else {
-			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), remoteClusterName)
-			go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
-			return NewCreateRemoteClusterResponse(remoteClusterRef)
+			return nil, err
+		} else if len(errorsMap) > 0 {
+			logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+			return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
 		}
+
+		logger_ap.Infof("Request params: justValidate=%v, remoteClusterRef=%v", justValidate, remoteClusterRef.CloneAndRedact())
+
+		if justValidate {
+			err = remoteClusterService.ValidateSetRemoteCluster(remoteClusterName, remoteClusterRef)
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		}
+		setErr = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
+	case true:
+		clusterCompat, err := adminport.xdcrCompTopologySvc.MyClusterCompatibility()
+		if err != nil {
+			logger_ap.Errorf("failed to fetch cluster compatibility while verifing if staging is allowed. err=%v", err)
+			return EncodeRemoteClusterErrorIntoResponse(fmt.Errorf("failed to verify cluster compatibility for staging: %w", err))
+		}
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForSeamlessCredsChangeSupport) {
+			return EncodeRemoteClusterErrorIntoResponse(base.ErrorSeamlessCredsChangeMixedModeUnsupported)
+		}
+		stagedCredentials, errorsMap, err = DecodeRemoteClusterStagingRequest(request, remoteClusterName)
+		if err != nil {
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		} else if len(errorsMap) > 0 {
+			logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+			return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
+		}
+		logger_ap.Infof("Request params: stagedCredentials %v", stagedCredentials.Clone().Redact())
+
+		remoteClusterRef, setErr = remoteClusterService.SetStagedCredentials(remoteClusterName, stagedCredentials)
+	default:
+		// no op
+	}
+
+	if setErr != nil {
+		if isAccessDeniedErr(setErr) {
+			go writeRemoteAccessDeniedEvent(service_def.UpdateRemoteAccessDeniedEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), setErr.Error())
+		}
+		return EncodeRemoteClusterErrorIntoResponse(setErr)
+	} else {
+		go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), remoteClusterName)
+		go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
+		return NewCreateRemoteClusterResponse(remoteClusterRef)
 	}
 }
 
@@ -1540,4 +1581,25 @@ func (adminport *Adminport) doPostClusterToClusterRequest(request *http.Request)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())
+}
+
+func (adminport *Adminport) checkIfStagingRequest(request *http.Request) (bool, error) {
+	if request == nil {
+		return false, nil
+	}
+	if err := request.ParseForm(); err != nil {
+		return false, ErrorParsingForm
+	}
+	staging, exists := request.Form[base.StageCredentials]
+	if !exists {
+		return false, nil
+	}
+	isStagingReq, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(staging[0])))
+	if err != nil {
+		return false, fmt.Errorf("failed to parse the value provided (%v) against %v parameter as a valid bool. err=%v", staging[0], base.StageCredentials, err)
+	}
+	if isStagingReq {
+		return true, nil
+	}
+	return false, nil
 }

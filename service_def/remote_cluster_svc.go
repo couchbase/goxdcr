@@ -111,6 +111,9 @@ type RemoteClusterSvc interface {
 
 	// Specs Reader
 	SetReplReader(reader ReplicationSpecReader)
+
+	// set staged credentials
+	SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error)
 }
 
 type ClusterHeartbeatAPI interface {

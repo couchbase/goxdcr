@@ -89,8 +89,8 @@ type RemoteClusterReference struct {
 	Uuid_     string `json:"Uuid"`
 	Name_     string `json:"Name"`
 	HostName_ string `json:"HostName"`
-	UserName_ string `json:"UserName"`
-	Password_ string `json:"Password"`
+	// Primary credentials
+	Credentials
 
 	DemandEncryption_ bool   `json:"DemandEncryption"`
 	EncryptionType_   string `json:"EncryptionType"`
@@ -104,9 +104,6 @@ type RemoteClusterReference struct {
 	HttpsHostName_    string            `json:"HttpsHostName"`
 	SANInCertificate_ bool              `json:"SANInCertificate"`
 	HttpAuthMech_     base.HttpAuthMech `json:"HttpAuthMech"`
-
-	ClientCertificate_ []byte `json:"ClientCertificate"`
-	ClientKey_         []byte `json:"ClientKey"`
 
 	// these are hostname actually used to connect to target
 	// they are rotated among nodes in target cluster to achieve load balancing on target
@@ -140,6 +137,81 @@ type RemoteClusterReference struct {
 
 	// if specified true and using non-DNSSRV hostname, bootstrap hostname will not be replaced. Eg: For users using a LB
 	RestrictHostnameReplace bool `json:"RestrictHostnameReplace"`
+
+	// If provided, used when the primary credentials start to fail because of unauthorised errors
+	// Note that staging is not allowed in mixed mode clusters
+	StagedCredentials *Credentials `json:"StagedCredentials,omitempty"`
+}
+
+type Credentials struct {
+	UserName_          string `json:"UserName"`
+	Password_          string `json:"Password"`
+	ClientCertificate_ []byte `json:"ClientCertificate"`
+	ClientKey_         []byte `json:"ClientKey"`
+}
+
+func (c *Credentials) Clone() *Credentials {
+	if c.IsEmpty() {
+		return nil
+	}
+	ret := &Credentials{}
+	ret.UserName_ = c.UserName_
+	ret.Password_ = c.Password_
+	ret.ClientCertificate_ = base.DeepCopyByteArray(c.ClientCertificate_)
+	ret.ClientKey_ = base.DeepCopyByteArray(c.ClientKey_)
+	return ret
+}
+
+func (c *Credentials) IsEmpty() bool {
+	if c == nil {
+		return true
+	}
+	return false
+}
+
+func (c *Credentials) ToMap() map[string]interface{} {
+	if c.IsEmpty() {
+		return nil
+	}
+	ret := map[string]interface{}{}
+	if len(c.UserName_) > 0 {
+		ret[base.RemoteClusterUserName] = c.UserName_
+	}
+	if len(c.ClientCertificate_) > 0 {
+		ret[base.RemoteClusterClientCertificate] = string(c.ClientCertificate_)
+	}
+	return ret
+}
+
+func (c *Credentials) IsSame(other *Credentials) bool {
+	switch {
+	case c == nil:
+		return other == nil
+	case other == nil:
+		return false
+	default:
+		return c.UserName_ == other.UserName_ && c.Password_ == other.Password_ &&
+			bytes.Equal(c.ClientCertificate_, other.ClientCertificate_) &&
+			bytes.Equal(c.ClientKey_, other.ClientKey_)
+	}
+}
+
+func (c *Credentials) Redact() *Credentials {
+	if c != nil {
+		if len(c.UserName_) > 0 && !base.IsStringRedacted(c.UserName_) {
+			c.UserName_ = base.TagUD(c.UserName_)
+		}
+		if len(c.Password_) > 0 && !base.IsStringRedacted(c.Password_) {
+			c.Password_ = base.TagUD(c.Password_)
+		}
+		if len(c.ClientCertificate_) > 0 && !base.IsByteSliceRedacted(c.ClientCertificate_) {
+			c.ClientCertificate_ = base.TagUDBytes(c.ClientCertificate_)
+		}
+		if len(c.ClientKey_) > 0 && !base.IsByteSliceRedacted(c.ClientKey_) {
+			c.ClientKey_ = base.TagUDBytes(c.ClientKey_)
+		}
+	}
+	return c
 }
 
 type ConnErr struct {
@@ -357,18 +429,20 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password, hostnam
 	}
 
 	ref := &RemoteClusterReference{Id_: refId,
-		Uuid_:              uuid,
-		Name_:              name,
-		HostName_:          hostName,
-		UserName_:          userName,
-		Password_:          password,
-		DemandEncryption_:  demandEncryption,
-		EncryptionType_:    encryptionType,
-		Certificate_:       certificate,
-		ClientCertificate_: clientCertificate,
-		ClientKey_:         clientKey,
-		HostnameMode_:      hostnameMode,
-		dnsSrvHelper:       dnsSrvHelper,
+		Uuid_:     uuid,
+		Name_:     name,
+		HostName_: hostName,
+		Credentials: Credentials{
+			UserName_:          userName,
+			Password_:          password,
+			ClientCertificate_: clientCertificate,
+			ClientKey_:         clientKey,
+		},
+		DemandEncryption_: demandEncryption,
+		EncryptionType_:   encryptionType,
+		Certificate_:      certificate,
+		HostnameMode_:     hostnameMode,
+		dnsSrvHelper:      dnsSrvHelper,
 	}
 
 	return ref, nil
@@ -424,19 +498,15 @@ func (ref *RemoteClusterReference) MyConnectionStr() (connStr string, err error)
 
 func (ref *RemoteClusterReference) redactNoLock() *RemoteClusterReference {
 	if ref != nil {
-		if len(ref.UserName_) > 0 && !base.IsStringRedacted(ref.UserName_) {
-			ref.UserName_ = base.TagUD(ref.UserName_)
-		}
-		if len(ref.Password_) > 0 && !base.IsStringRedacted(ref.Password_) {
-			ref.Password_ = base.TagUD(ref.Password_)
-		}
 		if len(ref.Certificate_) > 0 && !base.IsByteSliceRedacted(ref.Certificate_) {
 			ref.Certificate_ = base.TagUDBytes(ref.Certificate_)
 		}
-		if len(ref.ClientCertificate_) > 0 && !base.IsByteSliceRedacted(ref.ClientCertificate_) {
-			ref.ClientCertificate_ = base.TagUDBytes(ref.ClientCertificate_)
+		// redact primary credentials
+		ref.Credentials.Redact()
+		if ref.StagedCredentials != nil {
+			// redact staged credentials
+			ref.StagedCredentials.Redact()
 		}
-		// no need to redact ClientKey since it is always nil in this ref for redact
 	}
 	return ref
 }
@@ -454,6 +524,15 @@ func (ref *RemoteClusterReference) MyCredentials() (string, string, base.HttpAut
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
 	return ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.certificatesNoLock(), ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, nil
+}
+
+// MyStagedCredentials returns staged (secondary) credentials that can be used
+// as a fallback in case the primary credentials fail (e.g., due to auth errors or expired certificates).
+// It is the callers responsibility to check if the stage credentials are present
+func (ref *RemoteClusterReference) MyStagedCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.StagedCredentials.UserName_, ref.StagedCredentials.Password_, ref.HttpAuthMech_, ref.certificatesNoLock(), ref.SANInCertificate_, ref.StagedCredentials.ClientCertificate_, ref.StagedCredentials.ClientKey_, nil
 }
 
 // convert to a map for output
@@ -489,6 +568,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	}
 	if len(ref.TargetBucketManifest) > 0 {
 		outputMap[base.RemoteBucketManifest] = ref.TargetBucketManifest
+	}
+	if !ref.StagedCredentials.IsEmpty() {
+		outputMap[base.StageCredentials] = ref.StagedCredentials.ToMap()
 	}
 	outputMap[base.ConnectivityErrors] = ref.CloneConnErrsNoLock()
 
@@ -531,9 +613,8 @@ func (ref *RemoteClusterReference) areUserSecurityCredentialsTheSameNoLock(ref2 
 	}
 	ref2.mutex.RLock()
 	defer ref2.mutex.RUnlock()
-	return ref.UserName_ == ref2.UserName_ && ref.Password_ == ref2.Password_ && ref.DemandEncryption_ == ref2.DemandEncryption_ &&
-		ref.EncryptionType_ == ref2.EncryptionType_ && bytes.Equal(ref.Certificate_, ref2.Certificate_) &&
-		bytes.Equal(ref.ClientCertificate_, ref2.ClientCertificate_) && bytes.Equal(ref.ClientKey_, ref2.ClientKey_)
+	return ref.Credentials.IsSame(&ref2.Credentials) && ref.DemandEncryption_ == ref2.DemandEncryption_ &&
+		ref.EncryptionType_ == ref2.EncryptionType_ && bytes.Equal(ref.Certificate_, ref2.Certificate_)
 }
 
 func (ref *RemoteClusterReference) AreSecuritySettingsTheSame(ref2 *RemoteClusterReference) bool {
@@ -575,7 +656,7 @@ func (ref *RemoteClusterReference) isEssentiallySameNoLock(ref2 *RemoteClusterRe
 		ref2.mutex.RLock()
 		defer ref2.mutex.RUnlock()
 		return ref.Id_ == ref2.Id_ && ref.Uuid_ == ref2.Uuid_ && ref.Name_ == ref2.Name_ &&
-			ref.HostName_ == ref2.HostName_ && ref.HttpsHostName_ == ref2.HttpsHostName_
+			ref.HostName_ == ref2.HostName_ && ref.HttpsHostName_ == ref2.HttpsHostName_ && ref.StagedCredentials.IsSame(ref2.StagedCredentials)
 	}
 }
 
@@ -649,6 +730,8 @@ func (ref *RemoteClusterReference) loadNonActivesFromNoLock(inRef *RemoteCluster
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
 	ref.revision = inRef.revision
+	// deep copy staged credentials
+	ref.StagedCredentials = inRef.StagedCredentials.Clone()
 }
 
 func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
@@ -694,19 +777,21 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		return nil
 	}
 	return &RemoteClusterReference{Id_: ref.Id_,
-		Uuid_:              ref.Uuid_,
-		Name_:              ref.Name_,
-		HostName_:          ref.HostName_,
-		HttpsHostName_:     ref.HttpsHostName_,
-		UserName_:          ref.UserName_,
-		Password_:          ref.Password_,
-		DemandEncryption_:  ref.DemandEncryption_,
-		Certificate_:       base.DeepCopyByteArray(ref.Certificate_),
-		ClientCertificate_: base.DeepCopyByteArray(ref.ClientCertificate_),
-		EncryptionType_:    ref.EncryptionType_,
-		SANInCertificate_:  ref.SANInCertificate_,
-		HttpAuthMech_:      ref.HttpAuthMech_,
-		HostnameMode_:      ref.HostnameMode_,
+		Uuid_:          ref.Uuid_,
+		Name_:          ref.Name_,
+		HostName_:      ref.HostName_,
+		HttpsHostName_: ref.HttpsHostName_,
+		Credentials: Credentials{
+			UserName_:          ref.UserName_,
+			Password_:          ref.Password_,
+			ClientCertificate_: base.DeepCopyByteArray(ref.ClientCertificate_),
+		},
+		DemandEncryption_: ref.DemandEncryption_,
+		Certificate_:      base.DeepCopyByteArray(ref.Certificate_),
+		EncryptionType_:   ref.EncryptionType_,
+		SANInCertificate_: ref.SANInCertificate_,
+		HttpAuthMech_:     ref.HttpAuthMech_,
+		HostnameMode_:     ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
 		revision:                ref.revision,
@@ -715,6 +800,7 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		srvEntries:              ref.srvEntries.Clone(),
 		connectivityErrors:      ref.connectivityErrors, // shallow copy to ensure ClearConnErrs() works
 		RestrictHostnameReplace: ref.GetRestrictHostnameReplaceNoLock(),
+		StagedCredentials:       ref.StagedCredentials.Clone(),
 	}
 }
 
@@ -1015,6 +1101,19 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 		hostnameList = append(hostnameList, connStr)
 	}
 	return
+}
+
+func (ref *RemoteClusterReference) HasStagedCreds() bool {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return !ref.StagedCredentials.IsEmpty()
+}
+
+func (ref *RemoteClusterReference) SetStagingInfo(creds *Credentials) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+
+	ref.StagedCredentials = creds
 }
 
 // DNS SRV look up should be quick
@@ -1389,6 +1488,31 @@ func (ref *RemoteClusterReference) ValidateCertificates() error {
 	}
 
 	return nil
+}
+
+// Promotes staged creds to primary if present
+// If staged creds is absent, it is a no-op
+// Hence its the callers responsibility to ensure that stagedCreds are present
+func (ref *RemoteClusterReference) PromoteStageCredsToPrimary() {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	if ref.StagedCredentials.IsEmpty() {
+		return
+	}
+	if len(ref.StagedCredentials.UserName_) > 0 {
+		ref.UserName_ = ref.StagedCredentials.UserName_
+	}
+	if len(ref.StagedCredentials.Password_) > 0 {
+		ref.Password_ = ref.StagedCredentials.Password_
+	}
+	if len(ref.StagedCredentials.ClientCertificate_) > 0 {
+		ref.ClientCertificate_ = base.DeepCopyByteArray(ref.StagedCredentials.ClientCertificate_)
+	}
+	if len(ref.StagedCredentials.ClientKey_) > 0 {
+		ref.ClientKey_ = base.DeepCopyByteArray(ref.StagedCredentials.ClientKey_)
+	}
+	// reset staged creds
+	ref.StagedCredentials = nil
 }
 
 type ConnectivityStatus int

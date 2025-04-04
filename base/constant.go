@@ -347,6 +347,8 @@ const (
 	RemoteBucketManifest           = "remoteBucketManifest"
 	RedactRequested                = "redactRequested"
 	RestrictHostnameReplace        = "restrictHostnameReplace"
+	StageCredentials               = "stage"
+	ErrKeyInvalidClientCert        = "InvalidClientCertKeyPair"
 )
 
 // secure type for remote cluster reference
@@ -643,6 +645,7 @@ var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
+var VersionForSeamlessCredsChangeSupport = ServerVersion{8, 1, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}

@@ -54,6 +54,14 @@ var ErrorAdminTimeout = errors.New("The requested operation is being executed bu
 var ErrorRefreshUnreachable = errors.New("Refresh operation could not contact any node in the node list")
 var ErrorRevisionMismatch = errors.New("Revision mismatch error")
 
+// On the server side, certificate validation failures trigger specific TLS alert codes as defined by the RFC.
+// Go's TLS implementation maps these alert codes to human-readable error messages:
+// https://github.com/golang/go/blob/72d9322032f0ee94759a681d524d8ea72a7f23a9/src/pkg/crypto/tls/alert.go#L42
+// At the time of writing, there's an open issue (https://github.com/golang/go/issues/35234)
+// to expose these TLS errors more explicitly. Once resolved, we can leverage the exposed error
+// instead of relying on string matching.
+var ErrorClientCertificateExpired = "expired certificate"
+
 var AdminTimeout = 25 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 25
 
 func IsRefreshError(err error) bool {
@@ -761,6 +769,7 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 
 	if !rctx.refOrig.IsSame(rctx.refCache) || rctx.nodeListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
 		isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
+		stageCredsPromoted := rctx.refOrig.HasStagedCreds() && !rctx.refCache.HasStagedCreds()
 		rctx.agent.logger.Infof("%v in checkAndUpdateAgentReference isSame: %#v, nodeListUpdated: %#v, addressPrefUpdate: %#v, capabilityChanged: %#v, isEssentiallySame: %#v",
 			rctx.agent.Id(),
 			rctx.refOrig.IsSame(rctx.refCache), rctx.nodeListUpdated, rctx.addressPrefUpdate, rctx.capabilityChanged(), isEssentiallySame)
@@ -789,6 +798,9 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 			if rctx.uiErrorMsg != "" {
 				rctx.agent.uiLogSvc.Write(rctx.uiErrorMsg)
 			}
+			if stageCredsPromoted {
+				rctx.agent.uiLogSvc.Write(fmt.Sprintf("Promoted staged credentials to primary on remote cluster \"%s\".", rctx.refCache.Name()))
+			}
 		} else {
 			rctx.agent.refMtx.Lock()
 			rctx.agent.refNodesList = base.DeepCopyStringPairList(rctx.cachedRefNodesList)
@@ -813,16 +825,43 @@ func (rctx *refreshContext) finalizeRefCacheListFrom(listToBeUsed base.StringPai
 	rctx.cachedNodeListWithMinInfo = nodeList
 }
 
-func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecuritySettings bool) ([]interface{}, error) {
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := rctx.refCache.MyCredentials()
+func (rctx *refreshContext) performRPC(connStr string, updateSecuritySettings bool, credsGetter base.MyCredentialsGetter) (httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, statusCode int, err error) {
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := credsGetter()
 	if err != nil {
 		rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving user credentials from reference. err=%v\n", rctx.refCache.Id(), connStr, err)
-		return nil, err
+		return httpAuthMech, defaultPoolInfo, 0, err
 	}
 
-	var defaultPoolInfo map[string]interface{}
-	var bgErr error
-	var statusCode int
+	if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
+		// if updateSecuritySettings is true, get up to date security settings from target
+		httpAuthMech, defaultPoolInfo, statusCode, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+		if err != nil {
+			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. statusCode=%v err=%v", rctx.refCache.Id(), connStr, statusCode, err)
+			return httpAuthMech, defaultPoolInfo, statusCode, err
+		}
+	} else {
+		defaultPoolInfo, err, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+		if err != nil {
+			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. statusCode=%v err=%v", rctx.refCache.Id(), connStr,
+				statusCode, err)
+			return httpAuthMech, defaultPoolInfo, statusCode, err
+		}
+	}
+	return httpAuthMech, defaultPoolInfo, statusCode, err
+}
+
+func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecuritySettings bool) ([]interface{}, error) {
+	var (
+		defaultPoolInfo       map[string]interface{}
+		bgErr                 error
+		statusCode            int
+		httpAuthMech          base.HttpAuthMech
+		sanInCertificate      bool
+		err                   error
+		promoteStageToPrimary bool
+	)
+	httpAuthMech = rctx.refCache.HttpAuthMech()
+	sanInCertificate = rctx.refCache.SANInCertificate()
 	// This backgroundRPC is launched with an opaque
 	// Because it is possible that an Refresh is aborted - in which this function call will need to bail out
 	// quickly and leave this RPC call hanging.
@@ -838,23 +877,23 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 			}
 		}
 		defer signalFunc()
-		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
-			// if updateSecuritySettings is true, get up to date security settings from target
-			httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
-			rctx.markNodeWithStatus(statusCode, bgErr)
-			if bgErr != nil {
-				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
-				return
-			}
-		} else {
-			defaultPoolInfo, bgErr, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
-			rctx.markNodeWithStatus(statusCode, bgErr)
-			if bgErr != nil {
-				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. statusCode=%v err=%v\n", rctx.refCache.Id(), connStr,
-					statusCode, bgErr)
-				return
+		// perform the actual rpc using primary crendentials
+		httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.performRPC(connStr, updateSecuritySettings, rctx.refCache.MyCredentials)
+		if (statusCode == http.StatusUnauthorized || rctx.IsCertificateExpired(statusCode, bgErr)) && rctx.refCache.HasStagedCreds() {
+			// Retry with staged credentials in the following scenarios:
+			// 1. Authentication error returned by the target
+			// 2. TLS handshake failure, possibly due to certificate expiration
+			rctx.agent.logger.Infof("%v Failed to perform RPC with primary credentials. statusCode=%v err=%v", rctx.refCache.Id(), statusCode, bgErr)
+			rctx.agent.logger.Infof("%v Attempting to perform RPC with secondary credentials", rctx.refCache.Id())
+			httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.performRPC(connStr, updateSecuritySettings, rctx.refCache.MyStagedCredentials)
+			if statusCode == http.StatusOK && bgErr == nil {
+				promoteStageToPrimary = true
 			}
 		}
+		if bgErr == nil && httpAuthMech == base.HttpAuthMechHttps {
+			sanInCertificate = true
+		}
+		rctx.markNodeWithStatus(statusCode, bgErr)
 	}
 	// This operation can take a while. Let it run in the bg and watch for any abort signals
 	rctx.agent.refreshMtx.Lock()
@@ -928,6 +967,12 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		}
 	}
 
+	// promote stage credentials to primary only if the target node is in the same taget cluster
+	if promoteStageToPrimary {
+		rctx.refCache.PromoteStageCredsToPrimary()
+		rctx.agent.logger.Infof("Preparing to promote staged credentials to primary in remote cluster reference %v.", rctx.refCache.Id())
+	}
+
 	return nodeList, err
 }
 
@@ -987,6 +1032,7 @@ func (rctx *refreshContext) capabilityChanged() bool {
 
 func (agent *RemoteClusterAgent) Refresh() error {
 	rctx, refreshErrCh, err := agent.initializeNewRefreshContext()
+
 	if err != nil {
 		if err == RefreshAlreadyActive {
 			// Just wait until the err is returned from the active result
@@ -1748,7 +1794,6 @@ func (agent *RemoteClusterAgent) stageNewReferenceNoLock(newRef *metadata.Remote
 			agent.pendingRef.SetRevision(agent.reference.Revision())
 		}
 	}
-
 	return nil
 }
 
@@ -2756,7 +2801,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 		}
 
 		if agent == nil {
-			*errPtr = errors.New(fmt.Sprintf("refName %v not found in the cluster service\n", refName))
+			*errPtr = fmt.Errorf("refName %v not found in the cluster service\n", refName)
 			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
 				service.uilog_svc.Write(fmt.Sprintf("Unable to SetRemoteCluster given %v to %v, due to %v", refName, newRef.CloneAndRedact(), *errPtr))
 			}
@@ -2772,12 +2817,15 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 				service.checkAndUpdateAgentMaps(oldRef, newRef, agent)
 
 				if service.uilog_svc != nil {
-					var hostnameChangeMsg string
+					changeDetails := []string{}
 					newRefHostName := newRef.HostName()
 					if oldRef.HostName() != newRefHostName {
-						hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", newRefHostName)
+						changeDetails = append(changeDetails, fmt.Sprintf(" New contact point is %s.", newRefHostName))
 					}
-					uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name(), hostnameChangeMsg)
+					if oldRef.HasStagedCreds() && !newRef.HasStagedCreds() {
+						changeDetails = append(changeDetails, " Previously staged credentials have been discarded.")
+					}
+					uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name(), strings.Join(changeDetails, ""))
 					if service.uilog_svc != nil {
 						service.uilog_svc.Write(uiLogMsg)
 					}
@@ -2791,6 +2839,34 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 		}
 	}
 	return service.performAdminTask(adminFunc)
+}
+
+// SetStagedCredentials sets the provided staged credentials on the given
+// remote cluster reference and persists the update to metaKV.
+// Returns the updated reference, an error denoting if the operation failed.
+func (service *RemoteClusterService) SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error) {
+	remoteClusterRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
+	if err != nil {
+		err = fmt.Errorf("failed to fetch remoteClusterReference %v. err=%v", refName, err)
+		return nil, err
+	}
+
+	remoteClusterRef.SetStagingInfo(stagedCredentials)
+	// write the updated reference with staging info to metaKV
+	service.registerSet(refName)
+	err = agent.UpdateReferenceFrom(remoteClusterRef, true)
+	if err != nil {
+		service.logger.Errorf("failed to set staging info on remote cluster \"%s\". err=%v", refName, err)
+		service.deregisterSet(refName)
+		if service.uilog_svc != nil {
+			service.uilog_svc.Write(fmt.Sprintf("failed to stage credentials on remote cluster \"%s\" due to %v", refName, err))
+		}
+		return nil, err
+	}
+	if service.uilog_svc != nil {
+		service.uilog_svc.Write(fmt.Sprintf("Successfully staged credentials on remote cluster \"%s\".", refName))
+	}
+	return remoteClusterRef, nil
 }
 
 // The entry point for REST iface for when an user wants to delete a remote cluster reference
@@ -4365,4 +4441,14 @@ func (service *RemoteClusterService) GetBucketTopologySvc() service_def.BucketTo
 func (service *RemoteClusterService) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
 	ref.PopulateDnsSrvIfNeeded(logger)
 	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
+}
+
+func (rctx *refreshContext) IsCertificateExpired(statusCode int, err error) bool {
+	if statusCode != 0 || err == nil {
+		return false
+	}
+	if strings.Contains(err.Error(), ErrorClientCertificateExpired) {
+		return true
+	}
+	return false
 }

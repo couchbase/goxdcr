@@ -1306,6 +1306,65 @@ func (_c *RemoteClusterSvc_SetReplReader_Call) RunAndReturn(run func(service_def
 	return _c
 }
 
+// SetStagedCredentials provides a mock function with given fields: refName, stagedCredentials
+func (_m *RemoteClusterSvc) SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error) {
+	ret := _m.Called(refName, stagedCredentials)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetStagedCredentials")
+	}
+
+	var r0 *metadata.RemoteClusterReference
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, *metadata.Credentials) (*metadata.RemoteClusterReference, error)); ok {
+		return rf(refName, stagedCredentials)
+	}
+	if rf, ok := ret.Get(0).(func(string, *metadata.Credentials) *metadata.RemoteClusterReference); ok {
+		r0 = rf(refName, stagedCredentials)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.RemoteClusterReference)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, *metadata.Credentials) error); ok {
+		r1 = rf(refName, stagedCredentials)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteClusterSvc_SetStagedCredentials_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetStagedCredentials'
+type RemoteClusterSvc_SetStagedCredentials_Call struct {
+	*mock.Call
+}
+
+// SetStagedCredentials is a helper method to define mock.On call
+//   - refName string
+//   - stagedCredentials *metadata.Credentials
+func (_e *RemoteClusterSvc_Expecter) SetStagedCredentials(refName interface{}, stagedCredentials interface{}) *RemoteClusterSvc_SetStagedCredentials_Call {
+	return &RemoteClusterSvc_SetStagedCredentials_Call{Call: _e.mock.On("SetStagedCredentials", refName, stagedCredentials)}
+}
+
+func (_c *RemoteClusterSvc_SetStagedCredentials_Call) Run(run func(refName string, stagedCredentials *metadata.Credentials)) *RemoteClusterSvc_SetStagedCredentials_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*metadata.Credentials))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetStagedCredentials_Call) Return(_a0 *metadata.RemoteClusterReference, _a1 error) *RemoteClusterSvc_SetStagedCredentials_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetStagedCredentials_Call) RunAndReturn(run func(string, *metadata.Credentials) (*metadata.RemoteClusterReference, error)) *RemoteClusterSvc_SetStagedCredentials_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShouldUseAlternateAddress provides a mock function with given fields: ref
 func (_m *RemoteClusterSvc) ShouldUseAlternateAddress(ref *metadata.RemoteClusterReference) (bool, error) {
 	ret := _m.Called(ref)
