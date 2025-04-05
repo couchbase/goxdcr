@@ -2309,3 +2309,10 @@ function verifyClogStats {
 	echo "All clog stats are correct for replication $sourceBucketName -> $targetBucketName."
 	return 0
 }
+
+function testForMobileImportSim {
+	if [[ -z ${mobileImportSimBin:-} ]]; then
+		echo "mobile import binary needed"
+		exit 1
+	fi
+}

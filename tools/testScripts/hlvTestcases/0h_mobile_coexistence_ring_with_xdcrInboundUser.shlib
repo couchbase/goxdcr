@@ -1,4 +1,4 @@
-# Copyright 2024-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -120,9 +120,8 @@ function testMobileHlvWithRingTopology {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running mobile coexistence test case on ring topology"
+	echo "Running mobile coexistence test case with xdcr inbound user on ring topology"
 	echo "============================================================================"
-
 	testForMobileImportSim
 	testForClusterRun
 	if (($? != 0)); then
@@ -137,18 +136,22 @@ function runTestCase {
 		exit $?
 	fi
 
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C1" "C3"
-	createRemoteClusterReference "C2" "C1"
-	createRemoteClusterReference "C2" "C3"
-	createRemoteClusterReference "C3" "C1"
-	createRemoteClusterReference "C3" "C2"
+	setupXdcrInboundUser "C1" "xdcrUser1" "xdcrPassword1"
+	setupXdcrInboundUser "C2" "xdcrUser2" "xdcrPassword2"
+	setupXdcrInboundUser "C3" "xdcrUser3" "xdcrPassword3"
+
+	createRemoteClusterReference "C1" "C2" "127.0.0.1" "xdcrUser2" "xdcrPassword2"
+	createRemoteClusterReference "C1" "C3" "127.0.0.1" "xdcrUser3" "xdcrPassword3"
+	createRemoteClusterReference "C2" "C1" "127.0.0.1" "xdcrUser1" "xdcrPassword1"
+	createRemoteClusterReference "C2" "C3" "127.0.0.1" "xdcrUser3" "xdcrPassword3"
+	createRemoteClusterReference "C3" "C1" "127.0.0.1" "xdcrUser1" "xdcrPassword1"
+	createRemoteClusterReference "C3" "C2" "127.0.0.1" "xdcrUser2" "xdcrPassword2"
 
 	sleep 2
 	testMobileHlvWithRingTopology
 
 	echo "============================================================================"
-	echo "Mobile coexistence test case on ring topology passed"
+	echo "Mobile coexistence test case with xdcr inbound user on ring topology passed"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs

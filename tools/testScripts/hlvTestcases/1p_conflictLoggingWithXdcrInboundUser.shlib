@@ -1,4 +1,4 @@
-# Copyright 2024-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -28,13 +28,13 @@ insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty # conflict bucket for C3.B3
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty # bucket to test conflict records are not replicated
 
-conflictLoggingMap1="{\"bucket\":\"B4\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B4\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B4\", \"collection\": \"S1.col2\"}}}}"
+conflictLoggingMap1="{\"bucket\":\"B4\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B4\", \"collection\": \"S1.col1\"}}}"
 declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap1)
 
-conflictLoggingMap2="{\"bucket\":\"B5\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B5\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B5\", \"collection\": \"S1.col2\"}}}}"
+conflictLoggingMap2="{\"bucket\":\"B5\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B5\", \"collection\": \"S1.col1\"}}}"
 declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap2)
 
-conflictLoggingMap3="{\"bucket\":\"B6\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B6\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B6\", \"collection\": \"S1.col2\"}}}}"
+conflictLoggingMap3="{\"bucket\":\"B6\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B6\", \"collection\": \"S1.col1\"}}}"
 declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap3)
 
 declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true) # replication to test conflict records are not replicated
@@ -127,12 +127,6 @@ function testReplicationWithConflictLogging {
 	echo runCbWorkloadGenCollection "C3" "B3" "S1" "col1" "conflict"
 	runCbWorkloadGenCollection "C3" "B3" "S1" "col1" "" "conflict"
 
-	# create collections that will result in broken mapping(s).
-	createCollection "C1" "B1" "S1" "col2"
-	createCollection "C3" "B3" "S1" "col2"
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" "" "conflict"
-	runCbWorkloadGenCollection "C3" "B3" "S1" "col2" "" "conflict"
-
 	echo "Replication C1.B1 -> C2.B2"
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties1
 	echo "Replication C1.B1 -> C3.B3"
@@ -150,7 +144,7 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=300
+	sleepTime=200
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 
@@ -158,43 +152,12 @@ function testReplicationWithConflictLogging {
 
 	grepForAbnormalities
 
-	pauseReplication "C1" "B1" "C2" "B2"
-	pauseReplication "C2" "B2" "C1" "B1"
-	pauseReplication "C1" "B1" "C3" "B3"
-	pauseReplication "C3" "B3" "C1" "B1"
-	pauseReplication "C2" "B2" "C3" "B3"
-	pauseReplication "C3" "B3" "C2" "B2"
-
-	createCollection "C1" "B4" "S1" "col2"
-	createCollection "C2" "B5" "S1" "col2"
-	createCollection "C3" "B6" "S1" "col2"
-	createCollection "C2" "B2" "S1" "col2"
-
-	# generate conflicts for backfill collections
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" "" "conflict"
-	runCbWorkloadGenCollection "C2" "B2" "S1" "col2" "" "conflict"
-	runCbWorkloadGenCollection "C3" "B3" "S1" "col2" "" "conflict"
-
-	resumeReplication "C1" "B1" "C2" "B2"
-	resumeReplication "C2" "B2" "C1" "B1"
-	resumeReplication "C1" "B1" "C3" "B3"
-	resumeReplication "C3" "B3" "C1" "B1"
-	resumeReplication "C2" "B2" "C3" "B3"
-	resumeReplication "C3" "B3" "C2" "B2"
-
-	echo "sleeping $sleepTime seconds for backfill to finish"
-	sleep $sleepTime
-
-	waitForChangesLeft0ForTopology
-
-	grepForAbnormalities
-
-	verifyPromStats $(($numItems * 3))
+	verifyPromStats $(($numItems * 2))
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running conflict logging with backfill test case"
+	echo "Running conflict logging test case with xdcr inbound user"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -209,19 +172,23 @@ function runTestCase {
 		exit $?
 	fi
 
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C1" "C3"
-	createRemoteClusterReference "C2" "C1"
-	createRemoteClusterReference "C2" "C3"
-	createRemoteClusterReference "C3" "C1"
-	createRemoteClusterReference "C3" "C2"
-	createRemoteClusterReference "C1" "C1"
+	setupXdcrInboundUser "C1" "xdcrUser1" "xdcrPassword1"
+	setupXdcrInboundUser "C2" "xdcrUser2" "xdcrPassword2"
+	setupXdcrInboundUser "C3" "xdcrUser3" "xdcrPassword3"
+
+	createRemoteClusterReference "C1" "C2" "127.0.0.1" "xdcrUser2" "xdcrPassword2"
+	createRemoteClusterReference "C1" "C3" "127.0.0.1" "xdcrUser3" "xdcrPassword3"
+	createRemoteClusterReference "C2" "C1" "127.0.0.1" "xdcrUser1" "xdcrPassword1"
+	createRemoteClusterReference "C2" "C3" "127.0.0.1" "xdcrUser3" "xdcrPassword3"
+	createRemoteClusterReference "C3" "C1" "127.0.0.1" "xdcrUser1" "xdcrPassword1"
+	createRemoteClusterReference "C3" "C2" "127.0.0.1" "xdcrUser2" "xdcrPassword2"
+	createRemoteClusterReference "C1" "C1" "127.0.0.1" "xdcrUser1" "xdcrPassword1"
 
 	sleep 2
 	testReplicationWithConflictLogging
 
 	echo "============================================================================"
-	echo "Running conflict logging with backfill test case passed"
+	echo "Running conflict logging test case passed with xdcr inbound user"
 	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets

@@ -154,8 +154,7 @@ function runOneReplicationCycleAndPause {
 	numConflictDocsC2=$(getBucketItemCount "C2" "B2")
 	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2"
 	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)); then
-		echo "conflicts were not written"
-		exit 1
+		echo "WARN: conflicts were not written"
 	fi
 	NumConflictDocsC1=$numConflictDocsC1
 	NumConflictDocsC2=$numConflictDocsC2

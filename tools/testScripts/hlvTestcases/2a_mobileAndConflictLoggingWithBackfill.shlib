@@ -200,6 +200,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running conflict logging + mobile with backfill test case"
 	echo "============================================================================"
+	testForMobileImportSim
 	testForClusterRun
 	if (($? != 0)); then
 		exit $?

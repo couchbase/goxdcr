@@ -243,6 +243,8 @@ function runTestCase {
 	echo "Running mobile coexistence test case on multinode setup"
 	echo "============================================================================"
 
+	testForMobileImportSim
+
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 

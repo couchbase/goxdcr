@@ -167,6 +167,8 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running mobile coexistence test case"
 	echo "============================================================================"
+
+	testForMobileImportSim
 	testForClusterRun
 	if (($? != 0)); then
 		exit $?
