@@ -1064,7 +1064,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogg
 	defer ref.mutex.Unlock()
 	if err != nil {
 		if logger != nil {
-			logger.Errorf("%s dnsSrv failed while lookup lookupHost=%s, err=%v", ref.Name_, lookupName, err)
+			logger.Warnf("%s dnsSrv failed while lookup lookupHost=%s, err=%v", ref.Name_, lookupName, err)
 		}
 		ref.hostnameSRVType.ClearSRV()
 		return err
