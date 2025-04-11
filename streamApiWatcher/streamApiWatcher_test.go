@@ -14,11 +14,14 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def/mocks"
 	realUtils "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/stretchr/testify/assert"
+	"os"
 	"testing"
 )
 
 const username = "Administrator"
-const password = "wewewe"
+const envPasswordVar = "XDCR_UNIT_TEST_PW"
+
+var password = os.Getenv(envPasswordVar)
 
 func setupMocksCWS() *mocks.XDCRCompTopologySvc {
 	xdcrTopologySvc := &mocks.XDCRCompTopologySvc{}
