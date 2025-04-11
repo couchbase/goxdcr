@@ -59,7 +59,8 @@ const srcKVPort = "12000"
 const sourcePort = "9000"
 const targetPort = "9001"
 const username = "Administrator"
-const password = "wewewe"
+const envPasswordVar = "XDCR_UNIT_TEST_PW"
+
 const poolsDefaultPath = "pools/default"
 const curl = "curl"
 const POST = "POST"
@@ -67,6 +68,7 @@ const GET = "GET"
 
 var combinedCreds = fmt.Sprintf("%v:%v", username, password)
 var printCmd bool = true
+var password = os.Getenv(envPasswordVar)
 
 var commonAgentWAROptions gocbcore.WaitUntilReadyOptions = gocbcore.WaitUntilReadyOptions{
 	DesiredState: gocbcore.ClusterStateOnline,
@@ -96,7 +98,7 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 
 	// local cluster run has KV port starting at 12000
-	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil, "", "", common.MainPipeline)
+	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", password, crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil, "", "", common.MainPipeline)
 	xmemNozzle.SetConflictLogger(func() baseclog.Logger { return nil })
 
 	// settings map
@@ -1090,7 +1092,7 @@ func Disable_TestLiveImportDoc(t *testing.T) {
 	fmt.Printf("Upsert CAS: %v, result %v\n", uint64(upsOut.Cas()), upsOut.Result)
 
 	// After enabling enableCrossClusterVersioning
-	// curl -X POST -u Administrator:wewewe http://127.0.0.1:9000/pools/default/buckets/B1 -d enableCrossClusterVersioning=true
+	// curl -X POST -u Administrator:<password> http://127.0.0.1:9000/pools/default/buckets/B1 -d enableCrossClusterVersioning=true
 	// In goxdcr.log, we have:
 	// 2024-01-03T09:55:01.810-08:00 INFO GOXDCR.XmemNozzle: pipelineFullTopic=44d5d82a3909c505c52133a353d98254/B1/B2, xmem_44d5d82a3909c505c52133a353d98254/B1/B2_127.0.0.1:12002_0: Using adX1DsoRpCb6kQWoZYq5ew(UUID 69d5f50eca11a426fa9105a8658ab97b) and QIpU9Op/zY2WDmGxkjwvPQ(UUID 408a54f4ea7fcd8d960e61b1923c2f3d) as source and target bucket IDs for HLV.
 	// Use the source bucket Id.
@@ -1460,6 +1462,9 @@ func runCmd(cmd *exec.Cmd, printCmd bool) ([]byte, error) {
 }
 
 func setupClusterRunCluster(port int) {
+	if password == "" {
+		panic(fmt.Sprintf("Environment variable %v not set, unable to get password", envPasswordVar))
+	}
 	defer time.Sleep(3 * time.Second)
 	cmd := exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/nodes/self/controller/settings", port))
 	runCmd(cmd, printCmd)
