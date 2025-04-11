@@ -37,9 +37,11 @@ var id2 = "Cluster2"
 var engineWorkerCount int = base.JSEngineWorkers
 var evaluatorQuota int = base.JSWorkerQuota
 
+const envPasswordVar = "XDCR_UNIT_TEST_PW"
+
 var functionUrl = fmt.Sprintf(base.FunctionUrlFmt, "127.0.0.1", "8080")
 var username = "Administrator"
-var password = "wewewe"
+var password = os.Getenv(envPasswordVar)
 
 var once sync.Once
 var sleepTime = 30 * time.Second
