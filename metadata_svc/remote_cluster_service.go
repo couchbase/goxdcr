@@ -2181,6 +2181,7 @@ func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (servic
 
 func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) *component.RemoteMemcachedComponent {
 	userAgentStr := fmt.Sprintf("RemoteClusterAgent_%v", atomic.AddUint64(&agentCounter, 1))
+	heloUserAgentStr := fmt.Sprintf("RmtAgent %s", bucketName)
 	remoteMemcachedComponent := component.NewRemoteMemcachedComponent(agent.logger, agent.agentFinCh, agent.utils, bucketName)
 	remoteMemcachedComponent.SetTargetUsernameGetter(func() string {
 		agent.waitForRefreshEnabled()
@@ -2242,7 +2243,7 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		return agent.reference.Clone()
 	}).SetAlternateAddressChecker(func(reference *metadata.RemoteClusterReference) (bool, error) {
 		return agent.UsesAlternateAddress()
-	})
+	}).SetUserAgent(heloUserAgentStr)
 
 	return remoteMemcachedComponent
 }
