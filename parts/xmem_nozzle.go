@@ -92,6 +92,8 @@ type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
+var GetMetaClientNameForHELO = "GET"
+var SetMetaClientNameForHELO = "SET"
 
 /************************************
 /* struct bufferedMCRequest
@@ -4439,20 +4441,21 @@ func (xmem *XmemNozzle) composeUserAgent() {
 
 func (xmem *XmemNozzle) composeUserAgentForClient(setMeta bool) {
 	var buffer bytes.Buffer
-	buffer.WriteString("Goxdcr Xmem ")
+	buffer.WriteString("Xmem ")
 	if setMeta {
-		buffer.WriteString(SetMetaClientName)
+		buffer.WriteString(SetMetaClientNameForHELO)
 	} else {
-		buffer.WriteString(GetMetaClientName)
+		buffer.WriteString(GetMetaClientNameForHELO)
 	}
-	buffer.WriteString(" SourceBucket:" + xmem.sourceBucketName)
-	buffer.WriteString(" TargetBucket:" + xmem.config.bucketName)
-	buffer.WriteString(" ConnType:" + xmem.connType.String())
+	buffer.WriteString(" " + xmem.sourceBucketName)
+	buffer.WriteString(" " + xmem.config.bucketName)
+	buffer.WriteString(" " + xmem.connType.String())
 	if setMeta {
-		xmem.setMetaUserAgent = buffer.String()
+		xmem.setMetaUserAgent = base.ComposeHELOMsgKey(buffer.String())
 	} else {
-		xmem.getMetaUserAgent = buffer.String()
+		xmem.getMetaUserAgent = base.ComposeHELOMsgKey(buffer.String())
 	}
+
 }
 
 /**

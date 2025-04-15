@@ -223,6 +223,13 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		// in the unlikely event of error, an empty version will be used
 	}
 
+	// build version i.e. node version + build number
+	buildVersion, err := xdcr_topology_svc.MyBuildVersion()
+	if err != nil {
+		logger_rm.Errorf("Failed to get local build version. err=%v", err)
+		// in the unlikely event of error, an empty version will be used
+	}
+
 	internal_settings := internal_settings_svc.GetInternalSettings()
 
 	logger_rm.Infof("XDCR internal settings: %v\n", internal_settings.ToMap())
@@ -372,6 +379,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
 		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepVariableVBKey].(int),
 		internal_settings.Values[metadata.MaxCheckpointRecordsToReadVariableVBKey].(int),
+		buildVersion,
 	)
 }
 

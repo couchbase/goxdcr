@@ -27,7 +27,7 @@ import (
 )
 
 var ErrorInitializingAuditService = "Error initializing audit service."
-var AuditServiceUserAgent = "Goxdcr Audit"
+var AuditServiceUserAgentPrefix = "Audit"
 
 // opcode for memcached audit command
 var AuditPutCommandCode = mc.AUDIT
@@ -179,7 +179,8 @@ func (service *AuditSvc) init() error {
 
 func (service *AuditSvc) getClient() (mcc.ClientIface, error) {
 	// audit connection is sparse and is not kept alive
-	client, err := service.utils.GetMemcachedConnection(service.kvaddr, "" /*bucketName*/, AuditServiceUserAgent,
+	userAgent := base.ComposeHELOMsgKey(AuditServiceUserAgentPrefix)
+	client, err := service.utils.GetMemcachedConnection(service.kvaddr, "" /*bucketName*/, userAgent,
 		0 /*keepAlivePeriod*/, service.logger)
 
 	if err != nil {

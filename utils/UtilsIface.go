@@ -215,6 +215,5 @@ type UtilsIface interface {
 		client *http.Client, keep_client_alive bool, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (error, int)
 
 	ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nodeInfo map[string]interface{}) string
-	SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, logger *log.CommonLogger) error
 	SendHELOWithFeatures(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, requestedFeatures HELOFeatures, logger *log.CommonLogger) (respondedFeatures HELOFeatures, err error)
 }

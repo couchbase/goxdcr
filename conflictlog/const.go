@@ -18,7 +18,7 @@ const (
 	// Manager consts
 	ConflictManagerLoggerName string = "conflictMgr"
 	ConflictLoggerName        string = "conflictLogger"
-	MemcachedConnUserAgent    string = "conflictLog"
+	MemcachedConnUserAgent    string = "cLog"
 
 	// Logger consts
 	LoggerShutdownChCap       int    = 10

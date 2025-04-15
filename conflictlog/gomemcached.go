@@ -184,7 +184,7 @@ func (m *MemcachedConn) newMemcNodeConn(user, passwd, addr string, isPeerNode bo
 		return nil, err
 	}
 
-	userAgent := MemcachedConnUserAgent
+	userAgent := base.ComposeHELOMsgKey(fmt.Sprintf("%s %s", MemcachedConnUserAgent, m.bucketName))
 
 	retFeatures, err := m.utilsObj.SendHELOWithFeatures(conn, userAgent, MCReadTimeout, MCWriteTimeout, features, m.logger)
 	if err != nil {

@@ -763,7 +763,7 @@ var ckmgrIterationId uint32
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
-	ckmgr.SetUserAgent(base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName))
+	ckmgr.SetUserAgent(base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("CkptMgr", spec.SourceBucketName, spec.TargetBucketName)))
 	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId(), base.GetIterationId(&ckmgrIterationId))
 }
 

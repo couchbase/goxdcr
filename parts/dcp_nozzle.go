@@ -470,7 +470,7 @@ func NewDcpNozzle(id string,
 }
 
 func (dcp *DcpNozzle) composeUserAgent() {
-	dcp.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr Dcp ", dcp.sourceBucketName, dcp.targetBucketName)
+	dcp.user_agent = base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("Dcp", dcp.sourceBucketName, dcp.targetBucketName))
 }
 
 func (dcp *DcpNozzle) CollectionEnabled() bool {

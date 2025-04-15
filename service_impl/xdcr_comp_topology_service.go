@@ -527,26 +527,16 @@ func (top_svc *XDCRTopologySvc) MyClusterName() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) MyNodeVersion() (string, error) {
-	var poolsInfo map[string]interface{}
-	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
-	if err != nil || statusCode != 200 {
-		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
-	}
-
-	implVersionObj, ok := poolsInfo[base.ImplementationVersionKey]
-	if !ok {
-		return "", errors.New("Could not get implementation version of local node.")
-	}
-	implVersion, ok := implVersionObj.(string)
-	if !ok {
-		return "", errors.New(fmt.Sprintf("implementation version of local node is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(implVersion)))
+	implVersion, err := getNodeImplementationVersion(top_svc.staticHostAddr(), top_svc.utils, top_svc.logger)
+	if err != nil {
+		return "", err
 	}
 
 	// implVersion is of format [version]-[buildNumber]-xxx, e.g., 2.5.1-1114-rel-enterprise
 	// we need only the version portion
 	implVersionParts := strings.Split(implVersion, "-")
 	if len(implVersionParts) < 2 {
-		return "", fmt.Errorf("implementation version of local node, %v, is of wrong format.", implVersion)
+		return "", fmt.Errorf("implementation version of local node, %v, is of wrong format", implVersion)
 	}
 
 	return implVersionParts[0], nil
@@ -772,4 +762,39 @@ func (top_svc *XDCRTopologySvc) IsOrchestratorNode() (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func getNodeImplementationVersion(hostAddr string, utils utilities.UtilsIface, logger *log.CommonLogger) (string, error) {
+	var poolsInfo map[string]interface{}
+	err, statusCode := utils.QueryRestApi(hostAddr, base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, logger)
+	if err != nil || statusCode != 200 {
+		return "", fmt.Errorf("failed on calling %s/%v, err=%v, statusCode=%v", hostAddr, base.PoolsPath, err, statusCode)
+	}
+
+	implVersionObj, ok := poolsInfo[base.ImplementationVersionKey]
+	if !ok {
+		return "", fmt.Errorf("could not get implementation version of local node %s", hostAddr)
+	}
+	implVersion, ok := implVersionObj.(string)
+	if !ok {
+		return "", fmt.Errorf("implementation version of local node is of wrong type for %s. Expected type: string; Actual type: %s", hostAddr, reflect.TypeOf(implVersion))
+	}
+
+	return implVersion, nil
+}
+
+func (top_svc *XDCRTopologySvc) MyBuildVersion() (string, error) {
+	implVersion, err := getNodeImplementationVersion(top_svc.staticHostAddr(), top_svc.utils, top_svc.logger)
+	if err != nil {
+		return "", err
+	}
+
+	// implVersion is of format [version]-[buildNumber]-xxx, e.g., 2.5.1-1114-rel-enterprise
+	// we need only the [version]-[buildNumber] portion
+	implVersionParts := strings.Split(implVersion, "-")
+	if len(implVersionParts) < 2 {
+		return "", fmt.Errorf("implementation version of local node, %v, is of wrong format", implVersion)
+	}
+
+	return fmt.Sprintf("%s-%s", implVersionParts[0], implVersionParts[1]), nil
 }

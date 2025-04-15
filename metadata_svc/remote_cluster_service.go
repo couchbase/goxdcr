@@ -2181,7 +2181,7 @@ func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (servic
 
 func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) *component.RemoteMemcachedComponent {
 	userAgentStr := fmt.Sprintf("RemoteClusterAgent_%v", atomic.AddUint64(&agentCounter, 1))
-	heloUserAgentStr := fmt.Sprintf("RmtAgent %s", bucketName)
+	heloUserAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("RmtAgent %s", bucketName))
 	remoteMemcachedComponent := component.NewRemoteMemcachedComponent(agent.logger, agent.agentFinCh, agent.utils, bucketName)
 	remoteMemcachedComponent.SetTargetUsernameGetter(func() string {
 		agent.waitForRefreshEnabled()

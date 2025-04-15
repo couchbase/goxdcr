@@ -757,7 +757,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 		}
 
 		highseqno_map := watcher.objsPool.HighSeqnosMapPool.Get(kv_vb_map.GetKeyList())
-		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
+		userAgent := base.ComposeHELOMsgKey(fmt.Sprintf("BktWatcher %v", spec.SourceBucketName))
 		var freeInCaseOfErrList []*map[uint16]uint64
 
 		// Temp notification is used for if partial VBs are not parsed
@@ -860,7 +860,7 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 			return fmt.Errorf("KvVbMap not established yet")
 		}
 
-		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", watcher.bucketName)
+		userAgent := base.ComposeHELOMsgKey(fmt.Sprintf("BktWatcher %v", watcher.bucketName))
 		var features utils.HELOFeatures
 		features.CompressionType = base.CompressionTypeNone
 

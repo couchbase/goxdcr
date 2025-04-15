@@ -95,4 +95,8 @@ type XDCRCompTopologySvc interface {
 	ClientCertIsMandatoryOrHybrid() (bool, error)
 
 	IsOrchestratorNode() (bool, error)
+
+	// the version of the cluster that this xdcr comp is running on
+	// along with the build number. Eg: 8.0.0-12345
+	MyBuildVersion() (string, error)
 }

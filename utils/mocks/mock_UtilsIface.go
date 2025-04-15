@@ -6325,56 +6325,6 @@ func (_c *UtilsIface_ReplicationStatusNotFoundError_Call) RunAndReturn(run func(
 	return _c
 }
 
-// SendHELO provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, logger
-func (_m *UtilsIface) SendHELO(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) error {
-	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, logger)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SendHELO")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
-		r0 = rf(client, userAgent, readTimeout, writeTimeout, logger)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UtilsIface_SendHELO_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendHELO'
-type UtilsIface_SendHELO_Call struct {
-	*mock.Call
-}
-
-// SendHELO is a helper method to define mock.On call
-//   - client memcached.ClientIface
-//   - userAgent string
-//   - readTimeout time.Duration
-//   - writeTimeout time.Duration
-//   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) SendHELO(client interface{}, userAgent interface{}, readTimeout interface{}, writeTimeout interface{}, logger interface{}) *UtilsIface_SendHELO_Call {
-	return &UtilsIface_SendHELO_Call{Call: _e.mock.On("SendHELO", client, userAgent, readTimeout, writeTimeout, logger)}
-}
-
-func (_c *UtilsIface_SendHELO_Call) Run(run func(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger)) *UtilsIface_SendHELO_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(memcached.ClientIface), args[1].(string), args[2].(time.Duration), args[3].(time.Duration), args[4].(*log.CommonLogger))
-	})
-	return _c
-}
-
-func (_c *UtilsIface_SendHELO_Call) Return(_a0 error) *UtilsIface_SendHELO_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *UtilsIface_SendHELO_Call) RunAndReturn(run func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error) *UtilsIface_SendHELO_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SendHELOWithFeatures provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger
 func (_m *UtilsIface) SendHELOWithFeatures(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, requestedFeatures utils.HELOFeatures, logger *log.CommonLogger) (utils.HELOFeatures, error) {
 	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger)

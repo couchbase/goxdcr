@@ -340,7 +340,7 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap base.ErrorM
 		defer stopFunc()
 		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
 		client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
-			base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
+			base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("ReplSpecSvc", sourceBucket, targetBucket)),
 			false /*plainAuth*/, 0 /*keepAlivePeriod*/, service.logger)
 		if client != nil {
 			client.Close()

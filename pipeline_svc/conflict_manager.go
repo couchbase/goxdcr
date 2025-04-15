@@ -195,7 +195,8 @@ func (c *ConflictManager) Attach(pipeline common.Pipeline) (err error) {
 	c.Logger().Infof("Attach conflictManager with %v pipeline %v\n", pipeline.Type().String(), pipeline.FullTopic())
 	c.Id()
 	c.pipeline = pipeline
-	c.userAgent = fmt.Sprintf("Goxdcr ccrMetadata bucket: %s", c.sourceBucketName)
+	c.userAgent = base.ComposeHELOMsgKey(fmt.Sprintf("ccrMgr %s", c.sourceBucketName))
+
 	// register pipeline supervisor as conflict manager's error handler
 	supervisor := c.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
 	if supervisor == nil {

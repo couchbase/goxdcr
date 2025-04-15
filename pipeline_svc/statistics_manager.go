@@ -358,8 +358,6 @@ type StatisticsManager struct {
 
 	stats_map map[string]string
 
-	user_agent string
-
 	utils utilities.UtilsIface
 
 	endSeqnos map[uint16]uint64
@@ -1022,7 +1020,6 @@ func (stats_mgr *StatisticsManager) getOrCreateRegistry(name string) metrics.Reg
 
 func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	stats_mgr.pipeline = pipeline
-	stats_mgr.composeUserAgent()
 
 	//mount collectors with pipeline
 	for _, collector := range stats_mgr.collectors {
@@ -1053,13 +1050,6 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 	stats_mgr.logger.Infof("StatisticsManager is started")
 
 	return nil
-}
-
-// compose user agent string for HELO command
-func (stats_mgr *StatisticsManager) composeUserAgent() {
-	spec := stats_mgr.pipeline.Specification().GetReplicationSpec()
-	stats_mgr.user_agent = base.ComposeUserAgentWithBucketNames(fmt.Sprintf("Goxdcr StatsMgr %v", stats_mgr.pipeline.Type()),
-		spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {

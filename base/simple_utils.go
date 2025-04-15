@@ -699,9 +699,9 @@ func EncodeVersionToEffectiveVersion(version []int) int {
 func ComposeUserAgentWithBucketNames(prefix, sourceBucketName, targetBucketName string) string {
 	var buffer bytes.Buffer
 	buffer.WriteString(prefix)
-	buffer.WriteString(" SourceBucket:")
+	buffer.WriteString(" ")
 	buffer.WriteString(sourceBucketName)
-	buffer.WriteString(" TargetBucket:")
+	buffer.WriteString(" ")
 	buffer.WriteString(targetBucketName)
 	return buffer.String()
 }

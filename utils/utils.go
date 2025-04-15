@@ -669,26 +669,6 @@ func (u *Utilities) GetRemoteMemcachedConnection(serverAddr, username, password,
 	return conn, err
 }
 
-// send helo with specified user agent string to memcached
-// the helo is purely informational, for the identification of the client
-// unsuccessful response is not treated as errors
-func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration,
-	logger *log.CommonLogger) (err error) {
-	var allFeaturesDisabled HELOFeatures
-	heloReq := u.ComposeHELORequest(userAgent, allFeaturesDisabled)
-
-	var response *mc.MCResponse
-	response, err = u.sendHELORequest(client, heloReq, userAgent, readTimeout, writeTimeout, logger)
-	if err != nil {
-		logger.Errorf("Received error response from HELO command. userAgent=%v, err=%v.", userAgent, err)
-	} else if response.Status != mc.SUCCESS {
-		logger.Warnf("Received unexpected response from HELO command. userAgent=%v, response status=%v.", userAgent, response.Status)
-	} else {
-		logger.Infof("Successfully sent HELO command with userAgent=%v", userAgent)
-	}
-	return
-}
-
 // send helo to memcached with data type (including xattr) feature enabled
 // we need to know whether data type is indeed enabled from helo response
 // unsuccessful response is treated as errors
@@ -773,26 +753,8 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			}
 			pos += 2
 		}
-		logger.Infof("Successfully sent HELO command with userAgent=%v. attributes=%#v", userAgent, respondedFeatures)
+		logger.Infof("Successful HELO for %v with %+v", userAgent, respondedFeatures)
 	}
-	return
-}
-
-func (u *Utilities) sendHELORequest(client mcc.ClientIface, heloReq *mc.MCRequest, userAgent string, readTimeout, writeTimeout time.Duration,
-	logger *log.CommonLogger) (response *mc.MCResponse, err error) {
-
-	conn := client.Hijack()
-	conn.(net.Conn).SetWriteDeadline(time.Now().Add(writeTimeout))
-	_, err = conn.Write(heloReq.Bytes())
-	conn.(net.Conn).SetWriteDeadline(time.Time{})
-	if err != nil {
-		logger.Warnf("Error sending HELO command. userAgent=%v, err=%v.", userAgent, err)
-		return
-	}
-
-	conn.(net.Conn).SetReadDeadline(time.Now().Add(readTimeout))
-	response, err = client.Receive()
-	conn.(net.Conn).SetReadDeadline(time.Time{})
 	return
 }
 

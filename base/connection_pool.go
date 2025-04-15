@@ -43,11 +43,11 @@ var (
 
 func (connType ConnType) String() string {
 	if connType == MemConn {
-		return "MemConn"
+		return "Mem"
 	} else if connType == SSLOverMem {
-		return "SSLOverMem"
+		return "SSL"
 	} else {
-		return "InvalidConnType"
+		return "X"
 	}
 }
 

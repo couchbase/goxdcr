@@ -9,6 +9,8 @@
 package base
 
 import (
+	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -680,8 +682,40 @@ func NewServerVersionFromString(str string) (ServerVersion, error) {
 	return versionsInt, nil
 }
 
+// User agent for REST calls.
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
+
+// Refer https://github.com/couchbase/kv_engine/blob/977c08f26f9826a8b0e21dd9c1c20a7b2be26d3a/docs/BinaryProtocol.md#0x1f-helo
+// HELO user agent name ("a") will be truncated only upto the 32nd byte by kv_engine.
+// So use a short name with a server version suffix.
+var GoxdcrHELOUserAgentPrefix = "goxdcr"
+var GoxdcrHELOUserAgent = ""
+var HELOUserAgentNameMaxLen int = 32
+var HELOConnIdMaxLen int = 33
+
+func ComposeHELOMsgKey(connectionId string) string {
+	if len(connectionId) > HELOConnIdMaxLen {
+		// In an odd case wherein the connectionId is too long (it's a possibility if a bucket name is too long),
+		// we will use the md5 hash of it (32 bytes) to fit the connectionId to a 33 bytes limit.
+		connectionId = fmt.Sprintf("%x", md5.Sum([]byte(connectionId)))
+	}
+
+	key, err := json.Marshal(struct {
+		UserAgentName string `json:"a"`
+		ConnectionId  string `json:"i"`
+	}{
+		UserAgentName: GoxdcrHELOUserAgent,
+		ConnectionId:  connectionId,
+	})
+	if err != nil {
+		// non-JSON objects HELO message keys are also fine, but hinders debuggability
+		// on the kv_engine side.
+		return GoxdcrHELOUserAgent
+	}
+
+	return string(key)
+}
 
 // Used to calculate the number of bytes to allocate for sending the HELO messages
 var HELO_BYTES_PER_FEATURE int = 2
@@ -1225,7 +1259,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
-	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int) {
+	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
+	buildVersion string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1238,6 +1273,16 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	} else {
 		GoxdcrUserAgent = GoxdcrUserAgentPrefix
 	}
+
+	if len(buildVersion) > 0 {
+		GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix + KeyPartsDelimiter + buildVersion
+		if len(GoxdcrHELOUserAgent) > HELOUserAgentNameMaxLen {
+			GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix
+		}
+	} else {
+		GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix
+	}
+
 	CapiMaxRetryBatchUpdateDocs = capiMaxRetryBatchUpdateDocs
 	CapiBatchTimeout = capiBatchTimeout
 	CapiWriteTimeout = capiWriteTimeout
