@@ -207,6 +207,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevBackfillReqHandlerStartOnceDelay:       metadata.DevBackfillReqHandlerStartOnceDelay,
 	base.DevBackfillReqHandlerHandleVBTaskDoneHang: metadata.DevBackfillReqHandlerHandleVBTaskDoneHang,
 	base.DevBackfillUnrecoverableErrorInj:          metadata.DevBackfillUnrecoverableErrorInj,
+	base.DevBackfillMgrVbsTasksDoneNotifierDelay:   metadata.DevBackfillMgrVbsTasksDoneNotifierDelay,
 
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
@@ -289,6 +290,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevBackfillReqHandlerStartOnceDelay:       base.DevBackfillReqHandlerStartOnceDelay,
 	metadata.DevBackfillReqHandlerHandleVBTaskDoneHang: base.DevBackfillReqHandlerHandleVBTaskDoneHang,
 	metadata.DevBackfillUnrecoverableErrorInj:          base.DevBackfillUnrecoverableErrorInj,
+	metadata.DevBackfillMgrVbsTasksDoneNotifierDelay:   base.DevBackfillMgrVbsTasksDoneNotifierDelay,
 
 	metadata.ReplicationTypeKey:                   base.Type,
 	metadata.FilterExpressionKey:                  FilterExpression,

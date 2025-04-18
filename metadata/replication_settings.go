@@ -35,6 +35,7 @@ const (
 	DevBackfillReqHandlerStartOnceDelay       = base.DevBackfillReqHandlerStartOnceDelay
 	DevBackfillReqHandlerHandleVBTaskDoneHang = base.DevBackfillReqHandlerHandleVBTaskDoneHang
 	DevBackfillUnrecoverableErrorInj          = base.DevBackfillUnrecoverableErrorInj
+	DevBackfillMgrVbsTasksDoneNotifierDelay   = base.DevBackfillMgrVbsTasksDoneNotifierDelay
 
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
@@ -171,7 +172,8 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
 	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
 	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey,
-	DevPreCheckMaxCasErrorInjection, DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang, DevBackfillUnrecoverableErrorInj}
+	DevPreCheckMaxCasErrorInjection, DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang,
+	DevBackfillUnrecoverableErrorInj, DevBackfillMgrVbsTasksDoneNotifierDelay}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -217,6 +219,7 @@ var XDCRDevPreCheckMaxCasErrorInjectionConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillReqHandlerStartOnceDelayConfig = &SettingsConfig{0, &Range{0, 1000}}
 var XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
+var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -312,6 +315,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevBackfillReqHandlerStartOnceDelay:       XDCRDevBackfillReqHandlerStartOnceDelayConfig,
 	DevBackfillReqHandlerHandleVBTaskDoneHang: XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig,
 	DevBackfillUnrecoverableErrorInj:          XDCRDevBackfillUnrecoverableErrorInjConfig,
+	DevBackfillMgrVbsTasksDoneNotifierDelay:   XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
 
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
