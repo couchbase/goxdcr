@@ -86,6 +86,9 @@ type BackfillMgr struct {
 	// To track the update status of backfill spec
 	backfillSpecUpdateStatusMtx sync.RWMutex
 	backfillSpecUpdateStatusMap map[string]*uint32
+
+	// Debug
+	debugVbsTaskDoneNotifierHang uint32
 }
 
 type replSpecHandler struct {
@@ -406,6 +409,14 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		// It will tell pipeline manager to stop the backfill pipeline (tear down)
 		// and then start the backfill pipeline again (build a new one)
 		b.logger.Infof("Backfill Request Handler %v has finished processing one task for all requested VBs", replId)
+
+		for atomic.LoadUint32(&b.debugVbsTaskDoneNotifierHang) == 1 {
+			time.Sleep(30 * time.Second)
+			if atomic.LoadUint32(&b.debugVbsTaskDoneNotifierHang) == 0 {
+				break
+			}
+		}
+
 		err := b.pipelineMgr.HaltBackfill(replId)
 		if err != nil {
 			b.logger.Errorf("Unable to halt backfill pipeline %v - %v", replId, err)
@@ -684,6 +695,9 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		}
 		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
 	} else {
+		if newSpec.Settings.GetBoolSettingValue(metadata.DevBackfillMgrVbsTasksDoneNotifierDelay) {
+			atomic.StoreUint32(&b.debugVbsTaskDoneNotifierHang, 1)
+		}
 		// metakv_change_listener will call GetExplicitMappingChangeHandler if needed
 	}
 	return err
@@ -828,6 +842,7 @@ func (b *BackfillMgr) checkUpToDateSpec(specId string, internalSpecId string) (e
 
 func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	callback := func() error {
+		atomic.CompareAndSwapUint32(&b.debugVbsTaskDoneNotifierHang, 1, 0)
 		err, upToDate := b.checkUpToDateSpec(specId, internalSpecId)
 		if !upToDate {
 			return err
