@@ -17,7 +17,7 @@ func (_m *SnappyCompressableVal) EXPECT() *SnappyCompressableVal_Expecter {
 	return &SnappyCompressableVal_Expecter{mock: &_m.Mock}
 }
 
-// ToSnappyCompressed provides a mock function with given fields:
+// ToSnappyCompressed provides a mock function with no fields
 func (_m *SnappyCompressableVal) ToSnappyCompressed() ([]byte, error) {
 	ret := _m.Called()
 

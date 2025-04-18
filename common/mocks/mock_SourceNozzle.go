@@ -22,7 +22,7 @@ func (_m *SourceNozzle) EXPECT() *SourceNozzle_Expecter {
 	return &SourceNozzle_Expecter{mock: &_m.Mock}
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *SourceNozzle) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_c *SourceNozzle_AsyncComponentEventListeners_Call) RunAndReturn(run func(
 	return _c
 }
 
-// Close provides a mock function with given fields:
+// Close provides a mock function with no fields
 func (_m *SourceNozzle) Close() error {
 	ret := _m.Called()
 
@@ -114,7 +114,7 @@ func (_c *SourceNozzle_Close_Call) RunAndReturn(run func() error) *SourceNozzle_
 	return _c
 }
 
-// Connector provides a mock function with given fields:
+// Connector provides a mock function with no fields
 func (_m *SourceNozzle) Connector() common.Connector {
 	ret := _m.Called()
 
@@ -161,7 +161,7 @@ func (_c *SourceNozzle_Connector_Call) RunAndReturn(run func() common.Connector)
 	return _c
 }
 
-// Connectors provides a mock function with given fields:
+// Connectors provides a mock function with no fields
 func (_m *SourceNozzle) Connectors() []common.Connector {
 	ret := _m.Called()
 
@@ -208,7 +208,7 @@ func (_c *SourceNozzle_Connectors_Call) RunAndReturn(run func() []common.Connect
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *SourceNozzle) Id() string {
 	ret := _m.Called()
 
@@ -253,7 +253,7 @@ func (_c *SourceNozzle_Id_Call) RunAndReturn(run func() string) *SourceNozzle_Id
 	return _c
 }
 
-// IsOpen provides a mock function with given fields:
+// IsOpen provides a mock function with no fields
 func (_m *SourceNozzle) IsOpen() bool {
 	ret := _m.Called()
 
@@ -298,7 +298,7 @@ func (_c *SourceNozzle_IsOpen_Call) RunAndReturn(run func() bool) *SourceNozzle_
 	return _c
 }
 
-// Open provides a mock function with given fields:
+// Open provides a mock function with no fields
 func (_m *SourceNozzle) Open() error {
 	ret := _m.Called()
 
@@ -372,7 +372,7 @@ func (_c *SourceNozzle_RaiseEvent_Call) Return() *SourceNozzle_RaiseEvent_Call {
 }
 
 func (_c *SourceNozzle_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *SourceNozzle_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -451,7 +451,7 @@ func (_c *SourceNozzle_RecycleDataObj_Call) Return() *SourceNozzle_RecycleDataOb
 }
 
 func (_c *SourceNozzle_RecycleDataObj_Call) RunAndReturn(run func(interface{})) *SourceNozzle_RecycleDataObj_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -502,7 +502,7 @@ func (_c *SourceNozzle_RegisterComponentEventListener_Call) RunAndReturn(run fun
 	return _c
 }
 
-// ResponsibleVBs provides a mock function with given fields:
+// ResponsibleVBs provides a mock function with no fields
 func (_m *SourceNozzle) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
@@ -641,7 +641,7 @@ func (_c *SourceNozzle_Start_Call) RunAndReturn(run func(metadata.ReplicationSet
 	return _c
 }
 
-// State provides a mock function with given fields:
+// State provides a mock function with no fields
 func (_m *SourceNozzle) State() common.PartState {
 	ret := _m.Called()
 
@@ -686,7 +686,7 @@ func (_c *SourceNozzle_State_Call) RunAndReturn(run func() common.PartState) *So
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *SourceNozzle) Stop() error {
 	ret := _m.Called()
 

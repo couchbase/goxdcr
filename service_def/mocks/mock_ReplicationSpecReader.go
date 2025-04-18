@@ -20,7 +20,7 @@ func (_m *ReplicationSpecReader) EXPECT() *ReplicationSpecReader_Expecter {
 	return &ReplicationSpecReader_Expecter{mock: &_m.Mock}
 }
 
-// AllActiveReplicationSpecsReadOnly provides a mock function with given fields:
+// AllActiveReplicationSpecsReadOnly provides a mock function with no fields
 func (_m *ReplicationSpecReader) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
 
@@ -135,7 +135,7 @@ func (_c *ReplicationSpecReader_AllActiveReplicationSpecsWithRemote_Call) RunAnd
 	return _c
 }
 
-// AllReplicationSpecIds provides a mock function with given fields:
+// AllReplicationSpecIds provides a mock function with no fields
 func (_m *ReplicationSpecReader) AllReplicationSpecIds() ([]string, error) {
 	ret := _m.Called()
 
@@ -250,7 +250,7 @@ func (_c *ReplicationSpecReader_AllReplicationSpecIdsForBucket_Call) RunAndRetur
 	return _c
 }
 
-// AllReplicationSpecs provides a mock function with given fields:
+// AllReplicationSpecs provides a mock function with no fields
 func (_m *ReplicationSpecReader) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
 

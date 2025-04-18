@@ -75,7 +75,7 @@ func (_c *vbBasedMetric_Getter_Call) RunAndReturn(run func(uint16) (interface{},
 	return _c
 }
 
-// IsTraditional provides a mock function with given fields:
+// IsTraditional provides a mock function with no fields
 func (_m *vbBasedMetric) IsTraditional() bool {
 	ret := _m.Called()
 
@@ -120,7 +120,7 @@ func (_c *vbBasedMetric_IsTraditional_Call) RunAndReturn(run func() bool) *vbBas
 	return _c
 }
 
-// Len provides a mock function with given fields:
+// Len provides a mock function with no fields
 func (_m *vbBasedMetric) Len() int {
 	ret := _m.Called()
 

@@ -1271,7 +1271,7 @@ func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(string, string, s
 	return _c
 }
 
-// GetBucketRecreatedError provides a mock function with given fields:
+// GetBucketRecreatedError provides a mock function with no fields
 func (_m *UtilsIface) GetBucketRecreatedError() error {
 	ret := _m.Called()
 
@@ -4002,7 +4002,7 @@ func (_c *UtilsIface_GetNodesListFromNodeServicesInfo_Call) RunAndReturn(run fun
 	return _c
 }
 
-// GetNonExistentBucketError provides a mock function with given fields:
+// GetNonExistentBucketError provides a mock function with no fields
 func (_m *UtilsIface) GetNonExistentBucketError() error {
 	ret := _m.Called()
 
@@ -5502,7 +5502,7 @@ func (_c *UtilsIface_LocalPool_Call) RunAndReturn(run func(string) (couchbase.Po
 	return _c
 }
 
-// NewDataPool provides a mock function with given fields:
+// NewDataPool provides a mock function with no fields
 func (_m *UtilsIface) NewDataPool() base.DataPool {
 	ret := _m.Called()
 
@@ -6076,7 +6076,7 @@ func (_c *UtilsIface_RecoverPanic_Call) Return() *UtilsIface_RecoverPanic_Call {
 }
 
 func (_c *UtilsIface_RecoverPanic_Call) RunAndReturn(run func(*error)) *UtilsIface_RecoverPanic_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -6571,7 +6571,7 @@ func (_c *UtilsIface_TranslateKvVbMap_Call) Return() *UtilsIface_TranslateKvVbMa
 }
 
 func (_c *UtilsIface_TranslateKvVbMap_Call) RunAndReturn(run func(base.KvVBMapType, map[string]interface{})) *UtilsIface_TranslateKvVbMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

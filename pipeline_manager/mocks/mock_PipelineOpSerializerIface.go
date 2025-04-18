@@ -455,7 +455,7 @@ func (_c *PipelineOpSerializerIface_StartBackfill_Call) RunAndReturn(run func(st
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *PipelineOpSerializerIface) Stop() {
 	_m.Called()
 }
@@ -483,7 +483,7 @@ func (_c *PipelineOpSerializerIface_Stop_Call) Return() *PipelineOpSerializerIfa
 }
 
 func (_c *PipelineOpSerializerIface_Stop_Call) RunAndReturn(run func()) *PipelineOpSerializerIface_Stop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

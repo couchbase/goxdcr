@@ -47,7 +47,7 @@ func (_c *IncrementerFunc_Execute_Call) Return() *IncrementerFunc_Execute_Call {
 }
 
 func (_c *IncrementerFunc_Execute_Call) RunAndReturn(run func(string, interface{})) *IncrementerFunc_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

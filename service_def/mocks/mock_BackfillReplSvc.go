@@ -70,7 +70,7 @@ func (_c *BackfillReplSvc_AddBackfillReplSpec_Call) RunAndReturn(run func(*metad
 	return _c
 }
 
-// AllActiveBackfillSpecsReadOnly provides a mock function with given fields:
+// AllActiveBackfillSpecsReadOnly provides a mock function with no fields
 func (_m *BackfillReplSvc) AllActiveBackfillSpecsReadOnly() (map[string]*metadata.BackfillReplicationSpec, error) {
 	ret := _m.Called()
 
@@ -301,7 +301,7 @@ func (_c *BackfillReplSvc_GetMyVBs_Call) RunAndReturn(run func(*metadata.Replica
 	return _c
 }
 
-// RaiseUnrecoverableBackfillsIfNeeded provides a mock function with given fields:
+// RaiseUnrecoverableBackfillsIfNeeded provides a mock function with no fields
 func (_m *BackfillReplSvc) RaiseUnrecoverableBackfillsIfNeeded() chan bool {
 	ret := _m.Called()
 
@@ -564,7 +564,7 @@ func (_c *BackfillReplSvc_SetMetadataChangeHandlerCallback_Call) Return() *Backf
 }
 
 func (_c *BackfillReplSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallback)) *BackfillReplSvc_SetMetadataChangeHandlerCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -17,7 +17,7 @@ func (_m *HandlerResult) EXPECT() *HandlerResult_Expecter {
 	return &HandlerResult_Expecter{mock: &_m.Mock}
 }
 
-// GetError provides a mock function with given fields:
+// GetError provides a mock function with no fields
 func (_m *HandlerResult) GetError() error {
 	ret := _m.Called()
 
@@ -62,7 +62,7 @@ func (_c *HandlerResult_GetError_Call) RunAndReturn(run func() error) *HandlerRe
 	return _c
 }
 
-// GetHttpStatusCode provides a mock function with given fields:
+// GetHttpStatusCode provides a mock function with no fields
 func (_m *HandlerResult) GetHttpStatusCode() int {
 	ret := _m.Called()
 

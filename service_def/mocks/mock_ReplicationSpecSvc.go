@@ -71,7 +71,7 @@ func (_c *ReplicationSpecSvc_AddReplicationSpec_Call) RunAndReturn(run func(*met
 	return _c
 }
 
-// AllActiveReplicationSpecsReadOnly provides a mock function with given fields:
+// AllActiveReplicationSpecsReadOnly provides a mock function with no fields
 func (_m *ReplicationSpecSvc) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
 
@@ -186,7 +186,7 @@ func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call) RunAndRet
 	return _c
 }
 
-// AllReplicationSpecIds provides a mock function with given fields:
+// AllReplicationSpecIds provides a mock function with no fields
 func (_m *ReplicationSpecSvc) AllReplicationSpecIds() ([]string, error) {
 	ret := _m.Called()
 
@@ -301,7 +301,7 @@ func (_c *ReplicationSpecSvc_AllReplicationSpecIdsForBucket_Call) RunAndReturn(r
 	return _c
 }
 
-// AllReplicationSpecs provides a mock function with given fields:
+// AllReplicationSpecs provides a mock function with no fields
 func (_m *ReplicationSpecSvc) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
 
@@ -937,7 +937,7 @@ func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) Return() *ReplicationSpecS
 }
 
 func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) RunAndReturn(run func(service_def.ManifestsGetter)) *ReplicationSpecSvc_SetManifestsGetter_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -974,7 +974,7 @@ func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) Return() *Re
 }
 
 func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(string, base.MetadataChangeHandlerCallbackWithWg, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority)) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

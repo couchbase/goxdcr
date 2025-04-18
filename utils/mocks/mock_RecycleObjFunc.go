@@ -46,7 +46,7 @@ func (_c *RecycleObjFunc_Execute_Call) Return() *RecycleObjFunc_Execute_Call {
 }
 
 func (_c *RecycleObjFunc_Execute_Call) RunAndReturn(run func(interface{})) *RecycleObjFunc_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

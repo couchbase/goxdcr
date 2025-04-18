@@ -22,7 +22,7 @@ func (_m *Part) EXPECT() *Part_Expecter {
 	return &Part_Expecter{mock: &_m.Mock}
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *Part) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_c *Part_AsyncComponentEventListeners_Call) RunAndReturn(run func() map[st
 	return _c
 }
 
-// Connector provides a mock function with given fields:
+// Connector provides a mock function with no fields
 func (_m *Part) Connector() common.Connector {
 	ret := _m.Called()
 
@@ -116,7 +116,7 @@ func (_c *Part_Connector_Call) RunAndReturn(run func() common.Connector) *Part_C
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *Part) Id() string {
 	ret := _m.Called()
 
@@ -190,7 +190,7 @@ func (_c *Part_RaiseEvent_Call) Return() *Part_RaiseEvent_Call {
 }
 
 func (_c *Part_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *Part_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -287,7 +287,7 @@ func (_c *Part_RegisterComponentEventListener_Call) RunAndReturn(run func(common
 	return _c
 }
 
-// ResponsibleVBs provides a mock function with given fields:
+// ResponsibleVBs provides a mock function with no fields
 func (_m *Part) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
@@ -426,7 +426,7 @@ func (_c *Part_Start_Call) RunAndReturn(run func(metadata.ReplicationSettingsMap
 	return _c
 }
 
-// State provides a mock function with given fields:
+// State provides a mock function with no fields
 func (_m *Part) State() common.PartState {
 	ret := _m.Called()
 
@@ -471,7 +471,7 @@ func (_c *Part_State_Call) RunAndReturn(run func() common.PartState) *Part_State
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *Part) Stop() error {
 	ret := _m.Called()
 

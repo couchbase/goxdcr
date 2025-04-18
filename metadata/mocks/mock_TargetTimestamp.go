@@ -17,7 +17,7 @@ func (_m *TargetTimestamp) EXPECT() *TargetTimestamp_Expecter {
 	return &TargetTimestamp_Expecter{mock: &_m.Mock}
 }
 
-// GetValue provides a mock function with given fields:
+// GetValue provides a mock function with no fields
 func (_m *TargetTimestamp) GetValue() interface{} {
 	ret := _m.Called()
 
@@ -64,7 +64,7 @@ func (_c *TargetTimestamp_GetValue_Call) RunAndReturn(run func() interface{}) *T
 	return _c
 }
 
-// IsTraditional provides a mock function with given fields:
+// IsTraditional provides a mock function with no fields
 func (_m *TargetTimestamp) IsTraditional() bool {
 	ret := _m.Called()
 

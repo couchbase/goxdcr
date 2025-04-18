@@ -20,7 +20,7 @@ func (_m *Connectable) EXPECT() *Connectable_Expecter {
 	return &Connectable_Expecter{mock: &_m.Mock}
 }
 
-// Connector provides a mock function with given fields:
+// Connector provides a mock function with no fields
 func (_m *Connectable) Connector() common.Connector {
 	ret := _m.Called()
 

@@ -535,7 +535,7 @@ func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) RunAndReturn(run func(*meta
 	return _c
 }
 
-// GetRefListForFirstTimeBadAuths provides a mock function with given fields:
+// GetRefListForFirstTimeBadAuths provides a mock function with no fields
 func (_m *RemoteClusterSvc) GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
 
@@ -592,7 +592,7 @@ func (_c *RemoteClusterSvc_GetRefListForFirstTimeBadAuths_Call) RunAndReturn(run
 	return _c
 }
 
-// GetRefListForRestartAndClearState provides a mock function with given fields:
+// GetRefListForRestartAndClearState provides a mock function with no fields
 func (_m *RemoteClusterSvc) GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
 
@@ -967,7 +967,7 @@ func (_c *RemoteClusterSvc_RemoteClusterServiceCallback_Call) RunAndReturn(run f
 	return _c
 }
 
-// RemoteClusters provides a mock function with given fields:
+// RemoteClusters provides a mock function with no fields
 func (_m *RemoteClusterSvc) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
 
@@ -1099,7 +1099,7 @@ func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) Return() *RemoteClusterSvc
 }
 
 func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) RunAndReturn(run func(service_def.BucketTopologySvc)) *RemoteClusterSvc_SetBucketTopologySvc_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1132,7 +1132,7 @@ func (_c *RemoteClusterSvc_SetHeartbeatSenderAPI_Call) Return() *RemoteClusterSv
 }
 
 func (_c *RemoteClusterSvc_SetHeartbeatSenderAPI_Call) RunAndReturn(run func(service_def.ClusterHeartbeatAPI)) *RemoteClusterSvc_SetHeartbeatSenderAPI_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1165,7 +1165,7 @@ func (_c *RemoteClusterSvc_SetMetadataChangeHandlerCallback_Call) Return() *Remo
 }
 
 func (_c *RemoteClusterSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallback)) *RemoteClusterSvc_SetMetadataChangeHandlerCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1245,7 +1245,7 @@ func (_c *RemoteClusterSvc_SetReplReader_Call) Return() *RemoteClusterSvc_SetRep
 }
 
 func (_c *RemoteClusterSvc_SetReplReader_Call) RunAndReturn(run func(service_def.ReplicationSpecReader)) *RemoteClusterSvc_SetReplReader_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

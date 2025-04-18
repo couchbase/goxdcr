@@ -17,7 +17,7 @@ func (_m *MigrationSvc) EXPECT() *MigrationSvc_Expecter {
 	return &MigrationSvc_Expecter{mock: &_m.Mock}
 }
 
-// Migrate provides a mock function with given fields:
+// Migrate provides a mock function with no fields
 func (_m *MigrationSvc) Migrate() error {
 	ret := _m.Called()
 

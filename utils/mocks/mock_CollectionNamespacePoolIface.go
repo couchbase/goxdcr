@@ -20,7 +20,7 @@ func (_m *CollectionNamespacePoolIface) EXPECT() *CollectionNamespacePoolIface_E
 	return &CollectionNamespacePoolIface_Expecter{mock: &_m.Mock}
 }
 
-// Get provides a mock function with given fields:
+// Get provides a mock function with no fields
 func (_m *CollectionNamespacePoolIface) Get() *base.CollectionNamespace {
 	ret := _m.Called()
 
@@ -96,7 +96,7 @@ func (_c *CollectionNamespacePoolIface_Put_Call) Return() *CollectionNamespacePo
 }
 
 func (_c *CollectionNamespacePoolIface_Put_Call) RunAndReturn(run func(*base.CollectionNamespace)) *CollectionNamespacePoolIface_Put_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -392,7 +392,7 @@ func (_c *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call) Return
 }
 
 func (_c *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call) RunAndReturn(run func(string, string)) *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

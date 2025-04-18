@@ -24,7 +24,7 @@ func (_m *SecuritySvc) EXPECT() *SecuritySvc_Expecter {
 	return &SecuritySvc_Expecter{mock: &_m.Mock}
 }
 
-// EncryptData provides a mock function with given fields:
+// EncryptData provides a mock function with no fields
 func (_m *SecuritySvc) EncryptData() bool {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_c *SecuritySvc_EncryptData_Call) RunAndReturn(run func() bool) *SecurityS
 	return _c
 }
 
-// GetCACertificates provides a mock function with given fields:
+// GetCACertificates provides a mock function with no fields
 func (_m *SecuritySvc) GetCACertificates() []byte {
 	ret := _m.Called()
 
@@ -116,7 +116,7 @@ func (_c *SecuritySvc_GetCACertificates_Call) RunAndReturn(run func() []byte) *S
 	return _c
 }
 
-// GetCaPool provides a mock function with given fields:
+// GetCaPool provides a mock function with no fields
 func (_m *SecuritySvc) GetCaPool() *x509.CertPool {
 	ret := _m.Called()
 
@@ -163,7 +163,7 @@ func (_c *SecuritySvc_GetCaPool_Call) RunAndReturn(run func() *x509.CertPool) *S
 	return _c
 }
 
-// GetClientCertAndKeyPair provides a mock function with given fields:
+// GetClientCertAndKeyPair provides a mock function with no fields
 func (_m *SecuritySvc) GetClientCertAndKeyPair() []tls.Certificate {
 	ret := _m.Called()
 
@@ -210,7 +210,7 @@ func (_c *SecuritySvc_GetClientCertAndKeyPair_Call) RunAndReturn(run func() []tl
 	return _c
 }
 
-// IsClusterEncryptionLevelAll provides a mock function with given fields:
+// IsClusterEncryptionLevelAll provides a mock function with no fields
 func (_m *SecuritySvc) IsClusterEncryptionLevelAll() bool {
 	ret := _m.Called()
 
@@ -255,7 +255,7 @@ func (_c *SecuritySvc_IsClusterEncryptionLevelAll_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// IsClusterEncryptionLevelStrict provides a mock function with given fields:
+// IsClusterEncryptionLevelStrict provides a mock function with no fields
 func (_m *SecuritySvc) IsClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
 
@@ -300,7 +300,7 @@ func (_c *SecuritySvc_IsClusterEncryptionLevelStrict_Call) RunAndReturn(run func
 	return _c
 }
 
-// IsClusterEncryptionStrictOrAll provides a mock function with given fields:
+// IsClusterEncryptionStrictOrAll provides a mock function with no fields
 func (_m *SecuritySvc) IsClusterEncryptionStrictOrAll() bool {
 	ret := _m.Called()
 
@@ -374,7 +374,7 @@ func (_c *SecuritySvc_SetClientCertSettingChangeCb_Call) Return() *SecuritySvc_S
 }
 
 func (_c *SecuritySvc_SetClientCertSettingChangeCb_Call) RunAndReturn(run func(func())) *SecuritySvc_SetClientCertSettingChangeCb_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -408,11 +408,11 @@ func (_c *SecuritySvc_SetEncryptionLevelChangeCallback_Call) Return() *SecurityS
 }
 
 func (_c *SecuritySvc_SetEncryptionLevelChangeCallback_Call) RunAndReturn(run func(string, service_def.SecChangeCallback)) *SecuritySvc_SetEncryptionLevelChangeCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *SecuritySvc) Start() error {
 	ret := _m.Called()
 

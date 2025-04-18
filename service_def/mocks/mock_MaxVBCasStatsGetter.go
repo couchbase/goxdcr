@@ -20,7 +20,7 @@ func (_m *MaxVBCasStatsGetter) EXPECT() *MaxVBCasStatsGetter_Expecter {
 	return &MaxVBCasStatsGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *MaxVBCasStatsGetter) Execute() (base.HighSeqnosMapType, error) {
 	ret := _m.Called()
 

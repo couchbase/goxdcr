@@ -46,7 +46,7 @@ func (_c *PipelineProgressRecorder_Execute_Call) Return() *PipelineProgressRecor
 }
 
 func (_c *PipelineProgressRecorder_Execute_Call) RunAndReturn(run func(string)) *PipelineProgressRecorder_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

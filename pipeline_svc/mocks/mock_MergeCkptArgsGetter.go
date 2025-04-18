@@ -20,7 +20,7 @@ func (_m *MergeCkptArgsGetter) EXPECT() *MergeCkptArgsGetter_Expecter {
 	return &MergeCkptArgsGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *MergeCkptArgsGetter) Execute() *pipeline_svc.MergeCkptArgs {
 	ret := _m.Called()
 

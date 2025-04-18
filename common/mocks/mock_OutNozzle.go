@@ -22,7 +22,7 @@ func (_m *OutNozzle) EXPECT() *OutNozzle_Expecter {
 	return &OutNozzle_Expecter{mock: &_m.Mock}
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *OutNozzle) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_c *OutNozzle_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 	return _c
 }
 
-// Close provides a mock function with given fields:
+// Close provides a mock function with no fields
 func (_m *OutNozzle) Close() error {
 	ret := _m.Called()
 
@@ -114,7 +114,7 @@ func (_c *OutNozzle_Close_Call) RunAndReturn(run func() error) *OutNozzle_Close_
 	return _c
 }
 
-// Connector provides a mock function with given fields:
+// Connector provides a mock function with no fields
 func (_m *OutNozzle) Connector() common.Connector {
 	ret := _m.Called()
 
@@ -161,7 +161,7 @@ func (_c *OutNozzle_Connector_Call) RunAndReturn(run func() common.Connector) *O
 	return _c
 }
 
-// GetConflictLogger provides a mock function with given fields:
+// GetConflictLogger provides a mock function with no fields
 func (_m *OutNozzle) GetConflictLogger() interface{} {
 	ret := _m.Called()
 
@@ -208,7 +208,7 @@ func (_c *OutNozzle_GetConflictLogger_Call) RunAndReturn(run func() interface{})
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *OutNozzle) Id() string {
 	ret := _m.Called()
 
@@ -253,7 +253,7 @@ func (_c *OutNozzle_Id_Call) RunAndReturn(run func() string) *OutNozzle_Id_Call 
 	return _c
 }
 
-// IsOpen provides a mock function with given fields:
+// IsOpen provides a mock function with no fields
 func (_m *OutNozzle) IsOpen() bool {
 	ret := _m.Called()
 
@@ -298,7 +298,7 @@ func (_c *OutNozzle_IsOpen_Call) RunAndReturn(run func() bool) *OutNozzle_IsOpen
 	return _c
 }
 
-// Open provides a mock function with given fields:
+// Open provides a mock function with no fields
 func (_m *OutNozzle) Open() error {
 	ret := _m.Called()
 
@@ -372,7 +372,7 @@ func (_c *OutNozzle_RaiseEvent_Call) Return() *OutNozzle_RaiseEvent_Call {
 }
 
 func (_c *OutNozzle_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *OutNozzle_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -451,7 +451,7 @@ func (_c *OutNozzle_RecycleDataObj_Call) Return() *OutNozzle_RecycleDataObj_Call
 }
 
 func (_c *OutNozzle_RecycleDataObj_Call) RunAndReturn(run func(interface{})) *OutNozzle_RecycleDataObj_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -502,7 +502,7 @@ func (_c *OutNozzle_RegisterComponentEventListener_Call) RunAndReturn(run func(c
 	return _c
 }
 
-// ResponsibleVBs provides a mock function with given fields:
+// ResponsibleVBs provides a mock function with no fields
 func (_m *OutNozzle) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
@@ -670,7 +670,7 @@ func (_c *OutNozzle_SetUpstreamErrReporter_Call) Return() *OutNozzle_SetUpstream
 }
 
 func (_c *OutNozzle_SetUpstreamErrReporter_Call) RunAndReturn(run func(func(interface{}))) *OutNozzle_SetUpstreamErrReporter_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -703,7 +703,7 @@ func (_c *OutNozzle_SetUpstreamObjRecycler_Call) Return() *OutNozzle_SetUpstream
 }
 
 func (_c *OutNozzle_SetUpstreamObjRecycler_Call) RunAndReturn(run func(func(interface{}))) *OutNozzle_SetUpstreamObjRecycler_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -753,7 +753,7 @@ func (_c *OutNozzle_Start_Call) RunAndReturn(run func(metadata.ReplicationSettin
 	return _c
 }
 
-// State provides a mock function with given fields:
+// State provides a mock function with no fields
 func (_m *OutNozzle) State() common.PartState {
 	ret := _m.Called()
 
@@ -798,7 +798,7 @@ func (_c *OutNozzle_State_Call) RunAndReturn(run func() common.PartState) *OutNo
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *OutNozzle) Stop() error {
 	ret := _m.Called()
 

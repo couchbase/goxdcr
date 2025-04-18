@@ -20,7 +20,7 @@ func (_m *MultiConnectable) EXPECT() *MultiConnectable_Expecter {
 	return &MultiConnectable_Expecter{mock: &_m.Mock}
 }
 
-// Connectors provides a mock function with given fields:
+// Connectors provides a mock function with no fields
 func (_m *MultiConnectable) Connectors() []common.Connector {
 	ret := _m.Called()
 

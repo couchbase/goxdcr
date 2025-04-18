@@ -89,7 +89,7 @@ func (_c *P2PManager_CheckVBMaster_Call) RunAndReturn(run func(peerToPeer.Bucket
 	return _c
 }
 
-// GetHeartbeatsReceivedV1 provides a mock function with given fields:
+// GetHeartbeatsReceivedV1 provides a mock function with no fields
 func (_m *P2PManager) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
 	ret := _m.Called()
 
@@ -182,7 +182,7 @@ func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) RunAndReturn(run func() (map[
 	return _c
 }
 
-// GetLifecycleId provides a mock function with given fields:
+// GetLifecycleId provides a mock function with no fields
 func (_m *P2PManager) GetLifecycleId() string {
 	ret := _m.Called()
 
@@ -418,7 +418,7 @@ func (_c *P2PManager_SendConnectionPreCheckRequest_Call) Return() *P2PManager_Se
 }
 
 func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, peerToPeer.InitRemoteClusterRefFunc, string)) *P2PManager_SendConnectionPreCheckRequest_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -638,11 +638,11 @@ func (_c *P2PManager_SetPushReqMergerOnce_Call) Return() *P2PManager_SetPushReqM
 }
 
 func (_c *P2PManager_SetPushReqMergerOnce_Call) RunAndReturn(run func(func(string, string, interface{}) error)) *P2PManager_SetPushReqMergerOnce_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *P2PManager) Start() (peerToPeer.PeerToPeerCommAPI, error) {
 	ret := _m.Called()
 
@@ -699,7 +699,7 @@ func (_c *P2PManager_Start_Call) RunAndReturn(run func() (peerToPeer.PeerToPeerC
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *P2PManager) Stop() error {
 	ret := _m.Called()
 

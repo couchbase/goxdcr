@@ -17,7 +17,7 @@ func (_m *StreamApiWatcher) EXPECT() *StreamApiWatcher_Expecter {
 	return &StreamApiWatcher_Expecter{mock: &_m.Mock}
 }
 
-// GetResult provides a mock function with given fields:
+// GetResult provides a mock function with no fields
 func (_m *StreamApiWatcher) GetResult() map[string]interface{} {
 	ret := _m.Called()
 
@@ -64,7 +64,7 @@ func (_c *StreamApiWatcher_GetResult_Call) RunAndReturn(run func() map[string]in
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *StreamApiWatcher) Start() {
 	_m.Called()
 }
@@ -92,11 +92,11 @@ func (_c *StreamApiWatcher_Start_Call) Return() *StreamApiWatcher_Start_Call {
 }
 
 func (_c *StreamApiWatcher_Start_Call) RunAndReturn(run func()) *StreamApiWatcher_Start_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *StreamApiWatcher) Stop() {
 	_m.Called()
 }
@@ -124,7 +124,7 @@ func (_c *StreamApiWatcher_Stop_Call) Return() *StreamApiWatcher_Stop_Call {
 }
 
 func (_c *StreamApiWatcher_Stop_Call) RunAndReturn(run func()) *StreamApiWatcher_Stop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

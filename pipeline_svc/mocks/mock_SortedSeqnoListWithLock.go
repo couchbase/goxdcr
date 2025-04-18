@@ -51,7 +51,7 @@ func (_c *SortedSeqnoListWithLock_AppendSeqnoGlobal_Call) Return() *SortedSeqnoL
 }
 
 func (_c *SortedSeqnoListWithLock_AppendSeqnoGlobal_Call) RunAndReturn(run func(uint16, string, uint64)) *SortedSeqnoListWithLock_AppendSeqnoGlobal_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -85,7 +85,7 @@ func (_c *SortedSeqnoListWithLock_AppendSeqnoTraditional_Call) Return() *SortedS
 }
 
 func (_c *SortedSeqnoListWithLock_AppendSeqnoTraditional_Call) RunAndReturn(run func(string, uint64)) *SortedSeqnoListWithLock_AppendSeqnoTraditional_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -186,7 +186,7 @@ func (_c *SortedSeqnoListWithLock_GetterTraditional_Call) RunAndReturn(run func(
 	return _c
 }
 
-// IsTraditional provides a mock function with given fields:
+// IsTraditional provides a mock function with no fields
 func (_m *SortedSeqnoListWithLock) IsTraditional() bool {
 	ret := _m.Called()
 

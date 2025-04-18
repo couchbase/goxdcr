@@ -50,7 +50,7 @@ func (_c *SecChangeCallback_Execute_Call) Return() *SecChangeCallback_Execute_Ca
 }
 
 func (_c *SecChangeCallback_Execute_Call) RunAndReturn(run func(service_def.EncryptionSettingIface, service_def.EncryptionSettingIface)) *SecChangeCallback_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

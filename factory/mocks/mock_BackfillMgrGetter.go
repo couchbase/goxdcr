@@ -20,7 +20,7 @@ func (_m *BackfillMgrGetter) EXPECT() *BackfillMgrGetter_Expecter {
 	return &BackfillMgrGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *BackfillMgrGetter) Execute() service_def.BackfillMgrIface {
 	ret := _m.Called()
 

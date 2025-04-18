@@ -50,7 +50,7 @@ func (_c *ReplicaReplicator_HandleSpecChange_Call) Return() *ReplicaReplicator_H
 }
 
 func (_c *ReplicaReplicator_HandleSpecChange_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, *metadata.ReplicationSpecification)) *ReplicaReplicator_HandleSpecChange_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -83,7 +83,7 @@ func (_c *ReplicaReplicator_HandleSpecCreation_Call) Return() *ReplicaReplicator
 }
 
 func (_c *ReplicaReplicator_HandleSpecCreation_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *ReplicaReplicator_HandleSpecCreation_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -116,7 +116,7 @@ func (_c *ReplicaReplicator_HandleSpecDeletion_Call) Return() *ReplicaReplicator
 }
 
 func (_c *ReplicaReplicator_HandleSpecDeletion_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *ReplicaReplicator_HandleSpecDeletion_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -166,7 +166,7 @@ func (_c *ReplicaReplicator_RequestImmediatePush_Call) RunAndReturn(run func(str
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *ReplicaReplicator) Start() {
 	_m.Called()
 }
@@ -194,11 +194,11 @@ func (_c *ReplicaReplicator_Start_Call) Return() *ReplicaReplicator_Start_Call {
 }
 
 func (_c *ReplicaReplicator_Start_Call) RunAndReturn(run func()) *ReplicaReplicator_Start_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *ReplicaReplicator) Stop() {
 	_m.Called()
 }
@@ -226,7 +226,7 @@ func (_c *ReplicaReplicator_Stop_Call) Return() *ReplicaReplicator_Stop_Call {
 }
 
 func (_c *ReplicaReplicator_Stop_Call) RunAndReturn(run func()) *ReplicaReplicator_Stop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -201,7 +201,7 @@ func (_c *BackfillMgrIface_GetLastSuccessfulSourceManifestId_Call) RunAndReturn(
 	return _c
 }
 
-// GetPipelineSvc provides a mock function with given fields:
+// GetPipelineSvc provides a mock function with no fields
 func (_m *BackfillMgrIface) GetPipelineSvc() common.PipelineService {
 	ret := _m.Called()
 
@@ -389,7 +389,7 @@ func (_c *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call) Return() *BackfillM
 }
 
 func (_c *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call) RunAndReturn(run func(string, base.BackfillSpecUpdateStatus)) *BackfillMgrIface_SetBackfillSpecUpdateStatus_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -442,7 +442,7 @@ func (_c *BackfillMgrIface_SetLastSuccessfulSourceManifestId_Call) RunAndReturn(
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *BackfillMgrIface) Start() error {
 	ret := _m.Called()
 
@@ -487,7 +487,7 @@ func (_c *BackfillMgrIface_Start_Call) RunAndReturn(run func() error) *BackfillM
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *BackfillMgrIface) Stop() {
 	_m.Called()
 }
@@ -515,7 +515,7 @@ func (_c *BackfillMgrIface_Stop_Call) Return() *BackfillMgrIface_Stop_Call {
 }
 
 func (_c *BackfillMgrIface_Stop_Call) RunAndReturn(run func()) *BackfillMgrIface_Stop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

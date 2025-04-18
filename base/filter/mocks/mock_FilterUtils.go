@@ -128,7 +128,7 @@ func (_c *FilterUtils_CheckForNecessarySystemXattrsInUprEvent_Call) RunAndReturn
 	return _c
 }
 
-// NewDataPool provides a mock function with given fields:
+// NewDataPool provides a mock function with no fields
 func (_m *FilterUtils) NewDataPool() base.DataPool {
 	ret := _m.Called()
 

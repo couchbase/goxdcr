@@ -20,7 +20,7 @@ func (_m *GlobalInfo) EXPECT() *GlobalInfo_Expecter {
 	return &GlobalInfo_Expecter{mock: &_m.Mock}
 }
 
-// GetClone provides a mock function with given fields:
+// GetClone provides a mock function with no fields
 func (_m *GlobalInfo) GetClone() metadata.GlobalInfo {
 	ret := _m.Called()
 
@@ -67,7 +67,7 @@ func (_c *GlobalInfo_GetClone_Call) RunAndReturn(run func() metadata.GlobalInfo)
 	return _c
 }
 
-// Sha256 provides a mock function with given fields:
+// Sha256 provides a mock function with no fields
 func (_m *GlobalInfo) Sha256() ([32]byte, error) {
 	ret := _m.Called()
 
@@ -124,7 +124,7 @@ func (_c *GlobalInfo_Sha256_Call) RunAndReturn(run func() ([32]byte, error)) *Gl
 	return _c
 }
 
-// ToSnappyCompressable provides a mock function with given fields:
+// ToSnappyCompressable provides a mock function with no fields
 func (_m *GlobalInfo) ToSnappyCompressable() metadata.SnappyCompressableVal {
 	ret := _m.Called()
 

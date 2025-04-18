@@ -49,7 +49,7 @@ func (_c *IgnoreDataEventer_Execute_Call) Return() *IgnoreDataEventer_Execute_Ca
 }
 
 func (_c *IgnoreDataEventer_Execute_Call) RunAndReturn(run func(*base.WrappedMCRequest)) *IgnoreDataEventer_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

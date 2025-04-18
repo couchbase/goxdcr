@@ -22,7 +22,7 @@ func (_m *ClusterHeartbeatAPI) EXPECT() *ClusterHeartbeatAPI_Expecter {
 	return &ClusterHeartbeatAPI_Expecter{mock: &_m.Mock}
 }
 
-// GetHeartbeatsReceivedV1 provides a mock function with given fields:
+// GetHeartbeatsReceivedV1 provides a mock function with no fields
 func (_m *ClusterHeartbeatAPI) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
 	ret := _m.Called()
 

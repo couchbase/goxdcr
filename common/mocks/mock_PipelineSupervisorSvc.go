@@ -114,7 +114,7 @@ func (_c *PipelineSupervisorSvc_Detach_Call) RunAndReturn(run func(common.Pipeli
 	return _c
 }
 
-// IsSharable provides a mock function with given fields:
+// IsSharable provides a mock function with no fields
 func (_m *PipelineSupervisorSvc) IsSharable() bool {
 	ret := _m.Called()
 
@@ -159,7 +159,7 @@ func (_c *PipelineSupervisorSvc_IsSharable_Call) RunAndReturn(run func() bool) *
 	return _c
 }
 
-// ListenerPipelineType provides a mock function with given fields:
+// ListenerPipelineType provides a mock function with no fields
 func (_m *PipelineSupervisorSvc) ListenerPipelineType() common.ListenerPipelineType {
 	ret := _m.Called()
 
@@ -233,7 +233,7 @@ func (_c *PipelineSupervisorSvc_OnEvent_Call) Return() *PipelineSupervisorSvc_On
 }
 
 func (_c *PipelineSupervisorSvc_OnEvent_Call) RunAndReturn(run func(*common.Event)) *PipelineSupervisorSvc_OnEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -283,7 +283,7 @@ func (_c *PipelineSupervisorSvc_Start_Call) RunAndReturn(run func(metadata.Repli
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *PipelineSupervisorSvc) Stop() error {
 	ret := _m.Called()
 

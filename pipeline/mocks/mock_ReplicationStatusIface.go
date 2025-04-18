@@ -57,7 +57,7 @@ func (_c *ReplicationStatusIface_AddError_Call) Return() *ReplicationStatusIface
 }
 
 func (_c *ReplicationStatusIface_AddError_Call) RunAndReturn(run func(error)) *ReplicationStatusIface_AddError_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -90,11 +90,11 @@ func (_c *ReplicationStatusIface_AddErrorsFromMap_Call) Return() *ReplicationSta
 }
 
 func (_c *ReplicationStatusIface_AddErrorsFromMap_Call) RunAndReturn(run func(base.ErrorMap)) *ReplicationStatusIface_AddErrorsFromMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// AllPipelines provides a mock function with given fields:
+// AllPipelines provides a mock function with no fields
 func (_m *ReplicationStatusIface) AllPipelines() []common.Pipeline {
 	ret := _m.Called()
 
@@ -141,7 +141,7 @@ func (_c *ReplicationStatusIface_AllPipelines_Call) RunAndReturn(run func() []co
 	return _c
 }
 
-// BackfillPipeline provides a mock function with given fields:
+// BackfillPipeline provides a mock function with no fields
 func (_m *ReplicationStatusIface) BackfillPipeline() common.Pipeline {
 	ret := _m.Called()
 
@@ -217,7 +217,7 @@ func (_c *ReplicationStatusIface_CleanupBeforeExit_Call) Return() *ReplicationSt
 }
 
 func (_c *ReplicationStatusIface_CleanupBeforeExit_Call) RunAndReturn(run func([]string)) *ReplicationStatusIface_CleanupBeforeExit_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -250,11 +250,11 @@ func (_c *ReplicationStatusIface_ClearCustomSetting_Call) Return() *ReplicationS
 }
 
 func (_c *ReplicationStatusIface_ClearCustomSetting_Call) RunAndReturn(run func(string)) *ReplicationStatusIface_ClearCustomSetting_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// ClearErrors provides a mock function with given fields:
+// ClearErrors provides a mock function with no fields
 func (_m *ReplicationStatusIface) ClearErrors() {
 	_m.Called()
 }
@@ -282,7 +282,7 @@ func (_c *ReplicationStatusIface_ClearErrors_Call) Return() *ReplicationStatusIf
 }
 
 func (_c *ReplicationStatusIface_ClearErrors_Call) RunAndReturn(run func()) *ReplicationStatusIface_ClearErrors_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -315,11 +315,11 @@ func (_c *ReplicationStatusIface_ClearErrorsWithString_Call) Return() *Replicati
 }
 
 func (_c *ReplicationStatusIface_ClearErrorsWithString_Call) RunAndReturn(run func(string)) *ReplicationStatusIface_ClearErrorsWithString_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// ClearTemporaryCustomSettings provides a mock function with given fields:
+// ClearTemporaryCustomSettings provides a mock function with no fields
 func (_m *ReplicationStatusIface) ClearTemporaryCustomSettings() {
 	_m.Called()
 }
@@ -347,11 +347,11 @@ func (_c *ReplicationStatusIface_ClearTemporaryCustomSettings_Call) Return() *Re
 }
 
 func (_c *ReplicationStatusIface_ClearTemporaryCustomSettings_Call) RunAndReturn(run func()) *ReplicationStatusIface_ClearTemporaryCustomSettings_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Errors provides a mock function with given fields:
+// Errors provides a mock function with no fields
 func (_m *ReplicationStatusIface) Errors() pipeline.PipelineErrorArray {
 	ret := _m.Called()
 
@@ -398,7 +398,7 @@ func (_c *ReplicationStatusIface_Errors_Call) RunAndReturn(run func() pipeline.P
 	return _c
 }
 
-// GetEventsManager provides a mock function with given fields:
+// GetEventsManager provides a mock function with no fields
 func (_m *ReplicationStatusIface) GetEventsManager() pipeline.PipelineEventsManager {
 	ret := _m.Called()
 
@@ -445,7 +445,7 @@ func (_c *ReplicationStatusIface_GetEventsManager_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// GetEventsProducer provides a mock function with given fields:
+// GetEventsProducer provides a mock function with no fields
 func (_m *ReplicationStatusIface) GetEventsProducer() common.PipelineEventsProducer {
 	ret := _m.Called()
 
@@ -540,7 +540,7 @@ func (_c *ReplicationStatusIface_GetOverviewStats_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// GetProgress provides a mock function with given fields:
+// GetProgress provides a mock function with no fields
 func (_m *ReplicationStatusIface) GetProgress() string {
 	ret := _m.Called()
 
@@ -585,7 +585,7 @@ func (_c *ReplicationStatusIface_GetProgress_Call) RunAndReturn(run func() strin
 	return _c
 }
 
-// GetSpecInternalId provides a mock function with given fields:
+// GetSpecInternalId provides a mock function with no fields
 func (_m *ReplicationStatusIface) GetSpecInternalId() string {
 	ret := _m.Called()
 
@@ -679,7 +679,7 @@ func (_c *ReplicationStatusIface_GetStats_Call) RunAndReturn(run func(string, co
 	return _c
 }
 
-// LoadLatestBrokenMap provides a mock function with given fields:
+// LoadLatestBrokenMap provides a mock function with no fields
 func (_m *ReplicationStatusIface) LoadLatestBrokenMap() {
 	_m.Called()
 }
@@ -707,11 +707,11 @@ func (_c *ReplicationStatusIface_LoadLatestBrokenMap_Call) Return() *Replication
 }
 
 func (_c *ReplicationStatusIface_LoadLatestBrokenMap_Call) RunAndReturn(run func()) *ReplicationStatusIface_LoadLatestBrokenMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Pipeline provides a mock function with given fields:
+// Pipeline provides a mock function with no fields
 func (_m *ReplicationStatusIface) Pipeline() common.Pipeline {
 	ret := _m.Called()
 
@@ -789,7 +789,7 @@ func (_c *ReplicationStatusIface_PopulateReplInfo_Call) Return() *ReplicationSta
 }
 
 func (_c *ReplicationStatusIface_PopulateReplInfo_Call) RunAndReturn(run func(*base.ReplicationInfo, func(string) bool, func(string) string)) *ReplicationStatusIface_PopulateReplInfo_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -822,7 +822,7 @@ func (_c *ReplicationStatusIface_Publish_Call) Return() *ReplicationStatusIface_
 }
 
 func (_c *ReplicationStatusIface_Publish_Call) RunAndReturn(run func(bool)) *ReplicationStatusIface_Publish_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -856,7 +856,7 @@ func (_c *ReplicationStatusIface_PublishWithStatus_Call) Return() *ReplicationSt
 }
 
 func (_c *ReplicationStatusIface_PublishWithStatus_Call) RunAndReturn(run func(string, bool)) *ReplicationStatusIface_PublishWithStatus_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -889,7 +889,7 @@ func (_c *ReplicationStatusIface_RecordBackfillProgress_Call) Return() *Replicat
 }
 
 func (_c *ReplicationStatusIface_RecordBackfillProgress_Call) RunAndReturn(run func(string)) *ReplicationStatusIface_RecordBackfillProgress_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -922,7 +922,7 @@ func (_c *ReplicationStatusIface_RecordProgress_Call) Return() *ReplicationStatu
 }
 
 func (_c *ReplicationStatusIface_RecordProgress_Call) RunAndReturn(run func(string)) *ReplicationStatusIface_RecordProgress_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -955,11 +955,11 @@ func (_c *ReplicationStatusIface_RemovePipeline_Call) Return() *ReplicationStatu
 }
 
 func (_c *ReplicationStatusIface_RemovePipeline_Call) RunAndReturn(run func(common.Pipeline)) *ReplicationStatusIface_RemovePipeline_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// RepId provides a mock function with given fields:
+// RepId provides a mock function with no fields
 func (_m *ReplicationStatusIface) RepId() string {
 	ret := _m.Called()
 
@@ -1033,7 +1033,7 @@ func (_c *ReplicationStatusIface_ResetStorage_Call) Return() *ReplicationStatusI
 }
 
 func (_c *ReplicationStatusIface_ResetStorage_Call) RunAndReturn(run func(common.PipelineType)) *ReplicationStatusIface_ResetStorage_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1112,7 +1112,7 @@ func (_c *ReplicationStatusIface_SetCustomSettings_Call) Return() *ReplicationSt
 }
 
 func (_c *ReplicationStatusIface_SetCustomSettings_Call) RunAndReturn(run func(map[string]interface{})) *ReplicationStatusIface_SetCustomSettings_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1192,7 +1192,7 @@ func (_c *ReplicationStatusIface_SetOverviewStats_Call) Return() *ReplicationSta
 }
 
 func (_c *ReplicationStatusIface_SetOverviewStats_Call) RunAndReturn(run func(*expvar.Map, common.PipelineType)) *ReplicationStatusIface_SetOverviewStats_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1225,7 +1225,7 @@ func (_c *ReplicationStatusIface_SetPipeline_Call) Return() *ReplicationStatusIf
 }
 
 func (_c *ReplicationStatusIface_SetPipeline_Call) RunAndReturn(run func(common.Pipeline)) *ReplicationStatusIface_SetPipeline_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1260,7 +1260,7 @@ func (_c *ReplicationStatusIface_SetStats_Call) Return() *ReplicationStatusIface
 }
 
 func (_c *ReplicationStatusIface_SetStats_Call) RunAndReturn(run func(string, *expvar.Map, common.PipelineType)) *ReplicationStatusIface_SetStats_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -1339,11 +1339,11 @@ func (_c *ReplicationStatusIface_SetVbList_Call) Return() *ReplicationStatusIfac
 }
 
 func (_c *ReplicationStatusIface_SetVbList_Call) RunAndReturn(run func([]uint16)) *ReplicationStatusIface_SetVbList_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// SettingsMap provides a mock function with given fields:
+// SettingsMap provides a mock function with no fields
 func (_m *ReplicationStatusIface) SettingsMap() map[string]interface{} {
 	ret := _m.Called()
 
@@ -1390,7 +1390,7 @@ func (_c *ReplicationStatusIface_SettingsMap_Call) RunAndReturn(run func() map[s
 	return _c
 }
 
-// Spec provides a mock function with given fields:
+// Spec provides a mock function with no fields
 func (_m *ReplicationStatusIface) Spec() *metadata.ReplicationSpecification {
 	ret := _m.Called()
 
@@ -1485,7 +1485,7 @@ func (_c *ReplicationStatusIface_Storage_Call) RunAndReturn(run func(common.Pipe
 	return _c
 }
 
-// String provides a mock function with given fields:
+// String provides a mock function with no fields
 func (_m *ReplicationStatusIface) String() string {
 	ret := _m.Called()
 
@@ -1530,7 +1530,7 @@ func (_c *ReplicationStatusIface_String_Call) RunAndReturn(run func() string) *R
 	return _c
 }
 
-// Updater provides a mock function with given fields:
+// Updater provides a mock function with no fields
 func (_m *ReplicationStatusIface) Updater() interface{} {
 	ret := _m.Called()
 
@@ -1577,7 +1577,7 @@ func (_c *ReplicationStatusIface_Updater_Call) RunAndReturn(run func() interface
 	return _c
 }
 
-// VbList provides a mock function with given fields:
+// VbList provides a mock function with no fields
 func (_m *ReplicationStatusIface) VbList() []uint16 {
 	ret := _m.Called()
 

@@ -50,7 +50,7 @@ func (_c *SupervisorFailureHandler_OnError_Call) Return() *SupervisorFailureHand
 }
 
 func (_c *SupervisorFailureHandler_OnError_Call) RunAndReturn(run func(common.Supervisor, map[string]error)) *SupervisorFailureHandler_OnError_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

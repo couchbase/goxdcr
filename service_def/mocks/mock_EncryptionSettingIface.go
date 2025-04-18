@@ -17,7 +17,7 @@ func (_m *EncryptionSettingIface) EXPECT() *EncryptionSettingIface_Expecter {
 	return &EncryptionSettingIface_Expecter{mock: &_m.Mock}
 }
 
-// IsEncryptionLevelAll provides a mock function with given fields:
+// IsEncryptionLevelAll provides a mock function with no fields
 func (_m *EncryptionSettingIface) IsEncryptionLevelAll() bool {
 	ret := _m.Called()
 
@@ -62,7 +62,7 @@ func (_c *EncryptionSettingIface_IsEncryptionLevelAll_Call) RunAndReturn(run fun
 	return _c
 }
 
-// IsEncryptionLevelStrict provides a mock function with given fields:
+// IsEncryptionLevelStrict provides a mock function with no fields
 func (_m *EncryptionSettingIface) IsEncryptionLevelStrict() bool {
 	ret := _m.Called()
 
@@ -107,7 +107,7 @@ func (_c *EncryptionSettingIface_IsEncryptionLevelStrict_Call) RunAndReturn(run 
 	return _c
 }
 
-// IsEncryptionLevelStrictOrAll provides a mock function with given fields:
+// IsEncryptionLevelStrictOrAll provides a mock function with no fields
 func (_m *EncryptionSettingIface) IsEncryptionLevelStrictOrAll() bool {
 	ret := _m.Called()
 

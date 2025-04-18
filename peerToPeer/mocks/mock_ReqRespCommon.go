@@ -68,7 +68,7 @@ func (_c *ReqRespCommon_DeSerialize_Call) RunAndReturn(run func([]byte) error) *
 	return _c
 }
 
-// GetEnqueuedTime provides a mock function with given fields:
+// GetEnqueuedTime provides a mock function with no fields
 func (_m *ReqRespCommon) GetEnqueuedTime() time.Time {
 	ret := _m.Called()
 
@@ -113,7 +113,7 @@ func (_c *ReqRespCommon_GetEnqueuedTime_Call) RunAndReturn(run func() time.Time)
 	return _c
 }
 
-// GetOpaque provides a mock function with given fields:
+// GetOpaque provides a mock function with no fields
 func (_m *ReqRespCommon) GetOpaque() uint32 {
 	ret := _m.Called()
 
@@ -158,7 +158,7 @@ func (_c *ReqRespCommon_GetOpaque_Call) RunAndReturn(run func() uint32) *ReqResp
 	return _c
 }
 
-// GetOpcode provides a mock function with given fields:
+// GetOpcode provides a mock function with no fields
 func (_m *ReqRespCommon) GetOpcode() peerToPeer.OpCode {
 	ret := _m.Called()
 
@@ -203,7 +203,7 @@ func (_c *ReqRespCommon_GetOpcode_Call) RunAndReturn(run func() peerToPeer.OpCod
 	return _c
 }
 
-// GetSender provides a mock function with given fields:
+// GetSender provides a mock function with no fields
 func (_m *ReqRespCommon) GetSender() string {
 	ret := _m.Called()
 
@@ -248,7 +248,7 @@ func (_c *ReqRespCommon_GetSender_Call) RunAndReturn(run func() string) *ReqResp
 	return _c
 }
 
-// GetType provides a mock function with given fields:
+// GetType provides a mock function with no fields
 func (_m *ReqRespCommon) GetType() peerToPeer.ReqRespType {
 	ret := _m.Called()
 
@@ -293,7 +293,7 @@ func (_c *ReqRespCommon_GetType_Call) RunAndReturn(run func() peerToPeer.ReqResp
 	return _c
 }
 
-// RecordEnqueuedTime provides a mock function with given fields:
+// RecordEnqueuedTime provides a mock function with no fields
 func (_m *ReqRespCommon) RecordEnqueuedTime() {
 	_m.Called()
 }
@@ -321,11 +321,11 @@ func (_c *ReqRespCommon_RecordEnqueuedTime_Call) Return() *ReqRespCommon_RecordE
 }
 
 func (_c *ReqRespCommon_RecordEnqueuedTime_Call) RunAndReturn(run func()) *ReqRespCommon_RecordEnqueuedTime_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Serialize provides a mock function with given fields:
+// Serialize provides a mock function with no fields
 func (_m *ReqRespCommon) Serialize() ([]byte, error) {
 	ret := _m.Called()
 

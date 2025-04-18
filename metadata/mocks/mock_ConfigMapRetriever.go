@@ -20,7 +20,7 @@ func (_m *ConfigMapRetriever) EXPECT() *ConfigMapRetriever_Expecter {
 	return &ConfigMapRetriever_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *ConfigMapRetriever) Execute() map[string]*metadata.SettingsConfig {
 	ret := _m.Called()
 

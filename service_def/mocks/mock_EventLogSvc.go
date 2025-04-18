@@ -50,7 +50,7 @@ func (_c *EventLogSvc_WriteEvent_Call) Return() *EventLogSvc_WriteEvent_Call {
 }
 
 func (_c *EventLogSvc_WriteEvent_Call) RunAndReturn(run func(service_def.EventIdType, map[string]string)) *EventLogSvc_WriteEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

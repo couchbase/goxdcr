@@ -351,7 +351,7 @@ func (_c *PipelineMgrForSerializer_GetLastUpdateResult_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetLogSvc provides a mock function with given fields:
+// GetLogSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetLogSvc() service_def.UILogSvc {
 	ret := _m.Called()
 
@@ -457,7 +457,7 @@ func (_c *PipelineMgrForSerializer_GetOrCreateReplicationStatus_Call) RunAndRetu
 	return _c
 }
 
-// GetRemoteClusterSvc provides a mock function with given fields:
+// GetRemoteClusterSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	ret := _m.Called()
 
@@ -504,7 +504,7 @@ func (_c *PipelineMgrForSerializer_GetRemoteClusterSvc_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetReplSpecSvc provides a mock function with given fields:
+// GetReplSpecSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetReplSpecSvc() service_def.ReplicationSpecSvc {
 	ret := _m.Called()
 
@@ -551,7 +551,7 @@ func (_c *PipelineMgrForSerializer_GetReplSpecSvc_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// GetXDCRTopologySvc provides a mock function with given fields:
+// GetXDCRTopologySvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetXDCRTopologySvc() service_def.XDCRCompTopologySvc {
 	ret := _m.Called()
 
@@ -644,7 +644,7 @@ func (_c *PipelineMgrForSerializer_PauseReplication_Call) RunAndReturn(run func(
 	return _c
 }
 
-// PostTopologyStatus provides a mock function with given fields:
+// PostTopologyStatus provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) PostTopologyStatus() {
 	_m.Called()
 }
@@ -672,7 +672,7 @@ func (_c *PipelineMgrForSerializer_PostTopologyStatus_Call) Return() *PipelineMg
 }
 
 func (_c *PipelineMgrForSerializer_PostTopologyStatus_Call) RunAndReturn(run func()) *PipelineMgrForSerializer_PostTopologyStatus_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -816,7 +816,7 @@ func (_c *PipelineMgrForSerializer_StartPipeline_Call) RunAndReturn(run func(str
 	return _c
 }
 
-// StopAllUpdaters provides a mock function with given fields:
+// StopAllUpdaters provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) StopAllUpdaters() {
 	_m.Called()
 }
@@ -844,7 +844,7 @@ func (_c *PipelineMgrForSerializer_StopAllUpdaters_Call) Return() *PipelineMgrFo
 }
 
 func (_c *PipelineMgrForSerializer_StopAllUpdaters_Call) RunAndReturn(run func()) *PipelineMgrForSerializer_StopAllUpdaters_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

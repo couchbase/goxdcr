@@ -127,7 +127,7 @@ func (_c *Filter_SetMobileCompatibility_Call) Return() *Filter_SetMobileCompatib
 }
 
 func (_c *Filter_SetMobileCompatibility_Call) RunAndReturn(run func(int)) *Filter_SetMobileCompatibility_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -160,7 +160,7 @@ func (_c *Filter_SetShouldSkipBinaryDocs_Call) Return() *Filter_SetShouldSkipBin
 }
 
 func (_c *Filter_SetShouldSkipBinaryDocs_Call) RunAndReturn(run func(bool)) *Filter_SetShouldSkipBinaryDocs_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -193,7 +193,7 @@ func (_c *Filter_SetShouldSkipUncommittedTxn_Call) Return() *Filter_SetShouldSki
 }
 
 func (_c *Filter_SetShouldSkipUncommittedTxn_Call) RunAndReturn(run func(bool)) *Filter_SetShouldSkipUncommittedTxn_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

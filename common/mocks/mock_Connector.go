@@ -69,7 +69,7 @@ func (_c *Connector_AddDownStream_Call) RunAndReturn(run func(string, common.Par
 	return _c
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *Connector) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -116,7 +116,7 @@ func (_c *Connector_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 	return _c
 }
 
-// DownStreams provides a mock function with given fields:
+// DownStreams provides a mock function with no fields
 func (_m *Connector) DownStreams() map[string]common.Part {
 	ret := _m.Called()
 
@@ -255,7 +255,7 @@ func (_c *Connector_GetLayoutString_Call) RunAndReturn(run func(common.Part) str
 	return _c
 }
 
-// GetUpstreamObjRecycler provides a mock function with given fields:
+// GetUpstreamObjRecycler provides a mock function with no fields
 func (_m *Connector) GetUpstreamObjRecycler() func(interface{}) {
 	ret := _m.Called()
 
@@ -302,7 +302,7 @@ func (_c *Connector_GetUpstreamObjRecycler_Call) RunAndReturn(run func() func(in
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *Connector) Id() string {
 	ret := _m.Called()
 
@@ -347,7 +347,7 @@ func (_c *Connector_Id_Call) RunAndReturn(run func() string) *Connector_Id_Call 
 	return _c
 }
 
-// IsStartable provides a mock function with given fields:
+// IsStartable provides a mock function with no fields
 func (_m *Connector) IsStartable() bool {
 	ret := _m.Called()
 
@@ -421,7 +421,7 @@ func (_c *Connector_RaiseEvent_Call) Return() *Connector_RaiseEvent_Call {
 }
 
 func (_c *Connector_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *Connector_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -518,7 +518,7 @@ func (_c *Connector_RegisterUpstreamPart_Call) RunAndReturn(run func(common.Part
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *Connector) Start() error {
 	ret := _m.Called()
 
@@ -563,7 +563,7 @@ func (_c *Connector_Start_Call) RunAndReturn(run func() error) *Connector_Start_
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *Connector) Stop() error {
 	ret := _m.Called()
 

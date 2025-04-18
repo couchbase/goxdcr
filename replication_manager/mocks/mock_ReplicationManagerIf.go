@@ -52,7 +52,7 @@ func (_c *ReplicationManagerIf_OnError_Call) Return() *ReplicationManagerIf_OnEr
 }
 
 func (_c *ReplicationManagerIf_OnError_Call) RunAndReturn(run func(common.Supervisor, base.ErrorMap)) *ReplicationManagerIf_OnError_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
