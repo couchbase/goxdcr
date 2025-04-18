@@ -1062,6 +1062,15 @@
         ],
         "stability": "committed"
     },
+    "xdcr_number_of_replications_total": {
+        "type": "gauge",
+        "help": "The total number of replications that exists to replicate to a particular target cluster",
+        "added": "8.0.0",
+        "labels": [
+            "targetClusterUUID"
+        ],
+        "stability": "committed"
+    },
     "xdcr_number_of_source_nodes_total": {
         "type": "gauge",
         "help": "For a given source cluster, the number of data service nodes that it contains",

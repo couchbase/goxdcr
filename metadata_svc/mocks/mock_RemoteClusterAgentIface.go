@@ -273,6 +273,51 @@ func (_c *RemoteClusterAgentIface_GetReferenceClone_Call) RunAndReturn(run func(
 	return _c
 }
 
+// GetReferenceUUID provides a mock function with no fields
+func (_m *RemoteClusterAgentIface) GetReferenceUUID() string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReferenceUUID")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// RemoteClusterAgentIface_GetReferenceUUID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReferenceUUID'
+type RemoteClusterAgentIface_GetReferenceUUID_Call struct {
+	*mock.Call
+}
+
+// GetReferenceUUID is a helper method to define mock.On call
+func (_e *RemoteClusterAgentIface_Expecter) GetReferenceUUID() *RemoteClusterAgentIface_GetReferenceUUID_Call {
+	return &RemoteClusterAgentIface_GetReferenceUUID_Call{Call: _e.mock.On("GetReferenceUUID")}
+}
+
+func (_c *RemoteClusterAgentIface_GetReferenceUUID_Call) Run(run func()) *RemoteClusterAgentIface_GetReferenceUUID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteClusterAgentIface_GetReferenceUUID_Call) Return(_a0 string) *RemoteClusterAgentIface_GetReferenceUUID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RemoteClusterAgentIface_GetReferenceUUID_Call) RunAndReturn(run func() string) *RemoteClusterAgentIface_GetReferenceUUID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Refresh provides a mock function with no fields
 func (_m *RemoteClusterAgentIface) Refresh() error {
 	ret := _m.Called()

@@ -885,8 +885,12 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 	return stats, nil
 }
 
-func GetAllStatistics() (*expvar.Map, error) {
+func GetAllStatistics() (*expvar.Map, []string, []string, error) {
 	repIds := replication_mgr.pipelineMgr.AllReplications()
+	remClusterIds, err := replication_mgr.remote_cluster_svc.ListRemoteClusterUUIDs()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
@@ -899,7 +903,7 @@ func GetAllStatistics() (*expvar.Map, error) {
 			stats.Set(fullReplicationId, oneStats)
 		}
 	}
-	return stats, nil
+	return stats, remClusterIds, repIds, nil
 }
 
 // create and persist the replication specification

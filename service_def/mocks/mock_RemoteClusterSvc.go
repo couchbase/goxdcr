@@ -742,6 +742,63 @@ func (_c *RemoteClusterSvc_InitRemoteClusterReference_Call) RunAndReturn(run fun
 	return _c
 }
 
+// ListRemoteClusterUUIDs provides a mock function with no fields
+func (_m *RemoteClusterSvc) ListRemoteClusterUUIDs() ([]string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRemoteClusterUUIDs")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteClusterSvc_ListRemoteClusterUUIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRemoteClusterUUIDs'
+type RemoteClusterSvc_ListRemoteClusterUUIDs_Call struct {
+	*mock.Call
+}
+
+// ListRemoteClusterUUIDs is a helper method to define mock.On call
+func (_e *RemoteClusterSvc_Expecter) ListRemoteClusterUUIDs() *RemoteClusterSvc_ListRemoteClusterUUIDs_Call {
+	return &RemoteClusterSvc_ListRemoteClusterUUIDs_Call{Call: _e.mock.On("ListRemoteClusterUUIDs")}
+}
+
+func (_c *RemoteClusterSvc_ListRemoteClusterUUIDs_Call) Run(run func()) *RemoteClusterSvc_ListRemoteClusterUUIDs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_ListRemoteClusterUUIDs_Call) Return(_a0 []string, _a1 error) *RemoteClusterSvc_ListRemoteClusterUUIDs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_ListRemoteClusterUUIDs_Call) RunAndReturn(run func() ([]string, error)) *RemoteClusterSvc_ListRemoteClusterUUIDs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteClusterByRefId provides a mock function with given fields: refId, refresh
 func (_m *RemoteClusterSvc) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refId, refresh)

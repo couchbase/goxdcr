@@ -209,3 +209,133 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	}
 	assert.True(oneReplFound && twoReplFound)
 }
+
+func TestPrometheusNumOfReplicationsPerTarget(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusNumOfReplicationsPerTarget =================")
+	defer fmt.Println("============== Test case end: TestPrometheusNumOfReplicationsPerTarget =================")
+
+	var srcBucketName = "srcBucket"
+	var tgtBucketName = "tgtBucket"
+	var tgtBucketName2 = "tgtBucket2"
+	var tgtClusterUUID = "tgtUUID"
+
+	spec1, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtClusterUUID, tgtBucketName, "")
+	assert.Nil(err)
+
+	spec2, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtClusterUUID, tgtBucketName2, "")
+	assert.Nil(err)
+
+	var replIds []string
+	replIds = append(replIds, spec1.Id)
+	replIds = append(replIds, spec2.Id)
+	var tgtUUIDs []string = []string{tgtClusterUUID}
+
+	// Use already templated data
+	// This file is a shortcut produced by converting expVar.Map into a ExpVarParseMapType, and then saved to a file
+	// If the "LoadExpVarMap" function logic is changed, this file will need to be regenerated
+	expVarMarshalledBytes, err := ioutil.ReadFile("testdata/expVarStatsDump.json")
+	if err != nil {
+		panic(err.Error())
+	}
+	expVarParseMap := make(map[string]interface{})
+	err = json.Unmarshal(expVarMarshalledBytes, &expVarParseMap)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	assert.NotNil(expVarParseMap)
+
+	// Unit test unmarshal will unmarshal them into map[string]interface{}
+	// Need to re-convert
+	convertedMap := make(ExpVarParseMapType)
+	for k, v := range expVarParseMap {
+		convertedMap[k] = ExpVarParseMapType(v.(map[string]interface{}))
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+	exporter.expVarParseMap = convertedMap
+
+	exporter.LoadMetricsMap(true)
+	assert.Nil(exporter.LoadReplicationIds(tgtUUIDs, replIds))
+
+	numEntries := exporter.metricsMap[service_def.TOTAL_REPLICATIONS_COUNT]
+	assert.Len(numEntries, 1)
+
+	for _, statPerIdentifier := range numEntries {
+		assert.Equal(statPerIdentifier.GetValue(), 2)
+	}
+}
+
+func TestPrometheusNumOfReplicationsPerTargetTwoTargets(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusNumOfReplicationsPerTargetTwoTargets =================")
+	defer fmt.Println("============== Test case end: TestPrometheusNumOfReplicationsPerTargetTwoTargets =================")
+
+	var srcBucketName = "srcBucket"
+	var tgtBucketName = "tgtBucket"
+	var tgtBucketName2 = "tgtBucket2"
+	var tgtClusterUUID = "tgtUUID"
+	var tgtClusterUUID2 = "tgtUUID2"
+
+	spec1, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtClusterUUID, tgtBucketName, "")
+	assert.Nil(err)
+
+	spec2, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtClusterUUID, tgtBucketName2, "")
+	assert.Nil(err)
+
+	spec3, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtClusterUUID2, tgtBucketName, "")
+	assert.Nil(err)
+
+	var replIds []string
+	replIds = append(replIds, spec1.Id)
+	replIds = append(replIds, spec2.Id)
+	replIds = append(replIds, spec3.Id)
+	var tgtUUIDs []string = []string{tgtClusterUUID, tgtClusterUUID2}
+
+	// Use already templated data
+	// This file is a shortcut produced by converting expVar.Map into a ExpVarParseMapType, and then saved to a file
+	// If the "LoadExpVarMap" function logic is changed, this file will need to be regenerated
+	expVarMarshalledBytes, err := ioutil.ReadFile("testdata/expVarStatsDump.json")
+	if err != nil {
+		panic(err.Error())
+	}
+	expVarParseMap := make(map[string]interface{})
+	err = json.Unmarshal(expVarMarshalledBytes, &expVarParseMap)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	assert.NotNil(expVarParseMap)
+
+	// Unit test unmarshal will unmarshal them into map[string]interface{}
+	// Need to re-convert
+	convertedMap := make(ExpVarParseMapType)
+	for k, v := range expVarParseMap {
+		convertedMap[k] = ExpVarParseMapType(v.(map[string]interface{}))
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+	exporter.expVarParseMap = convertedMap
+
+	exporter.LoadMetricsMap(true)
+	assert.Nil(exporter.LoadReplicationIds(tgtUUIDs, replIds))
+
+	numEntries := exporter.metricsMap[service_def.TOTAL_REPLICATIONS_COUNT]
+	assert.Len(numEntries, 2)
+
+	var oneFound bool
+	var twoFound bool
+	for _, statPerIdentifier := range numEntries {
+		if statPerIdentifier.GetValue() == 2 {
+			twoFound = true
+		}
+
+		if statPerIdentifier.GetValue() == 1 {
+			oneFound = true
+		}
+	}
+
+	assert.True(twoFound)
+	assert.True(oneFound)
+}

@@ -23,6 +23,7 @@ import (
 
 type ExpVarExporter interface {
 	LoadExpVarMap(m *expvar.Map) bool
+	LoadReplicationIds(remClusterUUIDs, replIds []string) error
 	LoadSourceClustersInfoV1(srcClusterNames map[string]string, srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string)
 	Export() ([]byte, error)
 }
@@ -33,6 +34,7 @@ var PrometheusTargetBucketBytes = []byte(service_def.PrometheusTargetBucketLabel
 var PrometheusPipelineTypeBytes = []byte(service_def.PrometheusPipelineTypeLabel)
 var PrometheusSourceClusterUuidBytes = []byte(service_def.PrometheusSourceClusterUUIDLabel)
 var PrometheusSourceClusterNameBytes = []byte(service_def.PrometheusSourceClusterNameLabel)
+var PrometheusNumberOfReplicationsBytes = []byte(service_def.PrometheusNumOfReplications)
 
 type PrometheusExporter struct {
 	// Read only
@@ -70,6 +72,8 @@ type PrometheusExporter struct {
 
 	srcNodes map[string][]string
 	srcSpecs map[string][]*metadata.ReplicationSpecification
+
+	lastKnownTgtReplMap map[string]int
 }
 
 func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, labelsTableConstructor PrometheusLabelsConstructorType) *PrometheusExporter {
@@ -208,6 +212,86 @@ func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, 
 			}
 		}
 	}
+}
+
+func (m *MetricsMapType) RecordTargetClusterReplCount(countMap map[string]int, lookupMap service_def.StatisticsPropertyMap, constructor PrometheusLabelsConstructorType) {
+	var statKey = service_def.TOTAL_REPLICATIONS_COUNT
+
+	// Every time this is called, information will need to be updated, so reinitialize
+	targetClusterUUIDToStatsMap := IdentifierStatsMap{}
+	(*m)[statKey] = targetClusterUUIDToStatsMap
+
+	for targetClusterUuid, count := range countMap {
+		_, targetClusterExists := targetClusterUUIDToStatsMap[targetClusterUuid]
+		if !targetClusterExists {
+			statsProperty := lookupMap[statKey]
+			labelsTable := constructor(statKey)
+			targetClusterUUIDToStatsMap[targetClusterUuid] = NewPerTargetClusterStatsType(statsProperty, labelsTable, []byte(statKey), targetClusterUuid)
+		}
+
+		targetClusterUUIDToStatsMap[targetClusterUuid].SetValue(count)
+	}
+}
+
+type PerTargetClusterStatsType struct {
+	PerItemStatTypeCommon
+
+	StatsNameToOutput    []byte
+	TargetClusterUuid    string
+	NumberOfReplications int
+}
+
+func (p *PerTargetClusterStatsType) UpdateOutputBuffer(metricKey []byte, tgtUuid string) {
+	p.resetBuffers()
+
+	if p.LabelsTable != nil {
+		for customLabelName, extractor := range p.LabelsTable {
+			p.appendMetricName(metricKey, p.IndividualLabelBuffer[customLabelName])
+			p.appendStandardLabels(p.IndividualLabelBuffer[customLabelName])
+			p.appendBufferWithValue(p.IndividualLabelBuffer[customLabelName], extractor.GetValueBaseUnit)
+		}
+		p.composeFinalOutputBufferFromLabelBuffers()
+	} else {
+		p.appendMetricName(metricKey, &p.OutputBuffer)
+		p.appendStandardLabels(&p.OutputBuffer)
+		p.appendBufferWithValue(&p.OutputBuffer, p.GetValueBaseUnit)
+	}
+}
+
+func (p *PerTargetClusterStatsType) appendStandardLabels(buffer *[]byte) {
+	// {
+	*buffer = append(*buffer, []byte(" {")...)
+
+	// {targetClusterUUID="abcdef"
+	*buffer = append(*buffer, PrometheusTargetClusterUuidBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(p.TargetClusterUuid)...)
+	*buffer = append(*buffer, []byte("\"")...)
+
+	// {targetClusterUUID="abcdef"}
+	*buffer = append(*buffer, endBracketWithSpace...)
+}
+
+func (p *PerTargetClusterStatsType) ResetBuffer() {
+	p.resetBuffers()
+}
+
+func NewPerTargetClusterStatsType(property service_def.StatsProperty, table PrometheusLabels, keyBytesCache []byte, uuid string) StatsPerExportedConst {
+	obj := &PerTargetClusterStatsType{
+		PerItemStatTypeCommon: PerItemStatTypeCommon{
+			Properties:            property,
+			Value:                 nil,
+			LabelsTable:           table,
+			IndividualLabelBuffer: map[string]*[]byte{},
+		},
+		StatsNameToOutput: keyBytesCache,
+		TargetClusterUuid: uuid,
+	}
+	for k, _ := range table {
+		oneSlice := make([]byte, 0)
+		obj.IndividualLabelBuffer[k] = &oneSlice
+	}
+	return obj
 }
 
 type ExpVarParseMapType map[string]interface{}
@@ -668,6 +752,43 @@ func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[stri
 		p.resetOutputBuffer()
 		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, p.globalLookupMap, p.labelsTableConstructor)
 	}
+}
+
+func (p *PrometheusExporter) LoadReplicationIds(remClusterUUIDs, replIds []string) error {
+	targetClusterReplCountMap := make(map[string]int)
+
+	// We need to initialize to 0 so we can properly display the number of replications for each target cluster
+	// even if it doesn't have one (which means the repl IDs aren't coming through
+	for _, oneRemClusterUUID := range remClusterUUIDs {
+		targetClusterReplCountMap[oneRemClusterUUID] = 0
+	}
+
+	reusedReplStruct := &metadata.ReplIdComposition{}
+	for _, replId := range replIds {
+		reusedReplStruct = metadata.DecomposeReplicationId(replId, reusedReplStruct)
+		// Only count just main out of precaution
+		if reusedReplStruct.PipelineType == "Main" {
+			targetClusterReplCountMap[reusedReplStruct.TargetClusterUUID]++
+		}
+	}
+
+	var cacheOutdated bool
+	if len(p.lastKnownTgtReplMap) != len(targetClusterReplCountMap) {
+		cacheOutdated = true
+	}
+	for k, v := range targetClusterReplCountMap {
+		if cachedVal, exists := p.lastKnownTgtReplMap[k]; !exists || cachedVal != v {
+			cacheOutdated = true
+			break
+		}
+	}
+
+	if cacheOutdated {
+		p.resetOutputBuffer()
+		p.metricsMap.RecordTargetClusterReplCount(targetClusterReplCountMap, p.globalLookupMap, p.labelsTableConstructor)
+		p.lastKnownTgtReplMap = targetClusterReplCountMap
+	}
+	return nil
 }
 
 func (p *PrometheusExporter) LoadMetricsMap(needToReallocate bool) error {

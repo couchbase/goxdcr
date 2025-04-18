@@ -38,6 +38,8 @@ type RemoteClusterSvc interface {
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	// Gets a map of cloned remote cluster references, with unique ID being the key
 	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
+	// Lightweight API to get a list of remote cluster UUIDs
+	ListRemoteClusterUUIDs() ([]string, error)
 
 	// Remote Cluster Service may need to monitor target bucket info
 	RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error

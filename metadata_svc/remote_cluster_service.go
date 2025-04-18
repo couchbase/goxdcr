@@ -2821,6 +2821,20 @@ func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.Remo
 	return remoteClusterReferencesMap, nil
 }
 
+func (service *RemoteClusterService) ListRemoteClusterUUIDs() ([]string, error) {
+	service.logger.Debugf("Getting remote clusters UUIDs")
+
+	remoteClusterUUIDs := make([]string, 0)
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+	for remoteClusterUUID, _ := range service.agentCacheUuidMap {
+		remoteClusterUUIDs = append(remoteClusterUUIDs, remoteClusterUUID)
+	}
+
+	return remoteClusterUUIDs, nil
+}
+
 // validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
 func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	return service.validateAddRemoteCluster(ref, false)

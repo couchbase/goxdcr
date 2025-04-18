@@ -1329,11 +1329,17 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 		return EncodeByteArrayIntoPrometheusResponseWithStatusCode([]byte{}, http.StatusOK)
 	}
 
-	expVarMap, err := GetAllStatistics()
+	expVarMap, remClusterIds, replIds, err := GetAllStatistics()
 	if err != nil {
 		return nil, err
 	}
 	adminport.prometheusExporter.LoadExpVarMap(expVarMap)
+
+	err = adminport.prometheusExporter.LoadReplicationIds(remClusterIds, replIds)
+	if err != nil {
+		// Not a critical error, continue
+		logger_ap.Debugf("Unable to load replication IDs due to err %v\n", err)
+	}
 
 	sourceClusterNames, sourceSpecs, sourceNodes, _, _, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {

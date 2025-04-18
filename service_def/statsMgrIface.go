@@ -206,6 +206,9 @@ const (
 	CLOG_UNKNOWN_RESP_COUNT       = "clog_unknown_resps"
 	CLOG_OTHER_ERRORS             = "clog_other_errors"
 	CLOG_STATUS                   = "clog_status"
+
+	// Consts for accumulative number of replications
+	TOTAL_REPLICATIONS_COUNT = "number_of_replications"
 )
 
 const (
@@ -512,6 +515,10 @@ var CLogStatusLabels = StatsLabels{
 	TargetBucketNameLabel,
 	PipelineTypeLabel,
 	CLogStatusLabel,
+}
+
+var RemoteClusterSpecificLabels = StatsLabels{
+	TargetClusterUUIDLabel,
 }
 
 // See: https://docs.google.com/document/d/183VfS6fi-Tn0lHc6oEHPFQgOmYOgnwbM28zWtGbyTUg/edit#
@@ -1758,6 +1765,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Internal,
 		Labels:       StandardLabels,
 	},
+
+	TOTAL_REPLICATIONS_COUNT: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForVariableVBSupport,
+		Description:  "The total number of replications that exists to replicate to a particular target cluster",
+		Stability:    Committed,
+		Labels:       RemoteClusterSpecificLabels,
+	},
 }
 
 const (
@@ -1769,4 +1785,5 @@ const (
 	PrometheusSourceClusterUUIDLabel = "sourceClusterUUID"
 	PrometheusSourceClusterNameLabel = "sourceClusterName"
 	PrometheusCLogStatusLabel        = "status"
+	PrometheusNumOfReplications      = "numberOfReplications"
 )
