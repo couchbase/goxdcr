@@ -1470,6 +1470,7 @@ const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 const DevPreCheckMaxCasErrorInjection = "xdcrDevPreCheckMaxCasErrorInjection"
+const DevBackfillMgrVbsTasksDoneNotifierDelay = "xdcrDevBackfillMgrVbsTasksDoneNotifierDelay"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
