@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -126,8 +128,79 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 	assert.Nil(err)
 	tgtFailoverLogs := make(map[uint16]*mcc.FailoverLog)
 	assert.Nil(json.Unmarshal(tgtFailoverLogsSlice, &tgtFailoverLogs))
-	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{filteredMap, nil}, tgtFailoverLogs)
+	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{filteredMap, nil}, tgtFailoverLogs, &log.CommonLogger{})
 	filteredMapTgt := filteredMapTgts[0]
+	for _, ckptDoc := range filteredMapTgt {
+		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
+	}
+}
+
+func TestCheckpointsValidityWithFailoverLogs(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointsValidityWithFailoverLogs =================")
+	defer fmt.Println("============== Test case end: TestCheckpointsValidityWithFailoverLogs =================")
+	assert := assert.New(t)
+
+	tgtFailoverLogsSlice, err := ioutil.ReadFile("./unitTestdata/tgtFailoverJson.json")
+	assert.Nil(err)
+	tgtFailoverLogs := make(map[uint16]*mcc.FailoverLog)
+	assert.Nil(json.Unmarshal(tgtFailoverLogsSlice, &tgtFailoverLogs))
+
+	globalCkts := metadata.GenerateGlobalVBsCkptDocMap([]uint16{0, 1, 2}, "")
+	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{globalCkts, nil}, tgtFailoverLogs, &log.CommonLogger{})
+	filteredMapTgt := filteredMapTgts[0]
+	for _, ckptDoc := range filteredMapTgt {
+		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
+	}
+}
+
+func TestCheckpointsValidityWithPreReplicate(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointsValidityWithPreReplicate =================")
+	defer fmt.Println("============== Test case end: TestCheckpointsValidityWithPreReplicate =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc, true)
+
+	assert.Nil(err)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+	// Replace with a customized one
+	capiSvcErr := &service_def.CAPIService{}
+	var preReplicateCounter uint32
+	// capiSvc that returns error
+	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		atomic.AddUint32(&preReplicateCounter, 1)
+	}).Return(false, nil, fmt.Errorf("dummy"))
+	ckptMgr.capi_svc = capiSvcErr
+
+	globalCkts := metadata.GenerateGlobalVBsCkptDocMap([]uint16{0, 1, 2}, "")
+	filteredMapTgts := ckptMgr.filterInvalidCkptsBasedOnPreReplicate([]metadata.VBsCkptsDocMap{globalCkts, nil})
+	filteredMapTgt := filteredMapTgts[0]
+	for _, ckptDoc := range filteredMapTgt {
+		assert.Equal(0, len(ckptDoc.Checkpoint_records))
+	}
+
+	// Replace with a customized one that returns positive results, like positive match
+	capiSvcGood := &service_def.CAPIService{}
+	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		atomic.AddUint32(&preReplicateCounter, 1)
+	}).Return(true, nil, nil)
+	ckptMgr.capi_svc = capiSvcGood
+
+	filteredMapTgts = ckptMgr.filterInvalidCkptsBasedOnPreReplicate([]metadata.VBsCkptsDocMap{globalCkts, nil})
+	filteredMapTgt = filteredMapTgts[0]
 	for _, ckptDoc := range filteredMapTgt {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
 	}
@@ -1648,4 +1721,88 @@ func TestCheckpointManager_CleanupInMemoryBrokenMap(t *testing.T) {
 	assert.Equal(0, len(ckptManager.cachedBrokenMap.brokenMap))
 	assert.Equal(uint64(4), ckptManager.cachedBrokenMap.correspondingTargetManifest)
 	assert.Equal(2, len(ckptManager.cachedBrokenMap.brokenMapHistories))
+}
+
+func Test_prepareForLocalPreReplicate(t *testing.T) {
+
+	var f *mcc.FailoverLog = &mcc.FailoverLog{
+		{189935894142520, 7879},
+		{189935894896622, 1000},
+		{150911719482835, 0},
+	}
+	var f1 *mcc.FailoverLog = &mcc.FailoverLog{
+		{150911719482835, 0},
+	}
+	var f2 *mcc.FailoverLog = &mcc.FailoverLog{}
+
+	tests := []struct {
+		name        string
+		failoverLog *mcc.FailoverLog
+		want        *mcc.FailoverLog
+	}{
+
+		{
+			name:        "Test1",
+			failoverLog: f,
+			want:        &mcc.FailoverLog{{189935894142520, math.MaxUint64}, {189935894896622, 7879}, {150911719482835, 1000}},
+		},
+		{
+			name:        "Test2",
+			failoverLog: f1,
+			want:        &mcc.FailoverLog{{150911719482835, math.MaxUint}},
+		},
+		{
+			name:        "Test3",
+			failoverLog: f2,
+			want:        nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, _ := prepareForLocalPreReplicate(tt.failoverLog); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("prepareForLocalPreReplicate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_localPreReplicate(t *testing.T) {
+	var f *mcc.FailoverLog = &mcc.FailoverLog{
+		{189935894142520, 7879},
+		{189935894896622, 1000},
+		{150911719482835, 0},
+	}
+	modifiedFailoverLog, _ := prepareForLocalPreReplicate(f)
+	tests := []struct {
+		name         string
+		commitOpaque [2]uint64
+		failoverLog  *mcc.FailoverLog
+		want         bool
+	}{
+		{
+			name:         "Invalid UUID",
+			commitOpaque: [2]uint64{1, 100},
+			failoverLog:  modifiedFailoverLog,
+			want:         false,
+		},
+		{
+			name:         "Valid UUID+seq pair",
+			commitOpaque: [2]uint64{189935894896622, 500},
+			failoverLog:  modifiedFailoverLog,
+			want:         true,
+		},
+		{
+			name:         "Valid UUID but invalid Seq",
+			commitOpaque: [2]uint64{150911719482835, 1010},
+			failoverLog:  modifiedFailoverLog,
+			want:         false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := localPreReplicate(tt.failoverLog, tt.commitOpaque); got != tt.want {
+				t.Errorf("localPreReplicate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

@@ -1752,7 +1752,7 @@ func (ckmgr *CheckpointManager) extractTargetTimestamp(vbno uint16, targetTimest
 	} else {
 		for _, tgtVBno := range ckmgr.getMyTgtVBs() {
 			if ckpt_record.GlobalTimestamp == nil || ckpt_record.GlobalTimestamp[tgtVBno] == nil {
-				ckmgr.logger.Warnf("Global timestamp for target vb %v does not exist", vbno)
+				ckmgr.logger.Warnf("Global timestamp for target vb %v does not exist", tgtVBno)
 				return base.ErrorNilPtr
 			}
 			globalTimestamp[tgtVBno] = &service_def.RemoteVBReplicationStatus{
@@ -3254,7 +3254,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			ckmgr.logger.Warnf("unable to get failoverlog from target(s) %v - using pre_replicate", err)
 			filteredMaps = ckmgr.filterInvalidCkptsBasedOnPreReplicate(filteredMaps)
 		} else {
-			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
+			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs, ckmgr.logger)
 		}
 	}
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
@@ -3523,7 +3523,7 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 	return filteredMaps, combinedShaMap, nil
 }
 
-func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap, tgtFailoverLogs map[uint16]*mcc.FailoverLog) []metadata.VBsCkptsDocMap {
+func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap, tgtFailoverLogs map[uint16]*mcc.FailoverLog, logger *log.CommonLogger) []metadata.VBsCkptsDocMap {
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
@@ -3545,6 +3545,12 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 			if !found || failoverLog == nil {
 				continue
 			}
+			modifiedFailoverLog, err := prepareForLocalPreReplicate(failoverLog)
+			if err != nil {
+				// should never happen
+				logger.Fatalf("failed to prepare failover log for localPreReplicate. vbno %v err=%v", vbno, err)
+				continue
+			}
 
 			_, exists := combinedMap[vbno]
 			if !exists {
@@ -3558,16 +3564,10 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 					continue
 				}
 
-				ckptRecordVbUuid := ckptRecord.Target_vb_opaque.Value().(uint64)
-
-				for _, vbUuidSeqnoPair := range *failoverLog {
-					failoverVbUuid := vbUuidSeqnoPair[0]
-
-					if ckptRecordVbUuid == failoverVbUuid {
-						// Usable checkpoint based purely off of source bucket info
-						combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
-						continue
-					}
+				if IsCkptRecordValidBasedOnTgtFailover(ckptRecord, modifiedFailoverLog) {
+					// Usable checkpoint based purely off of target bucket info
+					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+					continue
 				}
 			}
 		}
@@ -4231,16 +4231,8 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 					continue
 				}
 
-				targetTimestamp := &service_def.RemoteVBReplicationStatus{
-					VBOpaque: ckptRecord.Target_vb_opaque,
-					VBSeqno:  ckptRecord.Target_Seqno,
-					VBNo:     vbno,
-				}
-
-				bMatch, _, err := preReplicateCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp)
+				bMatch, err := ckmgr.IsCkptRecordValidBasedOnPreReplicate(ckptRecord, preReplicateCtx, vbno)
 				if err != nil {
-					ckmgr.logger.Errorf("filterInvalidCkptBasedOnPreReplicate tgtTs (%v,%v,%v) error: %v",
-						vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
 					continue
 				}
 				if bMatch {
@@ -4250,4 +4242,115 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
+}
+
+// The failover log is a list of (vbuuid, start_seqno) pairs, where each entry
+// marks the point a vBucket UUID (vbuuid) took ownership. For example:
+// [(Y, 900), (X, 500), (W, 0)]. The most recent entry is Y.
+//
+// prepareForLocalPreReplicate function transforms this into (vbuuid, end_seqno)
+// pairs to indicate the seqno at which each vbuuid's ownership ends:
+// (Y, INT_MAX), (X, 900), (W, 500). INT_MAX is used for the currently active vbuuid.
+//
+// This transformation allows us to validate checkpoints. For example:
+//   - Suppose a checkpoint contains the pair (W, 501). This should be rejected
+//     because ownership for W ended at sequence number 500. Since X took over
+//     from W at seqno 500, only mutations with seqno ≤ 500 are guaranteed to be present in X.
+//   - A checkpoint with entry (X, 899) should be accepted since X's ownership ended
+//     at 900, meaning all seqnos <= 900 are guaranteed to be present in Y.
+func prepareForLocalPreReplicate(failoverLogPtr *mcc.FailoverLog) (*mcc.FailoverLog, error) {
+	if failoverLogPtr == nil || len(*failoverLogPtr) == 0 {
+		return nil, base.ErrorInvalidInput
+	}
+
+	failoverLog := *failoverLogPtr
+	n := len(failoverLog)
+	result := make(mcc.FailoverLog, n)
+
+	for i := n - 1; i > 0; i-- {
+		entry := [2]uint64{failoverLog[i][0], failoverLog[i-1][1]}
+		result[i] = entry
+	}
+
+	lastEntry := [2]uint64{failoverLog[0][0], math.MaxUint64}
+	result[0] = lastEntry
+
+	return &result, nil
+}
+
+// its the callers responsibility to ensure that the parameters passed in are valid
+func localPreReplicate(failoverLog *mcc.FailoverLog, commitOpaque [2]uint64) bool {
+	commitUUID := commitOpaque[0]
+	commitSeqno := commitOpaque[1]
+
+	for _, entry := range *failoverLog {
+		uuid := entry[0]
+		endSeqno := entry[1]
+		if commitUUID == uuid && commitSeqno <= endSeqno {
+			return true
+		}
+	}
+	return false
+}
+
+func IsCkptRecordValidBasedOnTgtFailover(ckptRecord *metadata.CheckpointRecord, failoverLog *mcc.FailoverLog) bool {
+	if ckptRecord == nil {
+		return false
+	}
+
+	if ckptRecord.IsTraditional() {
+		ckptCommitOpaque := [2]uint64{
+			ckptRecord.Target_vb_opaque.Value().(uint64),
+			ckptRecord.Target_Seqno,
+		}
+		return localPreReplicate(failoverLog, ckptCommitOpaque)
+	}
+
+	for _, tgtTs := range ckptRecord.GlobalTimestamp {
+		tgtCommitOpaque := [2]uint64{
+			tgtTs.Target_vb_opaque.Value().(uint64),
+			tgtTs.Target_Seqno,
+		}
+		if !localPreReplicate(failoverLog, tgtCommitOpaque) {
+			return false
+		}
+	}
+	return true
+}
+
+func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord *metadata.CheckpointRecord, preReplicateCtx *globalCkptPrereplicateCacheCtx, vbno uint16) (bool, error) {
+	if ckptRecord == nil {
+		return false, nil
+	}
+
+	if ckptRecord.IsTraditional() {
+		targetTimestamp := &service_def.RemoteVBReplicationStatus{
+			VBOpaque: ckptRecord.Target_vb_opaque,
+			VBSeqno:  ckptRecord.Target_Seqno,
+			VBNo:     vbno,
+		}
+		bmatch, _, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, true)
+		if err != nil {
+			ckmgr.logger.Errorf("IsCkptRecordValidBasedOnPreReplicate targetTimeStamp (%v,%v,%v) error: %v",
+				vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
+		}
+		return bmatch, err
+	}
+	for tgtno, tgtTs := range ckptRecord.GlobalTimestamp {
+		targetTimestamp := &service_def.RemoteVBReplicationStatus{
+			VBOpaque: tgtTs.Target_vb_opaque,
+			VBSeqno:  tgtTs.Target_Seqno,
+			VBNo:     tgtno,
+		}
+		bmatch, _, err := preReplicateCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp)
+		if err != nil {
+			ckmgr.logger.Errorf("IsCkptRecordValidBasedOnPreReplicate tgtTs (%v,%v,%v) error: %v",
+				tgtno, tgtTs.Target_vb_opaque, tgtTs.Target_Seqno, err)
+			return false, err
+		}
+		if !bmatch {
+			return false, nil
+		}
+	}
+	return true, nil
 }
