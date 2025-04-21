@@ -40,6 +40,7 @@ type RemoteClusterRefEvent struct {
 	RemoteClusterHostname string `json:"cluster_hostname"`
 	IsEncrypted           bool   `json:"is_encrypted"`
 	EncryptionType        string `json:"encryption_type"`
+	OldRemoteClusterName  string `json:"old_cluster_name,omitempty"`
 }
 
 type CreateReplicationEvent struct {
@@ -197,4 +198,11 @@ func (event *LocalClusterAccessDeniedEvent) Redact() AuditEventIface {
 func (event *LocalClusterAccessDeniedEvent) Clone() AuditEventIface {
 	clonedEvent := *event
 	return &clonedEvent
+}
+
+// Sets the old reference name if the remote cluster reference name has changed; otherwise, its a no-op
+func (event *RemoteClusterRefEvent) SetOldRefName(oldRefName string) {
+	if oldRefName != event.RemoteClusterName {
+		event.OldRemoteClusterName = oldRefName
+	}
 }

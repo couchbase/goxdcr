@@ -428,7 +428,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 			}
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), "")
 			go writeRemoteClusterSystemEvent(service_def.CreateRemoteClusterRefSystemEventId, remoteClusterRef)
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -475,7 +475,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 			}
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), remoteClusterName)
 			go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -525,7 +525,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	}
 
-	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), remoteClusterName)
 	go writeRemoteClusterSystemEvent(service_def.DeleteRemoteClusterRefSystemEventId, ref)
 
 	return NewOKResponse()
@@ -1068,13 +1068,15 @@ func writeRemoteClusterSystemEvent(eventId service_def.EventIdType, ref *metadat
 	EventlogService().WriteEvent(eventId, args)
 }
 
-func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) {
+func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, remoteClusterName string) {
 	event := &service_def.RemoteClusterRefEvent{
 		GenericFields:         service_def.GenericFields{Timestamp: log.FormatTimeWithMilliSecondPrecision(time.Now()), RealUserid: *realUserId, LocalRemoteIPs: *ips},
 		RemoteClusterName:     remoteClusterRef.Name(),
 		RemoteClusterHostname: remoteClusterRef.HostName(),
 		IsEncrypted:           remoteClusterRef.DemandEncryption(),
 		EncryptionType:        remoteClusterRef.EncryptionType()}
+
+	event.SetOldRefName(remoteClusterName)
 
 	err := AuditService().Write(eventId, event)
 	logAuditErrors(err)
