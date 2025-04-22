@@ -169,7 +169,8 @@ type DualSortedSeqnoListWithLock struct {
 	lock         *sync.RWMutex
 
 	// By default, the two lists are always assumed to be of equal length.
-	// Use setNoLenRestriction to set it to true.
+	// Use setNoLenRestriction to set it to true, which means there is no such
+	// equality restriction.
 	overrideLenRestriction bool
 }
 
@@ -258,24 +259,17 @@ func (list_obj *DualSortedSeqnoListWithLock) appendSeqnoToList2(seqno2 uint64) {
 // truncate all seqnos that are no larger than passed in through_seqno
 // through_seqno is assumed to be not present in the lists, since we are dealing with
 // gap seqnos.
-func (list_obj *DualSortedSeqnoListWithLock) truncateGapSeqnos(through_seqno uint64) {
+func (list_obj *DualSortedSeqnoListWithLock) truncateSeqnos(through_seqno uint64) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 
-	list_obj.seqno_list_1 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_1)
-	list_obj.seqno_list_2 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_2)
-}
-
-// truncate all seqnos that are no larger than passed in through_seqno
-// seqno_list_1 and seqno_list_2 is assumed to not be related and hence truncated independently.
-// The entire lists are assumed to be NOT sorted. However the lists are assumed to be sorted
-// from index 0 to the index of through_seqno. Eg: [1, 2, 3, 5, 4, 9, 8], through_seqno=3.
-func (list_obj *DualSortedSeqnoListWithLock) truncateHalfSortedSeqnos(through_seqno uint64) {
-	list_obj.lock.Lock()
-	defer list_obj.lock.Unlock()
-
-	list_obj.seqno_list_1 = truncateHalfSortedSeqnoList(through_seqno, list_obj.seqno_list_1)
-	list_obj.seqno_list_2 = truncateHalfSortedSeqnoList(through_seqno, list_obj.seqno_list_2)
+	if list_obj.overrideLenRestriction {
+		list_obj.seqno_list_1 = truncateOneSeqnoList(through_seqno, list_obj.seqno_list_1)
+		list_obj.seqno_list_2 = truncateOneSeqnoList(through_seqno, list_obj.seqno_list_2)
+	} else {
+		list_obj.seqno_list_1 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_1)
+		list_obj.seqno_list_2 = truncateGapSeqnoList(through_seqno, list_obj.seqno_list_2)
+	}
 }
 
 // When we truncate based on a through_seqno, this is the "reverse" truncate of the Seqnos
@@ -1017,6 +1011,8 @@ func (t *SeqnoManifestsMapType) GetManifestId(vbno uint16, seqno uint64) (uint64
 	return manifestId, err
 }
 
+// specifically used for gap seqno list since the input through_seqno
+// should never be found in the list.
 func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 	index, found := base.SearchUint64List(seqno_list, through_seqno)
 	if found {
@@ -1028,10 +1024,10 @@ func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 	return seqno_list
 }
 
-// The entire lists are assumed to be NOT sorted. However the lists are assumed to be sorted
-// from index 0 to the index of through_seqno. Eg: [1, 2, 3, 5, 4, 9, 8], through_seqno=3.
-func truncateHalfSortedSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
-	index, found := base.SearchUint64ListUnsorted(seqno_list, through_seqno)
+// used in a generic manner which truncates the input seqno_list to
+// have no elements less than or equal to through_seqno.
+func truncateOneSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
+	index, found := base.SearchUint64List(seqno_list, through_seqno)
 	if found {
 		return seqno_list[index+1:]
 	} else if index > 0 {
@@ -1820,12 +1816,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vb_sent_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_filtered_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vb_failed_cr_seqno_list_map[vbno].TruncateSeqnos(through_seqno)
-	tsTracker.vb_gap_seqno_list_map[vbno].truncateGapSeqnos(through_seqno)
+	tsTracker.vb_gap_seqno_list_map[vbno].truncateSeqnos(through_seqno)
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbIgnoredSeqnoListMap[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vbTgtSeqnoManifestMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbClonedTracker[vbno].truncateSeqno1Floor(through_seqno)
-	tsTracker.cLogTrackerVbMap[vbno].truncateHalfSortedSeqnos(through_seqno)
+	tsTracker.cLogTrackerVbMap[vbno].truncateSeqnos(through_seqno)
 }
 
 /**
