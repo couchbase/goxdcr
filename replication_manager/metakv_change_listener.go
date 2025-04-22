@@ -380,6 +380,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 }
 
 func needSpecialCallbackUpdate(topic, internalSpecId string, oldSettings, newSettings *metadata.ReplicationSettings) (callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, needCallback bool) {
+	// TODO MB-66379 - this logic will need to also need to be repaired based upon the fix for MB-66140
 	if !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules()) {
 		needCallback = true
 		handlerCb, handlerErrCb := replication_mgr.backfillMgr.GetExplicitMappingChangeHandler(topic, internalSpecId, oldSettings, newSettings)
