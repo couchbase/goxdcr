@@ -119,9 +119,14 @@ function runTestCase {
 	sleep 5
 	checkItemCnt "C2" "B2" $newCount
 
-	# Backfill should not have been raised - because XDCR prevents pipeline from starting if explicit mapping was empty
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt))
+	# Because of MB-66344, it is now possible to have backfills raised because the backfill raise "error" condition will persist
+	# Before the MB, we would see:
+	# 2025-04-21T11:37:01.621-07:00 ERRO GOXDCR.ReplicaReplicator: Immediate Fetching replication 7b479f1a5e0df8d67d8292163678410f/B1/B2 for ckpt push had err Nothing to send yet
+	# until the max retry
+	# ... backfill raise and push due to explicit mapping change had error ExplicitMapChangePushRetry Operation failed after max retries.  Last error: Nothing to send yet
+	# Because of the asyn nature, the backfill will now be raised, but should not be an issue
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt+1))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt+1))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

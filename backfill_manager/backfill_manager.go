@@ -744,34 +744,36 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				return err
 			}
 			added, removed := oldMapping.Diff(newMapping)
-			err = b.handleExplicitMapChangeBackfillReq(specId, added, removed)
-			if err != nil {
-				if !b.validateReplIdExists(specId) {
-					return nil
-				}
-
-				srcUid, err := b.getLastHandledSourceManifestId(specId)
+			errCb := func(err error) {
 				if err != nil {
-					b.logger.Errorf("Unable to find retry manifestID for spec %v", specForId)
-				}
-				diffPair := metadata.CollectionNamespaceMappingsDiffPair{
-					Added:                      added,
-					Removed:                    removed,
-					CorrespondingSrcManifestId: srcUid,
-				}
-
-				if errMeansReqNeedsToBeRetried(err) {
-					req := BackfillRetryRequest{
-						replId:                     specId,
-						req:                        diffPair,
-						force:                      false,
-						correspondingSrcManifestId: srcUid,
-						handler:                    b.internalGetHandler(specId),
+					if !b.validateReplIdExists(specId) {
+						return
 					}
-					b.retryBackfillRequest(req)
+
+					srcUid, err := b.getLastHandledSourceManifestId(specId)
+					if err != nil {
+						b.logger.Errorf("Unable to find retry manifestID for spec %v", specForId)
+					}
+					diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+						Added:                      added,
+						Removed:                    removed,
+						CorrespondingSrcManifestId: srcUid,
+					}
+
+					if errMeansReqNeedsToBeRetried(err) {
+						req := BackfillRetryRequest{
+							replId:                     specId,
+							req:                        diffPair,
+							force:                      false,
+							correspondingSrcManifestId: srcUid,
+							handler:                    b.internalGetHandler(specId),
+						}
+						b.retryBackfillRequest(req)
+					}
 				}
-				return err
 			}
+
+			b.handleExplicitMapChangeBackfillReq(specId, added, removed, errCb)
 
 			// If pipeline was active during this callback's lifetime, then it means the ckpts created by the pipeline has outdated mappings. clean those up
 			if oldSettings.Active {
@@ -784,9 +786,6 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				if err != nil {
 					errCb(err, true)
 				}
-			}
-			if err != nil {
-				return err
 			}
 		}
 		return nil
@@ -840,24 +839,22 @@ func (b *BackfillMgr) checkUpToDateSpec(specId string, internalSpecId string) (e
 	return nil, true
 }
 
-func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) base.StoppedPipelineCallback {
 	callback := func() error {
 		atomic.CompareAndSwapUint32(&b.debugVbsTaskDoneNotifierHang, 1, 0)
 		err, upToDate := b.checkUpToDateSpec(specId, internalSpecId)
 		if !upToDate {
 			return err
 		}
-		err = b.handleExplicitMapChangeBackfillReq(specId, diff.Added, diff.Removed)
-		if err != nil {
-			return err
+
+		errCb := func(err error) {
+			b.explicitMappingCbGenericErrHandler(err, specId, diff)
 		}
+
+		b.handleExplicitMapChangeBackfillReq(specId, diff.Added, diff.Removed, errCb)
 		return nil
 	}
-
-	errCb := func(err error, cbCalled bool) {
-		b.explicitMappingCbGenericErrHandler(err, specId, diff)
-	}
-	return callback, errCb
+	return callback
 }
 
 func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
@@ -1431,14 +1428,15 @@ func (b *BackfillMgr) GetComponentEventListener(pipeline common.Pipeline) (commo
 	return b.pipelineSvc.GetComponentEventListener(pipeline)
 }
 
-func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping) error {
+func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping, errCb func(err error)) {
 	b.specReqHandlersMtx.RLock()
 	handler := b.specToReqHandlerMap[replId]
 	handlerFinCh := handler.finCh
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
 		b.logger.Errorf("Unable to find handler for spec %v", replId)
-		return base.ErrorNotFound
+		errCb(base.ErrorNotFound)
+		return
 	}
 
 	srcUid, err := b.getLastHandledSourceManifestId(replId)
@@ -1455,16 +1453,22 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 	handleRequestWrapper := func(interface{}) (interface{}, error) {
 		return nil, handler.HandleBackfillRequest(mapPair, "explicit map change")
 	}
-	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
-	if err != nil {
-		if strings.Contains(err.Error(), base.FinClosureStr) {
-			// If finClosure, then this means that the handler has been told to stop, which means spec was deleted
-			err = nil
-		} else {
-			b.logger.Errorf("%v Executing explicitMapChange with retry resulted in %v", replId, err)
+
+	// Do the following asynchronously to avoid deadlocking
+	go func() {
+		_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
+		if err != nil {
+			if strings.Contains(err.Error(), base.FinClosureStr) {
+				// If finClosure, then this means that the handler has been told to stop, which means spec was deleted
+				err = nil
+			} else {
+				b.logger.Errorf("%v Executing explicitMapChange with retry resulted in %v", replId, err)
+			}
+			if err != nil {
+				errCb(err)
+			}
 		}
-	}
-	return err
+	}()
 }
 
 func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
