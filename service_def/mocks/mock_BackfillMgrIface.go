@@ -249,7 +249,7 @@ func (_c *BackfillMgrIface_GetPipelineSvc_Call) RunAndReturn(run func() common.P
 }
 
 // GetRouterMappingChangeHandler provides a mock function with given fields: specId, internalSpecId, diff
-func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) base.StoppedPipelineCallback {
 	ret := _m.Called(specId, internalSpecId, diff)
 
 	if len(ret) == 0 {
@@ -257,10 +257,6 @@ func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, interna
 	}
 
 	var r0 base.StoppedPipelineCallback
-	var r1 base.StoppedPipelineErrCallback
-	if rf, ok := ret.Get(0).(func(string, string, metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
-		return rf(specId, internalSpecId, diff)
-	}
 	if rf, ok := ret.Get(0).(func(string, string, metadata.CollectionNamespaceMappingsDiffPair) base.StoppedPipelineCallback); ok {
 		r0 = rf(specId, internalSpecId, diff)
 	} else {
@@ -269,15 +265,7 @@ func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, interna
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, metadata.CollectionNamespaceMappingsDiffPair) base.StoppedPipelineErrCallback); ok {
-		r1 = rf(specId, internalSpecId, diff)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(base.StoppedPipelineErrCallback)
-		}
-	}
-
-	return r0, r1
+	return r0
 }
 
 // BackfillMgrIface_GetRouterMappingChangeHandler_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRouterMappingChangeHandler'
@@ -300,12 +288,12 @@ func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) Run(run func(spec
 	return _c
 }
 
-func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) Return(_a0 base.StoppedPipelineCallback, _a1 base.StoppedPipelineErrCallback) *BackfillMgrIface_GetRouterMappingChangeHandler_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) Return(_a0 base.StoppedPipelineCallback) *BackfillMgrIface_GetRouterMappingChangeHandler_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) RunAndReturn(run func(string, string, metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)) *BackfillMgrIface_GetRouterMappingChangeHandler_Call {
+func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) RunAndReturn(run func(string, string, metadata.CollectionNamespaceMappingsDiffPair) base.StoppedPipelineCallback) *BackfillMgrIface_GetRouterMappingChangeHandler_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -837,11 +837,8 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 
 	// When router detects a diff, it simply calls this function and this will handle the rest
 	explicitMappingChangeHandler := func(diff metadata.CollectionNamespaceMappingsDiffPair) {
-		callback, errCb := xdcrf.getBackfillMgr().GetRouterMappingChangeHandler(spec.Id, spec.InternalId, diff)
-		err := xdcrf.pipelineMgrStopCallback(spec.Id, callback, errCb)
-		if err != nil {
-			errCb(err, true)
-		}
+		callback := xdcrf.getBackfillMgr().GetRouterMappingChangeHandler(spec.Id, spec.InternalId, diff)
+		xdcrf.pipelineMgrStopCallback(spec.Id, callback, nil)
 	}
 
 	// Get the current remote cluster capability. Note - if remote cluster capability changes, pipelines

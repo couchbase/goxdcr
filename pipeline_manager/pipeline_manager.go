@@ -916,7 +916,7 @@ func (pipelineMgr *PipelineManager) UpdateWithStoppedCb(topic string, callback b
 		callback: callback,
 		errCb:    errCb,
 	})
-	if err != nil {
+	if err != nil && errCb != nil {
 		// Unable to register the callback - this means the callback will not get to execute
 		// and thus the errCb() will need to be called
 		errCb(err, false)
@@ -2547,7 +2547,7 @@ func (r *PipelineUpdater) executeQueuedCallbacks() {
 		case cb := <-r.updateWithCb:
 			r.logger.Infof("%v calling one callback...", r.pipeline_name)
 			err := cb.callback()
-			if err != nil {
+			if err != nil && cb.errCb != nil {
 				cb.errCb(err, true)
 			}
 		default:
@@ -2562,7 +2562,7 @@ func (r *PipelineUpdater) executeQueuedBackfillCallbacks() {
 		case cb := <-r.backfillUpdateWithCb:
 			r.logger.Infof("%v calling one backfill callback...", r.pipeline_name)
 			err := cb.callback()
-			if err != nil {
+			if err != nil && cb.errCb != nil {
 				cb.errCb(err, true)
 			}
 		default:

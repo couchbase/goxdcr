@@ -128,6 +128,8 @@ function runTestCase {
 		exit 1
 	fi
 
+	checkItemCnt "C2" "B2" $checkCount4col
+
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
