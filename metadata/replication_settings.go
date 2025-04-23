@@ -142,6 +142,9 @@ const (
 
 	// This means the user intentionally wants to keep the replication around even if it's outdated
 	SkipReplSpecAutoGcKey = base.SkipReplSpecAutoGcKey
+
+	// randomised hash, stamped on the replication spec whenever the pipline is re-initialised (i.e. streams from seq num 0)
+	PipelineReinitHashKey = base.PipelineReinitHash
 )
 
 // keys to facilitate redaction of replication settings map
@@ -163,7 +166,7 @@ var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey,
 	CollectionsDelVbBackfillKey, DismissEventKey}
 
 // settings whose values cannot be changed after replication is created
-var ImmutableSettings = []string{FilterSystemScopeKey}
+var ImmutableSettings = []string{FilterSystemScopeKey, PipelineReinitHashKey}
 
 // settings that are internal and should be hidden from outside
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
@@ -173,7 +176,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
 	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey,
 	DevPreCheckMaxCasErrorInjection, DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang,
-	DevBackfillUnrecoverableErrorInj, DevBackfillMgrVbsTasksDoneNotifierDelay}
+	DevBackfillUnrecoverableErrorInj, DevBackfillMgrVbsTasksDoneNotifierDelay, PipelineReinitHashKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -298,6 +301,8 @@ var CLogReattemptDurationConfig = &SettingsConfig{base.DefaultCLogReattemptDurat
 
 var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
 
+var PipelineReinitHashConfig = &SettingsConfig{"", nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -368,6 +373,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CLogErrorTimeWindowKey:               CLogErrorTimeWindowConfig,
 	CLogReattemptDurationKey:             CLogReattemptDurationConfig,
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
+	PipelineReinitHashKey:                PipelineReinitHashConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1108,6 +1114,7 @@ func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(ot
 	return s.GetCollectionModes() != other.GetCollectionModes()
 }
 
+// tightly coupled with the behaviour of pipelineReinitCausingChange()
 func (s *ReplicationSettings) NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(other *ReplicationSettings) bool {
 	// Any of these toggle changes mean start over
 	otherCollectionModes := other.GetCollectionModes()
@@ -1209,6 +1216,11 @@ func (s *ReplicationSettings) GetConflictLoggingMapping() base.ConflictLoggingMa
 func (s *ReplicationSettings) GetSkipAutoGC() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(SkipReplSpecAutoGcKey)
 	return val.(bool)
+}
+
+// returns the PipelineReinitHash assigned to the replication spec on its last (re)initialisation
+func (s *ReplicationSettings) GetPipelineReinitHash() string {
+	return s.GetStringSettingValue(PipelineReinitHashKey)
 }
 
 type ReplicationSettingsMap map[string]interface{}

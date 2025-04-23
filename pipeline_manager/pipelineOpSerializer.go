@@ -427,6 +427,15 @@ forloop:
 					errMsg := fmt.Sprintf("Error during re-intializing XDCR replication: getting replication status for pipeline %v, err=%v", job.pipelineTopic, err)
 					serializer.logger.Errorf(errMsg)
 					serializer.pipelineMgr.GetLogSvc().Write(errMsg)
+
+					hostAddr, _ := serializer.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
+					uiAlertMssg := fmt.Sprintf("Replication failed to re-initialise after settings update on node %v - Needs to be deleted & recreated for the changes to take effect", hostAddr)
+					rep_status, repErr := serializer.pipelineMgr.GetOrCreateReplicationStatus(job.pipelineTopic, nil)
+					if repErr == nil {
+						rep_status.GetEventsManager().AddEvent(base.PersistentMsg, uiAlertMssg, base.NewEventsMap(), nil)
+					}
+					serializer.pipelineMgr.GetLogSvc().Write(uiAlertMssg)
+
 					continue forloop
 				}
 

@@ -639,6 +639,7 @@ var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
+var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -747,6 +748,9 @@ var HELO_FEATURE_JSON uint16 = 0x0b
 
 // length of random id
 var LengthOfRandomId = 16
+
+// 8 bytes put the approx. hash collision probability of 'MaxCheckpointRecordsToKeep' (100) items at ~0%
+const PipelineReinitHashLength = 8
 
 // max retry for random id generation
 var MaxRetryForRandomIdGeneration = 5
@@ -1979,3 +1983,5 @@ var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
 const SUBDOC_MULTI_MAX_PATHS int = 16
 
 const ExternalAddressSetup = "externalAddressSetup"
+
+const PipelineReinitHash = "pipelineReinitHash"

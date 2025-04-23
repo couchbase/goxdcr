@@ -54,6 +54,7 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 	if err != nil {
 		return nil, err
 	}
+
 	return &ReplicationSpecification{Id: ReplicationId(sourceBucketName, targetClusterUUID, targetBucketName),
 		InternalId:        randId,
 		SourceBucketName:  sourceBucketName,

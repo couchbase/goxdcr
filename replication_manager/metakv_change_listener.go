@@ -469,6 +469,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged
 }
 
+// tightly coupled with the behaviour of pipelineReinitCausingChange()
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
 	// Filter changed that require restart
 	skip := false

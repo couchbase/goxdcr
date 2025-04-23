@@ -63,7 +63,10 @@ type CheckpointManager struct {
 	*component.AbstractComponent
 	*component.RemoteMemcachedComponent
 
-	pipeline                   common.Pipeline
+	pipeline common.Pipeline
+	// obtained from the replication-spec when the CheckpointManager was attached to its corresponding pipeline
+	pipelineReinitHash string
+
 	srcBucketName              string
 	bucketTopologySubscriberId string
 
@@ -482,6 +485,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 				return remote_cluster_svc.ShouldUseAlternateAddress(ref)
 			}),
 		pipeline:                          nil,
+		pipelineReinitHash:                "",
 		checkpoints_svc:                   checkpoints_svc,
 		capi_svc:                          capi_svc,
 		rep_spec_svc:                      rep_spec_svc,
@@ -532,7 +536,9 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		ckmgr.bpVbHasCkpt = make(map[uint16]bool)
 		ckmgr.bpVbMtx.Unlock()
 	}
-	ckmgr.srcBucketName = ckmgr.pipeline.Specification().GetReplicationSpec().SourceBucketName
+	pipelineReplSpec := ckmgr.pipeline.Specification().GetReplicationSpec()
+	ckmgr.pipelineReinitHash = pipelineReplSpec.Settings.GetPipelineReinitHash()
+	ckmgr.srcBucketName = pipelineReplSpec.SourceBucketName
 
 	//populate the remote bucket information at the time of attaching
 	err := ckmgr.populateRemoteBucketInfo(pipeline)
@@ -1175,7 +1181,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	ckmgr.initBpMapIfNeeded(ckptDocs)
 
-	deleted_vbnos := make([]uint16, 0)
+	vbWithStaleReplSpecID := make([]uint16, 0)
+	vbWithStalePipelineReinitHash := make([]uint16, 0)
 	specInternalId := ckmgr.pipeline.Specification().GetReplicationSpec().InternalId
 
 	genSpec := ckmgr.pipeline.Specification()
@@ -1215,15 +1222,37 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
-				deleted_vbnos = append(deleted_vbnos, vbno)
+				vbWithStaleReplSpecID = append(vbWithStaleReplSpecID, vbno)
+
+			} else if len(ckptDoc.Checkpoint_records) > 0 &&
+				ckptDoc.Checkpoint_records[0].PipelineReinitHash != ckmgr.pipelineReinitHash {
+				// If PipelineReinitHash of the newest ckpt record does not match, that means the replication spec has been reinitialised and these
+				// checkpoint records belong to a different pipeline "initialisation" (can be newer or older) - To be ignored regardless.
+				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno, ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
+				if err != nil {
+					ckmgr.logger.Errorf("Deleting checkpoint docs for vb %v had an err %v", vbno, err)
+					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
+					return err
+				}
+				vbWithStalePipelineReinitHash = append(vbWithStalePipelineReinitHash, vbno)
 			}
 		}
 	}
 
-	ckmgr.logger.Infof("Checkpoint docs with internalId(s) %v while current spec has internalID %v - deleting outdated ckptdoc for vbs: %v",
-		oldSpecIds, specInternalId, deleted_vbnos)
-	for _, deleted_vbno := range deleted_vbnos {
-		delete(ckptDocs, deleted_vbno)
+	if len(vbWithStaleReplSpecID) > 0 {
+		ckmgr.logger.Infof("Checkpoint docs with internalId(s) %v while current spec has internalID %v - deleting outdated ckptdoc for vbs: %v",
+			oldSpecIds, specInternalId, vbWithStaleReplSpecID)
+		for _, deleted_vbno := range vbWithStaleReplSpecID {
+			delete(ckptDocs, deleted_vbno)
+		}
+	}
+
+	if len(vbWithStalePipelineReinitHash) > 0 {
+		ckmgr.logger.Infof("deleting checkpoint docs for VBs whose newest ckpt record was not stamped with the current PipelineReinitHash (%v): %v",
+			ckmgr.pipelineReinitHash, vbWithStalePipelineReinitHash)
+		for _, deleted_vbno := range vbWithStalePipelineReinitHash {
+			delete(ckptDocs, deleted_vbno)
+		}
 	}
 
 	//divide the workload to several getter and run the getter parallelly
@@ -1681,6 +1710,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		if ckpt_record.Seqno <= max_seqno {
 			err := ckmgr.extractTargetTimestamp(vbno, &targetTimestamp, globalTargetTimestamp, ckpt_record)
 			if err != nil {
+				ckptRecord.lock.RUnlock()
 				continue
 			}
 		}
@@ -2448,7 +2478,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, throughSeqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno,
 		remoteTimestamp, vbCountMetrics,
-		srcManifestIdForDcp, srcManifestIdForBackfill, uint64(time.Now().Unix()))
+		srcManifestIdForDcp, srcManifestIdForBackfill, uint64(time.Now().Unix()), ckmgr.pipelineReinitHash)
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil
@@ -3257,6 +3287,9 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs, ckmgr.logger)
 		}
 	}
+
+	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash)
+
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
 		// filteredMap may still be valid... continue
@@ -3629,6 +3662,47 @@ func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, src
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
 
+func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, currentReinitHash string) []metadata.VBsCkptsDocMap {
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
+	var combinedMap metadata.VBsCkptsDocMap
+
+	for i, ckptsMap := range ckptsMaps {
+		switch i {
+		case int(common.MainPipeline):
+			combinedMap = mainPipelineMap
+		case int(common.BackfillPipeline):
+			combinedMap = backfillPipelineMap
+		default:
+			panic(fmt.Sprintf("wrong integer %v", i))
+		}
+		if ckptsMap == nil {
+			continue
+		}
+		for vbno, ckptDoc := range ckptsMap {
+			_, exists := combinedMap[vbno]
+			if !exists {
+				// It's ok for checkpointRecords to be emptyList
+				combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
+			}
+
+			// Validate that this record is valid
+			for _, ckptRecord := range ckptDoc.Checkpoint_records {
+				if ckptRecord == nil {
+					continue
+				}
+
+				if ckptRecord.PipelineReinitHash != currentReinitHash {
+					continue
+				}
+
+				combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+			}
+		}
+	}
+	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
+}
+
 func findVbsThatNeedTargetFailoverLogs(filteredMaps []metadata.VBsCkptsDocMap) []uint16 {
 	dedupMap := make(map[uint16]bool)
 	for _, filteredMap := range filteredMaps {
@@ -3967,7 +4041,9 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, combinedBrokenMapping)
+	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash)
+
+	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
 		err := fmt.Errorf("filterCkptsWithoutValidBrokenMaps - %v", err)
 		ckmgr.logger.Errorf(err.Error())

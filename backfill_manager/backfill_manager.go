@@ -954,13 +954,19 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string, t
 	}
 	maxSeqnoMap := make(map[uint16]uint64)
 
+	replSpec, err := b.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		return nil, err
+	}
+	replSpecHash := replSpec.Settings.GetPipelineReinitHash()
+
 	for vb, ckptDoc := range ckptDocs {
 		if ckptDoc == nil || ckptDoc.SpecInternalId != internalId {
 			continue
 		}
 		var maxSeqno uint64
 		for _, record := range ckptDoc.Checkpoint_records {
-			if record == nil {
+			if record == nil || record.PipelineReinitHash != replSpecHash {
 				continue
 			}
 			if record.Seqno > maxSeqno {

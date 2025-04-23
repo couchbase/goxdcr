@@ -750,7 +750,7 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 	}
 	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelCheckpointsDocs %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
 	if err != nil {
-		pipelineMgr.logger.Warnf("Removing checkpoint resulting in error: %v\n")
+		pipelineMgr.logger.Warnf("removing checkpoint resulting in error: %v\n", err)
 	}
 
 	// When pipeline is "cleaned up", we don't need anymore backfill specs
@@ -760,7 +760,7 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 	}
 	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelBackfillReplSpec %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
 	if err != nil {
-		pipelineMgr.logger.Warnf("Removing backfill replication spec resulting in error: %v\n")
+		pipelineMgr.logger.Warnf("removing backfill replication spec resulting in error: %v\n", err)
 	}
 
 	// regardless of err above, we should restart updater

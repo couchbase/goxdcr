@@ -765,7 +765,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 	cleanupTempReplicationSettingKeys(settingsMap)
 
-	errorsMap, err, warnings := UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), justValidate)
+	errorsMap, err, warnings := UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), justValidate, adminport.xdcrCompTopologySvc)
 	if err != nil {
 		logger_ap.Errorf("UpdateReplicationSettings error=%v", err)
 		return nil, err

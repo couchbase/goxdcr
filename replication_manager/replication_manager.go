@@ -699,6 +699,21 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 	return false
 }
 
+func pipelineReinitCausingChange(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldCollectionMode base.CollectionsMgtType) bool {
+	if filterSettingsChanged(changedSettingsMap, oldFilterExpression) {
+		return true
+	}
+
+	if newCollectionModeRaw, ok := changedSettingsMap[metadata.CollectionsMgtMultiKey]; ok {
+		newCollectionMode := newCollectionModeRaw.(base.CollectionsMgtType)
+
+		return (newCollectionMode.IsExplicitMapping() != oldCollectionMode.IsExplicitMapping()) ||
+			(newCollectionMode.IsMigrationOn() != oldCollectionMode.IsMigrationOn())
+	}
+
+	return false
+}
+
 // This function determines if the specified replication settings require remote validation
 func CheckIfRemoteValidationRequired(justValidate bool, oldSettings, newSettings metadata.ReplicationSettingsMap) bool {
 	//justValidate means UI is in need of immediate update - do not perform RPC call
@@ -750,7 +765,7 @@ func ShouldValidateReplicationSettings(settings metadata.ReplicationSettingsMap)
 
 // update the per-replication settings only if justValidate is false
 // Warnings should be given only if there are no errors
-func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, justValidate bool) (map[string]error, error, service_def.UIWarnings) {
+func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, justValidate bool, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) (map[string]error, error, service_def.UIWarnings) {
 	logger_rm.Infof("Update replication settings for %v, settings=%v, justValidate=%v", topic, settings.CloneAndRedact(), justValidate)
 
 	var internalChangesTookPlace bool
@@ -772,6 +787,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 
 	// Save some old values that we may need
 	filterExpression := replSpec.Settings.Values[metadata.FilterExpressionKey].(string)
+	collectionMode := replSpec.Settings.GetCollectionModes()
 	oldCompressionType := replSpec.Settings.Values[metadata.CompressionTypeKey].(int)
 	filterVersion := replSpec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
 	_, CompressionOk := settings[metadata.CompressionTypeKey]
@@ -811,6 +827,31 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 			return errorMap, fmt.Errorf("Internal XDCR Error related to internal compression settings: %v", errorMap), nil
 		}
 		internalChangesTookPlace = true
+	}
+
+	if pipelineReinitCausingChange(changedSettingsMap, filterExpression, collectionMode) {
+		clusterCompat, err := xdcrCompTopologySvc.MyClusterCompatibility()
+		if err != nil {
+			return nil, err, nil
+		}
+
+		// PipelineReinitHash is not supported in mixed-mode wrt VersionForPipelineReinitHashSupport
+		if base.IsClusterCompatible(clusterCompat, base.VersionForPipelineReinitHashSupport) {
+			newHash, err := base.GenerateRandomId(base.PipelineReinitHashLength, base.MaxRetryForRandomIdGeneration)
+			for err == nil && newHash == replSpec.Settings.GetPipelineReinitHash() {
+				newHash, err = base.GenerateRandomId(base.PipelineReinitHashLength, base.MaxRetryForRandomIdGeneration)
+			}
+
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate PipelineReinitHash: %v", err), nil
+			}
+
+			settings[metadata.PipelineReinitHashKey] = newHash
+			_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
+			if len(errorMap) != 0 {
+				return errorMap, fmt.Errorf("internal XDCR error related to updating PipelineReinitHash: %v", errorMap), nil
+			}
+		}
 	}
 
 	if justValidate {
@@ -958,6 +999,20 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 			logger_rm.Errorf("Unable to share retrieved manifests with source peers: %v", err)
 			return nil, nil, err, nil
 		}
+	}
+
+	clusterCompat, err := rm.xdcr_topology_svc.MyClusterCompatibility()
+	if err != nil {
+		return nil, nil, err, nil
+	}
+
+	// PipelineReinitHash is not supported in mixed-mode wrt VersionForPipelineReinitHashSupport
+	if base.IsClusterCompatible(clusterCompat, base.VersionForPipelineReinitHashSupport) {
+		reinitHash, err := base.GenerateRandomId(base.PipelineReinitHashLength, base.MaxRetryForRandomIdGeneration)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate PipelineReinitHash for the replication spec, err: %v", err), nil
+		}
+		spec.Settings.Values[metadata.PipelineReinitHashKey] = reinitHash
 	}
 
 	//persist it

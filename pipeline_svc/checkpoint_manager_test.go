@@ -54,14 +54,23 @@ func TestCombineFailoverlogs(t *testing.T) {
 	failoverLogMap[2] = failoverLog
 
 	goodRecord := &metadata.CheckpointRecord{
+		PipelineReinitHash: "goodHash",
 		SourceVBTimestamp: metadata.SourceVBTimestamp{
 			Failover_uuid: goodVbUuid,
 			Seqno:         goodSeqno,
 		},
 	}
 	badRecord := &metadata.CheckpointRecord{
+		PipelineReinitHash: "goodHash",
 		SourceVBTimestamp: metadata.SourceVBTimestamp{
 			Failover_uuid: badVbUuid,
+			Seqno:         goodSeqno,
+		},
+	}
+	goodRecordWithBadHash := &metadata.CheckpointRecord{
+		PipelineReinitHash: "badHash",
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: goodVbUuid,
 			Seqno:         goodSeqno,
 		},
 	}
@@ -71,11 +80,11 @@ func TestCombineFailoverlogs(t *testing.T) {
 	}
 
 	badDoc := &metadata.CheckpointsDoc{
-		Checkpoint_records: []*metadata.CheckpointRecord{badRecord},
+		Checkpoint_records: []*metadata.CheckpointRecord{badRecord, goodRecordWithBadHash},
 	}
 
 	mixedDoc := &metadata.CheckpointsDoc{
-		Checkpoint_records: []*metadata.CheckpointRecord{goodRecord, badRecord},
+		Checkpoint_records: []*metadata.CheckpointRecord{goodRecord, badRecord, goodRecordWithBadHash},
 	}
 
 	checkMap := make(nodeVbCkptMap)
@@ -91,8 +100,16 @@ func TestCombineFailoverlogs(t *testing.T) {
 	assert.Len(result, 3)
 
 	assert.Len(result[0].Checkpoint_records, 1)
-	assert.Len(result[1].Checkpoint_records, 1)
-	assert.Len(result[2].Checkpoint_records, 0)
+	assert.Len(result[1].Checkpoint_records, 2)
+	assert.Len(result[2].Checkpoint_records, 1)
+
+	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash")
+	hashFilteredResult := hashFilteredResults[0]
+	assert.Len(hashFilteredResult, len(result))
+
+	assert.Len(hashFilteredResult[0].Checkpoint_records, 1)
+	assert.Len(hashFilteredResult[1].Checkpoint_records, 1)
+	assert.Len(hashFilteredResult[2].Checkpoint_records, 0)
 }
 
 func TestCombineFailoverlogsWithData(t *testing.T) {

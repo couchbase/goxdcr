@@ -73,6 +73,7 @@ const (
 	GlobalInfoTypeStr                  string = "global_info_type"
 	GlobalInfoDataStr                  string = "global_info_data"
 	SubdocCmdSkippedCnt                string = "subdoc_cmd_skipped_cnt"
+	PipelineReinitHashCkptKey          string = "pipelineReinitHash"
 )
 
 // SourceVBTimestamp defines the necessary items to start or resume a source DCP stream in a checkpoint context
@@ -1003,6 +1004,10 @@ type CheckpointRecord struct {
 	// Epoch timestamp of when this record was created
 	CreationTime uint64 `json:"creationTime"`
 
+	// Stamped by the ckpt manager. Used to filter out stale ckpts (i.e. those created prior
+	// to the current pipeline initialisation).
+	PipelineReinitHash string `json:"pipelineReinitHash"`
+
 	SourceVBTimestamp
 	SourceVBCounters
 
@@ -1214,6 +1219,8 @@ func (c *CheckpointRecord) Size() int {
 	var totalSize int
 	totalSize += 8 // CreationTime
 
+	totalSize += len(c.PipelineReinitHash)
+
 	// Either traditional or global share the following 2 embedded structs
 	totalSize += c.SourceVBTimestamp.Size()
 	totalSize += c.SourceVBCounters.Size()
@@ -1232,7 +1239,7 @@ func (c *CheckpointRecord) Size() int {
 
 func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 	tgtTimestamp TargetTimestamp, incomingMetric base.VBCountMetric, srcManifestForDCP, srcManifestForBackfill,
-	creationTime uint64) (*CheckpointRecord, error) {
+	creationTime uint64, pipelineReinitHash string) (*CheckpointRecord, error) {
 
 	var record *CheckpointRecord
 	var err error
@@ -1245,9 +1252,9 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 		if !ok {
 			return nil, fmt.Errorf("expecting *TargetVBTimestamp, but got %T", tgtTimestamp)
 		}
-		record = newTraditionalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetVbTimestamp, srcManifestForDCP, srcManifestForBackfill, creationTime, incomingMetric)
+		record = newTraditionalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetVbTimestamp, srcManifestForDCP, srcManifestForBackfill, creationTime, incomingMetric, pipelineReinitHash)
 	} else {
-		record, err = newGlobalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, tgtTimestamp, srcManifestForDCP, srcManifestForBackfill, creationTime, incomingMetric)
+		record, err = newGlobalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, tgtTimestamp, srcManifestForDCP, srcManifestForBackfill, creationTime, incomingMetric, pipelineReinitHash)
 		if err != nil {
 			return nil, err
 		}
@@ -1263,7 +1270,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 	return record, nil
 }
 
-func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, tgtTimestamp *TargetVBTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, creationTime uint64, incomingMetric base.VBCountMetric) *CheckpointRecord {
+func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, tgtTimestamp *TargetVBTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, creationTime uint64, incomingMetric base.VBCountMetric, pipelineReinitHash string) *CheckpointRecord {
 	vbCountMetrics := incomingMetric.GetValue().(base.TraditionalVBMetrics)
 	filteredItems := uint64(vbCountMetrics[base.DocsFiltered])
 	filterFailed := uint64(vbCountMetrics[base.DocsUnableToFilter])
@@ -1324,7 +1331,8 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 			CLogHibernatedCnt:                  clogHibernatedCnt,
 			CasPoisonCnt:                       casPoisonItems,
 		},
-		CreationTime: creationTime,
+		CreationTime:       creationTime,
+		PipelineReinitHash: pipelineReinitHash,
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailResidentRatioCnt:          guardrailResidentRatioItems,
 			GuardrailDataSizeCnt:               guardrailDataSizeItems,
@@ -1341,7 +1349,7 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 	return record
 }
 
-func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetTimestamp TargetTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, creationTime uint64, incomingMetric base.VBCountMetric) (*CheckpointRecord, error) {
+func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetTimestamp TargetTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, creationTime uint64, incomingMetric base.VBCountMetric, pipelineReinitHash string) (*CheckpointRecord, error) {
 	vbCountMetrics := incomingMetric.GetValue().(base.GlobalVBMetrics)
 
 	var srcFilteredCntrs SourceVBCounters
@@ -1456,10 +1464,11 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 			SourceManifestForDCP:         srcManifestForDCP,
 			SourceManifestForBackfillMgr: srcManifestForBackfill,
 		},
-		SourceVBCounters: srcFilteredCntrs,
-		GlobalCounters:   globalCntrs,
-		GlobalTimestamp:  *globalTs,
-		CreationTime:     creationTime,
+		SourceVBCounters:   srcFilteredCntrs,
+		GlobalCounters:     globalCntrs,
+		GlobalTimestamp:    *globalTs,
+		CreationTime:       creationTime,
+		PipelineReinitHash: pipelineReinitHash,
 	}
 	return record, nil
 }
@@ -1528,7 +1537,8 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt &&
 		ckptRecord.TargetPerVBCounters.SameAs(&newRecord.TargetPerVBCounters) &&
 		ckptRecord.GlobalTimestampSha256 == newRecord.GlobalTimestampSha256 &&
-		ckptRecord.GlobalCountersSha256 == newRecord.GlobalCountersSha256 {
+		ckptRecord.GlobalCountersSha256 == newRecord.GlobalCountersSha256 &&
+		ckptRecord.PipelineReinitHash == newRecord.PipelineReinitHash {
 		return true
 	} else {
 		return false
@@ -1580,6 +1590,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.GlobalTimestampSha256 = other.GlobalTimestampSha256
 	ckptRecord.GlobalCountersSha256 = other.GlobalCountersSha256
 	ckptRecord.SubdocCmdSkippedCnt = other.SubdocCmdSkippedCnt
+	ckptRecord.PipelineReinitHash = other.PipelineReinitHash
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCollectionNamespaceMap) error {
@@ -1886,6 +1897,11 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.GlobalCountersSha256 = globalCountersSha.(string)
 	}
 
+	pipelineReinitHash, ok := fieldMap[PipelineReinitHashCkptKey]
+	if ok {
+		ckptRecord.PipelineReinitHash = pipelineReinitHash.(string)
+	}
+
 	return nil
 }
 
@@ -2183,8 +2199,8 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingShaCnt=%v; BrokenMappingInfoType=%v}",
-		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
+	return fmt.Sprintf("{pipelineReinitHash=%v; Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingShaCnt=%v; BrokenMappingInfoType=%v}",
+		ckpt_record.PipelineReinitHash, ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
 		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.GetBrokenMappingShaCount(), ckpt_record.brokenMappings)
 }
 
@@ -2287,7 +2303,8 @@ func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord
 		// bRecord is "less than", or should belong in front of aRecord
 		return false, true
 	} else if aRecord.CheckpointRecord != nil && bRecord.CheckpointRecord == nil {
-		return true, false
+		// aRecord is "less than", or should belong in front of bRecord
+		return true, true
 	} else if aRecord.CheckpointRecord == nil && bRecord.CheckpointRecord == nil {
 		// Just say yes
 		return true, false
@@ -2719,6 +2736,7 @@ func (c *CheckpointsDoc) GetMaxCkptRecordsToRead() int {
 
 func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	ckpt_record_map := make(map[string]interface{})
+	ckpt_record_map[PipelineReinitHashCkptKey] = ckpt.PipelineReinitHash
 	ckpt_record_map[FailOverUUID] = ckpt.Failover_uuid
 	ckpt_record_map[Seqno] = ckpt.Seqno
 	ckpt_record_map[DcpSnapshotSeqno] = ckpt.Dcp_snapshot_seqno
@@ -2771,7 +2789,8 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
 		},
 
-		CreationTime: c.CreationTime,
+		CreationTime:       c.CreationTime,
+		PipelineReinitHash: c.PipelineReinitHash,
 		TargetPerVBCounters: TargetPerVBCounters{
 			GuardrailDiskSpaceCnt:              c.GuardrailDiskSpaceCnt,
 			GuardrailDataSizeCnt:               c.GuardrailDataSizeCnt,

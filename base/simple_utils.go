@@ -546,7 +546,7 @@ func GenerateRandomId(length, maxRetry int) (string, error) {
 	var err error
 	for {
 		rb := make([]byte, length)
-		_, err := rand.Read(rb)
+		_, err = rand.Read(rb)
 
 		if err != nil {
 			if numOfRetry < maxRetry {
