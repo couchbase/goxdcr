@@ -178,7 +178,7 @@ function runTestCaseWithUser {
 	echo "Rebalancing node in is completed"
 
 	echo "Sleeping before checking logs"
-	sleep 15
+	sleep 60
 
 	grepForPanics
 
@@ -201,7 +201,7 @@ function runTestCaseWithUser {
 
 	# Add C1P0 to C1
 	echo "Sleeping 15 secs before rebalancing second-node in"
-	sleep 15
+	sleep 60
 
 	#addNodesIn
 	addOneNodeIn "C1P1" "C1"
@@ -210,7 +210,7 @@ function runTestCaseWithUser {
 	echo "Rebalancing node in is completed"
 
 	echo "Sleeping before checking logs"
-	sleep 15
+	sleep 60
 	grepForPanics
 
 	sleep 20
