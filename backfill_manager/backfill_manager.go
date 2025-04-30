@@ -591,19 +591,44 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			// then the main replication pipeline will restart. When main pipeline restarts, the backfill pipeline
 			// will also restart alongside with it, and backfill pipelines will restart with the new settings
 		} else {
-			// If the top task (aka the one that's supposed to be running) are different because the mappingNamespaces
-			// has changed, and the pipeline is active, then restart the backfill pipeline
+			// If the active top task (only the ones for vbs that's supposed to be still running for the current instance of the backfill pipeline)
+			// are different because the mappingNamespaces has changed, and the pipeline is active, then restart the backfill pipeline
 			// This occurs if:
 			// 1. Explicit mapping changed and some backfill tasks mappings are no longer required
 			// 2. Both Implicit and Explicit mapping: if source collections that were part of the backfill tasks have
 			//    been deleted, then the top tasks' mappings will be modified
-			oldTopTasks := oldSpec.VBTasksMap.GetTopTasksOnlyClone()
-			newTopTasks := newSpec.VBTasksMap.GetTopTasksOnlyClone()
+
+			backfillHandler := b.internalGetHandler(changedSpecId)
+			if backfillHandler == nil {
+				// should not happen, but if it does happen in an odd case then it should mean that there is
+				// no more backfill pipeline running.
+				b.logger.Infof("Backfill handler was nil, considering that there was no active backfill pipeline for %s", changedSpecId)
+				return nil
+			}
+
+			var currActiveBackfillVbs []uint16
+			backfillHandler.pipelinesMtx.RLock()
+			for vb, done := range backfillHandler.backfillPipelineVBsDone {
+				if done {
+					// if the vb is marked done, then the top task for that vb will not be an active
+					// top task, since the task responsible for the current instance of the backfill pipeline
+					// would have been popped out of the backfill spec.
+					continue
+				}
+
+				currActiveBackfillVbs = append(currActiveBackfillVbs, vb)
+			}
+			backfillHandler.pipelinesMtx.RUnlock()
+
+			oldTopTasks := oldSpec.VBTasksMap.GetTopTasksOnlyCloneForSomeVbs(currActiveBackfillVbs)
+			newTopTasks := newSpec.VBTasksMap.GetTopTasksOnlyCloneForSomeVbs(currActiveBackfillVbs)
 			oldNamespaceMappings := oldTopTasks.GetAllCollectionNamespaceMappings()
 			newNamespaceMappings := newTopTasks.GetAllCollectionNamespaceMappings()
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
 				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
 				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(base.CompileBackfillPipelineSpecId(newSpec.Id), newSpec.InternalId, removedScopesMap)
+				b.logger.Infof("Restarting the current backfill pipeline %s because there was a removal of the following collection mappings from the active top tasks: %v, vbs=%v",
+					changedSpecId, removedScopesMap, currActiveBackfillVbs)
 
 				// The HaltBackfillWithCb() is a blocking call. However, this function is a handler callback
 				// The handler callback is invoked in a long call chain, where backfill replication spec
@@ -789,11 +814,14 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId, internalSpecId str
 			b.handleExplicitMapChangeBackfillReq(specId, added, removed, errCb, p2pPush)
 
 			// If pipeline was active during this callback's lifetime, then it means the ckpts created by the pipeline has outdated mappings. clean those up
-			if oldSettings.Active {
+			if len(removed) > 0 && oldSettings.Active {
 				removedScopesMap := make(metadata.ScopesMap)
-				for src, _ := range removed {
+				for src := range removed {
 					removedScopesMap.AddNamespace(src.ScopeName, src.CollectionName)
 				}
+
+				b.logger.Infof("Cleaning up checkpoints for %s because there was a removal of the following explicit collection mappings: %v",
+					specId, removedScopesMap)
 				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(specId, internalSpecId, removedScopesMap)
 				err = cb()
 				if err != nil {
