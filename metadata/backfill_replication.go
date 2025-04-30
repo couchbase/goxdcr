@@ -653,6 +653,34 @@ func (v *VBTasksMapType) GetTopTasksOnlyClone() *VBTasksMapType {
 	return retMap
 }
 
+// The same functionality as GetTopTasksOnlyClone,
+// but filtered only for vbnos input.
+func (v *VBTasksMapType) GetTopTasksOnlyCloneForSomeVbs(vbnos []uint16) *VBTasksMapType {
+	retMap := NewVBTasksMap()
+	if v == nil || v.Len() == 0 {
+		return retMap
+	}
+
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for _, vb := range vbnos {
+		tasks, ok := v.VBTasksMap[vb]
+		if !ok {
+			continue
+		}
+
+		var subTasksList *BackfillTasks
+		if tasks != nil && tasks.Len() > 0 {
+			subTasksList = tasks.CloneTopTask()
+		}
+
+		if subTasksList != nil {
+			retMap.VBTasksMap[vb] = subTasksList
+		}
+	}
+	return retMap
+}
+
 // ExportAsMigration For Backfill Pipelines, the VBTasksMap will be in the form of "filter" for
 // the source collection namespace
 // Migration will require the source namespace to be from default colletion
