@@ -1,0 +1,223 @@
+# Copyright 2024-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S1.col1"}' ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=10000)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
+	waitForBgJobs
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+HALTBACKFILLWITHCB_MSG="because there was a removal of the following collection mappings from the active top tasks"
+BACKFILL_HANDLER_NIL="Backfill handler was nil, considering that there was no active backfill pipeline for"
+
+function runTestCase {
+	echo "==============================================================================="
+	echo "Running explicit mapping test case - remove some collections in the mapping"
+	echo "==============================================================================="
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	cleanupGoxdcrLogs
+
+	runDataLoad
+
+	# let col1 not be in broken mapping.
+	createScope "C2" "B2" "S1"
+	createCollection "C2" "B2" "S1" "col1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 15 seconds before checking item count first pass"
+	sleep 15
+	# Only col1 is replicated at this point
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 1))
+
+	# force a checkpointing operation with broken mapping for col2 and col3
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 10
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 10
+
+	# create the missing collections on target.
+	createCollection "C2" "B2" "S1" "col2"
+	createCollection "C2" "B2" "S1" "col3"
+	echo "sleeping 100s for automatic manifests diff"
+	sleep 100
+
+	# After replicating 10k items from a source collection to target collection
+	# Add col2 and col3 to the replication mapping
+	# The backfill should kick in and fill in all the data to the new collection.
+	# A backfill delay of 10s is set also.
+	echo "Changing explicit mapping - target collection S1.col2 should now receive backfill"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2","S1.col3":"S1.col3"}'
+
+	echo "Waiting 30 seconds for some backfill to happen"
+	sleep 30
+
+	# now remove S1.col3 from explicit mapping and the backfill should halt, restart
+	# and not backfill for S1.col3 anymore (via HaltBackfillWithCb)
+	echo "Changing explicit mapping - target collection S1.col3 should not have backfill anymore"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2"}'
+
+	echo "Waiting 10 seconds for changes to take place"
+	sleep 10
+
+	# speeden-up backfill before checking for changes_left and doc count
+	echo "speedening up backfill for it to finish"
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevBackfillSendDelayMs=0"
+	sleep 30
+
+	checkUnidirectionalChangesLeft
+	grepForPanics
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	tgtItemCnt=$(getBucketItemCount "C2" "B2")
+	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	if (($tgtItemCnt == $maxCnt)); then
+		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)), but is $tgtItemCnt"
+		return 1
+	fi
+
+	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
+	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	exportProvisionedConfig
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	# Round 2 - all backfilling collections are removed from explicit mapping
+	# backfill spec should be deleted.
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	cleanupGoxdcrLogs
+
+	# let col1 not be in broken mapping.
+	createScope "C2" "B2" "S1"
+	createCollection "C2" "B2" "S1" "col1"
+
+	runDataLoad
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 15 seconds before checking item count first pass"
+	sleep 15
+	# Only col1 is replicated at this point
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 1))
+
+	# force a checkpointing operation
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 10
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 10
+
+	# create the missing collections on target.
+	createCollection "C2" "B2" "S1" "col2"
+	createCollection "C2" "B2" "S1" "col3"
+	echo "sleeping 100s for automatic manifests diff"
+	sleep 100
+
+	# After replicating 10k items from a source collection to target collection
+	# Add a col2 to the replication mapping
+	# The backfill should kick in and fill in all the data to the new collection.
+	# A backfill delay of 10s is set also.
+	echo "Changing explicit mapping - target collection S1.col2 should now receive backfill"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2"}'
+
+	echo "Waiting 100 seconds for some backfill to happen"
+	sleep 100
+
+	# now remove S1.co2 from explicit mapping and the backfill should halt, restart
+	# and not backfill for S1.col2 anymore (via HaltBackfillWithCb)
+	echo "Changing explicit mapping - target collection S1.col2 should not have backfill anymore"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1"}'
+
+	echo "Waiting 10 seconds for changes to take place"
+	sleep 10
+
+	# there should be no more backfill, so quicky check for changes_left,
+	# no need to speeden up backfill pipeline.
+	checkUnidirectionalChangesLeft
+	grepForPanics
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	tgtItemCnt=$(getBucketItemCount "C2" "B2")
+	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	if (($tgtItemCnt == $maxCnt)); then
+		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)), but is $tgtItemCnt"
+		return 1
+	fi
+
+	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 0
+	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	exportProvisionedConfig
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
