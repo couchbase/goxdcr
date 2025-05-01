@@ -716,12 +716,16 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 
 func (b *BackfillMgr) populateRemovedScopesMap(newNamespaceMappings metadata.ShaToCollectionNamespaceMap, oldNamespaceMappings metadata.ShaToCollectionNamespaceMap) metadata.ScopesMap {
 	removedScopesMap := make(metadata.ScopesMap)
-	_, removedShaMappings := newNamespaceMappings.Diff(oldNamespaceMappings)
-	for _, collectionNsMapping := range removedShaMappings {
-		for src, _ := range *collectionNsMapping {
-			removedScopesMap.AddNamespace(src.ScopeName, src.CollectionName)
+
+	newSources := newNamespaceMappings.GetAllUniqueSourceCollections()
+	oldSources := oldNamespaceMappings.GetAllUniqueSourceCollections()
+
+	for oldSource := range oldSources {
+		if _, exists := newSources[oldSource]; !exists {
+			removedScopesMap.AddNamespace(oldSource.ScopeName, oldSource.CollectionName)
 		}
 	}
+
 	return removedScopesMap
 }
 

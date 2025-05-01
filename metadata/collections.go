@@ -2092,6 +2092,30 @@ func (s *ShaToCollectionNamespaceMap) CompressToShaCompressedMap(preExistMap Sha
 	}
 }
 
+// returns a set of all source collections from s.
+func (s *ShaToCollectionNamespaceMap) GetAllUniqueSourceCollections() map[base.CollectionNamespace]bool {
+	sources := make(map[base.CollectionNamespace]bool)
+	if s == nil || len(*s) == 0 {
+		return sources
+	}
+
+	for _, collectionNsMapping := range *s {
+		if collectionNsMapping == nil {
+			continue
+		}
+
+		for src := range *collectionNsMapping {
+			if src == nil {
+				continue
+			}
+
+			sources[src.Clone()] = true
+		}
+	}
+
+	return sources
+}
+
 type CompressedShaMapping struct {
 	// Snappy compressed byte slice of Sha -> Data mapping
 	CompressedMapping []byte `json:compressedMapping`

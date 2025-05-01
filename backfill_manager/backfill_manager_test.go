@@ -792,3 +792,87 @@ func TestBackfillMgrUpdateCache(t *testing.T) {
 		assert.True(tgtEqual)
 	}
 }
+
+func TestRemovedNamespacesDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRemovedNamespacesDiff =================")
+	defer fmt.Println("============== Test case end: TestRemovedNamespacesDiff =================")
+
+	b := BackfillMgr{}
+	s1 := metadata.SourceNamespace{CollectionNamespace: &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}}
+	s2 := metadata.SourceNamespace{CollectionNamespace: &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col2"}}
+	s3 := metadata.SourceNamespace{CollectionNamespace: &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col3"}}
+	s4 := metadata.SourceNamespace{CollectionNamespace: &base.CollectionNamespace{ScopeName: "S2", CollectionName: "col4"}}
+	ns1 := &metadata.CollectionNamespaceMapping{&s1: nil}
+	ns2 := &metadata.CollectionNamespaceMapping{&s2: nil}
+	ns3 := &metadata.CollectionNamespaceMapping{&s3: nil}
+	ns4 := &metadata.CollectionNamespaceMapping{&s4: nil}
+
+	// 1. no diff
+	newNamespaces := metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2}
+	oldNamespaces := metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2}
+	diff := b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 0)
+
+	// 2. one collection diff
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"c": ns1, "d": ns2}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 1)
+	assert.Equal(len(diff["S1"].Collections), 1)
+	assert.Equal(len(diff["S2"].Collections), 0)
+
+	// 3. whole scope S1 is diff
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 1)
+	assert.Equal(len(diff["S1"].Collections), 2)
+	assert.Equal(len(diff["S2"].Collections), 0)
+
+	// 4. no diff for multiple scopes
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3, "d": ns4}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3, "d": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 0)
+
+	// 5. only one collection left
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"e": ns1}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3, "d": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 2)
+	assert.Equal(len(diff["S1"].Collections), 1)
+	assert.Equal(len(diff["S2"].Collections), 2)
+
+	// 6. only one collection removed
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"e": ns1, "f": ns2, "g": ns3, "h": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 1)
+	assert.Equal(len(diff["S1"].Collections), 0)
+	assert.Equal(len(diff["S2"].Collections), 1)
+
+	// 7. one full scope is a diff
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"e": ns1, "f": ns2, "g": ns3, "h": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 1)
+	assert.Equal(len(diff["S1"].Collections), 0)
+	assert.Equal(len(diff["S2"].Collections), 2)
+
+	// 8. one collection from each scope is a diff
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{"e": ns1, "f": ns3}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3, "d": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 2)
+	assert.Equal(len(diff["S1"].Collections), 1)
+	assert.Equal(len(diff["S2"].Collections), 1)
+
+	// 9. all scopes are diff
+	newNamespaces = metadata.ShaToCollectionNamespaceMap{}
+	oldNamespaces = metadata.ShaToCollectionNamespaceMap{"a": ns1, "b": ns2, "c": ns3, "d": ns4}
+	diff = b.populateRemovedScopesMap(newNamespaces, oldNamespaces)
+	assert.Equal(len(diff), 2)
+	assert.Equal(len(diff["S1"].Collections), 2)
+	assert.Equal(len(diff["S2"].Collections), 2)
+}
