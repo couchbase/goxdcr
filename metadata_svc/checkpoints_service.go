@@ -12,16 +12,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"reflect"
-	"strconv"
-	"strings"
-	"sync"
 )
 
 const (
@@ -942,8 +943,14 @@ func populateToDelNamespaces(mappingToCheck *metadata.CollectionNamespaceMapping
 		if !collectionExists {
 			continue
 		}
-		// The source instance from "sources" exists in broken map and should be removed
-		toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
+
+		for _, targetNs := range targetNsList {
+			if targetNs == nil {
+				continue
+			}
+			// The source instance from "sources" exists in broken map and should be removed
+			toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNs)
+		}
 	}
 }
 
