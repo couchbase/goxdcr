@@ -2031,6 +2031,30 @@ func (s *ShaToCollectionNamespaceMap) String() string {
 	return strings.Join(output, "\n")
 }
 
+// returns a set of all source collections from s.
+func (s *ShaToCollectionNamespaceMap) GetAllUniqueSourceCollections() map[base.CollectionNamespace]bool {
+	sources := make(map[base.CollectionNamespace]bool)
+	if s == nil || len(*s) == 0 {
+		return sources
+	}
+
+	for _, collectionNsMapping := range *s {
+		if collectionNsMapping == nil {
+			continue
+		}
+
+		for src := range *collectionNsMapping {
+			if src == nil {
+				continue
+			}
+
+			sources[src.Clone()] = true
+		}
+	}
+
+	return sources
+}
+
 func (s ShaToCollectionNamespaceMap) Diff(older ShaToCollectionNamespaceMap) (added, removed ShaToCollectionNamespaceMap) {
 	if len(older) == 0 && len(s) > 0 {
 		added = s
