@@ -627,7 +627,7 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			newNamespaceMappings := newTopTasks.GetAllCollectionNamespaceMappings()
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
 				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
-				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(base.CompileBackfillPipelineSpecId(newSpec.Id), newSpec.InternalId, removedScopesMap)
+				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(newSpec.Id, newSpec.InternalId, removedScopesMap)
 				b.logger.Infof("Restarting the current backfill pipeline %s because there was a removal of the following collection mappings from the active top tasks: %v, vbs=%v",
 					changedSpecId, removedScopesMap, currActiveBackfillVbs)
 
