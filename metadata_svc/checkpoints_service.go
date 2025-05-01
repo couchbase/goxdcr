@@ -1269,7 +1269,13 @@ func populateToDelNamespaces(mappingsToCheck metadata.ShaToCollectionNamespaceMa
 				continue
 			}
 			// The source instance from "sources" exists in broken map and should be removed
-			toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
+			for _, targetNs := range targetNsList {
+				if targetNs == nil {
+					continue
+				}
+
+				toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNs)
+			}
 		}
 	}
 }
