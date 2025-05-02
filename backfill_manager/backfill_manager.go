@@ -300,9 +300,6 @@ func (b *BackfillMgr) Start() error {
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.backfillReplSpecChangeHandlerCallback)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.BackfillReplicationSpecChangeCallback)
-	// CheckpointSvc performs checkpoint clean up when manifests changes, so this should be at the end
-	// once all pipelines have restarted and stabilized
-	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.CollectionsManifestChangeCb)
 
 	err := b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
 	if err != nil {
@@ -647,11 +644,21 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			// will also restart alongside with it, and backfill pipelines will restart with the new settings
 		} else {
 			// If the active top task (only the ones for vbs that's supposed to be still running for the current instance of the backfill pipeline)
-			// are different because the mappingNamespaces has changed, and the pipeline is active, then restart the backfill pipeline
+			// are different because the mappingNamespaces has changed, and the pipeline is active, then restart the backfill pipeline. This is because
+			// such source collections should not be backfilled from anymore, since they are now irrelevant to the replication.
 			// This occurs if:
 			// 1. Explicit mapping changed and some backfill tasks mappings are no longer required
 			// 2. Both Implicit and Explicit mapping: if source collections that were part of the backfill tasks have
 			//    been deleted, then the top tasks' mappings will be modified
+			// In code, this is done by:
+			// a. For case 1 above, the collection router will recognise the explicit mapping change and raise a backfill request
+			// with diffPair.Removed populated.
+			// b. For case 2 above, the collection manifest service, when it sees a change in source manifest and raises a backfill
+			// request with diffPair.Removed populated.
+			// In response for both, the backfill request handler will remove all the collection namespaces that are in diffPair.Removed
+			// in the exiting backfill tasks map. Refer to handleBackfillRequestDiffPair function, when the case is len(pairRO.Removed) > 0.
+			// The checkpoints taken with the broken mappings of the irrelevant source collections will not be cleaned up and is expected
+			// to be eventually handled after the system resumes from such checkpoints.
 
 			backfillHandler := b.internalGetHandler(changedSpecId)
 			if backfillHandler == nil {
@@ -681,9 +688,20 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			newNamespaceMappings := newTopTasks.GetAllCollectionNamespaceMappings()
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
 				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
-				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(newSpec.Id, newSpec.InternalId, removedScopesMap)
-				b.logger.Infof("Restarting the current backfill pipeline %s because there was a removal of the following collection mappings from the active top tasks: %v, vbs=%v",
-					changedSpecId, removedScopesMap, currActiveBackfillVbs)
+				now := time.Now().UnixNano()
+
+				cb := func() error {
+					b.logger.Infof("Restarted the current backfill pipeline %s because there was a removal of the following source collection mappings from the active top tasks: %v, vbs=%v at %v",
+						changedSpecId, removedScopesMap, currActiveBackfillVbs, now)
+					return nil
+				}
+				errCb := func(err error, cbCalled bool) {
+					b.logger.Errorf("Error restarting the current backfill pipeline %s because there was a removal of the following source collection mappings from the active top tasks: %v, vbs=%v, err=%v, cbCalled=%v at %v",
+						changedSpecId, removedScopesMap, currActiveBackfillVbs, err, cbCalled, now)
+				}
+
+				b.logger.Infof("Restarting the current backfill pipeline %s because there was a removal of the following source collection mappings from the active top tasks: %v, vbs=%v at %v",
+					changedSpecId, removedScopesMap, currActiveBackfillVbs, now)
 
 				// The HaltBackfillWithCb() is a blocking call. However, this function is a handler callback
 				// The handler callback is invoked in a long call chain, where backfill replication spec
@@ -871,22 +889,6 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 			}
 
 			b.handleExplicitMapChangeBackfillReq(specId, added, removed, errCb)
-
-			// If pipeline was active during this callback's lifetime, then it means the ckpts created by the pipeline has outdated mappings. clean those up
-			if len(removed) > 0 && oldSettings.Active {
-				removedScopesMap := make(metadata.ScopesMap)
-				for src := range removed {
-					removedScopesMap.AddNamespace(src.ScopeName, src.CollectionName)
-				}
-
-				b.logger.Infof("Cleaning up checkpoints for %s because there was a removal of the following explicit collection mappings: %v",
-					specId, removedScopesMap)
-				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(specId, internalSpecId, removedScopesMap)
-				err = cb()
-				if err != nil {
-					errCb(err, true)
-				}
-			}
 		}
 		return nil
 	}

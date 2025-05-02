@@ -54,7 +54,6 @@ function cleanupTestCaseInternalSettings {
 BACKFILL_MSG="These collections need to backfill"
 BACKFILL_APPEND_MSG="These collections need to append backfill"
 VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
-CKPT_MAPPINGS_CHANGED_MSG="checkpoints mapping changed due to collections manifest changes"
 
 function runTestCase {
 	echo "============================================================================"
@@ -92,7 +91,6 @@ function runTestCase {
 	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
 	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
-	currentCkptMappingsChangedCnt=$(echo "$currentXdcrLog" | grep -c "$CKPT_MAPPINGS_CHANGED_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -127,7 +125,6 @@ function runTestCase {
 	# broken msg shouldn't have increased
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 	# mappingChanged msg should not have occurred
-	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt))
 
 	echo "Deleting collection on source cluster C1:B1:S1:col1"
 	deleteCollection "C1" "B1" "S1" "col1"
@@ -135,7 +132,6 @@ function runTestCase {
 
 	echo "Sleeping 15 seconds for collectionsManifestSvc to pull new manifest"
 	sleep 15
-	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt + 1))
 
 	grepForPanics
 	validateXDCRCheckpoints "C1"
