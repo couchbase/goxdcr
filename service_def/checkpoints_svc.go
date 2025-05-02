@@ -9,9 +9,9 @@
 package service_def
 
 import (
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
 	"sync"
+
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 type CheckpointsService interface {
@@ -25,11 +25,8 @@ type CheckpointsService interface {
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
 	UpsertBrokenMapping(replicationId string, specInternalId string) error
 
-	CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 	ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error
 	BackfillReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
-
-	GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 
 	LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, IncrementerFunc, bool, error)
 	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error

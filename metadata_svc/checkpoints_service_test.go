@@ -16,6 +16,11 @@ package metadata_svc
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -23,10 +28,6 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *service_def.ReplicationSpecSvc) {
@@ -71,88 +72,6 @@ func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerCont
 
 const replId = "testReplId"
 const internalId = "testInternalId"
-
-func TestCkptSvcRemoveSourceMapping(t *testing.T) {
-	fmt.Println("============== Test case start: TestCkptSvcRemoveSourceMapping =================")
-	defer fmt.Println("============== Test case end: TestCkptSvcRemoveSourceMapping =================")
-	assert := assert.New(t)
-
-	metadataSvc, loggerCtx, replSpecSvc := setupCkptSvcBoilerPlate()
-
-	// This test will start with two mappings
-	// S1:C1 -> S1T:C1T
-	// S2:C2 -> S2T:C2T
-	brokenMap := generateBrokenMap()
-	shaSlice, err := brokenMap.Sha256()
-	assert.Nil(err)
-	brokenMapCompressedMap, err := brokenMap.ToSnappyCompressed()
-	assert.Nil(err)
-
-	ckptRecord := metadata.CheckpointRecord{
-		BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
-	}
-	entries := getEntries(ckptRecord, err, assert)
-
-	marshalledDoc := getbrokenMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
-
-	// New map should be just: SOURCE ||Scope: S2 Collection: C2|| -> TARGET(s) |Scope: S2T Collection: C2T|
-	newMap, _, _, upsertMappingDocSlice := getUpsertMap()
-	newMapShaSlice, _ := newMap.Sha256()
-	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
-	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
-
-	metadataSvcOpMap := make(map[string]error)
-	metadataSvcOpMap["Del"] = nil
-	metadataSvcOpMap["Get"] = nil
-	metadataSvcOpMap["Set"] = nil
-	metadataSvcOpMap["DelAllFromCatalog"] = nil
-	metadataSvcOpMap["GetAllMetadataFromCatalog"] = nil
-
-	metadataSvcDelayMap := make(map[string]time.Duration)
-
-	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap)
-
-	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, nil, replSpecSvc)
-	assert.NotNil(ckptSvc)
-	assert.Nil(err)
-
-	docs, err := ckptSvc.CheckpointsDocs(replId, true)
-	assert.Nil(err)
-	assert.Equal(1, len(docs))
-
-	for _, doc := range docs {
-		assert.Equal(1, len(doc.Checkpoint_records))
-		brokenMappingFromRecord := doc.Checkpoint_records[0].BrokenMappings()
-		assert.Equal(2, len(*brokenMappingFromRecord))
-	}
-
-	counter, exists := ckptSvc.ShaRefCounterService.topicMaps[replId]
-	assert.True(exists)
-	assert.NotNil(counter)
-	assert.Equal(1, len(counter.shaToMapping)) // representing the original 2-entries brokenmap
-	var origSha string
-	for _, v := range counter.shaToMapping {
-		sha, _ := v.Sha256()
-		origSha = fmt.Sprintf("%x", sha[:])
-	}
-	assert.NotEqual("", origSha)
-
-	// Remove S1:C1
-	collectionsMap := make(metadata.CollectionsMap)
-	collectionsMap["C1"] = metadata.Collection{
-		Uid:  1,
-		Name: "C1",
-	}
-	scopeMap := make(metadata.ScopesMap)
-	scopeMap["S1"] = metadata.Scope{
-		Uid:         0,
-		Name:        "S1",
-		Collections: collectionsMap,
-	}
-	changed, err := ckptSvc.removeMappingFromCkptDocs(replId, internalId, scopeMap)
-	assert.True(changed)
-	assert.Nil(err)
-}
 
 func getUpsertMap() (*metadata.CollectionNamespaceMapping, []byte, *metadata.CollectionNsMappingsDoc, []byte) {
 	newUpsertingMap := make(metadata.CollectionNamespaceMapping)

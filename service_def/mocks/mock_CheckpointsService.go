@@ -3,7 +3,6 @@
 package mocks
 
 import (
-	base "github.com/couchbase/goxdcr/base"
 	metadata "github.com/couchbase/goxdcr/metadata"
 
 	mock "github.com/stretchr/testify/mock"
@@ -192,54 +191,6 @@ func (_c *CheckpointsService_CheckpointsDocs_Call) RunAndReturn(run func(string,
 	return _c
 }
 
-// CollectionsManifestChangeCb provides a mock function with given fields: metadataId, oldMetadata, newMetadata
-func (_m *CheckpointsService) CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
-	ret := _m.Called(metadataId, oldMetadata, newMetadata)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CollectionsManifestChangeCb")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}) error); ok {
-		r0 = rf(metadataId, oldMetadata, newMetadata)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// CheckpointsService_CollectionsManifestChangeCb_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CollectionsManifestChangeCb'
-type CheckpointsService_CollectionsManifestChangeCb_Call struct {
-	*mock.Call
-}
-
-// CollectionsManifestChangeCb is a helper method to define mock.On call
-//   - metadataId string
-//   - oldMetadata interface{}
-//   - newMetadata interface{}
-func (_e *CheckpointsService_Expecter) CollectionsManifestChangeCb(metadataId interface{}, oldMetadata interface{}, newMetadata interface{}) *CheckpointsService_CollectionsManifestChangeCb_Call {
-	return &CheckpointsService_CollectionsManifestChangeCb_Call{Call: _e.mock.On("CollectionsManifestChangeCb", metadataId, oldMetadata, newMetadata)}
-}
-
-func (_c *CheckpointsService_CollectionsManifestChangeCb_Call) Run(run func(metadataId string, oldMetadata interface{}, newMetadata interface{})) *CheckpointsService_CollectionsManifestChangeCb_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(interface{}), args[2].(interface{}))
-	})
-	return _c
-}
-
-func (_c *CheckpointsService_CollectionsManifestChangeCb_Call) Return(_a0 error) *CheckpointsService_CollectionsManifestChangeCb_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *CheckpointsService_CollectionsManifestChangeCb_Call) RunAndReturn(run func(string, interface{}, interface{}) error) *CheckpointsService_CollectionsManifestChangeCb_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // DelCheckpointsDoc provides a mock function with given fields: replicationId, vbno, specInternalId
 func (_m *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16, specInternalId string) error {
 	ret := _m.Called(replicationId, vbno, specInternalId)
@@ -396,68 +347,6 @@ func (_c *CheckpointsService_EnableRefCntDecrement_Call) Return() *CheckpointsSe
 }
 
 func (_c *CheckpointsService_EnableRefCntDecrement_Call) RunAndReturn(run func(string)) *CheckpointsService_EnableRefCntDecrement_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetCkptsMappingsCleanupCallback provides a mock function with given fields: specId, specInternalId, toBeRemoved
-func (_m *CheckpointsService) GetCkptsMappingsCleanupCallback(specId string, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
-	ret := _m.Called(specId, specInternalId, toBeRemoved)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetCkptsMappingsCleanupCallback")
-	}
-
-	var r0 base.StoppedPipelineCallback
-	var r1 base.StoppedPipelineErrCallback
-	if rf, ok := ret.Get(0).(func(string, string, metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
-		return rf(specId, specInternalId, toBeRemoved)
-	}
-	if rf, ok := ret.Get(0).(func(string, string, metadata.ScopesMap) base.StoppedPipelineCallback); ok {
-		r0 = rf(specId, specInternalId, toBeRemoved)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(base.StoppedPipelineCallback)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string, metadata.ScopesMap) base.StoppedPipelineErrCallback); ok {
-		r1 = rf(specId, specInternalId, toBeRemoved)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(base.StoppedPipelineErrCallback)
-		}
-	}
-
-	return r0, r1
-}
-
-// CheckpointsService_GetCkptsMappingsCleanupCallback_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCkptsMappingsCleanupCallback'
-type CheckpointsService_GetCkptsMappingsCleanupCallback_Call struct {
-	*mock.Call
-}
-
-// GetCkptsMappingsCleanupCallback is a helper method to define mock.On call
-//   - specId string
-//   - specInternalId string
-//   - toBeRemoved metadata.ScopesMap
-func (_e *CheckpointsService_Expecter) GetCkptsMappingsCleanupCallback(specId interface{}, specInternalId interface{}, toBeRemoved interface{}) *CheckpointsService_GetCkptsMappingsCleanupCallback_Call {
-	return &CheckpointsService_GetCkptsMappingsCleanupCallback_Call{Call: _e.mock.On("GetCkptsMappingsCleanupCallback", specId, specInternalId, toBeRemoved)}
-}
-
-func (_c *CheckpointsService_GetCkptsMappingsCleanupCallback_Call) Run(run func(specId string, specInternalId string, toBeRemoved metadata.ScopesMap)) *CheckpointsService_GetCkptsMappingsCleanupCallback_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(metadata.ScopesMap))
-	})
-	return _c
-}
-
-func (_c *CheckpointsService_GetCkptsMappingsCleanupCallback_Call) Return(_a0 base.StoppedPipelineCallback, _a1 base.StoppedPipelineErrCallback) *CheckpointsService_GetCkptsMappingsCleanupCallback_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *CheckpointsService_GetCkptsMappingsCleanupCallback_Call) RunAndReturn(run func(string, string, metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)) *CheckpointsService_GetCkptsMappingsCleanupCallback_Call {
 	_c.Call.Return(run)
 	return _c
 }
