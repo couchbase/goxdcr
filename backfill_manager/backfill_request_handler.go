@@ -1051,12 +1051,12 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 	}
 
 	if len(pairRO.Removed) > 0 && b.cachedBackfillSpec != nil {
-		b.logger.Infof("%s: backfill spec mapping removed", b.id)
+		b.logger.Infof("%s: backfill spec mapping removed, removed=%v", b.id, pairRO.Removed)
 		b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(pairRO.Removed)
 	}
 
 	if len(pairRO.Added) > 0 {
-		b.logger.Infof("%s: backfill spec mapping added", b.id)
+		b.logger.Infof("%s: backfill spec mapping added, added=%v", b.id, pairRO.Added)
 		maxSeqnos, newVBsList, err := b.getMaxSeqnosMapToBackfill()
 		if err != nil {
 			return err

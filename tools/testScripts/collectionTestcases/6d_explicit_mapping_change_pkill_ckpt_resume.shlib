@@ -1,4 +1,4 @@
-# Copyright 2024-Present Couchbase, Inc.
+# Copyright 2025-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -23,7 +23,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500)
-declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=10000)
+declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=10000 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S1.col1"}')
 
 # Bucket -> Scopes
 # -----------------
@@ -38,7 +38,6 @@ function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
 	waitForBgJobs
 }
 
@@ -49,7 +48,7 @@ BACKFILL_HANDLER_NIL="Backfill handler was nil, considering that there was no ac
 
 function runTestCase {
 	echo "==============================================================================="
-	echo "Running implicit mapping test case - remove some collections from source"
+	echo "Running explicit mapping - remove some collections from source and resume from old ckpt"
 	echo "==============================================================================="
 	testForClusterRun
 	if (($? != 0)); then
@@ -64,6 +63,7 @@ function runTestCase {
 
 	cleanupGoxdcrLogs
 
+	sleep 10
 	runDataLoad
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
@@ -89,18 +89,30 @@ function runTestCase {
 	createScope "C2" "B2" "S1"
 	createCollection "C2" "B2" "S1" "col1"
 	createCollection "C2" "B2" "S1" "col2"
-	createCollection "C2" "B2" "S1" "col3"
 	printGlobalScopeAndCollectionInfo
 	echo "Sleeping 100 seconds for discovery and automatic backfill"
 	sleep 100
 
-	# now remove S1.col3 from source bucket
-	# and not backfill for S1.col3 anymore (via HaltBackfillWithCb)
-	echo "Deleting source collection col3 - target collections should not have backfill anymore"
-	deleteCollection "C1" "B1" "S1" "col3"
-	printGlobalScopeAndCollectionInfo
+	# remove S1.col1 from explicit mapping and add S2.col2
+	# and not backfill for S1.col1 anymore (via HaltBackfillWithCb)
+	echo "Deleting source collection col3 from mapping - target collections should not have backfill anymore"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col2":"S1.col2"}'
 	echo "Sleeping 100 seconds for discovery and automatic repair"
 	sleep 100
+
+	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
+	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	killGoXdcr "C1"
+	waitForBgJobs
+
+	echo "Sleeping 30s for backfill to start"
+	sleep 30
 
 	# speeden-up backfill before checking for changes_left and doc count
 	echo "speedening up backfill for it to finish"
@@ -111,97 +123,30 @@ function runTestCase {
 	grepForPanics
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	tgtItemCnt=$(getBucketItemCount "C2" "B2")
-	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	if (($tgtItemCnt == $maxCnt)); then
-		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)), but is $tgtItemCnt"
+		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)), but is $tgtItemCnt"
 		return 1
 	fi
 
-	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
-	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
-	grepForPanics
-	validateXDCRCheckpoints "C1"
-	validateXDCRCheckpoints "C2"
-
-	exportProvisionedConfig
-	cleanupBucketReplications
-	cleanupBuckets
-	cleanupRemoteClusterRefs
-
-	# Round 2 - all backfilling collections are removed from source bucket
-	# backfill spec should be deleted.
-
-	# First setup mis-matching mapping meaning all the data reside in C1
-	setupTopologies
-	if (($? != 0)); then
-		exit $?
-	fi
-
-	cleanupGoxdcrLogs
-
-	runDataLoad
-
-	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" ImplicitReplProperties
-	printGlobalScopeAndCollectionInfo
-
-	echo "Waiting 15 seconds before checking item count first pass"
-	sleep 15
-	checkItemCnt "C2" "B2" 0
-
-	# force a checkpointing operation
-	pauseReplication "C1" "B1" "C2" "B2"
-	sleep 10
-	resumeReplication "C1" "B1" "C2" "B2"
-	sleep 10
-
-	# Add a col1, col2 and col3 on target
-	# The backfill should kick in and fill in all the data to the new collections.
-	# A backfill delay of 10s is set also.
-	createScope "C2" "B2" "S1"
-	createCollection "C2" "B2" "S1" "col1"
-	createCollection "C2" "B2" "S1" "col2"
-	createCollection "C2" "B2" "S1" "col3"
-	printGlobalScopeAndCollectionInfo
+	# make sure if col1 is added back, and the new data is flowing now.
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2"}'
+	sleep 2
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "" "new" &
 	echo "Sleeping 100 seconds for discovery and automatic backfill"
 	sleep 100
+	waitForBgJobs
 
-	# now remove all collections from source bucket
-	# and not backfill for any anymore (i.e HaltBackfillWithCb should not be called, but spec should be deleted)
-	echo "Deleting source collection col3 - target collections should not have backfill anymore"
-	deleteCollection "C1" "B1" "S1" "col3"
-	deleteCollection "C1" "B1" "S1" "col2"
-	deleteCollection "C1" "B1" "S1" "col1"
-	printGlobalScopeAndCollectionInfo
-	echo "Sleeping 100 seconds for discovery and automatic repair"
-	sleep 100
-
-	# there should be no more backfill, so quicky check for changes_left,
-	# no need to speeden up backfill pipeline.
 	checkUnidirectionalChangesLeft
 	grepForPanics
-	checkItemCnt "C1" "B1" 0
-	tgtItemCnt=$(getBucketItemCount "C2" "B2")
-	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
-	if (($tgtItemCnt == $maxCnt)); then
-		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)), but is $tgtItemCnt"
-		return 1
-	fi
-
-	# The backfill spec should be deleted
-	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 0
-	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
-	grepForPanics
-	validateXDCRCheckpoints "C1"
-	validateXDCRCheckpoints "C2"
+	# both source and target should have CBWORKLOAD_COLLECTION_NUM_ITEMS from col2 +
+	# CBWORKLOAD_COLLECTION_NUM_ITEMS old col1 data +  CBWORKLOAD_COLLECTION_NUM_ITEMS new col1 data
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-	exportProvisionedConfig
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs

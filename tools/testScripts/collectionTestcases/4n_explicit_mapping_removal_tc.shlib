@@ -44,7 +44,7 @@ function runDataLoad {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
-HALTBACKFILLWITHCB_MSG="because there was a removal of the following collection mappings from the active top tasks: map[S1:{0 S1 map[col3:{0 col3}]}]"
+HALTBACKFILLWITHCB_MSG="Restarting the current backfill pipeline"
 BACKFILL_HANDLER_NIL="Backfill handler was nil, considering that there was no active backfill pipeline for"
 
 function runTestCase {

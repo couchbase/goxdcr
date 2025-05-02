@@ -1774,6 +1774,7 @@ function runCbWorkloadGenCollection {
 	local collectionId
 	local i
 	local loopFlag=""
+	local totalPrefix=${6:-}
 
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]]; then
 		echo "Invalid input"
@@ -1795,7 +1796,7 @@ function runCbWorkloadGenCollection {
 
 	collectionId=$(getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName")
 	if (($? != 0)); then
-		echo "Error retrieving collection ID for scope $scopeName collection $collectionName"
+		echo "Error retrieving collection ID for scope $scopeName collection $collectionName (bucket=$bucketName)"
 		echo "Output: $manifestOutput"
 		return 1
 	fi
@@ -1812,6 +1813,9 @@ function runCbWorkloadGenCollection {
 				echo "LOOPFLAG"
 				loopFlag="-l"
 			fi
+		fi
+		if [[ ! -z "$totalPrefix" ]]; then
+			prefix=$totalPrefix
 		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
 		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
