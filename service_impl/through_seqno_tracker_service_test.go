@@ -1202,3 +1202,17 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(4), through_seqno)
 }
+
+func TestBackfillBypassStreamForAllVBs(t *testing.T) {
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+	svc.initialize(pipeline)
+
+	// create streamBypass event
+	bypassEvent := common.NewEvent(common.StreamingBypassed, uint16(1), nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(bypassEvent))
+
+	// check if bgScanForThroSeq is called
+	assert.Equal(uint32(1), atomic.LoadUint32(&svc.vbBackfillHelperActive))
+}
