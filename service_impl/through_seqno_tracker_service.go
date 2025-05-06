@@ -130,6 +130,9 @@ type ThroughSeqnoTrackerSvc struct {
 	vbOsoModeSessionDCPTracker OSOSeqnoTrackerMapType
 	osoSnapshotRaiser          func(vbno uint16, seqno uint64)
 	osoCntReceivedFromDCP      uint64
+
+	// keeps a track of the number of vbs that received bypass stream
+	backfillStreamBypassCnt atomic.Uint32
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -1122,6 +1125,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamBypass(vbno uint16) {
 	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(VBSeqnoBypassed)
+	streamBypassCnt := tsTracker.backfillStreamBypassCnt.Add(1)
+	// if common.StreamingBypassed is raised for all the responsible VBs, spin the bgScanForThroughSeqno
+	if streamBypassCnt == uint32(len(tsTracker.vbBackfillHelperDoneMap)) {
+		if atomic.CompareAndSwapUint32(&tsTracker.vbBackfillHelperActive, 0, 1) {
+			go tsTracker.bgScanForThroughSeqno()
+		}
+	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16, endSeqno uint64) {
