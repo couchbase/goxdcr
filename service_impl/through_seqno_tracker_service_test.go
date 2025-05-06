@@ -2143,3 +2143,17 @@ func TestOSOModeWithAsyncDataReceived(t *testing.T) {
 
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(5))
 }
+
+func TestBackfillBypassStreamForAllVBs(t *testing.T) {
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc, targetNozzles, nil)
+	svc.initialize(pipeline)
+
+	// create streamBypass event
+	bypassEvent := common.NewEvent(common.StreamingBypassed, uint16(1), nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(bypassEvent))
+
+	// check if bgScanForThroSeq is called
+	assert.Equal(uint32(1), atomic.LoadUint32(&svc.vbBackfillHelperActive))
+}

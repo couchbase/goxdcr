@@ -152,6 +152,8 @@ type ThroughSeqnoTrackerSvc struct {
 	// keeps track of count of instances therein we
 	// saw a session end when we shouldn't have.
 	unusualOsoSessionEnd atomic.Uint64
+	// keeps a track of the number of vbs that received bypass stream
+	backfillStreamBypassCnt atomic.Uint32
 }
 
 // stats will be in milliseconds.
@@ -1578,6 +1580,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamBypass(vbno uint16) {
 	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(VBSeqnoBypassed)
+	streamBypassCnt := tsTracker.backfillStreamBypassCnt.Add(1)
+	// if common.StreamingBypassed is raised for all the responsible VBs, spin the bgScanForThroughSeqno
+	if streamBypassCnt == uint32(len(tsTracker.vbBackfillHelperDoneMap)) {
+		if atomic.CompareAndSwapUint32(&tsTracker.vbBackfillHelperActive, 0, 1) {
+			go tsTracker.bgScanForThroughSeqno()
+		}
+	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16, endSeqno uint64) {
