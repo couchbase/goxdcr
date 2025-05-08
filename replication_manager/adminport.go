@@ -552,17 +552,23 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	logger_ap.Info("doCreateReplicationRequest")
 	defer logger_ap.Info("Finished doCreateReplicationRequest call")
 
+	fromBucket, errMap := getBucketName(request, base.FromBucket)
+	if len(errMap) > 0 {
+		logger_ap.Errorf("Failed to fetch fromBucket name. errorsMap=%v\n", errMap)
+		return EncodeErrorsMapIntoResponse(errMap, true)
+	}
+
+	response, err := authWebCreds(request, constructBucketPermission(fromBucket, base.PermissionBucketXDCRWriteSuffix))
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	justValidate, fromBucket, toCluster, toBucket, settings, errorsMap, err := DecodeCreateReplicationRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, true)
-	}
-
-	response, err := authWebCreds(request, constructBucketPermission(fromBucket, base.PermissionBucketXDCRWriteSuffix))
-	if response != nil || err != nil {
-		return response, err
 	}
 
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
@@ -1181,14 +1187,20 @@ func (adminport *Adminport) IsReadyForHeartBeat() bool {
 func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doRegexpValidationRequest\n")
 
-	expression, docId, bucket, collectionNs, skipDoc, err := DecodeRegexpValidationRequest(request)
-	if err != nil {
-		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
+	bucket, errMap := getBucketName(request, Bucket)
+	if len(errMap) > 0 {
+		logger_ap.Errorf("Failed to fetch bucket name. errorsMap=%v\n", errMap)
+		return EncodeErrorsMapIntoResponse(errMap, true)
 	}
 
 	response, err := authWebCreds(request, constructBucketPermission(bucket, base.PermissionBucketDataReadSuffix))
 	if response != nil || err != nil {
 		return response, err
+	}
+
+	expression, docId, bucket, collectionNs, skipDoc, err := DecodeRegexpValidationRequest(request)
+	if err != nil {
+		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
 
 	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v bucket=%v scope=%v collection=%v skipDoc=%v",
