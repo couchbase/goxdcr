@@ -1569,3 +1569,19 @@ func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string
 
 	return EncodeObjectIntoResponse(respLists)
 }
+
+// Parses the request to fetch the value associated with the "bucketKey"
+func getBucketName(request *http.Request, bucketKey string) (bucketName string, errMap map[string]error) {
+	errMap = make(map[string]error)
+	if err := request.ParseForm(); err != nil {
+		errMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return
+	}
+	valueArr, exists := request.Form[bucketKey]
+	if !exists {
+		errMap[bucketKey] = base.MissingValueError("bucket name")
+		return
+	}
+	bucketName = getStringFromValArr(valueArr)
+	return
+}
