@@ -1514,3 +1514,19 @@ func NewConnectionPreCheckGetResponse(taskId string, res base.ConnectionErrMapTy
 	response, err := EncodeObjectIntoResponseSensitive(resMap)
 	return response, err
 }
+
+// Parses the request to fetch the value associated with the "bucketKey"
+func getBucketName(request *http.Request, bucketKey string) (bucketName string, errMap map[string]error) {
+	errMap = make(map[string]error)
+	if err := request.ParseForm(); err != nil {
+		errMap[base.PlaceHolderFieldKey] = ErrorParsingForm
+		return
+	}
+	valueArr, exists := request.Form[bucketKey]
+	if !exists {
+		errMap[bucketKey] = base.MissingValueError("bucket name")
+		return
+	}
+	bucketName = getStringFromValArr(valueArr)
+	return
+}
