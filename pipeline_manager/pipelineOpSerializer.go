@@ -13,11 +13,13 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
-	"sync"
 )
 
 type PipelineMgtOpType int
@@ -420,12 +422,46 @@ forloop:
 				// Any errors here would be considered critical, as filters in replication spec has already been
 				// changed but replication is not reflecting the changes. Raise UI errors to get users' attention
 				// as this would cause serious data inconsistencies
+
+				if spec, err := serializer.pipelineMgr.GetReplSpecSvc().ReplicationSpec(job.pipelineTopic); err == nil {
+					delayProofNode := spec.Settings.GetStringSettingValue(metadata.DevPipelineReinitCleanupDelayProofNode)
+					if delayProofNode != "" {
+						serializer.logger.Infof("pipeline cleanup delay injection is enabled")
+						myAddr, _ := serializer.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
+						if myAddr != "" && myAddr != delayProofNode { // inject cleanup delay on all nodes except the delay-proof node
+							delayTime := 2 * base.IntMax(spec.Settings.GetIntSettingValue(metadata.CheckpointIntervalKey), 60*spec.Settings.GetIntSettingValue(metadata.ReplicateCkptIntervalKey))
+							serializer.logger.Infof("injecting pipeline cleanup delay of %v seconds", delayTime)
+							time.Sleep(time.Duration(delayTime) * time.Second)
+						}
+					}
+				}
+
 				err := serializer.pipelineMgr.CleanupPipeline(job.pipelineTopic)
+
+				repStatus, repErr := serializer.pipelineMgr.GetOrCreateReplicationStatus(job.pipelineTopic, nil)
 				if err != nil {
 					errMsg := fmt.Sprintf("Error during re-intializing XDCR replication: getting replication status for pipeline %v, err=%v", job.pipelineTopic, err)
 					serializer.logger.Errorf(errMsg)
 					serializer.pipelineMgr.GetLogSvc().Write(errMsg)
+
+					hostAddr, _ := serializer.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
+					uiAlertMssg := fmt.Sprintf("Replication failed to re-initialise after settings update on node %v - Needs to be deleted & recreated for the changes to take effect", hostAddr)
+					if repErr == nil {
+						repStatus.GetEventsManager().AddEvent(base.PersistentMsg, uiAlertMssg, base.NewEventsMap(), nil)
+					}
+					serializer.pipelineMgr.GetLogSvc().Write(uiAlertMssg)
+
 					continue forloop
+				}
+
+				// Add a delay to allow lagging peer nodes to complete cleanup before the local node
+				// requests them for checkpoints during the pipeline restart (as part of 'VB Master Check').
+				time.Sleep(base.PipelineReinitStreamDelaySec)
+
+				if repErr != nil {
+					serializer.logger.Errorf("error during pipeline reinitialisation: failed to set 'isPipelineReinitStream' flag as unable to get replication status for pipeline %v - %v", job.pipelineTopic, repErr)
+				} else {
+					repStatus.SetCustomSettings(map[string]any{metadata.IsPipelineReinitStreamKey: true})
 				}
 
 				err = serializer.pipelineMgr.Update(job.pipelineTopic, job.errForUpdateOp)

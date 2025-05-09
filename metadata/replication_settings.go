@@ -32,6 +32,7 @@ const (
 	DevPreCheckCasDriftForceVbKey           = base.DevPreCheckCasDriftForceVbKey
 	DevPreCheckMaxCasErrorInjection         = base.DevPreCheckMaxCasErrorInjection
 	DevBackfillMgrVbsTasksDoneNotifierDelay = base.DevBackfillMgrVbsTasksDoneNotifierDelay
+	DevPipelineReinitCleanupDelayProofNode  = base.DevPipelineReinitCleanupDelayProofNode
 
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
@@ -113,6 +114,9 @@ const (
 
 	// This means the user intentionally wants to keep the replication around even if it's outdated
 	SkipReplSpecAutoGcKey = base.SkipReplSpecAutoGcKey
+
+	// flag to track if the current pipeline restart is in response to a `PipelineReinitStream` update
+	IsPipelineReinitStreamKey = base.IsPipelineReinitStreamKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -137,7 +141,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
 	DevNsServerPortSpecifier, SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey,
-	DevPreCheckCasDriftForceVbKey, DevPreCheckMaxCasErrorInjection, DevBackfillMgrVbsTasksDoneNotifierDelay}
+	DevPreCheckCasDriftForceVbKey, DevPreCheckMaxCasErrorInjection, DevBackfillMgrVbsTasksDoneNotifierDelay, DevPipelineReinitCleanupDelayProofNode}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -180,6 +184,7 @@ var XDCRDevCasDriftForceDocConfig = &SettingsConfig{"", nil}
 var XDCRDevPreCheckCasDriftForceVBConfig = &SettingsConfig{-1, &Range{-1, 1023}}
 var XDCRDevPreCheckMaxCasErrorInjectionConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
+var XDCRDevPipelineReinitCleanupDelayProofNodeConfig = &SettingsConfig{"", nil}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -259,6 +264,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevPreCheckCasDriftForceVbKey:           XDCRDevPreCheckCasDriftForceVBConfig,
 	DevPreCheckMaxCasErrorInjection:         XDCRDevPreCheckMaxCasErrorInjectionConfig,
 	DevBackfillMgrVbsTasksDoneNotifierDelay: XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
+	DevPipelineReinitCleanupDelayProofNode:  XDCRDevPipelineReinitCleanupDelayProofNodeConfig,
 
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
