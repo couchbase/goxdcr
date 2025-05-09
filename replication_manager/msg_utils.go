@@ -181,6 +181,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevPreCheckCasDriftForceVbKey:           metadata.DevPreCheckCasDriftForceVbKey,
 	base.DevPreCheckMaxCasErrorInjection:         metadata.DevPreCheckMaxCasErrorInjection,
 	base.DevBackfillMgrVbsTasksDoneNotifierDelay: metadata.DevBackfillMgrVbsTasksDoneNotifierDelay,
+	base.DevPipelineReinitCleanupDelayProofNode:  metadata.DevPipelineReinitCleanupDelayProofNode,
 
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
@@ -248,6 +249,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevPreCheckCasDriftForceVbKey:           base.DevPreCheckCasDriftForceVbKey,
 	metadata.DevPreCheckMaxCasErrorInjection:         base.DevPreCheckMaxCasErrorInjection,
 	metadata.DevBackfillMgrVbsTasksDoneNotifierDelay: base.DevBackfillMgrVbsTasksDoneNotifierDelay,
+	metadata.DevPipelineReinitCleanupDelayProofNode:  base.DevPipelineReinitCleanupDelayProofNode,
 
 	metadata.ReplicationTypeKey:                   base.Type,
 	metadata.FilterExpressionKey:                  FilterExpression,

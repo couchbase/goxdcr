@@ -926,7 +926,18 @@ func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
 	if ckpt_mgr == nil {
 		return errors.New(fmt.Sprintf("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic()))
 	}
-	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.FullTopic())
+
+	isReinitialisedPipeline := false
+	if settings := pipeline.Settings(); settings != nil && settings[metadata.IsPipelineReinitStreamKey] != nil {
+		isPipelineReinitStream, ok := settings[metadata.IsPipelineReinitStreamKey].(bool)
+		if ok {
+			isReinitialisedPipeline = isPipelineReinitStream
+		} else {
+			xdcrf.logger.Errorf("type assertion failed for value of setting 'isPipelineReinitStream' in (*XDCRFactory).SetStartSeqno(); expected (bool), got (%T)", settings[metadata.IsPipelineReinitStreamKey])
+		}
+	}
+
+	return ckpt_mgr.(*pipeline_svc.CheckpointManager).SetVBTimestamps(pipeline.FullTopic(), isReinitialisedPipeline)
 }
 
 func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {

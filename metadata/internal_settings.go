@@ -289,6 +289,8 @@ const (
 	CasPoisoningPreCheckEnabledKey = "CasPoisoningPreCheckEnabled"
 
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
+
+	PipelineReinitStreamDelaySecKey = "PipelineReinitStreamDelaySec"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -419,6 +421,7 @@ var CapellaHostnameSuffixConfig = &SettingsConfig{base.CapellaHostnameSuffix, ni
 var NWLatencyToleranceMilliSecConfig = &SettingsConfig{int(base.NWLatencyToleranceMilliSec / time.Millisecond), &Range{0, 60000}}
 var CasPoisoningPreCheckEnabledConfig = &SettingsConfig{base.CasPoisoningPreCheckEnabled, &Range{0, 1} /* 0 is disbaled, 1 is enabled */}
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
+var PipelineReinitStreamDelaySecConfig = &SettingsConfig{int(base.PipelineReinitStreamDelaySec / time.Second), &Range{0, 300}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -549,6 +552,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	NWLatencyToleranceMilliSecKey:                 NWLatencyToleranceMilliSecConfig,
 	CasPoisoningPreCheckEnabledKey:                CasPoisoningPreCheckEnabledConfig,
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
+	PipelineReinitStreamDelaySecKey:               PipelineReinitStreamDelaySecConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

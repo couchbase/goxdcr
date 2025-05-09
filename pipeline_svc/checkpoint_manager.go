@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/pipeline"
 
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -1044,9 +1045,12 @@ func (ckmgr *CheckpointManager) EnableRefCntGC(topic string) {
  * 3. Figures out all VB opaques from remote cluster, and updates the local checkpoint records (with lock) to reflect that.
  * The timestamps are to be consumed by dcp nozzle to determine the start point of dcp stream/replication via settings map (UpdateSettings).
  *
- * Unless the checkpoint manager is stopping, any non-nil returned error MUST raise a corresponding error event
+ * Unless the checkpoint manager is stopping, any non-nil returned error MUST raise a corresponding error event.
+ *
+ * 'isReinitialisedPipeline' is used to raise a UI alert if we find stale checkpoints for a reinitialised pipeline; which can
+ * prevent XDCR from replicating documents properly from the beginning (i.e. from sequence number 0 for all VBs).
  */
-func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
+func (ckmgr *CheckpointManager) SetVBTimestamps(topic string, isReinitialisedPipeline bool) error {
 	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(true)
 	if err != nil {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
@@ -1076,6 +1080,20 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 	ckmgr.loadCollectionMappingsFromCkptDocs(ckptDocs)
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication\n", len(ckptDocs))
+
+	if isReinitialisedPipeline && len(ckptDocs) > 0 {
+		ckmgr.logger.Errorf("expected to find 0 checkpoint documents for the re-initialised replication, but found %v stale checkpoints", len(ckptDocs))
+
+		repStatus, err := ckmgr.rep_spec_svc.GetDerivedObj(topic)
+		if err != nil || repStatus == nil {
+			ckmgr.logger.Errorf("unable to raise stale ckpts UI alert due to error getting replication status: %v", err)
+		} else {
+			hostAddr, _ := ckmgr.xdcr_topology_svc.MyHostAddr()
+			staleCkptUIMsg := fmt.Sprintf("Replication %v is using stale checkpoints on node %v; it needs to be deleted and recreated.", topic, hostAddr)
+			repStatus.(*pipeline.ReplicationStatus).GetEventsProducer().AddEvent(base.PersistentMsg, staleCkptUIMsg, base.EventsMap{}, nil)
+			ckmgr.uiLogSvc.Write(staleCkptUIMsg)
+		}
+	}
 
 	ckmgr.initBpMapIfNeeded(ckptDocs)
 

@@ -37,7 +37,7 @@ const (
 var OVERVIEW_METRICS_KEY = "Overview"
 
 // temporary custom settings that need to be cleared after pipeline update
-var TemporaryCustomSettings = []string{metadata.CompressionTypeKey}
+var TemporaryCustomSettings = []string{metadata.CompressionTypeKey, metadata.IsPipelineReinitStreamKey}
 
 func (rep_state ReplicationState) String() string {
 	if rep_state == Pending {
