@@ -52,6 +52,7 @@ const (
 	DocsSentWithSubdocDeleteCnt        string = "docs_sent_with_subdoc_delete"
 	CasPoisonCnt                       string = "cas_poison_cnt"
 	SubdocCmdSkippedCnt                string = "subdoc_cmd_skipped_cnt"
+	BackfillCollections                string = "bfillColIDs"
 )
 
 type CheckpointRecord struct {
@@ -112,6 +113,12 @@ type CheckpointRecord struct {
 	CasPoisonCnt                uint64 `json:"cas_poison_cnt"`
 	// Number of subdoc commands skipped due to maximum paths limit.
 	SubdocCmdSkippedCnt uint64 `json:"subdoc_cmd_skipped_cnt"`
+
+	// If this checkpoint is for a backfill pipeline, we will use this collection IDs list
+	// to ensure that another backfill pipeline resumes from this checkpoint based on if the
+	// new backfill pipeline's collection filter is the same (or subset) of the following field.
+	// This list will be sorted and will be nil for main pipeline.
+	BackfillCollections []uint32 `json:"bfillColIDs"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -133,12 +140,13 @@ func (c *CheckpointRecord) Size() int {
 	totalSize += int(unsafe.Sizeof(*c))
 	totalSize += len(c.BrokenMappingSha256)
 	totalSize += c.Target_vb_opaque.Size()
+	totalSize += len(c.BackfillCollections) * 4
 	return totalSize
 }
 
 func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno uint64,
 	vbCountMetrics base.VBCountMetricMap, srcManifestForDCP, srcManifestForBackfill,
-	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
+	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64, backfillCollections []uint32) (*CheckpointRecord, error) {
 
 	filteredItems := uint64(vbCountMetrics[base.DocsFiltered])
 	filterFailed := uint64(vbCountMetrics[base.DocsUnableToFilter])
@@ -190,6 +198,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
 		CasPoisonCnt:                       casPoisonItems,
 		SubdocCmdSkippedCnt:                subdocSkippedCnt,
+		BackfillCollections:                backfillCollections,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -250,7 +259,8 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.DocsSentWithSubdocDeleteCnt == newRecord.DocsSentWithSubdocDeleteCnt &&
 		ckptRecord.DocsSentWithSubdocSetCnt == newRecord.DocsSentWithSubdocSetCnt &&
 		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt &&
-		ckptRecord.SubdocCmdSkippedCnt == newRecord.SubdocCmdSkippedCnt {
+		ckptRecord.SubdocCmdSkippedCnt == newRecord.SubdocCmdSkippedCnt &&
+		base.Uint32List(ckptRecord.BackfillCollections).Equal(newRecord.BackfillCollections) {
 		return true
 	} else {
 		return false
@@ -291,6 +301,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.DocsSentWithSubdocSetCnt = other.DocsSentWithSubdocSetCnt
 	ckptRecord.CasPoisonCnt = other.CasPoisonCnt
 	ckptRecord.SubdocCmdSkippedCnt = other.SubdocCmdSkippedCnt
+	ckptRecord.BackfillCollections = base.Uint32List(other.BackfillCollections).Clone()
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -465,7 +476,38 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.SubdocCmdSkippedCnt = uint64(subdocSkippedCnt.(float64))
 	}
 
+	backfillCollections, ok := fieldMap[BackfillCollections]
+	if ok && backfillCollections != nil {
+		backfillColIDsList := backfillCollections.([]interface{})
+		ckptRecord.BackfillCollections = make([]uint32, 0)
+		for _, colId := range backfillColIDsList {
+			ckptRecord.BackfillCollections = append(ckptRecord.BackfillCollections, uint32(colId.(float64)))
+		}
+	}
+
 	return nil
+}
+
+// For a backfill pipeline, we can resume from a ckptRecord, only if ckptRecord was taken for a backfill
+// pipeline of a set of collections, which is same as or a superset of a set of collections for which
+// the current backfill pipeline will be backfilling. In other words, currBackfillColIDs should be a subset
+// or equal to ckptBackfillColIDs. Otherwise, there will be count mismatch for currBackfillColIDs - ckptBackfillColIds
+// set of collections.
+func (ckptRecord *CheckpointRecord) FilterBasedOnBackfillCollections(currBackfillColIDs []uint32) (skipCkptRec bool) {
+	ckptBackfillColIDs := ckptRecord.BackfillCollections
+	if ckptBackfillColIDs == nil {
+		// This is probably because this ckptRecord is from a pre-fix version. We will not skip this ckptRecord to
+		// ensure if there any long running backfill pipelines, it won't restart from 0.
+		return
+	}
+
+	currentCollectionIDs := base.Uint32List(currBackfillColIDs)
+	if !currentCollectionIDs.IsSubset(ckptBackfillColIDs) {
+		skipCkptRec = true
+		return
+	}
+
+	return
 }
 
 type TargetVBOpaque interface {
@@ -635,9 +677,9 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMappingInfoType=%v}",
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMappingInfoType=%v; bfillCol=%v}}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
-		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
+		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings, ckpt_record.BackfillCollections)
 }
 
 type CheckpointSortRecordsList []*CheckpointSortRecord
@@ -1088,6 +1130,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
 		CasPoisonCnt:                       c.CasPoisonCnt,
 		SubdocCmdSkippedCnt:                c.SubdocCmdSkippedCnt,
+		BackfillCollections:                base.Uint32List(c.BackfillCollections).Clone(),
 	}
 	return retVal
 }

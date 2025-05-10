@@ -1,4 +1,4 @@
-# Copyright 2025-Present Couchbase, Inc.
+# Copyright 2024-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -23,7 +23,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500)
-declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=10000)
+declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=2000)
 
 # Bucket -> Scopes
 # -----------------
@@ -49,7 +49,7 @@ BACKFILL_HANDLER_NIL="Backfill handler was nil, considering that there was no ac
 
 function runTestCase {
 	echo "==============================================================================="
-	echo "Running implicit mapping - remove some collections from source and resume from old ckpt"
+	echo "Stale backfill checkpoints testcase"
 	echo "==============================================================================="
 	testForClusterRun
 	if (($? != 0)); then
@@ -63,7 +63,6 @@ function runTestCase {
 	fi
 
 	cleanupGoxdcrLogs
-	sleep 30
 
 	runDataLoad
 
@@ -78,21 +77,26 @@ function runTestCase {
 	sleep 15
 	checkItemCnt "C2" "B2" 0
 
-	# force a checkpointing operation
+	# Add a col3 on target
+	# The backfill should kick in and fill in all the data to only col3.
+	# A backfill delay of 10s is set also.
+	createScope "C2" "B2" "S1"
+	createCollection "C2" "B2" "S1" "col3"
+	printGlobalScopeAndCollectionInfo
+	echo "Sleeping 100 seconds for discovery and automatic backfill of col3"
+	sleep 100
+
+	# force a checkpointing operation of backfill pipeline of col3
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 10
 	resumeReplication "C1" "B1" "C2" "B2"
 	sleep 10
 
-	# Add a col1, col2 and col3 on target
-	# The backfill should kick in and fill in all the data to the new collections.
-	# A backfill delay of 10s is set also.
-	createScope "C2" "B2" "S1"
+	# create backfill tasks for col1 and col2, but a backfill should already be running.
 	createCollection "C2" "B2" "S1" "col1"
 	createCollection "C2" "B2" "S1" "col2"
-	createCollection "C2" "B2" "S1" "col3"
 	printGlobalScopeAndCollectionInfo
-	echo "Sleeping 100 seconds for discovery and automatic backfill"
+	echo "Sleeping 100 seconds for discovery of col1 and col2"
 	sleep 100
 
 	# now remove S1.col3 from source bucket
@@ -100,22 +104,8 @@ function runTestCase {
 	echo "Deleting source collection col3 - target collections should not have backfill anymore"
 	deleteCollection "C1" "B1" "S1" "col3"
 	printGlobalScopeAndCollectionInfo
-	echo "Sleeping 100 seconds for discovery and automatic repair"
+	echo "Sleeping 100 seconds for discovery of col3 deletion"
 	sleep 100
-
-	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
-	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
-	grepForPanics
-	validateXDCRCheckpoints "C1"
-	validateXDCRCheckpoints "C2"
-
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
-	killGoXdcr "C1"
-	waitForBgJobs
-
-	echo "Sleeping 30s for backfill to start"
-	sleep 30
 
 	# speeden-up backfill before checking for changes_left and doc count
 	echo "speedening up backfill for it to finish"
@@ -126,36 +116,23 @@ function runTestCase {
 	grepForPanics
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	tgtItemCnt=$(getBucketItemCount "C2" "B2")
+	minCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
-	if (($tgtItemCnt == $maxCnt)); then
-		echo "Item count should be lesser than $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)), but is $tgtItemCnt"
-		return 1
-	fi
-
-	# make sure if col3 is added back, and the new data is flowing now.
-	createCollection "C1" "B1" "S1" "col3"
-	sleep 2
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" "" "new" &
-	echo "Sleeping 100 seconds for discovery and automatic backfill"
-	sleep 100
-	waitForBgJobs
-
-	checkUnidirectionalChangesLeft
-	grepForPanics
-	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
-	# target should have some documents (not all) from col3 before deletion,
-	# and all documents from col3 after re-creation
-	tgtItemCnt=$(getBucketItemCount "C2" "B2")
-	minCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
-	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 4))
 	if ! [[ $tgtItemCnt -ge $minCnt && $tgtItemCnt -lt $maxCnt ]]; then
-		echo "Item count should be within range $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)) and $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 4)), but is $tgtItemCnt"
+		echo "Item count should be within range $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) and $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)), but is $tgtItemCnt"
 		return 1
 	fi
+
+	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
+	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
+	exportProvisionedConfig
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs

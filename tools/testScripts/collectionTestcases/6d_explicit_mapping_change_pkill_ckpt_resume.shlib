@@ -62,6 +62,7 @@ function runTestCase {
 	fi
 
 	cleanupGoxdcrLogs
+	sleep 30
 
 	runDataLoad
 
