@@ -1823,3 +1823,111 @@ func Test_localPreReplicate(t *testing.T) {
 		})
 	}
 }
+
+func TestBackfillCollectionIdStamping(t *testing.T) {
+	fmt.Println("============== Test case start: TestBackfillCollectionIdStamping =================")
+	defer fmt.Println("============== Test case end: TestBackfillCollectionIdStamping =================")
+	assert := assert.New(t)
+	vbno := uint16(1)
+	pipeline := &commonMock.Pipeline{}
+	pipeline.On("Type").Return(common.BackfillPipeline)
+	ckmgr := &CheckpointManager{
+		backfillCollections: map[uint16][]uint32{
+			vbno: {10, 11, 12},
+		},
+		pipeline: pipeline,
+	}
+	other := &metadata.CheckpointRecord{}
+	notSame := &metadata.CheckpointRecord{BackfillCollections: []uint32{1000, 2000, 30000}}
+	unmarshalledRecord := &metadata.CheckpointRecord{}
+	marshaller := func(record *metadata.CheckpointRecord) []byte {
+		res, err := json.Marshal(record)
+		assert.Nil(err)
+		return res
+	}
+
+	// 1. pre-fix backfill checkpoints should not be skipped
+	record := &metadata.CheckpointRecord{
+		BackfillCollections: nil,
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned := record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes := marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 2. exact match - can resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{10, 11, 12},
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 3. current backfill collections is a subset of checkpoint collections - can resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{5, 6, 10, 11, 12, 13, 100, 200},
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 4. current backfill collections is not a subset of checkpoint collections - can't resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{5, 6, 10, 11},
+	}
+	assert.True(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 5. checkpoint was for a disjoint set - can't resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{20, 21},
+	}
+	assert.True(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 6. odd unrealistic case of empty list
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{},
+	}
+	ckmgr.backfillCollections[vbno] = []uint32{}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+}

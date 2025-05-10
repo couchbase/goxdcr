@@ -304,5 +304,5 @@ else
 	fi
 fi
 
-echo "INFO: Done - all specified tests successful!"
+echo "INFO: Done - all specified tests were run (or a test failed)"
 exit 0
