@@ -2149,7 +2149,7 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		return agent.reference.Clone()
 	}).SetAlternateAddressChecker(func(reference *metadata.RemoteClusterReference) (bool, error) {
 		return agent.UsesAlternateAddress()
-	})
+	}).SetUserAgent(userAgentStr)
 
 	return remoteMemcachedComponent
 }

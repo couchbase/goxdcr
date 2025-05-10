@@ -168,6 +168,12 @@ type CheckpointManager struct {
 	periodicMerger       periodicMergerType // can be replaced for unit test
 
 	lastHighSeqnoVbUuidMap base.HighSeqnoAndVbUuidMap
+
+	// Checkpoint manager will have a sorted list of collections against which this pipeline is streaming data,
+	// if the pipeline is a backfill pipeline. This list per vb will be stamped on checkpoints created by
+	// this CheckpointManager instance.
+	backfillCollections    map[uint16][]uint32
+	backfillCollectionsMtx sync.RWMutex
 }
 
 type checkpointSyncHelper struct {
@@ -480,6 +486,11 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		bucketTopologySvc:                 bucketTopologySvc,
 		getHighSeqnoAndVBUuidFromTargetCh: make(chan bool, 1),
 		periodicPushRequested:             make(chan bool, 1),
+		backfillCollections:               make(map[uint16][]uint32),
+	}
+
+	for _, vbno := range ckmgr.getMyVBs() {
+		ckmgr.backfillCollections[vbno] = make([]uint32, 0)
 	}
 
 	// So that unit test can override this and test it
@@ -618,6 +629,10 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	}
 
 	ckmgr.startRandomizedCheckpointingTicker()
+
+	if err = ckmgr.setBackfillCollections(); err != nil {
+		return err
+	}
 
 	//initialize connections
 	ckmgr.wait_grp.Add(1)
@@ -1456,6 +1471,19 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 			}
 		}
 
+		skip := ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, ckpt_record)
+		if skip {
+			if ckmgr.logger.GetLogLevel() >= log.LogLevelDebug {
+				ckmgr.backfillCollectionsMtx.RLock()
+				currBackfillColIDs, ok := ckmgr.backfillCollections[vbno]
+				ckmgr.logger.Debugf("Skipping checkpoint record for vbno=%v, ckmgrList=%v (ok=%v), ckptRecordList=%v",
+					vbno, currBackfillColIDs, ok, ckpt_record.BackfillCollections)
+				ckmgr.backfillCollectionsMtx.RUnlock()
+			}
+
+			continue
+		}
+
 		if remote_vb_status != nil {
 			bMatch := false
 			bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, remote_vb_status, ckmgr.support_ckpt)
@@ -2076,8 +2104,21 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	// Collection-Related items
 	srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
 
+	var backfillCollections []uint32
+	if ckmgr.pipeline.Type() == common.BackfillPipeline {
+		backfillCollections = []uint32{}
+		ckmgr.backfillCollectionsMtx.RLock()
+		colIDs, ok := ckmgr.backfillCollections[vbno]
+		if ok {
+			backfillCollections = base.Uint32List(colIDs).Clone()
+		} else {
+			ckmgr.logger.Warnf("Backfill collection ids not found for vb=%v, using []", vbno)
+		}
+		ckmgr.backfillCollectionsMtx.RUnlock()
+	}
+
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, uint64(casPoisonItems), brokenMapping, uint64(time.Now().Unix()))
+	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, uint64(casPoisonItems), brokenMapping, uint64(time.Now().Unix()), backfillCollections)
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil
@@ -3554,4 +3595,86 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
+}
+
+func (ckmgr *CheckpointManager) filterBackfillCheckpointRecordsOnColIDs(vbno uint16, ckptRecord *metadata.CheckpointRecord) (skipCkptRec bool) {
+	if ckmgr.pipeline.Type() != common.BackfillPipeline {
+		return
+	}
+
+	ckmgr.backfillCollectionsMtx.RLock()
+	defer ckmgr.backfillCollectionsMtx.RUnlock()
+	currBackfillColIDs, ok := ckmgr.backfillCollections[vbno]
+	if !ok || currBackfillColIDs == nil {
+		// shouldn't happen, skip ckpt_record to be sure
+		ckmgr.logger.Debugf("Backfill ColIDs was not initialised for vbno=%v, ok=%v", vbno, ok)
+		skipCkptRec = true
+		return
+	}
+
+	skipCkptRec = ckptRecord.FilterBasedOnBackfillCollections(currBackfillColIDs)
+	return
+}
+
+// If ckmgr belongs a backfill pipeline, we will parse the top tasks, so that checkpointing is aware of
+// which collections the backfill pipeline is running for.
+func (ckmgr *CheckpointManager) setBackfillCollections() error {
+	if ckmgr.pipeline.Type() != common.BackfillPipeline {
+		return nil
+	}
+
+	settings := ckmgr.pipeline.Settings()
+
+	vbTasksRaw, exists := settings[parts.DCP_VBTasksMap]
+	if !exists || vbTasksRaw == nil {
+		// odd for backfill pipeline
+		ckmgr.logger.Warnf("Ckmgr didn't receive any backfill tasks")
+		return nil
+	}
+
+	specificVBTasks := vbTasksRaw.(*metadata.VBTasksMapType)
+	if specificVBTasks.IsNil() || specificVBTasks.Len() == 0 {
+		// odd for backfill pipeline
+		ckmgr.logger.Warnf("Ckmgr didn't see any backfill tasks")
+		return nil
+	}
+
+	// Fetch the latest source manifest to check if the collections to be backfilled are still present on source bucket.
+	replSpec := ckmgr.pipeline.Specification().GetReplicationSpec()
+	latestSrcManifest, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(replSpec, math.MaxUint64)
+	if err != nil {
+		return err
+	}
+
+	ckmgr.backfillCollectionsMtx.Lock()
+	defer ckmgr.backfillCollectionsMtx.Unlock()
+
+	for _, vbno := range ckmgr.getMyVBs() {
+		vbTasks, exists, unlockSpecificVBTasksMap := specificVBTasks.Get(vbno, false)
+		if !exists || vbTasks == nil || vbTasks.Len() == 0 {
+			unlockSpecificVBTasksMap()
+			continue
+		}
+
+		// This step is expected to yield the same collection filter as got in dcp nozzle during starting streams.
+		topTask, _, unlockVbTasks := vbTasks.GetRO(0)
+		_, filter, toTaskErrs := topTask.ToDcpNozzleTask(latestSrcManifest)
+		unlockVbTasks()
+		unlockSpecificVBTasksMap()
+
+		if toTaskErrs != nil {
+			// it mostly means that the source manifest changed to not have some collections for the backfill task. In a steady
+			// state, this tasks will be eventually be removed from the backfill spec and this error should fix itself after some
+			// pipeline restarts.
+			err := fmt.Errorf("ckmgr couldn't convert VBTask to DCP Nozzle Task %v", toTaskErrs)
+			return err
+		}
+
+		// sort the list for checkpoint manager to search items in the list easily
+		sort.Sort(base.Uint32List(filter.CollectionsList))
+		ckmgr.backfillCollections[vbno] = append(ckmgr.backfillCollections[vbno], filter.CollectionsList...)
+	}
+
+	ckmgr.logger.Infof("Backfilling collections: %v", ckmgr.backfillCollections)
+	return nil
 }

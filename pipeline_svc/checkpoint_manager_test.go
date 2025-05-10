@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/common/mocks"
+	commonMock "github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	mocks2 "github.com/couchbase/goxdcr/metadata/mocks"
@@ -925,4 +926,119 @@ func TestCkptMgrStopBeforeStart(t *testing.T) {
 
 	assert.Nil(err)
 	assert.Nil(ckptMgr.Stop())
+}
+func TestBackfillCollectionIdStamping(t *testing.T) {
+	fmt.Println("============== Test case start: TestBackfillCollectionIdStamping =================")
+	defer fmt.Println("============== Test case end: TestBackfillCollectionIdStamping =================")
+	assert := assert.New(t)
+	vbno := uint16(1)
+	pipeline := &commonMock.Pipeline{}
+	pipeline.On("Type").Return(common.BackfillPipeline)
+	ckmgr := &CheckpointManager{
+		backfillCollections: map[uint16][]uint32{
+			vbno: {10, 11, 12},
+		},
+		pipeline: pipeline,
+	}
+	other := &metadata.CheckpointRecord{
+		Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{},
+	}
+	notSame := &metadata.CheckpointRecord{BackfillCollections: []uint32{1000, 2000, 30000}, Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{}}
+	unmarshalledRecord := &metadata.CheckpointRecord{}
+	marshaller := func(record *metadata.CheckpointRecord) []byte {
+		res, err := json.Marshal(record)
+		assert.Nil(err)
+		return res
+	}
+
+	// 1. pre-fix backfill checkpoints should not be skipped
+	record := &metadata.CheckpointRecord{
+		BackfillCollections: nil,
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned := record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes := marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 2. exact match - can resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{10, 11, 12},
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 3. current backfill collections is a subset of checkpoint collections - can resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{5, 6, 10, 11, 12, 13, 100, 200},
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 4. current backfill collections is not a subset of checkpoint collections - can't resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{5, 6, 10, 11},
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	assert.True(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 5. checkpoint was for a disjoint set - can't resume
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{20, 21},
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	assert.True(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
+
+	// 6. odd unrealistic case of empty list
+	record = &metadata.CheckpointRecord{
+		BackfillCollections: []uint32{},
+		Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+	}
+	ckmgr.backfillCollections[vbno] = []uint32{}
+	assert.False(ckmgr.filterBackfillCheckpointRecordsOnColIDs(vbno, record))
+	other.Load(record)
+	assert.True(record.SameAs(other))
+	cloned = record.Clone()
+	assert.True(record.SameAs(cloned))
+	assert.False(record.SameAs(notSame))
+	bytes = marshaller(record)
+	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
+	assert.True(record.SameAs(unmarshalledRecord))
 }

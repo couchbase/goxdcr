@@ -13,12 +13,13 @@ package base
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbaselabs/gojsonsm"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/couchbaselabs/gojsonsm"
+	"github.com/stretchr/testify/assert"
 )
 
 const testFilteringDataDir = "filter/testFilteringData/"
@@ -448,4 +449,118 @@ func TestIsJsonEndValid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUint32Ops(t *testing.T) {
+	fmt.Println("============== Test case start: TestUint32Ops =================")
+	defer fmt.Println("============== Test case end: TestUint32Ops =================")
+
+	// test IsSubset
+	tests := []struct {
+		name     string
+		l1       []uint32
+		l2       []uint32
+		isSubset bool
+	}{
+		{
+			name: "intersection, but not subset",
+			l1:   []uint32{1, 2, 4},
+			l2:   []uint32{1, 2, 3},
+		},
+		{
+			name:     "intersection and subset",
+			l1:       []uint32{1, 2},
+			l2:       []uint32{1, 2, 3},
+			isSubset: true,
+		},
+		{
+			name:     "empty list is a subset",
+			l1:       []uint32{},
+			l2:       []uint32{1, 2, 3},
+			isSubset: true,
+		},
+		{
+			name: "empty list is a superset",
+			l1:   []uint32{1, 2, 3},
+			l2:   []uint32{},
+		},
+		{
+			name:     "empty list is both subset and superset",
+			l1:       []uint32{},
+			l2:       []uint32{},
+			isSubset: true,
+		},
+		{
+			name: "disjoint set",
+			l1:   []uint32{1, 2, 3},
+			l2:   []uint32{4, 5, 6},
+		},
+		{
+			name: "disjoint set of unequal length",
+			l1:   []uint32{1, 2, 3, 10},
+			l2:   []uint32{4, 5, 6},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if gotSubset := Uint32List(tt.l1).IsSubset(tt.l2); gotSubset != tt.isSubset {
+				t.Errorf("IsSubset() = %v, want %v for %v", gotSubset, tt.isSubset, tt.name)
+			}
+		})
+	}
+
+	// also test clone and equal
+	l1 := []uint32{}
+	l2 := []uint32{}
+	l3 := Uint32List(l1).Clone()
+	assert.True(t, Uint32List(l1).Equal(l2))
+	assert.True(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
+
+	l1 = []uint32{}
+	l2 = []uint32{1}
+	l3 = Uint32List(l1).Clone()
+	assert.False(t, Uint32List(l1).Equal(l2))
+	assert.False(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
+
+	l1 = []uint32{1}
+	l2 = []uint32{}
+	l3 = Uint32List(l1).Clone()
+	assert.False(t, Uint32List(l1).Equal(l2))
+	assert.False(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
+
+	l1 = nil
+	l2 = []uint32{}
+	assert.False(t, Uint32List(l1).Equal(l2))
+
+	l1 = []uint32{}
+	l2 = nil
+	assert.False(t, Uint32List(l1).Equal(l2))
+
+	l1 = nil
+	l2 = nil
+	assert.True(t, Uint32List(l1).Equal(l2))
+
+	l1 = []uint32{1, 2, 3}
+	l2 = []uint32{4, 5, 6}
+	l3 = Uint32List(l1).Clone()
+	assert.False(t, Uint32List(l1).Equal(l2))
+	assert.False(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
+
+	l1 = []uint32{1, 2, 3}
+	l2 = []uint32{1, 2, 4}
+	l3 = Uint32List(l1).Clone()
+	assert.False(t, Uint32List(l1).Equal(l2))
+	assert.False(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
+
+	l1 = []uint32{1, 2, 3}
+	l2 = []uint32{1, 2, 3}
+	l3 = Uint32List(l1).Clone()
+	assert.True(t, Uint32List(l1).Equal(l2))
+	assert.True(t, Uint32List(l3).Equal(l2))
+	assert.True(t, Uint32List(l1).Equal(l3))
 }

@@ -326,6 +326,57 @@ func (u Uint32List) Len() int           { return len(u) }
 func (u Uint32List) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
 func (u Uint32List) Less(i, j int) bool { return u[i] < u[j] }
 
+// Returns true if l1 is a subset of l2 (or l1 is equal to l2).
+// Assumes that l1 is sorted. l1 and l2 should not be nil.
+func (l1 Uint32List) IsSubset(l2 []uint32) (subset bool) {
+	if len(l1) > len(l2) {
+		return
+	}
+
+	for _, v1 := range l1 {
+		if _, found := SearchUint32List(l2, v1); !found {
+			return
+		}
+	}
+
+	// l1 is a subset of l2
+	subset = true
+	return
+}
+
+// assumes l1 and l2 are sorted.
+func (l1 Uint32List) Equal(l2 Uint32List) (equal bool) {
+	if l1 == nil || l2 == nil {
+		equal = (l1 == nil && l2 == nil)
+		return
+	}
+
+	if len(l1) != len(l2) {
+		return
+	}
+
+	for i := 0; i < len(l1); i++ {
+		if l1[i] != l2[i] {
+			return
+		}
+	}
+
+	equal = true
+	return
+}
+
+func (list Uint32List) Clone() Uint32List {
+	if list == nil {
+		return nil
+	}
+
+	cloneList := make([]uint32, len(list))
+	for i, v := range list {
+		cloneList[i] = v
+	}
+	return cloneList
+}
+
 func SortUint32List(list []uint32) []uint32 {
 	sort.Sort(Uint32List(list))
 	return list
