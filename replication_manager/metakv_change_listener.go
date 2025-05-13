@@ -364,7 +364,7 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 			replication_mgr.pipelineMgr.InitiateRepStatus(newSpec.Id)
 		} else {
 			// is not a newly created spec
-			if needToRestreamPipelineEvenIfStopped(oldSettings, newSpec.Settings) {
+			if needToRestreamPipeline(oldSettings, newSpec.Settings) {
 				cleanErr := replication_mgr.pipelineMgr.ReInitStreams(topic)
 				if cleanErr != nil {
 					rscl.logger.Errorf("unable to cleanup %v due to %v - pipeline may be missing earlier data. Recommended manual delete and recreation", topic, cleanErr)
@@ -471,6 +471,11 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
+	if oldSettings == nil || newSettings == nil {
+		// 'newSettings == nil' is for defensive programming; no known case where this is true for a non-nil "newSpec"
+		return false
+	}
+
 	// Filter changed that require restart
 	skip := false
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
@@ -482,7 +487,7 @@ func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettin
 		return true
 	}
 
-	return needToRestreamPipelineEvenIfStopped(oldSettings, newSettings)
+	return oldSettings.NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(newSettings)
 }
 
 func needToRestreamPipelineEvenIfStopped(oldSettings, newSettings *metadata.ReplicationSettings) bool {
