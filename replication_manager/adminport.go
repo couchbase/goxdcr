@@ -303,6 +303,7 @@ type getOptsCommon struct {
 
 type getReplicationsOpt struct {
 	getOptsCommon
+	Backfill bool
 }
 
 type getRemoteClusterOpts struct {
@@ -353,20 +354,30 @@ func parseGetOptsCommon(query url.Values, opt *getOptsCommon) {
 	}
 }
 
-func parseGetReplicationsRequestQuery(request *http.Request) getReplicationsOpt {
+func parseGetReplicationsRequestQuery(request *http.Request) (getReplicationsOpt, error) {
 	var opt getReplicationsOpt
 	if request == nil {
-		return opt
+		return opt, fmt.Errorf("received nil value for http request")
 	}
 
 	query := request.URL.Query()
 	if query == nil || len(query) == 0 {
-		return opt
+		return opt, nil
 	}
 
 	parseGetOptsCommon(query, &opt.getOptsCommon)
 
-	return opt
+	for key, valArr := range query {
+		if key == base.Backfill && len(valArr) == 1 {
+			backfill, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(valArr[0])))
+			if err != nil {
+				return opt, fmt.Errorf("invalid value for query parameter '%s': expected a boolean but got '%s' (error: %v)", base.Backfill, valArr[0], err)
+			}
+			opt.Backfill = backfill
+		}
+	}
+
+	return opt, nil
 }
 
 func parseGetSourcesRequestQuery(request *http.Request) getSourcesOpt {
@@ -539,7 +550,24 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 		return response, err
 	}
 
-	replicationsGetOpts := parseGetReplicationsRequestQuery(request)
+	replicationsGetOpts, err := parseGetReplicationsRequestQuery(request)
+	if err != nil {
+		return nil, err
+	}
+
+	// return only backfill specs if requested explicitly
+	if replicationsGetOpts.Backfill {
+		replIds := replication_mgr.pipelineMgr.AllReplications()
+		backfillReplSpecs := make(map[string]*metadata.BackfillReplicationSpec)
+
+		for _, replId := range replIds {
+			backfillSpec, _ := replication_mgr.backfillReplSvc.BackfillReplSpec(replId)
+			if backfillSpec != nil {
+				backfillReplSpecs[replId] = backfillSpec.Clone()
+			}
+		}
+		return NewGetAllBackfillSpecsResponse(backfillReplSpecs)
+	}
 
 	replIds := replication_mgr.pipelineMgr.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
@@ -553,7 +581,6 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 			}
 		}
 	}
-
 	return NewGetAllReplicationsResponse(replSpecs)
 }
 

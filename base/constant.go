@@ -448,6 +448,9 @@ const (
 
 	ReplicationDocTypeXmem = "xdc-xmem"
 	ReplicationDocTypeCapi = "xdc"
+
+	VBTaskMap      = "vbTasks"
+	SourceManifest = "sourceManifest"
 )
 
 // constant used in replication info to ensure compatibility with erlang xdcr
@@ -1985,3 +1988,6 @@ const SUBDOC_MULTI_MAX_PATHS int = 16
 const ExternalAddressSetup = "externalAddressSetup"
 
 const PipelineReinitHash = "pipelineReinitHash"
+
+// constant used for paring get all replications request
+const Backfill = "backfill"

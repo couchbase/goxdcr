@@ -413,6 +413,30 @@ func NewGetAllReplicationsResponse(replSpecs map[string]*metadata.ReplicationSpe
 	return EncodeObjectIntoResponseSensitive(replArr)
 }
 
+func NewGetAllBackfillSpecsResponse(backfillSpecs map[string]*metadata.BackfillReplicationSpec) (*ap.Response, error) {
+	specIds := make([]string, 0, len(backfillSpecs))
+	for specId, _ := range backfillSpecs {
+		specIds = append(specIds, specId)
+	}
+	sort.Strings(specIds)
+
+	replArr := make([]map[string]interface{}, 0, len(specIds))
+	for _, specId := range specIds {
+		replArr = append(replArr, getBackfillSpecDoc(backfillSpecs[specId]))
+	}
+	return EncodeObjectIntoResponseSensitive(replArr)
+}
+
+func getBackfillSpecDoc(backfillSpec *metadata.BackfillReplicationSpec) map[string]interface{} {
+	specDocMap := make(map[string]interface{})
+	if backfillSpec != nil {
+		specDocMap[base.ReplicationDocId] = backfillSpec.Id
+		specDocMap[base.VBTaskMap] = backfillSpec.VBTasksMap.CompactTaskMap()
+		specDocMap[base.SourceManifest] = backfillSpec.SourceManifestUid
+	}
+	return specDocMap
+}
+
 func NewGetAllReplicationInfosResponse(replInfos []base.ReplicationInfo) (*ap.Response, error) {
 	return EncodeObjectIntoResponse(replInfos)
 }
