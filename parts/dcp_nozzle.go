@@ -391,6 +391,9 @@ type DcpNozzle struct {
 	minSeqnoOfOsoSnapshot map[uint16]uint64
 	maxSeqnoOfOsoSnapshot map[uint16]uint64
 	numSeqnoOfOsoSnapshot map[uint16]uint64
+
+	customPlainAuthGetter func() (string, string, error)
+	customAuthMtx         sync.RWMutex
 }
 
 func NewDcpNozzle(id string,
@@ -521,13 +524,19 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 	dcpMcReqFeatures.CompressionType = dcp.memcachedCompressionSetting
 	dcp.savedMcReqFeatures = dcpMcReqFeatures
 
+	customUsername, customPassword, customAuthErr := dcp.getCustomPlainAuth()
+
 	dcp.lock_client.Lock()
 	if dcp.state == common.Part_Stopping || dcp.state == common.Part_Stopped {
 		// If xmem start is slow, dcp can still be initializing when pipeline start times out and is being stopped. Don't create DCP connection to avoid connection leak
 		dcp.lock_client.Unlock()
 		return fmt.Errorf("Skipping creating client since DCP is stopping.")
 	}
-	dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
+	if customAuthErr == nil {
+		dcp.client, respondedFeatures, err = dcp.utils.GetRemoteMemcachedConnectionWFeatures(addr, customUsername, customPassword, dcp.sourceBucketName, dcp.user_agent, true, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
+	} else {
+		dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
+	}
 	dcp.lock_client.Unlock()
 
 	if err == nil && (dcp.memcachedCompressionSetting != base.CompressionTypeNone) && (respondedFeatures.CompressionType != dcp.memcachedCompressionSetting) {
@@ -2276,4 +2285,23 @@ func (dcp *DcpNozzle) Connectors() []common.Connector {
 		}
 	}
 	return connectorList
+}
+
+// SetCustomPlainAuth is a setter for the custom plain auth function
+// To avoid the need to use cbauth
+func (dcp *DcpNozzle) SetCustomPlainAuth(getter func() (string, string, error)) {
+	dcp.customAuthMtx.Lock()
+	defer dcp.customAuthMtx.Unlock()
+
+	dcp.customPlainAuthGetter = getter
+}
+
+func (dcp *DcpNozzle) getCustomPlainAuth() (string, string, error) {
+	dcp.customAuthMtx.RLock()
+	defer dcp.customAuthMtx.RUnlock()
+
+	if dcp.customPlainAuthGetter != nil {
+		return dcp.customPlainAuthGetter()
+	}
+	return "", "", base.ErrorNotFound
 }

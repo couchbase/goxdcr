@@ -595,6 +595,39 @@ func (_c *SourceNozzle_SetConnector_Call) RunAndReturn(run func(common.Connector
 	return _c
 }
 
+// SetCustomPlainAuth provides a mock function with given fields: _a0
+func (_m *SourceNozzle) SetCustomPlainAuth(_a0 func() (string, string, error)) {
+	_m.Called(_a0)
+}
+
+// SourceNozzle_SetCustomPlainAuth_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetCustomPlainAuth'
+type SourceNozzle_SetCustomPlainAuth_Call struct {
+	*mock.Call
+}
+
+// SetCustomPlainAuth is a helper method to define mock.On call
+//   - _a0 func()(string , string , error)
+func (_e *SourceNozzle_Expecter) SetCustomPlainAuth(_a0 interface{}) *SourceNozzle_SetCustomPlainAuth_Call {
+	return &SourceNozzle_SetCustomPlainAuth_Call{Call: _e.mock.On("SetCustomPlainAuth", _a0)}
+}
+
+func (_c *SourceNozzle_SetCustomPlainAuth_Call) Run(run func(_a0 func() (string, string, error))) *SourceNozzle_SetCustomPlainAuth_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(func() (string, string, error)))
+	})
+	return _c
+}
+
+func (_c *SourceNozzle_SetCustomPlainAuth_Call) Return() *SourceNozzle_SetCustomPlainAuth_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *SourceNozzle_SetCustomPlainAuth_Call) RunAndReturn(run func(func() (string, string, error))) *SourceNozzle_SetCustomPlainAuth_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Start provides a mock function with given fields: settings
 func (_m *SourceNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)

@@ -51,4 +51,7 @@ type SourceNozzle interface {
 
 	// Source nozzles may have more than one connector related to it
 	MultiConnectable
+
+	// SetCustomAuth allows a custom overriding auth getter to be set
+	SetCustomPlainAuth(func() (string, string, error))
 }
