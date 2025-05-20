@@ -21,17 +21,17 @@ func (_m *AgentSrcManifestGetter) EXPECT() *AgentSrcManifestGetter_Expecter {
 	return &AgentSrcManifestGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with no fields
-func (_m *AgentSrcManifestGetter) Execute() *metadata.CollectionsManifest {
-	ret := _m.Called()
+// Execute provides a mock function with given fields: forceRefresh
+func (_m *AgentSrcManifestGetter) Execute(forceRefresh bool) *metadata.CollectionsManifest {
+	ret := _m.Called(forceRefresh)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Execute")
 	}
 
 	var r0 *metadata.CollectionsManifest
-	if rf, ok := ret.Get(0).(func() *metadata.CollectionsManifest); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(bool) *metadata.CollectionsManifest); ok {
+		r0 = rf(forceRefresh)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*metadata.CollectionsManifest)
@@ -47,13 +47,14 @@ type AgentSrcManifestGetter_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
-func (_e *AgentSrcManifestGetter_Expecter) Execute() *AgentSrcManifestGetter_Execute_Call {
-	return &AgentSrcManifestGetter_Execute_Call{Call: _e.mock.On("Execute")}
+//   - forceRefresh bool
+func (_e *AgentSrcManifestGetter_Expecter) Execute(forceRefresh interface{}) *AgentSrcManifestGetter_Execute_Call {
+	return &AgentSrcManifestGetter_Execute_Call{Call: _e.mock.On("Execute", forceRefresh)}
 }
 
-func (_c *AgentSrcManifestGetter_Execute_Call) Run(run func()) *AgentSrcManifestGetter_Execute_Call {
+func (_c *AgentSrcManifestGetter_Execute_Call) Run(run func(forceRefresh bool)) *AgentSrcManifestGetter_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(bool))
 	})
 	return _c
 }
@@ -63,7 +64,7 @@ func (_c *AgentSrcManifestGetter_Execute_Call) Return(_a0 *metadata.CollectionsM
 	return _c
 }
 
-func (_c *AgentSrcManifestGetter_Execute_Call) RunAndReturn(run func() *metadata.CollectionsManifest) *AgentSrcManifestGetter_Execute_Call {
+func (_c *AgentSrcManifestGetter_Execute_Call) RunAndReturn(run func(bool) *metadata.CollectionsManifest) *AgentSrcManifestGetter_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

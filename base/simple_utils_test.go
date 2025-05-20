@@ -564,3 +564,38 @@ func TestUint32Ops(t *testing.T) {
 	assert.True(t, Uint32List(l3).Equal(l2))
 	assert.True(t, Uint32List(l1).Equal(l3))
 }
+
+func TestUint16List_Intersection(t *testing.T) {
+	tests := []struct {
+		name string
+		l1   Uint16List
+		l2   Uint16List
+		want Uint16List
+	}{
+		{
+			name: "len(l1) > len(l2)",
+			l1:   Uint16List{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			l2:   Uint16List{2, 8},
+			want: Uint16List{2, 8},
+		},
+		{
+			name: "len(l1) == len(l2)",
+			l1:   Uint16List{1, 2, 3, 4, 5},
+			l2:   Uint16List{6, 7, 8, 9, 10},
+			want: Uint16List{},
+		},
+		{
+			name: "len(l1)<len(l2)",
+			l1:   Uint16List{9, 10, 23, 5, 2},
+			l2:   Uint16List{8, 1, 23, 5, 16, 7, 2, 5},
+			want: Uint16List{23, 5, 2},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.l1.Intersection(tt.l2); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Uint16List.Intersection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

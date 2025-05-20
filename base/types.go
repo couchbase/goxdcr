@@ -3046,3 +3046,19 @@ const (
 	BackfillSpecUpdateComplete   BackfillSpecUpdateStatus = iota //indicates that there are no pending metaKV ops
 	BackfillSpecUpdateInProgress BackfillSpecUpdateStatus = iota //indicates the presence of a pending metaKV op
 )
+
+type VbStringMap map[uint16]string
+
+func (v VbStringMap) FilterByVBs(vbsList []uint16) VbStringMap {
+	if v == nil {
+		return nil
+	}
+	filteredMap := make(VbStringMap)
+	sortedVbsList := SortUint16List(CloneUint16List(vbsList))
+	for vbno, str := range v {
+		if _, found := SearchUint16List(sortedVbsList, vbno); found {
+			filteredMap[vbno] = str
+		}
+	}
+	return filteredMap
+}

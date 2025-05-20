@@ -3,7 +3,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
+
 	metadata "github.com/couchbase/goxdcr/metadata"
 
 	mock "github.com/stretchr/testify/mock"
@@ -548,9 +550,9 @@ func (_c *OutNozzle_SetConnector_Call) RunAndReturn(run func(common.Connector) e
 	return _c
 }
 
-// SetUpstreamErrReporter provides a mock function with given fields: _a0
-func (_m *OutNozzle) SetUpstreamErrReporter(_a0 func(interface{})) {
-	_m.Called(_a0)
+// SetUpstreamErrReporter provides a mock function with given fields: _a0, _a1
+func (_m *OutNozzle) SetUpstreamErrReporter(_a0 func(interface{}), _a1 base.Uint16List) {
+	_m.Called(_a0, _a1)
 }
 
 // OutNozzle_SetUpstreamErrReporter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetUpstreamErrReporter'
@@ -560,13 +562,14 @@ type OutNozzle_SetUpstreamErrReporter_Call struct {
 
 // SetUpstreamErrReporter is a helper method to define mock.On call
 //   - _a0 func(interface{})
-func (_e *OutNozzle_Expecter) SetUpstreamErrReporter(_a0 interface{}) *OutNozzle_SetUpstreamErrReporter_Call {
-	return &OutNozzle_SetUpstreamErrReporter_Call{Call: _e.mock.On("SetUpstreamErrReporter", _a0)}
+//   - _a1 base.Uint16List
+func (_e *OutNozzle_Expecter) SetUpstreamErrReporter(_a0 interface{}, _a1 interface{}) *OutNozzle_SetUpstreamErrReporter_Call {
+	return &OutNozzle_SetUpstreamErrReporter_Call{Call: _e.mock.On("SetUpstreamErrReporter", _a0, _a1)}
 }
 
-func (_c *OutNozzle_SetUpstreamErrReporter_Call) Run(run func(_a0 func(interface{}))) *OutNozzle_SetUpstreamErrReporter_Call {
+func (_c *OutNozzle_SetUpstreamErrReporter_Call) Run(run func(_a0 func(interface{}), _a1 base.Uint16List)) *OutNozzle_SetUpstreamErrReporter_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(interface{})))
+		run(args[0].(func(interface{})), args[1].(base.Uint16List))
 	})
 	return _c
 }
@@ -576,7 +579,7 @@ func (_c *OutNozzle_SetUpstreamErrReporter_Call) Return() *OutNozzle_SetUpstream
 	return _c
 }
 
-func (_c *OutNozzle_SetUpstreamErrReporter_Call) RunAndReturn(run func(func(interface{}))) *OutNozzle_SetUpstreamErrReporter_Call {
+func (_c *OutNozzle_SetUpstreamErrReporter_Call) RunAndReturn(run func(func(interface{}), base.Uint16List)) *OutNozzle_SetUpstreamErrReporter_Call {
 	_c.Run(run)
 	return _c
 }
