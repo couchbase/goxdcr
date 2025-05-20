@@ -180,6 +180,19 @@ func (u Uint16List) Len() int           { return len(u) }
 func (u Uint16List) Swap(i, j int)      { u[i], u[j] = u[j], u[i] }
 func (u Uint16List) Less(i, j int) bool { return u[i] < u[j] }
 
+// Returns a new Uint16List containing elements from l1 that are also present in l2.
+// Assumes that l2 is not sorted
+func (l1 Uint16List) Intersection(l2 Uint16List) Uint16List {
+	sortedl2 := SortUint16List(CloneUint16List(l2))
+	ret := make(Uint16List, 0, min(len(l1), len(l2)))
+	for _, v1 := range l1 {
+		if _, found := SearchUint16List(sortedl2, v1); found {
+			ret = append(ret, v1)
+		}
+	}
+	return ret
+}
+
 func SortUint16List(list []uint16) []uint16 {
 	sort.Sort(Uint16List(list))
 	return list

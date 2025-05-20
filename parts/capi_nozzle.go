@@ -1364,6 +1364,6 @@ func (capi *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 	// no op
 }
 
-func (capi *CapiNozzle) SetUpstreamErrReporter(func(interface{})) {
+func (capi *CapiNozzle) SetUpstreamErrReporter(func(interface{}), base.Uint16List) {
 	// no op
 }

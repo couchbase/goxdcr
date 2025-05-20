@@ -1467,7 +1467,7 @@ func checkAndHandleSpecialMigration(incomingRules *metadata.CollectionsMappingRu
 // Key - xmem nozzle ID
 type CollectionsRoutingMap map[string]*CollectionsRouter
 
-func (c CollectionsRoutingMap) Init(id string, downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) error {
+func (c CollectionsRoutingMap) Init(id string, downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error), routerVBs base.Uint16List) error {
 	for partId, outNozzlePart := range downStreamParts {
 		collectionRouter, exists := c[partId]
 		if !exists {
@@ -1478,7 +1478,12 @@ func (c CollectionsRoutingMap) Init(id string, downStreamParts map[string]common
 		if !ok {
 			return base.ErrorInvalidInput
 		} else {
-			outNozzle.SetUpstreamErrReporter(collectionRouter.recordUnroutableRequest)
+			// Retrieve the VBs that are common to both Xmem and the router,
+			// representing the set of VBs that the parent of `collectionRouter` is
+			// responsible for routing to the downstream `OutNozzle`.
+			outNozzleVbs := base.Uint16List(outNozzle.ResponsibleVBs())
+			vbsCommon := outNozzleVbs.Intersection(routerVBs)
+			outNozzle.SetUpstreamErrReporter(collectionRouter.recordUnroutableRequest, vbsCommon)
 		}
 	}
 
@@ -1664,7 +1669,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	if router.remoteClusterCapability.HasCollectionSupport() {
-		router.collectionsRouting.Init(router.id, downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
+		router.collectionsRouting.Init(router.id, downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter, router.GetPart().ResponsibleVBs())
 
 		modes := spec.Settings.GetCollectionModes()
 		router.collectionModes = CollectionsMgtAtomicType(modes)

@@ -8,6 +8,8 @@
 
 package common
 
+import "github.com/couchbase/goxdcr/v8/base"
+
 // Nozzle models the openning that data streaming out of the source system
 // and the outlet where the data flowing into the target system.
 //
@@ -38,7 +40,7 @@ type OutNozzle interface {
 	Nozzle
 
 	SetUpstreamObjRecycler(func(interface{}))
-	SetUpstreamErrReporter(func(interface{}))
+	SetUpstreamErrReporter(func(interface{}), base.Uint16List)
 
 	SetConflictLogger(interface{}) error
 	GetConflictLogger() interface{}
