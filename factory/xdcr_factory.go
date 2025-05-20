@@ -319,7 +319,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		}
 
 		// Construct a router - each Source nozzle has a router.
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
+		filteredVBNozzleMap := base.VbStringMap(vbNozzleMap).FilterByVBs(sourceNozzle.ResponsibleVBs())
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, filteredVBNozzleMap, sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
 		if err != nil {
 			return nil, nil, err
 		}

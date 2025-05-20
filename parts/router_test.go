@@ -1273,3 +1273,169 @@ func TestCollectionsRouter_checkIfXmemReportedCollectionError(t *testing.T) {
 	assert.Equal(uint64(9), manId)
 	assert.Nil(err)
 }
+
+func TestCollectionRouterInit_TwoRoutersOneNozzle(t *testing.T) {
+	fmt.Println("============== Test case start: TestCollectionRouterInit_TwoRoutersOneNozzle =================")
+	defer fmt.Println("============== Test case end: TestCollectionRouterInit_TwoRoutersOneNozzle =================")
+
+	assert := assert.New(t)
+
+	// Initialize utility and logger
+	utilInstance := utilities.NewUtilities()
+	dummyLogger := &log.CommonLogger{}
+
+	// Shared nozzle setup: responsible for all 128 vBuckets
+	sharedNozzle := &XmemNozzle{
+		vbList:                 make([]uint16, 128),
+		upstreamErrReporterMap: make(map[uint16]utilities.ErrReportFunc),
+	}
+	for i := uint16(0); i < 128; i++ {
+		sharedNozzle.vbList[i] = i
+	}
+
+	// Setup boilerplate
+	routerIdA, downstreamParts, routingMapA, crMode, loggerCtx, _, throttlerSvc, needToThrottle,
+		expDelMode, manifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	delete(downstreamParts, dummyDownStream)
+	downstreamParts["shared"] = sharedNozzle
+
+	// Set up Router A (0–63)
+	vbsA := make([]uint16, 64)
+	routingMap := routingMapA
+	for i := uint16(0); i < 64; i++ {
+		routingMap[i] = "shared"
+		vbsA[i] = i
+	}
+
+	routerA, err := NewRouter(
+		routerIdA, spec, downstreamParts, routingMap, crMode,
+		loggerCtx, utilInstance, throttlerSvc,
+		needToThrottle, expDelMode, manifestSvc,
+		recycler, nil, nonCollectionsCap, nil, connectivityStatus,
+		nil,
+	)
+	assert.Nil(err)
+	assert.NotNil(routerA)
+
+	// Set up Router B (64–127)
+	routerIdB := routerIdA + "_B"
+	routingMapB := make(map[uint16]string)
+	vbsB := make([]uint16, 64)
+	for i := uint16(64); i < 128; i++ {
+		routingMapB[i] = "shared"
+		vbsB[i-64] = i
+	}
+
+	routerB, err := NewRouter(
+		routerIdB, spec, downstreamParts, routingMapB, crMode,
+		loggerCtx, utilInstance, throttlerSvc,
+		needToThrottle, expDelMode, manifestSvc,
+		recycler, nil, nonCollectionsCap, nil, connectivityStatus,
+		nil,
+	)
+	assert.Nil(err)
+	assert.NotNil(routerB)
+
+	// Initialize collection routing
+	routerA.collectionsRouting.Init(
+		routerIdA, downstreamParts, manifestSvc, spec,
+		dummyLogger, nil, nil, nil, nil, nil, nil, routerA,
+	)
+	routerB.collectionsRouting.Init(
+		routerIdB, downstreamParts, manifestSvc, spec,
+		dummyLogger, nil, nil, nil, nil, nil, nil, routerB,
+	)
+
+	// Validate
+	assert.Equal(128, len(sharedNozzle.upstreamErrReporterMap))
+	assert.Equal(1, len(routerA.collectionsRouting))
+	assert.Equal(1, len(routerB.collectionsRouting))
+}
+
+func TestCollectionRouterInit_OneRouterTwoNozzles(t *testing.T) {
+	fmt.Println("============== Test case start: TestCollectionRouterInit_OneRouterTwoNozzles =================")
+	defer fmt.Println("============== Test case end: TestCollectionRouterInit_OneRouterTwoNozzles =================")
+
+	assert := assert.New(t)
+
+	// Initialize utilities and logger
+	utilInstance := utilities.NewUtilities()
+	dummyLogger := &log.CommonLogger{}
+
+	// Create two output nozzles each responsible for 64 vBuckets
+	nozzle1 := &XmemNozzle{
+		vbList:                 make([]uint16, 0, 64),
+		upstreamErrReporterMap: make(map[uint16]utilities.ErrReportFunc),
+	}
+	nozzle2 := &XmemNozzle{
+		vbList:                 make([]uint16, 0, 64),
+		upstreamErrReporterMap: make(map[uint16]utilities.ErrReportFunc),
+	}
+
+	for i := uint16(0); i < 64; i++ {
+		nozzle1.vbList = append(nozzle1.vbList, i)
+	}
+	for i := uint16(64); i < 128; i++ {
+		nozzle2.vbList = append(nozzle2.vbList, i)
+	}
+
+	// Setup boilerplate
+	routerId, downstreamParts, routingMap, crMode, loggerCtx, _, throttlerSvc, needToThrottle,
+		expDelMode, collManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Assign downstream parts
+	delete(downstreamParts, "dummy")
+	downstreamParts["nozzle1"] = nozzle1
+	downstreamParts["nozzle2"] = nozzle2
+
+	// Set up routing map for 128 vBuckets
+	routerVbs := make([]uint16, 0, 128)
+	for vb := uint16(0); vb < 128; vb++ {
+		if vb < 64 {
+			routingMap[vb] = "nozzle1"
+		} else {
+			routingMap[vb] = "nozzle2"
+		}
+		routerVbs = append(routerVbs, vb)
+	}
+
+	// Create the router
+	router, err := NewRouter(
+		routerId, spec, downstreamParts, routingMap, crMode,
+		loggerCtx, utilInstance, throttlerSvc,
+		needToThrottle, expDelMode, collManifestSvc,
+		recycler, nil, nonCollectionsCap, nil, connectivityStatus,
+		nil,
+	)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	// Initialize collections routing
+	router.collectionsRouting.Init(
+		routerId, downstreamParts, collManifestSvc, spec,
+		dummyLogger, nil, nil, nil, nil, nil, nil, router,
+	)
+
+	// Validate
+	assert.Equal(64, len(nozzle1.upstreamErrReporterMap))
+	assert.Equal(64, len(nozzle2.upstreamErrReporterMap))
+	assert.Equal(2, len(router.collectionsRouting))
+
+	// Test with 1 nozzle and 1 router
+	// modify the existing setup
+	nozzle1.upstreamErrReporterMap = make(map[uint16]utilities.ErrReportFunc)
+	for vb := uint16(64); vb < 128; vb++ {
+		nozzle1.vbList = append(nozzle1.vbList, vb)
+		routingMap[vb] = "nozzle1"
+	}
+	delete(downstreamParts, "nozzle2")
+	delete(router.collectionsRouting, "nozzle2")
+
+	router.collectionsRouting.Init(
+		routerId, downstreamParts, collManifestSvc, spec,
+		dummyLogger, nil, nil, nil, nil, nil, nil, router,
+	)
+	// Validate
+	assert.Equal(128, len(nozzle1.upstreamErrReporterMap))
+	assert.Equal(1, len(router.collectionsRouting))
+}

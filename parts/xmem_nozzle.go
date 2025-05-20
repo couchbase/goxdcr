@@ -693,25 +693,26 @@ type XmemNozzle struct {
 
 	finish_ch chan bool
 
-	counter_sent                uint64 // sent item count going through dataChan. sent = received - from_target + retry_cr
-	counter_received            uint64
-	counter_ignored             uint64
-	counter_compressed_received uint64
-	counter_compressed_sent     uint64
-	counter_retry_cr            uint64
-	counter_to_resolve          uint64
-	counter_to_setback          uint64
-	counter_from_target         uint64
-	counter_waittime            uint64
-	counterNumGetMeta           uint64
-	counterNumSubdocGet         uint64
-	start_time                  time.Time
-	counter_resend              uint64
-	counter_tmperr              uint64 // count TMPERR for commands except getMeta. TMPERR for getMeta not counted since it doesn't block replication
-	counter_eaccess             uint64 // count EACCESS for commands except getMeta. EACCESS for getMeta not counted since it doesn't block replication
-	counter_locked              uint64 // counter of times LOCKED status is returned by KV
-	counterGuardrailHit         uint64
-	counterUnknownStatus        uint64
+	counter_sent                      uint64 // sent item count going through dataChan. sent = received - from_target + retry_cr
+	counter_received                  uint64
+	counter_ignored                   uint64
+	counter_compressed_received       uint64
+	counter_compressed_sent           uint64
+	counter_retry_cr                  uint64
+	counter_to_resolve                uint64
+	counter_to_setback                uint64
+	counter_from_target               uint64
+	counter_waittime                  uint64
+	counterNumGetMeta                 uint64
+	counterNumSubdocGet               uint64
+	start_time                        time.Time
+	counter_resend                    uint64
+	counter_tmperr                    uint64 // count TMPERR for commands except getMeta. TMPERR for getMeta not counted since it doesn't block replication
+	counter_eaccess                   uint64 // count EACCESS for commands except getMeta. EACCESS for getMeta not counted since it doesn't block replication
+	counter_locked                    uint64 // counter of times LOCKED status is returned by KV
+	counterGuardrailHit               uint64
+	counterUnknownStatus              uint64
+	counterUpstreamErrReporterMissing uint64
 
 	receive_token_ch chan int
 
@@ -754,7 +755,16 @@ type XmemNozzle struct {
 
 	upstreamObjRecycler utilities.RecycleObjFunc
 
-	upstreamErrReporter utilities.ErrReportFunc
+	// Map of vb -> upstreamErrReporter
+	// When Xmem Nozzle receives data from two different upstream routers, it must report errors
+	// back to the specific router that originally routed the request to it.
+	// For example, consider a setup with 4 DCP nozzles and 2 XMEM nozzles:
+	// The VB ranges handled by source nozzles are: [0-256], [256-512], [512-768], and [768-1024],
+	// with corresponding routers aligned to these same ranges.
+	// The VB ranges for the XMEM nozzles are [0-512] and [512-1024],
+	// meaning each Xmem Nozzle receives data from two upstream routers.
+	// Hence should report errors if any, to the right upstream router.
+	upstreamErrReporterMap map[uint16]utilities.ErrReportFunc
 
 	// If XError is enabled, then as part of connection initialization, the target
 	// memcached will return an error map that contains more details about
@@ -791,41 +801,42 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
 	xmem := &XmemNozzle{
-		AbstractPart:        part,
-		remoteClusterSvc:    remoteClusterSvc,
-		sourceBucketUuid:    sourceBucketUuid,
-		targetClusterUuid:   targetClusterUuid,
-		bOpen:               true,
-		lock_bOpen:          sync.RWMutex{},
-		dataChan:            nil,
-		receive_token_ch:    nil,
-		client_for_setMeta:  nil,
-		client_for_getMeta:  nil,
-		config:              newConfig(part.Logger()),
-		batches_ready_queue: nil,
-		batch:               nil,
-		batch_lock:          make(chan bool, 1),
-		childrenWaitGrp:     sync.WaitGroup{},
-		buf:                 nil,
-		finish_ch:           make(chan bool, 1),
-		counter_sent:        0,
-		counter_received:    0,
-		counter_ignored:     0,
-		counter_waittime:    0,
-		counterNumGetMeta:   0,
-		counterNumSubdocGet: 0,
-		counter_tmperr:      0,
-		counter_eaccess:     0,
-		topic:               topic,
-		source_cr_mode:      source_cr_mode,
-		sourceBucketName:    sourceBucketName,
-		targetBucketUuid:    targetBucketUuid,
-		utils:               utilsIn,
-		vbList:              vbList,
-		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
-		eventsProducer:      eventsProducer,
-		errsForUIAlert:      make(map[uint16]mc.Status),
-		sourceClusterUuid:   sourceClusterUUID,
+		AbstractPart:           part,
+		remoteClusterSvc:       remoteClusterSvc,
+		sourceBucketUuid:       sourceBucketUuid,
+		targetClusterUuid:      targetClusterUuid,
+		bOpen:                  true,
+		lock_bOpen:             sync.RWMutex{},
+		dataChan:               nil,
+		receive_token_ch:       nil,
+		client_for_setMeta:     nil,
+		client_for_getMeta:     nil,
+		config:                 newConfig(part.Logger()),
+		batches_ready_queue:    nil,
+		batch:                  nil,
+		batch_lock:             make(chan bool, 1),
+		childrenWaitGrp:        sync.WaitGroup{},
+		buf:                    nil,
+		finish_ch:              make(chan bool, 1),
+		counter_sent:           0,
+		counter_received:       0,
+		counter_ignored:        0,
+		counter_waittime:       0,
+		counterNumGetMeta:      0,
+		counterNumSubdocGet:    0,
+		counter_tmperr:         0,
+		counter_eaccess:        0,
+		topic:                  topic,
+		source_cr_mode:         source_cr_mode,
+		sourceBucketName:       sourceBucketName,
+		targetBucketUuid:       targetBucketUuid,
+		utils:                  utilsIn,
+		vbList:                 vbList,
+		collectionEnabled:      1, /*Default to true unless otherwise disabled*/
+		eventsProducer:         eventsProducer,
+		errsForUIAlert:         make(map[uint16]mc.Status),
+		sourceClusterUuid:      sourceClusterUUID,
+		upstreamErrReporterMap: make(map[uint16]utilities.ErrReportFunc),
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -3035,7 +3046,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.recycleDataObj(wrappedReq)
 					} else if base.IsCollectionMappingError(response.Status) {
 						// upstreamErrReporter will recycle wrappedReq once it's done
-						xmem.upstreamErrReporter(wrappedReq)
+						upstreamReporter, exists := xmem.upstreamErrReporterMap[wrappedReq.Req.VBucket]
+						if !exists {
+							// This should never happen.
+							// If it does, increment the counter.
+							// Logging is avoided to prevent potential log flooding.
+							atomic.AddUint64(&xmem.counterUpstreamErrReporterMissing, 1)
+						} else {
+							upstreamReporter(wrappedReq)
+						}
+
 						if xmem.buf.evictSlot(pos) != nil {
 							panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
 						}
@@ -3703,7 +3723,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v unknownStatusRec=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v,numSubdocGet=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v unknownStatusRec=%v, numUpstreamErrReporterMissing=%v",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -3715,7 +3735,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
 			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta), atomic.LoadUint64(&xmem.counterNumSubdocGet),
 			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
-			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus))
+			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus), atomic.LoadUint64(&xmem.counterUpstreamErrReporterMissing))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -4325,8 +4345,10 @@ func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 }
 
 // Should only be done during pipeline construction
-func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{})) {
-	xmem.upstreamErrReporter = reporter
+func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{}), responiblseVbs base.Uint16List) {
+	for _, vb := range responiblseVbs {
+		xmem.upstreamErrReporterMap[vb] = reporter
+	}
 }
 
 // Should only be done during pipeline construction
