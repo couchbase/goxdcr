@@ -11,13 +11,14 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"strings"
+	"testing"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
-	"strings"
-	"testing"
 )
 
 func getManifest() metadata.CollectionsManifest {
