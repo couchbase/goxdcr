@@ -383,44 +383,33 @@ func needSpecialCallbackUpdate(topic, internalSpecId string, oldSettings, newSet
 	// TODO MB-66379 - this logic will need to also need to be repaired based upon the fix for MB-66140
 	if !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules()) {
 		needCallback = true
-		handlerCb, handlerErrCb := replication_mgr.backfillMgr.GetExplicitMappingChangeHandler(topic, internalSpecId, oldSettings, newSettings)
-		callback = func() error {
-			// When explicit map rule changes, there's a chance src manifests and tgt
-			// manifests did not change but the backfill raise is required because of
-			// the mapping change as previously unmapped src and tgt collections
-			// Each source node of the cluster will handle a subset of VBs and is
-			// responsible for raising backfill tasks for subset of ownership
-			// Normally when backfill is raised due to collections creation, it is
-			// working in conjunction with the checkpoints and the last known manifest
-			// recorded in the ckpt so that if a peer node takes over a VB
-			// and resumes from a previously known manifest ID using an older ckpt,
-			// another backfill can be raised when it detects that the resumed
-			// manifest ID is less than the current manifest ID and diff to find the
-			// differences
-			// But with explicit mapping change, manifests may not change and this
-			// backfill raise operation for the subset of VBs that this node owns
-			// must not be lost as main pipeline will keep going. It is possible that
-			// once the backfill tasks for this node's VBs are established, this
-			// node can be rebalanced out of the cluster before a push occurs
-			// (or if pipeline is paused)
-			// For the sake of safety for this scenario, this callback will not only
-			// raise backfill tasks, but also force a push to replicas so that the
-			// work done here is not lost
-			err := replication_mgr.utils.ExponentialBackoffExecutor("ExplicitMapChangeRetry",
-				base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor,
-				utilities.ExponentialOpFunc(handlerCb))
-			if err != nil {
-				return err
-			}
 
-			immediatePushRetry := func() error {
-				return replication_mgr.p2pMgr.RequestImmediateCkptBkfillPush(topic)
-			}
-			return replication_mgr.utils.ExponentialBackoffExecutor("ExplicitMapChangePushRetry",
-				base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor,
-				immediatePushRetry)
+		// When explicit map rule changes, there's a chance src manifests and tgt
+		// manifests did not change but the backfill raise is required because of
+		// the mapping change as previously unmapped src and tgt collections
+		// Each source node of the cluster will handle a subset of VBs and is
+		// responsible for raising backfill tasks for subset of ownership
+		// Normally when backfill is raised due to collections creation, it is
+		// working in conjunction with the checkpoints and the last known manifest
+		// recorded in the ckpt so that if a peer node takes over a VB
+		// and resumes from a previously known manifest ID using an older ckpt,
+		// another backfill can be raised when it detects that the resumed
+		// manifest ID is less than the current manifest ID and diff to find the
+		// differences
+		// But with explicit mapping change, manifests may not change and this
+		// backfill raise operation for the subset of VBs that this node owns
+		// must not be lost as main pipeline will keep going. It is possible that
+		// once the backfill tasks for this node's VBs are established, this
+		// node can be rebalanced out of the cluster before a push occurs
+		// (or if pipeline is paused)
+		// For the sake of safety for this scenario, this callback will not only
+		// raise backfill tasks, but also force a push to replicas so that the
+		// work done here is not lost
+		p2pImmediatePush := func() error {
+			return replication_mgr.p2pMgr.RequestImmediateCkptBkfillPush(topic)
 		}
-		errCb = handlerErrCb
+
+		callback, errCb = replication_mgr.backfillMgr.GetExplicitMappingChangeHandler(topic, internalSpecId, oldSettings, newSettings, p2pImmediatePush)
 	} else {
 		callback = func() error { /* nothing */ return nil }
 		errCb = func(error, bool) { /*nothing*/ }

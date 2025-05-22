@@ -704,7 +704,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 	return err
 }
 
-func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId, internalSpecId string, oldSettings, newSettings *metadata.ReplicationSettings, p2pPush func() error) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	callback := func() error {
 		err, upToDate := b.checkUpToDateSpec(specId, internalSpecId)
 		if !upToDate {
@@ -774,8 +774,6 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				}
 			}
 
-			b.handleExplicitMapChangeBackfillReq(specId, added, removed, errCb)
-
 			// If pipeline was active during this callback's lifetime, then it means the ckpts created by the pipeline has outdated mappings. clean those up
 			if oldSettings.Active {
 				removedScopesMap := make(metadata.ScopesMap)
@@ -788,6 +786,9 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 					errCb(err, true)
 				}
 			}
+
+			b.handleExplicitMapChangeBackfillReq(specId, added, removed, errCb, p2pPush)
+
 		}
 		return nil
 	}
@@ -852,7 +853,7 @@ func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId strin
 			b.explicitMappingCbGenericErrHandler(err, specId, diff)
 		}
 
-		b.handleExplicitMapChangeBackfillReq(specId, diff.Added, diff.Removed, errCb)
+		b.handleExplicitMapChangeBackfillReq(specId, diff.Added, diff.Removed, errCb, nil)
 		return nil
 	}
 	return callback
@@ -1465,7 +1466,7 @@ func (b *BackfillMgr) GetComponentEventListener(pipeline common.Pipeline) (commo
 	return b.pipelineSvc.GetComponentEventListener(pipeline)
 }
 
-func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping, errCb func(err error)) {
+func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping, errCb func(err error), p2pPush func() error) {
 	b.specReqHandlersMtx.RLock()
 	handler := b.specToReqHandlerMap[replId]
 	handlerFinCh := handler.finCh
@@ -1504,6 +1505,12 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 			if err != nil {
 				errCb(err)
 			}
+			return
+		}
+		if p2pPush != nil {
+			b.utils.ExponentialBackoffExecutor("ExplicitMapChangePushRetry",
+				base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor,
+				p2pPush)
 		}
 	}()
 }
