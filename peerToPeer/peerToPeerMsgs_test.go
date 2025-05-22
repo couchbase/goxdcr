@@ -598,7 +598,7 @@ func TestReplicationPayload_loadCkptInternalGlobal(t *testing.T) {
 	assert.NotEqual("", ckptDoc.Checkpoint_records[0].GlobalCountersSha256)
 	assert.NotEqual(0, len(ckptDoc.Checkpoint_records[0].GlobalCounters))
 
-	assert.Nil(req.LoadMainReplication(vb0CkptDoc, nil, nil))
+	assert.Nil(req.LoadMainReplication(vb0CkptDoc, nil, nil, metadata.CollectionNsMappingsDoc{}, bucketName))
 	payloadToCheck := (*req.payload)[bucketName]
 	assert.NotNil(payloadToCheck)
 	assert.NotNil(payloadToCheck.PushVBs)

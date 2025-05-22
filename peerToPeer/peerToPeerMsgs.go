@@ -1784,7 +1784,7 @@ func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16, inter
 	return req
 }
 
-func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest, brokenMappingDoc metadata.CollectionNsMappingsDoc, srcBucketName string) error {
 	err := v.ReplicationPayload.LoadMainPipelineCkpt(ckpts, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
@@ -1793,10 +1793,14 @@ func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.
 	if err != nil {
 		return err
 	}
+	err = v.LoadBrokenMappingDoc(brokenMappingDoc, srcBucketName)
+	if err != nil {
+		return fmt.Errorf("error loading BrokenMappingDoc: %v", err)
+	}
 	return nil
 }
 
-func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest, srcManifestUid uint64) error {
+func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest, srcManifestUid uint64, brokenMappingDoc metadata.CollectionNsMappingsDoc, srcBucketName string) error {
 	err := v.ReplicationPayload.LoadBackfillTasks(vbTasks, v.ReplicationPayload.SourceBucketName, srcManifestUid)
 	if err != nil {
 		return err
@@ -1809,6 +1813,10 @@ func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTas
 	err = v.ReplicationPayload.LoadManifests(srcManifests, tgtManifests, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
+	}
+	err = v.LoadBrokenMappingDoc(brokenMappingDoc, srcBucketName)
+	if err != nil {
+		return fmt.Errorf("error loading BrokenMappingDoc: %v", err)
 	}
 	return nil
 }

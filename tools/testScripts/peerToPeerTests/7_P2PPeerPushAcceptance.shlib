@@ -1,0 +1,203 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P0"]=9001 ["C2"]=9002)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C2"]=13002)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+declare LOGMSG
+
+function runOneReplicationCycleAndPause {
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	setupCluster
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setCustomManifestRefreshInterval "C1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	runDataLoad
+
+	echo "Sleeping 20 seconds before changes left check"
+	sleep 20
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
+}
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	echo "Sleeping 15 secs before rebalancing node in"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	echo "Sleeping before checking logs"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	grepForPanics
+}
+
+function runReplicationResume {
+	resumeReplication "C1" "B0" "C2" "B1"
+
+	# The more nodes, the more time it takes to resume
+	local waitTime=$((20 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "Waiting $waitTime seconds for resume to finish"
+	sleep $waitTime
+
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================================="
+	echo "Running test with nodes that accept peer-pushed checkpoints in the presence of broken mapping"
+	echo "============================================================================================="
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	# These tests require a clean log
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+
+	setupCluster
+	echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+
+	# Add nodes to the cluster
+	addNodesIn
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	# Run replication and pause to force checkpointing
+	runOneReplicationCycleAndPause
+
+	# To clear previous pipeline resumption logs, in favour of checkpoint resumption logs
+	clearInternalNodeXdcrLog "C1"
+	clearInternalNodeXdcrLog "C1P0"
+
+	runReplicationResume
+
+	echo "Setting replicateCkptIntervalMin..."
+	setReplicationSettings "C1" "B0" "C2" "B1" 'replicateCkptIntervalMin=1'
+	if (($? != 0)); then
+		echo "Unable to set replicateCkptIntervalMin"
+		return 1
+	fi
+	echo "Sleeping 200s to let local checkpoints be pushed to peers"
+	sleep 200
+
+	local logsC1
+	local logsC1P0
+	local resumeFrom0CntOrigC1
+	local resumeFrom0CntOrigC1P0
+	local resumeFrom0CntNewC1
+	logsC1=$(getInternalNodeXdcrLog "C1")
+	logsC1P0=$(getInternalNodeXdcrLog "C1P0")
+	resumeFrom0CntOrigC1=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
+	resumeFrom0CntOrigC1P0=$(echo "$logsC1P0" | grep -c "$TS_PREFIX=0")
+	echo "Failing node 9001 out and seeing if checkpoints are used on node 9000"
+	failoverNode "C1P0" "C1"
+	echo "Sleeping 30 seconds before checking logs for checkpoint resumption messages"
+	sleep 30
+	logsC1=$(getInternalNodeXdcrLog "C1")
+	resumeFrom0CntNewC1=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
+
+	# Verify that node 9000 holds checkpoints for the replica VBs that have been promoted to master after failover
+	local nonCkptVBs=$(($resumeFrom0CntNewC1 - $resumeFrom0CntOrigC1 - $resumeFrom0CntOrigC1P0))
+	if (($nonCkptVBs > 0)); then
+		echo "TEST FAILED: After failover, Source node 9000 resumed from sequence number 0 for $nonCkptVBs VBs instead of resuming from checkpoints pushed by node 9001"
+		exit 1
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+}

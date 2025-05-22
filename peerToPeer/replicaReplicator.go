@@ -645,11 +645,17 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 		return nil, fetchManifestErr
 	}
 
+	// fetch BrokenMappingDoc for the payload
+	_, brokenMappingDoc, _, _, err := a.ckptSvc.LoadBrokenMappings(a.specId)
+	if err != nil {
+		return nil, err
+	}
+
 	combinedVBs := getCombinedVBs(mainCkpts, bkptCkpts)
 	req := NewVBPeriodicReplicateReq(a.specId, a.srcBucketName, combinedVBs, a.internalId)
 	var hasThingsToSend bool
 	if len(mainCkpts) > 0 {
-		err = req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests)
+		err = req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests, *brokenMappingDoc, a.srcBucketName)
 		if err != nil {
 			return nil, err
 		}
@@ -658,7 +664,7 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 
 	if backfillSpec != nil && backfillSpec.VBTasksMap != nil && backfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(myVBList) {
 		err = req.LoadBackfillReplication(backfillSpec.VBTasksMap.FilterBasedOnVBs(myVBList), bkptCkpts, srcManifests,
-			tgtManifests, backfillSpec.SourceManifestUid)
+			tgtManifests, backfillSpec.SourceManifestUid, *brokenMappingDoc, a.srcBucketName)
 		if err != nil {
 			return nil, err
 		}
