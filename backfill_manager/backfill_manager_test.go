@@ -637,6 +637,9 @@ func TestBackfillMgrSpecChangeWithNamespaceChange(t *testing.T) {
 	utilsExpoRetMap["explicitMapChange"] = &backfillMgrTestUtilsRetStruct{
 		err: nil,
 	}
+	utilsExpoRetMap["ExplicitMapChangePushRetry"] = &backfillMgrTestUtilsRetStruct{
+		err: nil,
+	}
 	generatedSpec := setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, ckptMappingsCleanupCallback, ckptMappingErrCallback, utils, utilsExpoRetMap)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
@@ -721,7 +724,8 @@ func TestBackfillMgrSpecChangeWithNamespaceChange(t *testing.T) {
 	}()
 	waitGroup.Wait()
 
-	handlerCb, _ := backfillMgr.GetExplicitMappingChangeHandler(spec1.Id, generatedSpec.InternalId, oldSetting, newSetting)
+	fmt.Printf("1: elapsed %v\n", time.Since(startTime).Seconds())
+	handlerCb, _ := backfillMgr.GetExplicitMappingChangeHandler(spec1.Id, generatedSpec.InternalId, oldSetting, newSetting, nil)
 	handlerCb()
 
 	elapsed := time.Since(startTime)

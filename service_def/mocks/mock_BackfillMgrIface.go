@@ -82,9 +82,9 @@ func (_c *BackfillMgrIface_GetBackfillSpecUpdateStatus_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetExplicitMappingChangeHandler provides a mock function with given fields: specId, internalSpecId, oldSettings, newSettings
-func (_m *BackfillMgrIface) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
-	ret := _m.Called(specId, internalSpecId, oldSettings, newSettings)
+// GetExplicitMappingChangeHandler provides a mock function with given fields: specId, internalSpecId, oldSettings, newSettings, p2pPush
+func (_m *BackfillMgrIface) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, p2pPush func() error) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+	ret := _m.Called(specId, internalSpecId, oldSettings, newSettings, p2pPush)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetExplicitMappingChangeHandler")
@@ -92,19 +92,19 @@ func (_m *BackfillMgrIface) GetExplicitMappingChangeHandler(specId string, inter
 
 	var r0 base.StoppedPipelineCallback
 	var r1 base.StoppedPipelineErrCallback
-	if rf, ok := ret.Get(0).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
-		return rf(specId, internalSpecId, oldSettings, newSettings)
+	if rf, ok := ret.Get(0).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings, func() error) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
+		return rf(specId, internalSpecId, oldSettings, newSettings, p2pPush)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings) base.StoppedPipelineCallback); ok {
-		r0 = rf(specId, internalSpecId, oldSettings, newSettings)
+	if rf, ok := ret.Get(0).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings, func() error) base.StoppedPipelineCallback); ok {
+		r0 = rf(specId, internalSpecId, oldSettings, newSettings, p2pPush)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.StoppedPipelineCallback)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings) base.StoppedPipelineErrCallback); ok {
-		r1 = rf(specId, internalSpecId, oldSettings, newSettings)
+	if rf, ok := ret.Get(1).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings, func() error) base.StoppedPipelineErrCallback); ok {
+		r1 = rf(specId, internalSpecId, oldSettings, newSettings, p2pPush)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(base.StoppedPipelineErrCallback)
@@ -124,13 +124,14 @@ type BackfillMgrIface_GetExplicitMappingChangeHandler_Call struct {
 //   - internalSpecId string
 //   - oldSettings *metadata.ReplicationSettings
 //   - newSettings *metadata.ReplicationSettings
-func (_e *BackfillMgrIface_Expecter) GetExplicitMappingChangeHandler(specId interface{}, internalSpecId interface{}, oldSettings interface{}, newSettings interface{}) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
-	return &BackfillMgrIface_GetExplicitMappingChangeHandler_Call{Call: _e.mock.On("GetExplicitMappingChangeHandler", specId, internalSpecId, oldSettings, newSettings)}
+//   - p2pPush func() error
+func (_e *BackfillMgrIface_Expecter) GetExplicitMappingChangeHandler(specId interface{}, internalSpecId interface{}, oldSettings interface{}, newSettings interface{}, p2pPush interface{}) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
+	return &BackfillMgrIface_GetExplicitMappingChangeHandler_Call{Call: _e.mock.On("GetExplicitMappingChangeHandler", specId, internalSpecId, oldSettings, newSettings, p2pPush)}
 }
 
-func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) Run(run func(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings)) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
+func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) Run(run func(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, p2pPush func() error)) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(*metadata.ReplicationSettings), args[3].(*metadata.ReplicationSettings))
+		run(args[0].(string), args[1].(string), args[2].(*metadata.ReplicationSettings), args[3].(*metadata.ReplicationSettings), args[4].(func() error))
 	})
 	return _c
 }
@@ -140,7 +141,7 @@ func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) Return(_a0 base
 	return _c
 }
 
-func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) RunAndReturn(run func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
+func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) RunAndReturn(run func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings, func() error) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)) *BackfillMgrIface_GetExplicitMappingChangeHandler_Call {
 	_c.Call.Return(run)
 	return _c
 }
