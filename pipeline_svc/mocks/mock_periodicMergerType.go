@@ -17,7 +17,7 @@ func (_m *periodicMergerType) EXPECT() *periodicMergerType_Expecter {
 	return &periodicMergerType_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *periodicMergerType) Execute() {
 	_m.Called()
 }
@@ -45,7 +45,7 @@ func (_c *periodicMergerType_Execute_Call) Return() *periodicMergerType_Execute_
 }
 
 func (_c *periodicMergerType_Execute_Call) RunAndReturn(run func()) *periodicMergerType_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

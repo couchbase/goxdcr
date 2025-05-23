@@ -70,7 +70,7 @@ func (_c *SourceNotification_Clone_Call) RunAndReturn(run func(int) interface{})
 	return _c
 }
 
-// GetEnableCrossClusterVersioning provides a mock function with given fields:
+// GetEnableCrossClusterVersioning provides a mock function with no fields
 func (_m *SourceNotification) GetEnableCrossClusterVersioning() bool {
 	ret := _m.Called()
 
@@ -115,7 +115,7 @@ func (_c *SourceNotification_GetEnableCrossClusterVersioning_Call) RunAndReturn(
 	return _c
 }
 
-// GetHighSeqnosMap provides a mock function with given fields:
+// GetHighSeqnosMap provides a mock function with no fields
 func (_m *SourceNotification) GetHighSeqnosMap() base.HighSeqnosMapType {
 	ret := _m.Called()
 
@@ -162,7 +162,7 @@ func (_c *SourceNotification_GetHighSeqnosMap_Call) RunAndReturn(run func() base
 	return _c
 }
 
-// GetHighSeqnosMapLegacy provides a mock function with given fields:
+// GetHighSeqnosMapLegacy provides a mock function with no fields
 func (_m *SourceNotification) GetHighSeqnosMapLegacy() base.HighSeqnosMapType {
 	ret := _m.Called()
 
@@ -209,7 +209,7 @@ func (_c *SourceNotification_GetHighSeqnosMapLegacy_Call) RunAndReturn(run func(
 	return _c
 }
 
-// GetHlvVbMaxCas provides a mock function with given fields:
+// GetHlvVbMaxCas provides a mock function with no fields
 func (_m *SourceNotification) GetHlvVbMaxCas() []interface{} {
 	ret := _m.Called()
 
@@ -256,7 +256,7 @@ func (_c *SourceNotification_GetHlvVbMaxCas_Call) RunAndReturn(run func() []inte
 	return _c
 }
 
-// GetKvVbMapRO provides a mock function with given fields:
+// GetKvVbMapRO provides a mock function with no fields
 func (_m *SourceNotification) GetKvVbMapRO() base.KvVBMapType {
 	ret := _m.Called()
 
@@ -303,7 +303,7 @@ func (_c *SourceNotification_GetKvVbMapRO_Call) RunAndReturn(run func() base.KvV
 	return _c
 }
 
-// GetLocalTopologyUpdatedTime provides a mock function with given fields:
+// GetLocalTopologyUpdatedTime provides a mock function with no fields
 func (_m *SourceNotification) GetLocalTopologyUpdatedTime() time.Time {
 	ret := _m.Called()
 
@@ -348,7 +348,7 @@ func (_c *SourceNotification_GetLocalTopologyUpdatedTime_Call) RunAndReturn(run 
 	return _c
 }
 
-// GetNumberOfSourceNodes provides a mock function with given fields:
+// GetNumberOfSourceNodes provides a mock function with no fields
 func (_m *SourceNotification) GetNumberOfSourceNodes() int {
 	ret := _m.Called()
 
@@ -393,7 +393,7 @@ func (_c *SourceNotification_GetNumberOfSourceNodes_Call) RunAndReturn(run func(
 	return _c
 }
 
-// GetReplicasInfo provides a mock function with given fields:
+// GetReplicasInfo provides a mock function with no fields
 func (_m *SourceNotification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
 
@@ -468,7 +468,7 @@ func (_c *SourceNotification_GetReplicasInfo_Call) RunAndReturn(run func() (int,
 	return _c
 }
 
-// GetSourceCollectionManifestUid provides a mock function with given fields:
+// GetSourceCollectionManifestUid provides a mock function with no fields
 func (_m *SourceNotification) GetSourceCollectionManifestUid() uint64 {
 	ret := _m.Called()
 
@@ -513,7 +513,7 @@ func (_c *SourceNotification_GetSourceCollectionManifestUid_Call) RunAndReturn(r
 	return _c
 }
 
-// GetSourceStorageBackend provides a mock function with given fields:
+// GetSourceStorageBackend provides a mock function with no fields
 func (_m *SourceNotification) GetSourceStorageBackend() string {
 	ret := _m.Called()
 
@@ -558,7 +558,7 @@ func (_c *SourceNotification_GetSourceStorageBackend_Call) RunAndReturn(run func
 	return _c
 }
 
-// GetSourceVBMapRO provides a mock function with given fields:
+// GetSourceVBMapRO provides a mock function with no fields
 func (_m *SourceNotification) GetSourceVBMapRO() base.KvVBMapType {
 	ret := _m.Called()
 
@@ -605,7 +605,7 @@ func (_c *SourceNotification_GetSourceVBMapRO_Call) RunAndReturn(run func() base
 	return _c
 }
 
-// GetVBMaxCasStats provides a mock function with given fields:
+// GetVBMaxCasStats provides a mock function with no fields
 func (_m *SourceNotification) GetVBMaxCasStats() base.HighSeqnosMapType {
 	ret := _m.Called()
 
@@ -652,7 +652,7 @@ func (_c *SourceNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base
 	return _c
 }
 
-// GetVersionPruningWindowHrs provides a mock function with given fields:
+// GetVersionPruningWindowHrs provides a mock function with no fields
 func (_m *SourceNotification) GetVersionPruningWindowHrs() int {
 	ret := _m.Called()
 
@@ -697,7 +697,7 @@ func (_c *SourceNotification_GetVersionPruningWindowHrs_Call) RunAndReturn(run f
 	return _c
 }
 
-// IsSourceNotification provides a mock function with given fields:
+// IsSourceNotification provides a mock function with no fields
 func (_m *SourceNotification) IsSourceNotification() bool {
 	ret := _m.Called()
 
@@ -742,7 +742,7 @@ func (_c *SourceNotification_IsSourceNotification_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// Recycle provides a mock function with given fields:
+// Recycle provides a mock function with no fields
 func (_m *SourceNotification) Recycle() {
 	_m.Called()
 }
@@ -770,7 +770,7 @@ func (_c *SourceNotification_Recycle_Call) Return() *SourceNotification_Recycle_
 }
 
 func (_c *SourceNotification_Recycle_Call) RunAndReturn(run func()) *SourceNotification_Recycle_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

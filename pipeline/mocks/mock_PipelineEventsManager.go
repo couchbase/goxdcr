@@ -120,7 +120,7 @@ func (_c *PipelineEventsManager_BackfillUpdateCb_Call) RunAndReturn(run func(*me
 	return _c
 }
 
-// ClearNonFatalEvents provides a mock function with given fields:
+// ClearNonFatalEvents provides a mock function with no fields
 func (_m *PipelineEventsManager) ClearNonFatalEvents() {
 	_m.Called()
 }
@@ -148,7 +148,7 @@ func (_c *PipelineEventsManager_ClearNonFatalEvents_Call) Return() *PipelineEven
 }
 
 func (_c *PipelineEventsManager_ClearNonFatalEvents_Call) RunAndReturn(run func()) *PipelineEventsManager_ClearNonFatalEvents_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -181,11 +181,11 @@ func (_c *PipelineEventsManager_ClearNonFatalEventsWithString_Call) Return() *Pi
 }
 
 func (_c *PipelineEventsManager_ClearNonFatalEventsWithString_Call) RunAndReturn(run func(string)) *PipelineEventsManager_ClearNonFatalEventsWithString_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// ClearPersistentEvents provides a mock function with given fields:
+// ClearPersistentEvents provides a mock function with no fields
 func (_m *PipelineEventsManager) ClearPersistentEvents() {
 	_m.Called()
 }
@@ -213,7 +213,7 @@ func (_c *PipelineEventsManager_ClearPersistentEvents_Call) Return() *PipelineEv
 }
 
 func (_c *PipelineEventsManager_ClearPersistentEvents_Call) RunAndReturn(run func()) *PipelineEventsManager_ClearPersistentEvents_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -309,7 +309,7 @@ func (_c *PipelineEventsManager_DismissEvent_Call) RunAndReturn(run func(int) er
 	return _c
 }
 
-// GetCurrentEvents provides a mock function with given fields:
+// GetCurrentEvents provides a mock function with no fields
 func (_m *PipelineEventsManager) GetCurrentEvents() *pipeline.PipelineEventList {
 	ret := _m.Called()
 
@@ -385,11 +385,11 @@ func (_c *PipelineEventsManager_LoadLatestBrokenMap_Call) Return() *PipelineEven
 }
 
 func (_c *PipelineEventsManager_LoadLatestBrokenMap_Call) RunAndReturn(run func(metadata.CollectionNamespaceMapping)) *PipelineEventsManager_LoadLatestBrokenMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// ResetDismissedHistory provides a mock function with given fields:
+// ResetDismissedHistory provides a mock function with no fields
 func (_m *PipelineEventsManager) ResetDismissedHistory() {
 	_m.Called()
 }
@@ -417,7 +417,7 @@ func (_c *PipelineEventsManager_ResetDismissedHistory_Call) Return() *PipelineEv
 }
 
 func (_c *PipelineEventsManager_ResetDismissedHistory_Call) RunAndReturn(run func()) *PipelineEventsManager_ResetDismissedHistory_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -17,7 +17,7 @@ func (_m *ReleaseMemFunc) EXPECT() *ReleaseMemFunc_Expecter {
 	return &ReleaseMemFunc_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *ReleaseMemFunc) Execute() {
 	_m.Called()
 }
@@ -45,7 +45,7 @@ func (_c *ReleaseMemFunc_Execute_Call) Return() *ReleaseMemFunc_Execute_Call {
 }
 
 func (_c *ReleaseMemFunc_Execute_Call) RunAndReturn(run func()) *ReleaseMemFunc_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -114,7 +114,7 @@ func (_c *PipelineService_Detach_Call) RunAndReturn(run func(common.Pipeline) er
 	return _c
 }
 
-// IsSharable provides a mock function with given fields:
+// IsSharable provides a mock function with no fields
 func (_m *PipelineService) IsSharable() bool {
 	ret := _m.Called()
 
@@ -205,7 +205,7 @@ func (_c *PipelineService_Start_Call) RunAndReturn(run func(metadata.Replication
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *PipelineService) Stop() error {
 	ret := _m.Called()
 

@@ -46,7 +46,7 @@ func (_c *func_report_fixed_Execute_Call) Return() *func_report_fixed_Execute_Ca
 }
 
 func (_c *func_report_fixed_Execute_Call) RunAndReturn(run func(string)) *func_report_fixed_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

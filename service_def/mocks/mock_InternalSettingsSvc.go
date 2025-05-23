@@ -22,7 +22,7 @@ func (_m *InternalSettingsSvc) EXPECT() *InternalSettingsSvc_Expecter {
 	return &InternalSettingsSvc_Expecter{mock: &_m.Mock}
 }
 
-// GetInternalSettings provides a mock function with given fields:
+// GetInternalSettings provides a mock function with no fields
 func (_m *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
 	ret := _m.Called()
 
@@ -146,7 +146,7 @@ func (_c *InternalSettingsSvc_SetMetadataChangeHandlerCallback_Call) Return() *I
 }
 
 func (_c *InternalSettingsSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallback)) *InternalSettingsSvc_SetMetadataChangeHandlerCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

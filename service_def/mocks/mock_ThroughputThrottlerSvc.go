@@ -63,7 +63,7 @@ func (_c *ThroughputThrottlerSvc_CanSend_Call) RunAndReturn(run func(bool) bool)
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *ThroughputThrottlerSvc) Start() error {
 	ret := _m.Called()
 
@@ -108,7 +108,7 @@ func (_c *ThroughputThrottlerSvc_Start_Call) RunAndReturn(run func() error) *Thr
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *ThroughputThrottlerSvc) Stop() error {
 	ret := _m.Called()
 
@@ -201,7 +201,7 @@ func (_c *ThroughputThrottlerSvc_UpdateSettings_Call) RunAndReturn(run func(map[
 	return _c
 }
 
-// Wait provides a mock function with given fields:
+// Wait provides a mock function with no fields
 func (_m *ThroughputThrottlerSvc) Wait() {
 	_m.Called()
 }
@@ -229,7 +229,7 @@ func (_c *ThroughputThrottlerSvc_Wait_Call) Return() *ThroughputThrottlerSvc_Wai
 }
 
 func (_c *ThroughputThrottlerSvc_Wait_Call) RunAndReturn(run func()) *ThroughputThrottlerSvc_Wait_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -120,7 +120,7 @@ func (_c *ConnectionPreCheck_SendConnectionPreCheckRequest_Call) Return() *Conne
 }
 
 func (_c *ConnectionPreCheck_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, peerToPeer.InitRemoteClusterRefFunc, string)) *ConnectionPreCheck_SendConnectionPreCheckRequest_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

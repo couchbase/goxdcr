@@ -17,7 +17,7 @@ func (_m *EncryptionSettingIface) EXPECT() *EncryptionSettingIface_Expecter {
 	return &EncryptionSettingIface_Expecter{mock: &_m.Mock}
 }
 
-// IsStrictEncryption provides a mock function with given fields:
+// IsStrictEncryption provides a mock function with no fields
 func (_m *EncryptionSettingIface) IsStrictEncryption() bool {
 	ret := _m.Called()
 

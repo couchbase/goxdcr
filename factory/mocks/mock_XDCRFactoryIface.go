@@ -588,7 +588,7 @@ func (_c *XDCRFactoryIface_SetPipelineStopCallback_Call) Return() *XDCRFactoryIf
 }
 
 func (_c *XDCRFactoryIface_SetPipelineStopCallback_Call) RunAndReturn(run func(base.PipelineMgrStopCbType)) *XDCRFactoryIface_SetPipelineStopCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

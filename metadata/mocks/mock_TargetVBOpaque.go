@@ -66,7 +66,7 @@ func (_c *TargetVBOpaque_IsSame_Call) RunAndReturn(run func(metadata.TargetVBOpa
 	return _c
 }
 
-// Size provides a mock function with given fields:
+// Size provides a mock function with no fields
 func (_m *TargetVBOpaque) Size() int {
 	ret := _m.Called()
 
@@ -111,7 +111,7 @@ func (_c *TargetVBOpaque_Size_Call) RunAndReturn(run func() int) *TargetVBOpaque
 	return _c
 }
 
-// Value provides a mock function with given fields:
+// Value provides a mock function with no fields
 func (_m *TargetVBOpaque) Value() interface{} {
 	ret := _m.Called()
 

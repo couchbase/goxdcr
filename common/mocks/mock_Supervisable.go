@@ -68,7 +68,7 @@ func (_c *Supervisable_HeartBeat_async_Call) RunAndReturn(run func(chan []interf
 	return _c
 }
 
-// HeartBeat_sync provides a mock function with given fields:
+// HeartBeat_sync provides a mock function with no fields
 func (_m *Supervisable) HeartBeat_sync() bool {
 	ret := _m.Called()
 
@@ -113,7 +113,7 @@ func (_c *Supervisable_HeartBeat_sync_Call) RunAndReturn(run func() bool) *Super
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *Supervisable) Id() string {
 	ret := _m.Called()
 
@@ -158,7 +158,7 @@ func (_c *Supervisable_Id_Call) RunAndReturn(run func() string) *Supervisable_Id
 	return _c
 }
 
-// IsReadyForHeartBeat provides a mock function with given fields:
+// IsReadyForHeartBeat provides a mock function with no fields
 func (_m *Supervisable) IsReadyForHeartBeat() bool {
 	ret := _m.Called()
 

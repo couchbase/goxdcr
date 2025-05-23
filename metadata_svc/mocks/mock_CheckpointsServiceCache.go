@@ -21,7 +21,7 @@ func (_m *CheckpointsServiceCache) EXPECT() *CheckpointsServiceCache_Expecter {
 	return &CheckpointsServiceCache_Expecter{mock: &_m.Mock}
 }
 
-// GetLatestDocs provides a mock function with given fields:
+// GetLatestDocs provides a mock function with no fields
 func (_m *CheckpointsServiceCache) GetLatestDocs() (metadata.VBsCkptsDocMap, error) {
 	ret := _m.Called()
 
@@ -136,7 +136,7 @@ func (_c *CheckpointsServiceCache_GetOneVBDoc_Call) RunAndReturn(run func(uint16
 	return _c
 }
 
-// InvalidateCache provides a mock function with given fields:
+// InvalidateCache provides a mock function with no fields
 func (_m *CheckpointsServiceCache) InvalidateCache() {
 	_m.Called()
 }
@@ -164,7 +164,7 @@ func (_c *CheckpointsServiceCache_InvalidateCache_Call) Return() *CheckpointsSer
 }
 
 func (_c *CheckpointsServiceCache_InvalidateCache_Call) RunAndReturn(run func()) *CheckpointsServiceCache_InvalidateCache_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -198,7 +198,7 @@ func (_c *CheckpointsServiceCache_SpecChangeCb_Call) Return() *CheckpointsServic
 }
 
 func (_c *CheckpointsServiceCache_SpecChangeCb_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, *metadata.ReplicationSpecification)) *CheckpointsServiceCache_SpecChangeCb_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -325,7 +325,7 @@ func (_c *CheckpointsServiceCache_ValidateCache_Call) Return() *CheckpointsServi
 }
 
 func (_c *CheckpointsServiceCache_ValidateCache_Call) RunAndReturn(run func(string)) *CheckpointsServiceCache_ValidateCache_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

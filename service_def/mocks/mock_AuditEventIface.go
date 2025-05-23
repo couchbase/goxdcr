@@ -20,7 +20,7 @@ func (_m *AuditEventIface) EXPECT() *AuditEventIface_Expecter {
 	return &AuditEventIface_Expecter{mock: &_m.Mock}
 }
 
-// Clone provides a mock function with given fields:
+// Clone provides a mock function with no fields
 func (_m *AuditEventIface) Clone() service_def.AuditEventIface {
 	ret := _m.Called()
 
@@ -67,7 +67,7 @@ func (_c *AuditEventIface_Clone_Call) RunAndReturn(run func() service_def.AuditE
 	return _c
 }
 
-// Redact provides a mock function with given fields:
+// Redact provides a mock function with no fields
 func (_m *AuditEventIface) Redact() service_def.AuditEventIface {
 	ret := _m.Called()
 

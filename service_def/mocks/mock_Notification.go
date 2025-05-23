@@ -68,7 +68,7 @@ func (_c *Notification_Clone_Call) RunAndReturn(run func(int) interface{}) *Noti
 	return _c
 }
 
-// GetReplicasInfo provides a mock function with given fields:
+// GetReplicasInfo provides a mock function with no fields
 func (_m *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
 
@@ -143,7 +143,7 @@ func (_c *Notification_GetReplicasInfo_Call) RunAndReturn(run func() (int, *base
 	return _c
 }
 
-// IsSourceNotification provides a mock function with given fields:
+// IsSourceNotification provides a mock function with no fields
 func (_m *Notification) IsSourceNotification() bool {
 	ret := _m.Called()
 
@@ -188,7 +188,7 @@ func (_c *Notification_IsSourceNotification_Call) RunAndReturn(run func() bool) 
 	return _c
 }
 
-// Recycle provides a mock function with given fields:
+// Recycle provides a mock function with no fields
 func (_m *Notification) Recycle() {
 	_m.Called()
 }
@@ -216,7 +216,7 @@ func (_c *Notification_Recycle_Call) Return() *Notification_Recycle_Call {
 }
 
 func (_c *Notification_Recycle_Call) RunAndReturn(run func()) *Notification_Recycle_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

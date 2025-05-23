@@ -20,7 +20,7 @@ func (_m *Component) EXPECT() *Component_Expecter {
 	return &Component_Expecter{mock: &_m.Mock}
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *Component) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -67,7 +67,7 @@ func (_c *Component_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *Component) Id() string {
 	ret := _m.Called()
 
@@ -141,7 +141,7 @@ func (_c *Component_RaiseEvent_Call) Return() *Component_RaiseEvent_Call {
 }
 
 func (_c *Component_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *Component_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

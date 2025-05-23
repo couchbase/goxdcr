@@ -74,7 +74,7 @@ func (_c *PipelineMgrIface_AllReplicationSpecsForTargetCluster_Call) RunAndRetur
 	return _c
 }
 
-// AllReplications provides a mock function with given fields:
+// AllReplications provides a mock function with no fields
 func (_m *PipelineMgrIface) AllReplications() []string {
 	ret := _m.Called()
 
@@ -217,7 +217,7 @@ func (_c *PipelineMgrIface_AllReplicationsForTargetCluster_Call) RunAndReturn(ru
 	return _c
 }
 
-// CheckPipelines provides a mock function with given fields:
+// CheckPipelines provides a mock function with no fields
 func (_m *PipelineMgrIface) CheckPipelines() {
 	_m.Called()
 }
@@ -245,7 +245,7 @@ func (_c *PipelineMgrIface_CheckPipelines_Call) Return() *PipelineMgrIface_Check
 }
 
 func (_c *PipelineMgrIface_CheckPipelines_Call) RunAndReturn(run func()) *PipelineMgrIface_CheckPipelines_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -372,7 +372,7 @@ func (_c *PipelineMgrIface_HandleClusterEncryptionLevelChange_Call) Return() *Pi
 }
 
 func (_c *PipelineMgrIface_HandleClusterEncryptionLevelChange_Call) RunAndReturn(run func(service_def.EncryptionSettingIface, service_def.EncryptionSettingIface)) *PipelineMgrIface_HandleClusterEncryptionLevelChange_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -470,7 +470,7 @@ func (_c *PipelineMgrIface_InitiateRepStatus_Call) RunAndReturn(run func(string)
 	return _c
 }
 
-// OnExit provides a mock function with given fields:
+// OnExit provides a mock function with no fields
 func (_m *PipelineMgrIface) OnExit() error {
 	ret := _m.Called()
 
@@ -619,7 +619,7 @@ func (_c *PipelineMgrIface_ReplicationStatus_Call) RunAndReturn(run func(string)
 	return _c
 }
 
-// ReplicationStatusMap provides a mock function with given fields:
+// ReplicationStatusMap provides a mock function with no fields
 func (_m *PipelineMgrIface) ReplicationStatusMap() map[string]pipeline.ReplicationStatusIface {
 	ret := _m.Called()
 

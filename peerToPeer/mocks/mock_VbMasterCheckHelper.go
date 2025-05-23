@@ -110,7 +110,7 @@ func (_c *VbMasterCheckHelper_HandleSpecChange_Call) Return() *VbMasterCheckHelp
 }
 
 func (_c *VbMasterCheckHelper_HandleSpecChange_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, *metadata.ReplicationSpecification)) *VbMasterCheckHelper_HandleSpecChange_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -143,7 +143,7 @@ func (_c *VbMasterCheckHelper_HandleSpecCreation_Call) Return() *VbMasterCheckHe
 }
 
 func (_c *VbMasterCheckHelper_HandleSpecCreation_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *VbMasterCheckHelper_HandleSpecCreation_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -176,7 +176,7 @@ func (_c *VbMasterCheckHelper_HandleSpecDeletion_Call) Return() *VbMasterCheckHe
 }
 
 func (_c *VbMasterCheckHelper_HandleSpecDeletion_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *VbMasterCheckHelper_HandleSpecDeletion_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -22,17 +22,17 @@ func (_m *PipelineMgrBackfillIface) EXPECT() *PipelineMgrBackfillIface_Expecter 
 	return &PipelineMgrBackfillIface_Expecter{mock: &_m.Mock}
 }
 
-// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair, srcManifestDelta
-func (_m *PipelineMgrBackfillIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair, srcManifestDelta)
+// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair, srcManifestDelta, latestTgtManifestId
+func (_m *PipelineMgrBackfillIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	ret := _m.Called(topic, diffPair, srcManifestDelta, latestTgtManifestId)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BackfillMappingStatusUpdate")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
-		r0 = rf(topic, diffPair, srcManifestDelta)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error); ok {
+		r0 = rf(topic, diffPair, srcManifestDelta, latestTgtManifestId)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -49,13 +49,14 @@ type PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call struct {
 //   - topic string
 //   - diffPair *metadata.CollectionNamespaceMappingsDiffPair
 //   - srcManifestDelta []*metadata.CollectionsManifest
-func (_e *PipelineMgrBackfillIface_Expecter) BackfillMappingStatusUpdate(topic interface{}, diffPair interface{}, srcManifestDelta interface{}) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
-	return &PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call{Call: _e.mock.On("BackfillMappingStatusUpdate", topic, diffPair, srcManifestDelta)}
+//   - latestTgtManifestId uint64
+func (_e *PipelineMgrBackfillIface_Expecter) BackfillMappingStatusUpdate(topic interface{}, diffPair interface{}, srcManifestDelta interface{}, latestTgtManifestId interface{}) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
+	return &PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call{Call: _e.mock.On("BackfillMappingStatusUpdate", topic, diffPair, srcManifestDelta, latestTgtManifestId)}
 }
 
-func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest)) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
+func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64)) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest))
+		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest), args[3].(uint64))
 	})
 	return _c
 }
@@ -65,7 +66,7 @@ func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) Return(_a0 
 	return _c
 }
 
-func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
+func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error) *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -391,7 +392,7 @@ func (_c *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call) Return
 }
 
 func (_c *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call) RunAndReturn(run func(string, string)) *PipelineMgrBackfillIface_WaitForMainPipelineCkptMgrToStop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

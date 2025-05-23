@@ -21,7 +21,7 @@ func (_m *AgentSrcManifestGetter) EXPECT() *AgentSrcManifestGetter_Expecter {
 	return &AgentSrcManifestGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *AgentSrcManifestGetter) Execute() *metadata.CollectionsManifest {
 	ret := _m.Called()
 

@@ -24,17 +24,17 @@ func (_m *PipelineOpSerializerIface) EXPECT() *PipelineOpSerializerIface_Expecte
 	return &PipelineOpSerializerIface_Expecter{mock: &_m.Mock}
 }
 
-// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta
-func (_m *PipelineOpSerializerIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair, srcManifestsDelta)
+// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta, latestTgtManifestId
+func (_m *PipelineOpSerializerIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	ret := _m.Called(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BackfillMappingStatusUpdate")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
-		r0 = rf(topic, diffPair, srcManifestsDelta)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error); ok {
+		r0 = rf(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -51,13 +51,14 @@ type PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call struct {
 //   - topic string
 //   - diffPair *metadata.CollectionNamespaceMappingsDiffPair
 //   - srcManifestsDelta []*metadata.CollectionsManifest
-func (_e *PipelineOpSerializerIface_Expecter) BackfillMappingStatusUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
-	return &PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call{Call: _e.mock.On("BackfillMappingStatusUpdate", topic, diffPair, srcManifestsDelta)}
+//   - latestTgtManifestId uint64
+func (_e *PipelineOpSerializerIface_Expecter) BackfillMappingStatusUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}, latestTgtManifestId interface{}) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
+	return &PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call{Call: _e.mock.On("BackfillMappingStatusUpdate", topic, diffPair, srcManifestsDelta, latestTgtManifestId)}
 }
 
-func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest)) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
+func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64)) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest))
+		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest), args[3].(uint64))
 	})
 	return _c
 }
@@ -67,7 +68,7 @@ func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) Return(_a0
 	return _c
 }
 
-func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
+func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error) *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -454,7 +455,7 @@ func (_c *PipelineOpSerializerIface_StartBackfill_Call) RunAndReturn(run func(st
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *PipelineOpSerializerIface) Stop() {
 	_m.Called()
 }
@@ -482,7 +483,7 @@ func (_c *PipelineOpSerializerIface_Stop_Call) Return() *PipelineOpSerializerIfa
 }
 
 func (_c *PipelineOpSerializerIface_Stop_Call) RunAndReturn(run func()) *PipelineOpSerializerIface_Stop_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

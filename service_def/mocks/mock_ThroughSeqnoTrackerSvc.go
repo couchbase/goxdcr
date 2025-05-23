@@ -114,7 +114,7 @@ func (_c *ThroughSeqnoTrackerSvc_GetThroughSeqno_Call) RunAndReturn(run func(uin
 	return _c
 }
 
-// GetThroughSeqnos provides a mock function with given fields:
+// GetThroughSeqnos provides a mock function with no fields
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	ret := _m.Called()
 
@@ -161,7 +161,7 @@ func (_c *ThroughSeqnoTrackerSvc_GetThroughSeqnos_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// GetThroughSeqnosAndManifestIds provides a mock function with given fields:
+// GetThroughSeqnosAndManifestIds provides a mock function with no fields
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (map[uint16]uint64, map[uint16]uint64, map[uint16]uint64) {
 	ret := _m.Called()
 
@@ -229,7 +229,7 @@ func (_c *ThroughSeqnoTrackerSvc_GetThroughSeqnosAndManifestIds_Call) RunAndRetu
 	return _c
 }
 
-// PrintStatusSummary provides a mock function with given fields:
+// PrintStatusSummary provides a mock function with no fields
 func (_m *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	_m.Called()
 }
@@ -257,7 +257,7 @@ func (_c *ThroughSeqnoTrackerSvc_PrintStatusSummary_Call) Return() *ThroughSeqno
 }
 
 func (_c *ThroughSeqnoTrackerSvc_PrintStatusSummary_Call) RunAndReturn(run func()) *ThroughSeqnoTrackerSvc_PrintStatusSummary_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -292,7 +292,7 @@ func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) Return() *ThroughSeqnoTrack
 }
 
 func (_c *ThroughSeqnoTrackerSvc_SetStartSeqno_Call) RunAndReturn(run func(uint16, uint64, base.CollectionsManifestIdPair)) *ThroughSeqnoTrackerSvc_SetStartSeqno_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

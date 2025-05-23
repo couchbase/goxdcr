@@ -314,7 +314,7 @@ func (_c *CheckpointsService_DisableRefCntDecrement_Call) Return() *CheckpointsS
 }
 
 func (_c *CheckpointsService_DisableRefCntDecrement_Call) RunAndReturn(run func(string)) *CheckpointsService_DisableRefCntDecrement_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -347,7 +347,7 @@ func (_c *CheckpointsService_EnableRefCntDecrement_Call) Return() *CheckpointsSe
 }
 
 func (_c *CheckpointsService_EnableRefCntDecrement_Call) RunAndReturn(run func(string)) *CheckpointsService_EnableRefCntDecrement_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

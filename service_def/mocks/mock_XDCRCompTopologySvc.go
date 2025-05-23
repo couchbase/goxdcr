@@ -20,7 +20,7 @@ func (_m *XDCRCompTopologySvc) EXPECT() *XDCRCompTopologySvc_Expecter {
 	return &XDCRCompTopologySvc_Expecter{mock: &_m.Mock}
 }
 
-// GetLocalHostName provides a mock function with given fields:
+// GetLocalHostName provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) GetLocalHostName() string {
 	ret := _m.Called()
 
@@ -65,7 +65,7 @@ func (_c *XDCRCompTopologySvc_GetLocalHostName_Call) RunAndReturn(run func() str
 	return _c
 }
 
-// IsIpv4Blocked provides a mock function with given fields:
+// IsIpv4Blocked provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsIpv4Blocked() bool {
 	ret := _m.Called()
 
@@ -110,7 +110,7 @@ func (_c *XDCRCompTopologySvc_IsIpv4Blocked_Call) RunAndReturn(run func() bool) 
 	return _c
 }
 
-// IsIpv6Blocked provides a mock function with given fields:
+// IsIpv6Blocked provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsIpv6Blocked() bool {
 	ret := _m.Called()
 
@@ -155,7 +155,7 @@ func (_c *XDCRCompTopologySvc_IsIpv6Blocked_Call) RunAndReturn(run func() bool) 
 	return _c
 }
 
-// IsKVNode provides a mock function with given fields:
+// IsKVNode provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsKVNode() (bool, error) {
 	ret := _m.Called()
 
@@ -210,7 +210,7 @@ func (_c *XDCRCompTopologySvc_IsKVNode_Call) RunAndReturn(run func() (bool, erro
 	return _c
 }
 
-// IsMyClusterDeveloperPreview provides a mock function with given fields:
+// IsMyClusterDeveloperPreview provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsMyClusterDeveloperPreview() bool {
 	ret := _m.Called()
 
@@ -255,7 +255,7 @@ func (_c *XDCRCompTopologySvc_IsMyClusterDeveloperPreview_Call) RunAndReturn(run
 	return _c
 }
 
-// IsMyClusterEncryptionLevelStrict provides a mock function with given fields:
+// IsMyClusterEncryptionLevelStrict provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsMyClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
 
@@ -300,7 +300,7 @@ func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelStrict_Call) RunAndRetur
 	return _c
 }
 
-// IsMyClusterEnterprise provides a mock function with given fields:
+// IsMyClusterEnterprise provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsMyClusterEnterprise() (bool, error) {
 	ret := _m.Called()
 
@@ -355,7 +355,7 @@ func (_c *XDCRCompTopologySvc_IsMyClusterEnterprise_Call) RunAndReturn(run func(
 	return _c
 }
 
-// IsMyClusterIpv6 provides a mock function with given fields:
+// IsMyClusterIpv6 provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) IsMyClusterIpv6() bool {
 	ret := _m.Called()
 
@@ -400,7 +400,7 @@ func (_c *XDCRCompTopologySvc_IsMyClusterIpv6_Call) RunAndReturn(run func() bool
 	return _c
 }
 
-// MyAdminPort provides a mock function with given fields:
+// MyAdminPort provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyAdminPort() (uint16, error) {
 	ret := _m.Called()
 
@@ -455,7 +455,7 @@ func (_c *XDCRCompTopologySvc_MyAdminPort_Call) RunAndReturn(run func() (uint16,
 	return _c
 }
 
-// MyClusterCompatibility provides a mock function with given fields:
+// MyClusterCompatibility provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyClusterCompatibility() (int, error) {
 	ret := _m.Called()
 
@@ -510,7 +510,7 @@ func (_c *XDCRCompTopologySvc_MyClusterCompatibility_Call) RunAndReturn(run func
 	return _c
 }
 
-// MyClusterUuid provides a mock function with given fields:
+// MyClusterUuid provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyClusterUuid() (string, error) {
 	ret := _m.Called()
 
@@ -565,7 +565,7 @@ func (_c *XDCRCompTopologySvc_MyClusterUuid_Call) RunAndReturn(run func() (strin
 	return _c
 }
 
-// MyConnectionStr provides a mock function with given fields:
+// MyConnectionStr provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyConnectionStr() (string, error) {
 	ret := _m.Called()
 
@@ -620,7 +620,7 @@ func (_c *XDCRCompTopologySvc_MyConnectionStr_Call) RunAndReturn(run func() (str
 	return _c
 }
 
-// MyCredentials provides a mock function with given fields:
+// MyCredentials provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
 	ret := _m.Called()
 
@@ -723,7 +723,7 @@ func (_c *XDCRCompTopologySvc_MyCredentials_Call) RunAndReturn(run func() (strin
 	return _c
 }
 
-// MyHost provides a mock function with given fields:
+// MyHost provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyHost() (string, error) {
 	ret := _m.Called()
 
@@ -778,7 +778,7 @@ func (_c *XDCRCompTopologySvc_MyHost_Call) RunAndReturn(run func() (string, erro
 	return _c
 }
 
-// MyHostAddr provides a mock function with given fields:
+// MyHostAddr provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyHostAddr() (string, error) {
 	ret := _m.Called()
 
@@ -833,7 +833,7 @@ func (_c *XDCRCompTopologySvc_MyHostAddr_Call) RunAndReturn(run func() (string, 
 	return _c
 }
 
-// MyKVNodes provides a mock function with given fields:
+// MyKVNodes provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyKVNodes() ([]string, error) {
 	ret := _m.Called()
 
@@ -890,7 +890,7 @@ func (_c *XDCRCompTopologySvc_MyKVNodes_Call) RunAndReturn(run func() ([]string,
 	return _c
 }
 
-// MyMemcachedAddr provides a mock function with given fields:
+// MyMemcachedAddr provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyMemcachedAddr() (string, error) {
 	ret := _m.Called()
 
@@ -945,7 +945,7 @@ func (_c *XDCRCompTopologySvc_MyMemcachedAddr_Call) RunAndReturn(run func() (str
 	return _c
 }
 
-// MyNodeVersion provides a mock function with given fields:
+// MyNodeVersion provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) MyNodeVersion() (string, error) {
 	ret := _m.Called()
 
@@ -1000,7 +1000,7 @@ func (_c *XDCRCompTopologySvc_MyNodeVersion_Call) RunAndReturn(run func() (strin
 	return _c
 }
 
-// NumberOfKVNodes provides a mock function with given fields:
+// NumberOfKVNodes provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) NumberOfKVNodes() (int, error) {
 	ret := _m.Called()
 
@@ -1055,7 +1055,7 @@ func (_c *XDCRCompTopologySvc_NumberOfKVNodes_Call) RunAndReturn(run func() (int
 	return _c
 }
 
-// PeerNodesAdminAddrs provides a mock function with given fields:
+// PeerNodesAdminAddrs provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 	ret := _m.Called()
 
@@ -1112,7 +1112,7 @@ func (_c *XDCRCompTopologySvc_PeerNodesAdminAddrs_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// XDCRCompToKVNodeMap provides a mock function with given fields:
+// XDCRCompToKVNodeMap provides a mock function with no fields
 func (_m *XDCRCompTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, error) {
 	ret := _m.Called()
 

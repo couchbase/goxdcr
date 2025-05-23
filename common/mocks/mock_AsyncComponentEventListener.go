@@ -20,7 +20,7 @@ func (_m *AsyncComponentEventListener) EXPECT() *AsyncComponentEventListener_Exp
 	return &AsyncComponentEventListener_Expecter{mock: &_m.Mock}
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *AsyncComponentEventListener) Id() string {
 	ret := _m.Called()
 
@@ -94,7 +94,7 @@ func (_c *AsyncComponentEventListener_OnEvent_Call) Return() *AsyncComponentEven
 }
 
 func (_c *AsyncComponentEventListener_OnEvent_Call) RunAndReturn(run func(*common.Event)) *AsyncComponentEventListener_OnEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -127,11 +127,11 @@ func (_c *AsyncComponentEventListener_RegisterComponentEventHandler_Call) Return
 }
 
 func (_c *AsyncComponentEventListener_RegisterComponentEventHandler_Call) RunAndReturn(run func(common.AsyncComponentEventHandler)) *AsyncComponentEventListener_RegisterComponentEventHandler_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// Start provides a mock function with given fields:
+// Start provides a mock function with no fields
 func (_m *AsyncComponentEventListener) Start() error {
 	ret := _m.Called()
 
@@ -176,7 +176,7 @@ func (_c *AsyncComponentEventListener_Start_Call) RunAndReturn(run func() error)
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *AsyncComponentEventListener) Stop() error {
 	ret := _m.Called()
 

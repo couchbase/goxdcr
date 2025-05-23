@@ -46,7 +46,7 @@ func (_c *DecrementerFunc_Execute_Call) Return() *DecrementerFunc_Execute_Call {
 }
 
 func (_c *DecrementerFunc_Execute_Call) RunAndReturn(run func(string)) *DecrementerFunc_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -20,7 +20,7 @@ func (_m *AsyncComponentEventHandler) EXPECT() *AsyncComponentEventHandler_Expec
 	return &AsyncComponentEventHandler_Expecter{mock: &_m.Mock}
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *AsyncComponentEventHandler) Id() string {
 	ret := _m.Called()
 

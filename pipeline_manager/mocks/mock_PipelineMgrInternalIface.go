@@ -164,7 +164,7 @@ func (_c *PipelineMgrInternalIface_GetLastUpdateResult_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetLogSvc provides a mock function with given fields:
+// GetLogSvc provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) GetLogSvc() service_def.UILogSvc {
 	ret := _m.Called()
 
@@ -270,7 +270,7 @@ func (_c *PipelineMgrInternalIface_GetOrCreateReplicationStatus_Call) RunAndRetu
 	return _c
 }
 
-// GetRemoteClusterSvc provides a mock function with given fields:
+// GetRemoteClusterSvc provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	ret := _m.Called()
 
@@ -317,7 +317,7 @@ func (_c *PipelineMgrInternalIface_GetRemoteClusterSvc_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetReplSpecSvc provides a mock function with given fields:
+// GetReplSpecSvc provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) GetReplSpecSvc() service_def.ReplicationSpecSvc {
 	ret := _m.Called()
 
@@ -364,7 +364,7 @@ func (_c *PipelineMgrInternalIface_GetReplSpecSvc_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// GetXDCRTopologySvc provides a mock function with given fields:
+// GetXDCRTopologySvc provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) GetXDCRTopologySvc() service_def.XDCRCompTopologySvc {
 	ret := _m.Called()
 
@@ -411,7 +411,7 @@ func (_c *PipelineMgrInternalIface_GetXDCRTopologySvc_Call) RunAndReturn(run fun
 	return _c
 }
 
-// PostTopologyStatus provides a mock function with given fields:
+// PostTopologyStatus provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) PostTopologyStatus() {
 	_m.Called()
 }
@@ -439,7 +439,7 @@ func (_c *PipelineMgrInternalIface_PostTopologyStatus_Call) Return() *PipelineMg
 }
 
 func (_c *PipelineMgrInternalIface_PostTopologyStatus_Call) RunAndReturn(run func()) *PipelineMgrInternalIface_PostTopologyStatus_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -537,7 +537,7 @@ func (_c *PipelineMgrInternalIface_StartPipeline_Call) RunAndReturn(run func(str
 	return _c
 }
 
-// StopAllUpdaters provides a mock function with given fields:
+// StopAllUpdaters provides a mock function with no fields
 func (_m *PipelineMgrInternalIface) StopAllUpdaters() {
 	_m.Called()
 }
@@ -565,7 +565,7 @@ func (_c *PipelineMgrInternalIface_StopAllUpdaters_Call) Return() *PipelineMgrIn
 }
 
 func (_c *PipelineMgrInternalIface_StopAllUpdaters_Call) RunAndReturn(run func()) *PipelineMgrInternalIface_StopAllUpdaters_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

@@ -218,7 +218,7 @@ func (_c *CheckpointMgrSvc_Detach_Call) RunAndReturn(run func(common.Pipeline) e
 	return _c
 }
 
-// IsSharable provides a mock function with given fields:
+// IsSharable provides a mock function with no fields
 func (_m *CheckpointMgrSvc) IsSharable() bool {
 	ret := _m.Called()
 
@@ -355,7 +355,7 @@ func (_c *CheckpointMgrSvc_Start_Call) RunAndReturn(run func(metadata.Replicatio
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *CheckpointMgrSvc) Stop() error {
 	ret := _m.Called()
 

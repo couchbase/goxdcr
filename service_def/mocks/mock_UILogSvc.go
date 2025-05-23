@@ -46,7 +46,7 @@ func (_c *UILogSvc_Write_Call) Return() *UILogSvc_Write_Call {
 }
 
 func (_c *UILogSvc_Write_Call) RunAndReturn(run func(string)) *UILogSvc_Write_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

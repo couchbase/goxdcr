@@ -24,7 +24,7 @@ func (_m *Pipeline) EXPECT() *Pipeline_Expecter {
 	return &Pipeline_Expecter{mock: &_m.Mock}
 }
 
-// FullTopic provides a mock function with given fields:
+// FullTopic provides a mock function with no fields
 func (_m *Pipeline) FullTopic() string {
 	ret := _m.Called()
 
@@ -69,7 +69,7 @@ func (_c *Pipeline_FullTopic_Call) RunAndReturn(run func() string) *Pipeline_Ful
 	return _c
 }
 
-// GetAsyncListenerMap provides a mock function with given fields:
+// GetAsyncListenerMap provides a mock function with no fields
 func (_m *Pipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -116,7 +116,7 @@ func (_c *Pipeline_GetAsyncListenerMap_Call) RunAndReturn(run func() map[string]
 	return _c
 }
 
-// GetBrokenMapRO provides a mock function with given fields:
+// GetBrokenMapRO provides a mock function with no fields
 func (_m *Pipeline) GetBrokenMapRO() (metadata.CollectionNamespaceMapping, func()) {
 	ret := _m.Called()
 
@@ -175,7 +175,7 @@ func (_c *Pipeline_GetBrokenMapRO_Call) RunAndReturn(run func() (metadata.Collec
 	return _c
 }
 
-// GetRebalanceProgress provides a mock function with given fields:
+// GetRebalanceProgress provides a mock function with no fields
 func (_m *Pipeline) GetRebalanceProgress() (string, string) {
 	ret := _m.Called()
 
@@ -230,7 +230,7 @@ func (_c *Pipeline_GetRebalanceProgress_Call) RunAndReturn(run func() (string, s
 	return _c
 }
 
-// InstanceId provides a mock function with given fields:
+// InstanceId provides a mock function with no fields
 func (_m *Pipeline) InstanceId() string {
 	ret := _m.Called()
 
@@ -304,11 +304,11 @@ func (_c *Pipeline_ReportProgress_Call) Return() *Pipeline_ReportProgress_Call {
 }
 
 func (_c *Pipeline_ReportProgress_Call) RunAndReturn(run func(string)) *Pipeline_ReportProgress_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
-// RuntimeContext provides a mock function with given fields:
+// RuntimeContext provides a mock function with no fields
 func (_m *Pipeline) RuntimeContext() common.PipelineRuntimeContext {
 	ret := _m.Called()
 
@@ -384,7 +384,7 @@ func (_c *Pipeline_SetAsyncListenerMap_Call) Return() *Pipeline_SetAsyncListener
 }
 
 func (_c *Pipeline_SetAsyncListenerMap_Call) RunAndReturn(run func(map[string]common.AsyncComponentEventListener)) *Pipeline_SetAsyncListenerMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -417,7 +417,7 @@ func (_c *Pipeline_SetBrokenMap_Call) Return() *Pipeline_SetBrokenMap_Call {
 }
 
 func (_c *Pipeline_SetBrokenMap_Call) RunAndReturn(run func(metadata.CollectionNamespaceMapping)) *Pipeline_SetBrokenMap_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -450,7 +450,7 @@ func (_c *Pipeline_SetProgressRecorder_Call) Return() *Pipeline_SetProgressRecor
 }
 
 func (_c *Pipeline_SetProgressRecorder_Call) RunAndReturn(run func(common.PipelineProgressRecorder)) *Pipeline_SetProgressRecorder_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -483,7 +483,7 @@ func (_c *Pipeline_SetRuntimeContext_Call) Return() *Pipeline_SetRuntimeContext_
 }
 
 func (_c *Pipeline_SetRuntimeContext_Call) RunAndReturn(run func(common.PipelineRuntimeContext)) *Pipeline_SetRuntimeContext_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -533,7 +533,7 @@ func (_c *Pipeline_SetState_Call) RunAndReturn(run func(common.PipelineState) er
 	return _c
 }
 
-// Settings provides a mock function with given fields:
+// Settings provides a mock function with no fields
 func (_m *Pipeline) Settings() metadata.ReplicationSettingsMap {
 	ret := _m.Called()
 
@@ -580,7 +580,7 @@ func (_c *Pipeline_Settings_Call) RunAndReturn(run func() metadata.ReplicationSe
 	return _c
 }
 
-// Sources provides a mock function with given fields:
+// Sources provides a mock function with no fields
 func (_m *Pipeline) Sources() map[string]common.Nozzle {
 	ret := _m.Called()
 
@@ -627,7 +627,7 @@ func (_c *Pipeline_Sources_Call) RunAndReturn(run func() map[string]common.Nozzl
 	return _c
 }
 
-// Specification provides a mock function with given fields:
+// Specification provides a mock function with no fields
 func (_m *Pipeline) Specification() metadata.GenericSpecification {
 	ret := _m.Called()
 
@@ -722,7 +722,7 @@ func (_c *Pipeline_Start_Call) RunAndReturn(run func(metadata.ReplicationSetting
 	return _c
 }
 
-// State provides a mock function with given fields:
+// State provides a mock function with no fields
 func (_m *Pipeline) State() common.PipelineState {
 	ret := _m.Called()
 
@@ -767,7 +767,7 @@ func (_c *Pipeline_State_Call) RunAndReturn(run func() common.PipelineState) *Pi
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *Pipeline) Stop() base.ErrorMap {
 	ret := _m.Called()
 
@@ -814,7 +814,7 @@ func (_c *Pipeline_Stop_Call) RunAndReturn(run func() base.ErrorMap) *Pipeline_S
 	return _c
 }
 
-// Targets provides a mock function with given fields:
+// Targets provides a mock function with no fields
 func (_m *Pipeline) Targets() map[string]common.Nozzle {
 	ret := _m.Called()
 
@@ -861,7 +861,7 @@ func (_c *Pipeline_Targets_Call) RunAndReturn(run func() map[string]common.Nozzl
 	return _c
 }
 
-// Topic provides a mock function with given fields:
+// Topic provides a mock function with no fields
 func (_m *Pipeline) Topic() string {
 	ret := _m.Called()
 
@@ -906,7 +906,7 @@ func (_c *Pipeline_Topic_Call) RunAndReturn(run func() string) *Pipeline_Topic_C
 	return _c
 }
 
-// Type provides a mock function with given fields:
+// Type provides a mock function with no fields
 func (_m *Pipeline) Type() common.PipelineType {
 	ret := _m.Called()
 

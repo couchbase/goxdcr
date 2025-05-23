@@ -171,7 +171,7 @@ func (_c *PipelineFactory_SetPipelineStopCallback_Call) Return() *PipelineFactor
 }
 
 func (_c *PipelineFactory_SetPipelineStopCallback_Call) RunAndReturn(run func(base.PipelineMgrStopCbType)) *PipelineFactory_SetPipelineStopCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

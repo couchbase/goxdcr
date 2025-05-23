@@ -126,7 +126,7 @@ func (_c *Request_DeSerialize_Call) RunAndReturn(run func([]byte) error) *Reques
 	return _c
 }
 
-// GenerateResponse provides a mock function with given fields:
+// GenerateResponse provides a mock function with no fields
 func (_m *Request) GenerateResponse() interface{} {
 	ret := _m.Called()
 
@@ -173,7 +173,7 @@ func (_c *Request_GenerateResponse_Call) RunAndReturn(run func() interface{}) *R
 	return _c
 }
 
-// GetEnqueuedTime provides a mock function with given fields:
+// GetEnqueuedTime provides a mock function with no fields
 func (_m *Request) GetEnqueuedTime() time.Time {
 	ret := _m.Called()
 
@@ -218,7 +218,7 @@ func (_c *Request_GetEnqueuedTime_Call) RunAndReturn(run func() time.Time) *Requ
 	return _c
 }
 
-// GetOpaque provides a mock function with given fields:
+// GetOpaque provides a mock function with no fields
 func (_m *Request) GetOpaque() uint32 {
 	ret := _m.Called()
 
@@ -263,7 +263,7 @@ func (_c *Request_GetOpaque_Call) RunAndReturn(run func() uint32) *Request_GetOp
 	return _c
 }
 
-// GetOpcode provides a mock function with given fields:
+// GetOpcode provides a mock function with no fields
 func (_m *Request) GetOpcode() peerToPeer.OpCode {
 	ret := _m.Called()
 
@@ -308,7 +308,7 @@ func (_c *Request_GetOpcode_Call) RunAndReturn(run func() peerToPeer.OpCode) *Re
 	return _c
 }
 
-// GetSender provides a mock function with given fields:
+// GetSender provides a mock function with no fields
 func (_m *Request) GetSender() string {
 	ret := _m.Called()
 
@@ -353,7 +353,7 @@ func (_c *Request_GetSender_Call) RunAndReturn(run func() string) *Request_GetSe
 	return _c
 }
 
-// GetTarget provides a mock function with given fields:
+// GetTarget provides a mock function with no fields
 func (_m *Request) GetTarget() string {
 	ret := _m.Called()
 
@@ -398,7 +398,7 @@ func (_c *Request_GetTarget_Call) RunAndReturn(run func() string) *Request_GetTa
 	return _c
 }
 
-// GetType provides a mock function with given fields:
+// GetType provides a mock function with no fields
 func (_m *Request) GetType() peerToPeer.ReqRespType {
 	ret := _m.Called()
 
@@ -443,7 +443,7 @@ func (_c *Request_GetType_Call) RunAndReturn(run func() peerToPeer.ReqRespType) 
 	return _c
 }
 
-// RecordEnqueuedTime provides a mock function with given fields:
+// RecordEnqueuedTime provides a mock function with no fields
 func (_m *Request) RecordEnqueuedTime() {
 	_m.Called()
 }
@@ -471,7 +471,7 @@ func (_c *Request_RecordEnqueuedTime_Call) Return() *Request_RecordEnqueuedTime_
 }
 
 func (_c *Request_RecordEnqueuedTime_Call) RunAndReturn(run func()) *Request_RecordEnqueuedTime_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -531,7 +531,7 @@ func (_c *Request_SameAs_Call) RunAndReturn(run func(interface{}) (bool, error))
 	return _c
 }
 
-// Serialize provides a mock function with given fields:
+// Serialize provides a mock function with no fields
 func (_m *Request) Serialize() ([]byte, error) {
 	ret := _m.Called()
 

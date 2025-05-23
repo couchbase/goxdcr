@@ -66,7 +66,7 @@ func (_c *CacheableMetadataObj_CAS_Call) RunAndReturn(run func(metadata_svc.Cach
 	return _c
 }
 
-// Clone provides a mock function with given fields:
+// Clone provides a mock function with no fields
 func (_m *CacheableMetadataObj) Clone() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
 
@@ -113,7 +113,7 @@ func (_c *CacheableMetadataObj_Clone_Call) RunAndReturn(run func() metadata_svc.
 	return _c
 }
 
-// CloneAndRedact provides a mock function with given fields:
+// CloneAndRedact provides a mock function with no fields
 func (_m *CacheableMetadataObj) CloneAndRedact() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
 
@@ -160,7 +160,7 @@ func (_c *CacheableMetadataObj_CloneAndRedact_Call) RunAndReturn(run func() meta
 	return _c
 }
 
-// Redact provides a mock function with given fields:
+// Redact provides a mock function with no fields
 func (_m *CacheableMetadataObj) Redact() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
 

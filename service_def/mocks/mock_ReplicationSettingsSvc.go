@@ -20,7 +20,7 @@ func (_m *ReplicationSettingsSvc) EXPECT() *ReplicationSettingsSvc_Expecter {
 	return &ReplicationSettingsSvc_Expecter{mock: &_m.Mock}
 }
 
-// GetDefaultReplicationSettings provides a mock function with given fields:
+// GetDefaultReplicationSettings provides a mock function with no fields
 func (_m *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
 	ret := _m.Called()
 

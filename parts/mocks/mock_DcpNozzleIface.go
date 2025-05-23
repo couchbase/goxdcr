@@ -26,7 +26,7 @@ func (_m *DcpNozzleIface) EXPECT() *DcpNozzleIface_Expecter {
 	return &DcpNozzleIface_Expecter{mock: &_m.Mock}
 }
 
-// AsyncComponentEventListeners provides a mock function with given fields:
+// AsyncComponentEventListeners provides a mock function with no fields
 func (_m *DcpNozzleIface) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
@@ -73,7 +73,7 @@ func (_c *DcpNozzleIface_AsyncComponentEventListeners_Call) RunAndReturn(run fun
 	return _c
 }
 
-// Close provides a mock function with given fields:
+// Close provides a mock function with no fields
 func (_m *DcpNozzleIface) Close() error {
 	ret := _m.Called()
 
@@ -118,7 +118,7 @@ func (_c *DcpNozzleIface_Close_Call) RunAndReturn(run func() error) *DcpNozzleIf
 	return _c
 }
 
-// CollectionEnabled provides a mock function with given fields:
+// CollectionEnabled provides a mock function with no fields
 func (_m *DcpNozzleIface) CollectionEnabled() bool {
 	ret := _m.Called()
 
@@ -163,7 +163,7 @@ func (_c *DcpNozzleIface_CollectionEnabled_Call) RunAndReturn(run func() bool) *
 	return _c
 }
 
-// Connector provides a mock function with given fields:
+// Connector provides a mock function with no fields
 func (_m *DcpNozzleIface) Connector() common.Connector {
 	ret := _m.Called()
 
@@ -266,7 +266,7 @@ func (_c *DcpNozzleIface_GetStreamState_Call) RunAndReturn(run func(uint16) (par
 	return _c
 }
 
-// Id provides a mock function with given fields:
+// Id provides a mock function with no fields
 func (_m *DcpNozzleIface) Id() string {
 	ret := _m.Called()
 
@@ -311,7 +311,7 @@ func (_c *DcpNozzleIface_Id_Call) RunAndReturn(run func() string) *DcpNozzleIfac
 	return _c
 }
 
-// IsOpen provides a mock function with given fields:
+// IsOpen provides a mock function with no fields
 func (_m *DcpNozzleIface) IsOpen() bool {
 	ret := _m.Called()
 
@@ -356,7 +356,7 @@ func (_c *DcpNozzleIface_IsOpen_Call) RunAndReturn(run func() bool) *DcpNozzleIf
 	return _c
 }
 
-// Logger provides a mock function with given fields:
+// Logger provides a mock function with no fields
 func (_m *DcpNozzleIface) Logger() *log.CommonLogger {
 	ret := _m.Called()
 
@@ -403,7 +403,7 @@ func (_c *DcpNozzleIface_Logger_Call) RunAndReturn(run func() *log.CommonLogger)
 	return _c
 }
 
-// Open provides a mock function with given fields:
+// Open provides a mock function with no fields
 func (_m *DcpNozzleIface) Open() error {
 	ret := _m.Called()
 
@@ -448,7 +448,7 @@ func (_c *DcpNozzleIface_Open_Call) RunAndReturn(run func() error) *DcpNozzleIfa
 	return _c
 }
 
-// PrintStatusSummary provides a mock function with given fields:
+// PrintStatusSummary provides a mock function with no fields
 func (_m *DcpNozzleIface) PrintStatusSummary() {
 	_m.Called()
 }
@@ -476,7 +476,7 @@ func (_c *DcpNozzleIface_PrintStatusSummary_Call) Return() *DcpNozzleIface_Print
 }
 
 func (_c *DcpNozzleIface_PrintStatusSummary_Call) RunAndReturn(run func()) *DcpNozzleIface_PrintStatusSummary_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -509,7 +509,7 @@ func (_c *DcpNozzleIface_RaiseEvent_Call) Return() *DcpNozzleIface_RaiseEvent_Ca
 }
 
 func (_c *DcpNozzleIface_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *DcpNozzleIface_RaiseEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -588,7 +588,7 @@ func (_c *DcpNozzleIface_RecycleDataObj_Call) Return() *DcpNozzleIface_RecycleDa
 }
 
 func (_c *DcpNozzleIface_RecycleDataObj_Call) RunAndReturn(run func(interface{})) *DcpNozzleIface_RecycleDataObj_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -639,7 +639,7 @@ func (_c *DcpNozzleIface_RegisterComponentEventListener_Call) RunAndReturn(run f
 	return _c
 }
 
-// ResponsibleVBs provides a mock function with given fields:
+// ResponsibleVBs provides a mock function with no fields
 func (_m *DcpNozzleIface) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
@@ -778,7 +778,7 @@ func (_c *DcpNozzleIface_Start_Call) RunAndReturn(run func(metadata.ReplicationS
 	return _c
 }
 
-// State provides a mock function with given fields:
+// State provides a mock function with no fields
 func (_m *DcpNozzleIface) State() common.PartState {
 	ret := _m.Called()
 
@@ -823,7 +823,7 @@ func (_c *DcpNozzleIface_State_Call) RunAndReturn(run func() common.PartState) *
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *DcpNozzleIface) Stop() error {
 	ret := _m.Called()
 

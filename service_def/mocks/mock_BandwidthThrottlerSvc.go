@@ -75,7 +75,7 @@ func (_c *BandwidthThrottlerSvc_Throttle_Call) RunAndReturn(run func(int64, int6
 	return _c
 }
 
-// Wait provides a mock function with given fields:
+// Wait provides a mock function with no fields
 func (_m *BandwidthThrottlerSvc) Wait() error {
 	ret := _m.Called()
 

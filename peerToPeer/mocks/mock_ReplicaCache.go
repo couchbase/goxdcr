@@ -134,7 +134,7 @@ func (_c *ReplicaCache_HandleSpecCreation_Call) Return() *ReplicaCache_HandleSpe
 }
 
 func (_c *ReplicaCache_HandleSpecCreation_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *ReplicaCache_HandleSpecCreation_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -167,7 +167,7 @@ func (_c *ReplicaCache_HandleSpecDeletion_Call) Return() *ReplicaCache_HandleSpe
 }
 
 func (_c *ReplicaCache_HandleSpecDeletion_Call) RunAndReturn(run func(*metadata.ReplicationSpecification)) *ReplicaCache_HandleSpecDeletion_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

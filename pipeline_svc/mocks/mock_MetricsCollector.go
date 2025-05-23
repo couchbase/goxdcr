@@ -102,7 +102,7 @@ func (_c *MetricsCollector_HandleLatestThroughSeqnos_Call) Return() *MetricsColl
 }
 
 func (_c *MetricsCollector_HandleLatestThroughSeqnos_Call) RunAndReturn(run func(map[uint16]uint64)) *MetricsCollector_HandleLatestThroughSeqnos_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -182,7 +182,7 @@ func (_c *MetricsCollector_OnEvent_Call) Return() *MetricsCollector_OnEvent_Call
 }
 
 func (_c *MetricsCollector_OnEvent_Call) RunAndReturn(run func(*common.Event)) *MetricsCollector_OnEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

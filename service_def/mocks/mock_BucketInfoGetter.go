@@ -17,7 +17,7 @@ func (_m *BucketInfoGetter) EXPECT() *BucketInfoGetter_Expecter {
 	return &BucketInfoGetter_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields:
+// Execute provides a mock function with no fields
 func (_m *BucketInfoGetter) Execute() (map[string]interface{}, bool, string, error) {
 	ret := _m.Called()
 

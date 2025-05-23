@@ -683,7 +683,7 @@ func (_c *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call) Return()
 }
 
 func (_c *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallback)) *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -716,7 +716,7 @@ func (_c *CollectionsManifestSvc_SetPeerManifestsGetter_Call) Return() *Collecti
 }
 
 func (_c *CollectionsManifestSvc_SetPeerManifestsGetter_Call) RunAndReturn(run func(service_def.PeerManifestsGetter)) *CollectionsManifestSvc_SetPeerManifestsGetter_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

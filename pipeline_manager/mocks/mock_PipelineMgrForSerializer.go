@@ -72,17 +72,17 @@ func (_c *PipelineMgrForSerializer_AutoPauseReplication_Call) RunAndReturn(run f
 	return _c
 }
 
-// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta
-func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair, srcManifestsDelta)
+// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta, latestTgtManifestId
+func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64) error {
+	ret := _m.Called(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BackfillMappingUpdate")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
-		r0 = rf(topic, diffPair, srcManifestsDelta)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error); ok {
+		r0 = rf(topic, diffPair, srcManifestsDelta, latestTgtManifestId)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -99,13 +99,14 @@ type PipelineMgrForSerializer_BackfillMappingUpdate_Call struct {
 //   - topic string
 //   - diffPair *metadata.CollectionNamespaceMappingsDiffPair
 //   - srcManifestsDelta []*metadata.CollectionsManifest
-func (_e *PipelineMgrForSerializer_Expecter) BackfillMappingUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
-	return &PipelineMgrForSerializer_BackfillMappingUpdate_Call{Call: _e.mock.On("BackfillMappingUpdate", topic, diffPair, srcManifestsDelta)}
+//   - latestTgtManifestId uint64
+func (_e *PipelineMgrForSerializer_Expecter) BackfillMappingUpdate(topic interface{}, diffPair interface{}, srcManifestsDelta interface{}, latestTgtManifestId interface{}) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+	return &PipelineMgrForSerializer_BackfillMappingUpdate_Call{Call: _e.mock.On("BackfillMappingUpdate", topic, diffPair, srcManifestsDelta, latestTgtManifestId)}
 }
 
-func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest)) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Run(run func(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest, latestTgtManifestId uint64)) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest))
+		run(args[0].(string), args[1].(*metadata.CollectionNamespaceMappingsDiffPair), args[2].([]*metadata.CollectionsManifest), args[3].(uint64))
 	})
 	return _c
 }
@@ -115,7 +116,7 @@ func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) Return(_a0 error)
 	return _c
 }
 
-func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
+func (_c *PipelineMgrForSerializer_BackfillMappingUpdate_Call) RunAndReturn(run func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest, uint64) error) *PipelineMgrForSerializer_BackfillMappingUpdate_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -350,7 +351,7 @@ func (_c *PipelineMgrForSerializer_GetLastUpdateResult_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetLogSvc provides a mock function with given fields:
+// GetLogSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetLogSvc() service_def.UILogSvc {
 	ret := _m.Called()
 
@@ -456,7 +457,7 @@ func (_c *PipelineMgrForSerializer_GetOrCreateReplicationStatus_Call) RunAndRetu
 	return _c
 }
 
-// GetRemoteClusterSvc provides a mock function with given fields:
+// GetRemoteClusterSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	ret := _m.Called()
 
@@ -503,7 +504,7 @@ func (_c *PipelineMgrForSerializer_GetRemoteClusterSvc_Call) RunAndReturn(run fu
 	return _c
 }
 
-// GetReplSpecSvc provides a mock function with given fields:
+// GetReplSpecSvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetReplSpecSvc() service_def.ReplicationSpecSvc {
 	ret := _m.Called()
 
@@ -550,7 +551,7 @@ func (_c *PipelineMgrForSerializer_GetReplSpecSvc_Call) RunAndReturn(run func() 
 	return _c
 }
 
-// GetXDCRTopologySvc provides a mock function with given fields:
+// GetXDCRTopologySvc provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) GetXDCRTopologySvc() service_def.XDCRCompTopologySvc {
 	ret := _m.Called()
 
@@ -643,7 +644,7 @@ func (_c *PipelineMgrForSerializer_PauseReplication_Call) RunAndReturn(run func(
 	return _c
 }
 
-// PostTopologyStatus provides a mock function with given fields:
+// PostTopologyStatus provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) PostTopologyStatus() {
 	_m.Called()
 }
@@ -671,7 +672,7 @@ func (_c *PipelineMgrForSerializer_PostTopologyStatus_Call) Return() *PipelineMg
 }
 
 func (_c *PipelineMgrForSerializer_PostTopologyStatus_Call) RunAndReturn(run func()) *PipelineMgrForSerializer_PostTopologyStatus_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -815,7 +816,7 @@ func (_c *PipelineMgrForSerializer_StartPipeline_Call) RunAndReturn(run func(str
 	return _c
 }
 
-// StopAllUpdaters provides a mock function with given fields:
+// StopAllUpdaters provides a mock function with no fields
 func (_m *PipelineMgrForSerializer) StopAllUpdaters() {
 	_m.Called()
 }
@@ -843,7 +844,7 @@ func (_c *PipelineMgrForSerializer_StopAllUpdaters_Call) Return() *PipelineMgrFo
 }
 
 func (_c *PipelineMgrForSerializer_StopAllUpdaters_Call) RunAndReturn(run func()) *PipelineMgrForSerializer_StopAllUpdaters_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

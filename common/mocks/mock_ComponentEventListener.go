@@ -49,7 +49,7 @@ func (_c *ComponentEventListener_OnEvent_Call) Return() *ComponentEventListener_
 }
 
 func (_c *ComponentEventListener_OnEvent_Call) RunAndReturn(run func(*common.Event)) *ComponentEventListener_OnEvent_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 

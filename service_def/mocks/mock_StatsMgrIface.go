@@ -78,7 +78,7 @@ func (_c *StatsMgrIface_GetCountMetrics_Call) RunAndReturn(run func(string) (int
 	return _c
 }
 
-// GetThroughSeqnosFromTsService provides a mock function with given fields:
+// GetThroughSeqnosFromTsService provides a mock function with no fields
 func (_m *StatsMgrIface) GetThroughSeqnosFromTsService() map[uint16]uint64 {
 	ret := _m.Called()
 
@@ -212,7 +212,7 @@ func (_c *StatsMgrIface_HandleLatestThroughSeqnos_Call) Return() *StatsMgrIface_
 }
 
 func (_c *StatsMgrIface_HandleLatestThroughSeqnos_Call) RunAndReturn(run func(map[uint16]uint64)) *StatsMgrIface_HandleLatestThroughSeqnos_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
@@ -309,7 +309,7 @@ func (_c *StatsMgrIface_Start_Call) RunAndReturn(run func(metadata.ReplicationSe
 	return _c
 }
 
-// Stop provides a mock function with given fields:
+// Stop provides a mock function with no fields
 func (_m *StatsMgrIface) Stop() error {
 	ret := _m.Called()
 

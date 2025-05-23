@@ -46,7 +46,7 @@ func (_c *ErrReportFunc_Execute_Call) Return() *ErrReportFunc_Execute_Call {
 }
 
 func (_c *ErrReportFunc_Execute_Call) RunAndReturn(run func(interface{})) *ErrReportFunc_Execute_Call {
-	_c.Call.Return(run)
+	_c.Run(run)
 	return _c
 }
 
