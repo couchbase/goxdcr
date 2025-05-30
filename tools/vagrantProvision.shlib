@@ -234,7 +234,7 @@ function vagrantInstallCBServerAll {
 function mountVagrantSharedFilter {
 	local i=$1
 
-	cmd="${VSSH[$i]} \"sudo mount -t prl_fs /vagrant\""
+	cmd="${VSSH[$i]} \"sudo mkdir -p /vagrant && sudo mount -t prl_fs -o uid=1000,gid=1000,_netdev vagrant /vagrant\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
