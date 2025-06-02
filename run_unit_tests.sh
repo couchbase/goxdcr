@@ -24,22 +24,23 @@ while getopts "lhd:-:" opt; do
 	case "${opt}" in
 	-)
 		case "${OPTARG}" in
-			long)
-				runAllTests=1
-				;;
-			dir=*)
-				ROOT_DIR=${OPTARG#*=}
-				;;
-			help)
-				man $0
-				exit 0
-				;;
-			*)
-				echo "ERRO: Unknown option --${OPTARG}" >&2
-				man $0
-				exit 1
-				;;
-		esac;;
+		long)
+			runAllTests=1
+			;;
+		dir=*)
+			ROOT_DIR=${OPTARG#*=}
+			;;
+		help)
+			man $0
+			exit 0
+			;;
+		*)
+			echo "ERRO: Unknown option --${OPTARG}" >&2
+			man $0
+			exit 1
+			;;
+		esac
+		;;
 	l)
 		runAllTests=1
 		;;
@@ -69,31 +70,31 @@ declare -a DIRS_WITH_UT
 declare -a outputs
 
 DIRS_WITH_UT=(
-backfill_manager
-base
-base/conflictlog
-base/filter
-conflictlog
-crMeta
-factory
-hlv
-metadata
-metadata_svc
-parts
-peerToPeer
-pipeline
-pipeline_svc
-pipeline_manager
-pipeline_utils
-service_impl
-streamApiWatcher
-utils
-base/iopool
-service_impl/throttlerSvcImpl
+	backfill_manager
+	base
+	base/conflictlog
+	base/filter
+	conflictlog
+	crMeta
+	factory
+	hlv
+	metadata
+	metadata_svc
+	parts
+	peerToPeer
+	pipeline
+	pipeline_svc
+	pipeline_manager
+	pipeline_utils
+	service_impl
+	streamApiWatcher
+	utils
+	base/iopool
+	service_impl/throttlerSvcImpl
 )
 
 # resource_manager requires use of dynamic library of sigar
-if [[ ! -z "${runAllTests:-}" ]];then
+if [[ ! -z "${runAllTests:-}" ]]; then
 	DIRS_WITH_UT[${#DIRS_WITH_UT[@]}]="resource_manager"
 fi
 

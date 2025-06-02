@@ -168,6 +168,8 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	restoreClusterBack "C1"
+	restoreClusterBack "C2"
 
 	cleanupTestCaseInternalSettings
 	# remove trap as no longer needed

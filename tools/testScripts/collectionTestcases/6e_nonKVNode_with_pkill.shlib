@@ -1,0 +1,165 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C1P0"]=9002)
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C1P0"]=13002)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S1.col1"}')
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
+	waitForBgJobs
+}
+
+function sanityChecks {
+	numDocs=$1
+
+	# 1. check for 0 backlogs
+
+	checkUnidirectionalChangesLeft
+	checkItemCnt "C2" "B2" $numDocs
+	grepForPanics
+
+	# 2. check for backfill raise deadlocks
+
+	if (($(getGoroutinesStack "C1P0" | grep -c "handleBackfillRequestWithArgs") > 0)); then
+		echo "Found stuck go-routines in handleBackfillRequestWithArgs on non-KV node"
+		exit 1
+	fi
+	echo "No backfill deadlock found in non-KV node"
+
+	if (($(getGoroutinesStack "C1" | grep -c "handleBackfillRequestWithArgs") > 0)); then
+		echo "Found stuck go-routines in handleBackfillRequestWithArgs on KV node"
+		exit 1
+	fi
+	echo "No backfill deadlock found in KV node"
+
+	# 3. check pipeline statuses
+
+	echo "Pipeline status checks to start in 20s"
+	sleep 20
+	checkPipelineLastStatus "C1" "Replicating"
+	checkPipelineLastStatus "C1P0" "Pending"
+
+	# 3a. check if pause-resume works fine
+
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 20
+	checkPipelineLastStatus "C1" "Paused"
+	checkPipelineLastStatus "C1P0" "Paused"
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 20
+	checkPipelineLastStatus "C1" "Replicating"
+	checkPipelineLastStatus "C1P0" "Pending"
+}
+
+PIPELINE_STATUS_LOG="Replication Status = "
+
+function checkPipelineLastStatus {
+	node=$1
+	status=$2
+	logs=$(getInternalNodeXdcrLog $node)
+	lastStatus=$(echo "$logs" | grep "$PIPELINE_STATUS_LOG" | tail -n 1)
+	pendingCnts=$(echo $lastStatus | grep -c "$status")
+	if (($pendingCnts == 0)); then
+		echo "Found last status not to be $status for $node: $lastStatus"
+		exit 1
+	fi
+}
+
+function runTestCase {
+	echo "==============================================================================="
+	echo "Pkill with non-KV node"
+	echo "==============================================================================="
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# add a backup node as a non-KV node of the source cluster.
+	echo "Adding backup node to the source cluster"
+	sleep 5
+	addOneNodeIn "C1P0" "C1" "backup"
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	cleanupGoxdcrLogs
+
+	runDataLoad
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 15 seconds before checking item count first pass"
+	sleep 15
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 1))
+
+	# Change mapping so that col2 will backfill
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col2":"S1.col2"}'
+	sleep 15
+
+	sanityChecks $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+
+	# Kill source cluster XDCR
+	killGoXdcr "C1"
+	killGoXdcr "C1P0"
+	sleep 15
+
+	# Change mapping so that col3 will backfill
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col3":"S1.col3"}'
+	sleep 15
+
+	sanityChecks $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	restoreClusterBack "C1"
+	restoreClusterBack "C2"
+}

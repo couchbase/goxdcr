@@ -95,6 +95,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)
 	backfillReplSvc.On("RaiseUnrecoverableBackfillsIfNeeded").Return(make(chan bool))
+	utils.On("ExponentialBackoffExecutor", "checkForKVNode", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	sourceCh := make(chan service_def_real.SourceNotification, base.BucketTopologyWatcherChanLen)
 	var vbsList []uint16
@@ -194,7 +195,7 @@ func TestBackfillMgrLaunchNoSpecs(t *testing.T) {
 	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils := setupBoilerPlate()
 	setupReplStartupSpecs(replSpecSvc, nil)
 	setupBackfillSpecs(backfillReplSvc, nil)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
@@ -292,7 +293,7 @@ func TestBackfillMgrLaunchSpecs(t *testing.T) {
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
 	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
@@ -359,7 +360,7 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
@@ -444,7 +445,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
@@ -508,7 +509,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	//setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvcBad, specs)
 	setupBackfillReplSvcNegMock(backfillReplSvcBad)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr = NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvcBad, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
@@ -542,7 +543,7 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 	setupBackfillSpecs(backfillReplSvc, specs)
 	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)

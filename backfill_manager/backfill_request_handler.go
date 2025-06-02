@@ -250,7 +250,11 @@ func (b *BackfillRequestHandler) run() {
 		}
 	}
 
-	// if the node is not a KV then we cannot subscribe to local bucket feed.
+	// The following handling is purely defensive. In the case that the node is
+	// not a KV node, run goroutine and the backfill request handler should not
+	// exist in the first place.
+	//
+	// If the node is not a KV then we cannot subscribe to local bucket feed.
 	// In that case, we ignore requests else the submitters will get blocked
 	// and thereby end-up blocking some other part of the XDCR
 	if !b.isKVNode {
