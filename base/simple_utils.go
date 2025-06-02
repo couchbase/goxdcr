@@ -1856,7 +1856,7 @@ func NewUleb128(input uint32, dataSliceGetter func(uint64) ([]byte, error), trun
 	if dataSliceGetter != nil {
 		out, err2 = dataSliceGetter(uint64(bufferLen))
 	}
-	if err2 == nil || dataSliceGetter == nil {
+	if err2 != nil || dataSliceGetter == nil {
 		out = make([]byte, bufferLen, bufferLen)
 	}
 
