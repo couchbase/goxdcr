@@ -688,6 +688,14 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 
 			backfillHandler := b.internalGetHandler(changedSpecId)
 			if backfillHandler == nil {
+				// Defensive check if this is not a KV node. We should not hit this path because non-KV nodes
+				// cannot backfill.
+				isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+				if isKVNodeErr == nil && !isKVNode {
+					b.logger.Infof("Ignoring backfillMgr callback due to absence of data-service for %v", changedSpecId)
+					return nil
+				}
+
 				// should not happen, but if it does happen in an odd case then it should mean that there is
 				// no more backfill pipeline running.
 				b.logger.Infof("Backfill handler was nil, considering that there was no active backfill pipeline for %s", changedSpecId)
@@ -1275,7 +1283,12 @@ func (b *BackfillMgr) internalGetHandler(replId string) *BackfillRequestHandler 
 		// This can happen in two cases:
 		// 1. Replication spec is deleted
 		// 2. Pipeline is currently stopped
-		b.logger.Errorf("Unable to find handler for spec %v", replId)
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr != nil || isKVNode {
+			// It could also be that this node is a non-KV node, in which case nil
+			// handler is as expected.
+			b.logger.Errorf("Unable to find handler for spec %v", replId)
+		}
 	}
 	return handler
 }
@@ -1616,6 +1629,12 @@ func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, o
 	handler := b.internalGetHandler(replId)
 	b.errorRetryQMtx.RLock()
 	if handler == nil || len(b.errorRetryQueue) > 0 {
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring raiseBackfillReq of reason=%v request due to absence of data-service for %v", reason, replId)
+			return nil
+		}
+
 		// Don't jump ahead of queue
 		b.errorRetryQMtx.RUnlock()
 		b.errorRetryQMtx.Lock()
@@ -1652,8 +1671,14 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 	handler := b.specToReqHandlerMap[replId]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
-		b.logger.Errorf("Unable to find handler for spec %v", replId)
-		errCb(base.ErrorNotFound)
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring explicit mapping change backfill request due to absence of data-service for %v", replId)
+		} else {
+			b.logger.Errorf("Unable to find handler for spec %v", replId)
+			errCb(base.ErrorNotFound)
+		}
+
 		return
 	}
 
@@ -1774,6 +1799,12 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	handler := b.specToReqHandlerMap[specId]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring on demand backfill request due to absence of data-service for %v", specId)
+			return nil, base.ErrorNoBackfillNeeded
+		}
+
 		b.logger.Errorf("Unable to find handler for spec %v", specId)
 		return nil, base.ErrorNotFound
 	}
@@ -2060,6 +2091,12 @@ func (b *BackfillMgr) retryJob(job BackfillRetryRequest, unableToBeProcessedQueu
 	if handler == nil {
 		handler = b.internalGetHandler(job.replId)
 		if handler == nil {
+			isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+			if isKVNodeErr == nil && !isKVNode {
+				b.logger.Infof("Ignoring retryJob request due to absence of data-service for %v", job.replId)
+				return true
+			}
+
 			err = fmt.Errorf("unable to find backfill handler for %v", job.replId)
 		}
 	}
@@ -2099,7 +2136,6 @@ func (b *BackfillMgr) retryBackfillRequest(req BackfillRetryRequest) {
 
 	b.logger.Infof("BackfillMgr queued up to retry backfill request for replId %v with req %v", req.replId, req.req)
 	b.errorRetryQueue = append(b.errorRetryQueue, req)
-
 }
 
 func (b *BackfillMgr) DelAllBackfills(topic string) error {
@@ -2108,8 +2144,14 @@ func (b *BackfillMgr) DelAllBackfills(topic string) error {
 	b.specReqHandlersMtx.RUnlock()
 
 	if handler == nil {
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring DelAllBackfills request due to absence of data-service for %v", topic)
+			return nil
+		}
+
 		// This should not happen
-		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		err := fmt.Errorf("unable to find handler for spec %v", topic)
 		b.logger.Errorf(err.Error())
 		return err
 	}
@@ -2123,8 +2165,14 @@ func (b *BackfillMgr) DelBackfillForVB(topic string, vbno uint16) error {
 	b.specReqHandlersMtx.RUnlock()
 
 	if handler == nil {
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring DelBackfillForVB request due to absence of data-service for %v", topic)
+			return nil
+		}
+
 		// This should not happen
-		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		err := fmt.Errorf("unable to find handler for spec %v", topic)
 		b.logger.Errorf(err.Error())
 		return err
 	}
@@ -2149,8 +2197,14 @@ func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
 	b.specReqHandlersMtx.RUnlock()
 
 	if handler == nil {
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring HandleRollbackTo0ForVB due to absence of data-service for %v", topic)
+			return nil
+		}
+
 		// This should not happen
-		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		err := fmt.Errorf("unable to find handler for spec %v", topic)
 		b.logger.Errorf(err.Error())
 		return err
 	}
@@ -2244,7 +2298,13 @@ func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses
 	handler := b.specToReqHandlerMap[topic]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
-		err = fmt.Errorf("Unable to find handler for spec %v", topic)
+		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
+		if isKVNodeErr == nil && !isKVNode {
+			b.logger.Infof("Ignoring MergeIncomingPeerNodesBackfill request due to absence of data-service for %v", topic)
+			return nil
+		}
+
+		err = fmt.Errorf("unable to find handler for spec %v", topic)
 		b.logger.Errorf(err.Error())
 		return err
 	}
