@@ -644,9 +644,14 @@ function addOneNodeIn {
 	local dependentNodePortToUse
 	local httpStr
 	local output
+	local service=${3:-}
+	if [[ -z "${service:-}" ]]; then
+		# kv node by default
+		service="kv"
+	fi
 
 	for ((retryCnt = 0; $retryCnt < 5; retryCnt = $(($retryCnt + 1)))); do
-		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port"
+		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port with services=$service"
 		local preAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
 
 		httpStr="https://"
@@ -664,7 +669,7 @@ function addOneNodeIn {
 			dependentNodePortToUse="1${dependentNodePort}"
 		fi
 
-		output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="${httpStr}${dependentNodeHostname}:${dependentNodePortToUse}" 2>&1)
+		output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="${httpStr}${dependentNodeHostname}:${dependentNodePortToUse}" -d services=$service 2>&1)
 		if [[ "$output" =~ Node\ is\ already\ part\ of\ cluster ]]; then
 			return 0
 		fi

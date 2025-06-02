@@ -392,15 +392,39 @@ func (b *BackfillMgr) initCache() error {
 	// Backfill Manager needs to "monitor" for every single ongoing replication's source and target ID
 	// in additional to just the backfill replications
 	// Such that it can launch backfill as needed
+
+	// First, check if the node contains data service. If not, we cannot subscribe to local feed of
+	// bucketTopologySvc and we don't have to backfill. Perform exponential retries just in case
+	// ns_server is overloaded when the goxdcr process is just starting up.
+	isKVNode := true
+	checkForKVNode := func() error {
+		kvExists, err := b.xdcrTopologySvc.IsKVNode()
+		if err != nil {
+			return err
+		}
+
+		isKVNode = kvExists
+		return nil
+	}
+	kvCheckErr := b.utils.ExponentialBackoffExecutor("checkForKVNode", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry,
+		base.BucketInfoOpRetryFactor, checkForKVNode)
+	if kvCheckErr != nil {
+		b.logger.Errorf("KV check returned an error, err=%v. It will be assumed that KV service doesn't exist", kvCheckErr)
+	}
+
 	replSpecMap, _ := b.replSpecSvc.AllReplicationSpecs()
 	for replId, spec := range replSpecMap {
 		err := b.retrieveLastPersistedManifest(spec)
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
 		}
-		err = b.createBackfillRequestHandler(spec)
-		if err != nil {
-			return err
+		if kvCheckErr == nil && isKVNode {
+			// Create backfill handler only if this node has KV service to make sure that we can
+			// subscribe to local feed of bucketTopologySvc.
+			err = b.createBackfillRequestHandler(spec)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1479,13 +1503,14 @@ func (b *BackfillMgr) GetComponentEventListener(pipeline common.Pipeline) (commo
 func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping, errCb func(err error), p2pPush func() error) {
 	b.specReqHandlersMtx.RLock()
 	handler := b.specToReqHandlerMap[replId]
-	handlerFinCh := handler.finCh
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
 		b.logger.Errorf("Unable to find handler for spec %v", replId)
 		errCb(base.ErrorNotFound)
 		return
 	}
+
+	handlerFinCh := handler.finCh
 
 	srcUid, err := b.getLastHandledSourceManifestId(replId)
 	if err != nil {

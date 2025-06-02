@@ -10,7 +10,8 @@
 
 . setup.sh
 
-echo "Test start: "; date
+echo "Test start: "
+date
 
 export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB
@@ -36,4 +37,5 @@ export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB
 go test -run TestEvaluatorWorkloadSlowFunction
 
-echo "Test end: "; date
+echo "Test end: "
+date

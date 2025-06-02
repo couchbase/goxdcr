@@ -154,4 +154,6 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	restoreClusterBack "C1"
+	restoreClusterBack "C2"
 }
