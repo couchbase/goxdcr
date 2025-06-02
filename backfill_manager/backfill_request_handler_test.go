@@ -646,3 +646,46 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	// After merging, vb 0 has 1 task
 	assert.Equal(1, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
 }
+
+func TestBackfillReqHandlerStopAfterChannelFull(t *testing.T) {
+	fmt.Println("============== Test case start: TestBackfillReqHandlerStopAfterChannelFull =================")
+	defer fmt.Println("============== Test case end: TestBackfillReqHandlerStopAfterChannelFull =================")
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter, getBackfillSpecUpdateStatus, setBackfillSpecUpdateStatus := setupBRHBoilerPlate()
+	setupBucketTopology(bucketTopologySvc, nil)
+	spec := createTestSpec()
+	seqnoGetter := createSeqnoGetterFunc(100)
+	seqnoGetter2 := createSeqno2GetterFunc(100)
+	var addCount int
+	var setCount int
+	var delCount int
+	// Make a dummy namespacemapping
+	collectionNs := &base.CollectionNamespace{ScopeName: base.DefaultScopeCollectionName, CollectionName: base.DefaultScopeCollectionName}
+	requestMapping := make(metadata.CollectionNamespaceMapping)
+	requestMapping.AddSingleMapping(collectionNs, collectionNs)
+
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
+	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
+
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter2, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter, getBackfillSpecUpdateStatus, setBackfillSpecUpdateStatus)
+	_, tasks0 := getTaskForVB0(sourceBucketName)
+	vbTaskMap := metadata.NewVBTasksMap()
+	vbTaskMap.VBTasksMap[0] = tasks0
+	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec, 0)
+	internalReq := internalPeerBackfillTaskMergeReq{backfillSpec: backfillSpec}
+	var done sync.WaitGroup
+	done.Add(1)
+	go func() {
+		// there is no run() method, so the write of internalReq to channel will be blocking.
+		// This is to simulate when the channel is full.
+		defer done.Done()
+		rh.HandleBackfillRequest(internalReq, "test1")
+	}()
+	time.Sleep(2 * time.Second)
+	rh.Stop()
+	// ensure that there were not goroutines stuck after Stop.
+	// If the test timed out, that means there was a stuckage.
+	done.Wait()
+}
