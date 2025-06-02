@@ -300,7 +300,7 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, nil, nil)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
 
 	utilsExpoRetMap := make(map[string]*backfillMgrTestUtilsRetStruct)
 	utilsExpoRetMap[fmt.Sprintf("retrieveLastPersistedManifest.getAgent(%s)", getSpecId(3))] = &backfillMgrTestUtilsRetStruct{
