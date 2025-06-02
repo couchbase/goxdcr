@@ -50,22 +50,22 @@ declare -a DIRS_WITH_UT
 declare -a outputs
 
 DIRS_WITH_UT=(
-backfill_manager
-base
-base/filter
-crMeta
-factory
-hlv
-metadata
-metadata_svc
-parts
-peerToPeer
-pipeline
-pipeline_svc
-pipeline_manager
-service_impl
-streamApiWatcher
-utils
+	backfill_manager
+	base
+	base/filter
+	crMeta
+	factory
+	hlv
+	metadata
+	metadata_svc
+	parts
+	peerToPeer
+	pipeline
+	pipeline_svc
+	pipeline_manager
+	service_impl
+	streamApiWatcher
+	utils
 )
 
 function killAllBgOnExit {
