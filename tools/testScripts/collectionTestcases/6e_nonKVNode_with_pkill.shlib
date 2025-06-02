@@ -42,6 +42,10 @@ function runDataLoad {
 	waitForBgJobs
 }
 
+PIPELINE_STATUS_LOG="Replication Status = "
+NIL_BACKFILL_HANDLER_LOG1="failed due to unable to find backfill handler for"
+NIL_BACKFILL_HANDLER_LOG2="Unable to find handler for spec"
+
 function sanityChecks {
 	numDocs=$1
 
@@ -83,9 +87,13 @@ function sanityChecks {
 	sleep 20
 	checkPipelineLastStatus "C1" "Replicating"
 	checkPipelineLastStatus "C1P0" "Pending"
-}
 
-PIPELINE_STATUS_LOG="Replication Status = "
+	# 4. Ensure we don't retry backfill jobs forever on non-KV nodes
+	validateLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG1" 0
+	validateLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG1" 0
+	validateLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG2" 0
+	validateLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG2" 0
+}
 
 function checkPipelineLastStatus {
 	node=$1
