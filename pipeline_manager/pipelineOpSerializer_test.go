@@ -14,13 +14,19 @@ package pipeline_manager
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/pipeline"
-	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
-	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
 	"testing"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline"
+	replicationStatus "github.com/couchbase/goxdcr/pipeline"
+	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
+	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	"github.com/couchbase/goxdcr/utils"
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 )
 
 func setupBoilerPlateSerializer() (*PipelineOpSerializer, *PipelineMgrMock.PipelineMgrForSerializer) {
@@ -150,8 +156,21 @@ func TestPipelineOpSerializerReinit(t *testing.T) {
 	pipelineMgr.On("CleanupPipeline", mock.Anything).Return(nil).Times(1)
 	pipelineMgr.On("Update", mock.Anything, mock.Anything).Return(nil).Times(1)
 
-	assert.Nil(serializer.ReInit("TestTopic"))
-	time.Sleep(serializerSleepTime)
+	// boilerplate for xdcrDevPipelineReinitCleanupDelayProofNode
+	testTopic := "TestTopic"
+	testReplicationSpec := &metadata.ReplicationSpecification{Id: testTopic, Settings: metadata.DefaultReplicationSettings(), Revision: 1}
+	replSpecSvc := &service_def.ReplicationSpecSvc{}
+	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(testReplicationSpec, nil)
+	pipelineMgr.On("GetReplSpecSvc").Return(replSpecSvc)
+
+	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
+	utilsNew := utils.NewUtilities()
+	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
+	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger, nil, utilsNew)
+	pipelineMgr.On("GetOrCreateReplicationStatus", mock.Anything, mock.Anything).Return(testReplicationStatus, nil)
+
+	assert.Nil(serializer.ReInit(testTopic))
+	time.Sleep(serializerSleepTime + base.PipelineReinitStreamDelaySec)
 	assert.Equal(0, len(serializer.jobTopicMap))
 	fmt.Println("============== Test case end: TestPipelineOpSerializerReinit =================")
 }
