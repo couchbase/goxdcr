@@ -426,6 +426,10 @@ function checkUnidirectionalChangesLeft {
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 }
 
+function checkUnidirectionalChangesLeftSGW {
+	checkChangesLeftInternalSGW "C1" "B1" "C2" "B2"
+}
+
 function checkBidirectionalChangesLeft {
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 	checkChangesLeftInternal "C2" "B2" "C1" "B1"
@@ -811,6 +815,9 @@ function xdcrDifferParseOpts {
 		echo "-m body"
 	elif [[ "$optsIn" == "retry" ]]; then
 		echo "-e 2"
+	elif [[ "$optsIn" =~ ^-o ]]; then
+		# Out directory, just let it fly
+		echo "$optsIn"
 	fi
 }
 

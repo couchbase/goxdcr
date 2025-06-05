@@ -91,7 +91,7 @@ function verifyPromStats {
 function runTestCase {
 	local maxRuns=30
 	echo "============================================================================"
-	echo "Running active passive sgw replication"
+	echo "Running active active sgw replication"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll

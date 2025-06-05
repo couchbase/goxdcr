@@ -849,7 +849,7 @@ function vagrantValidateDifferResults {
 	local tmpFile="/tmp/vagrantMutationDiffDetails.log"
 	local resultOutput
 
-	local differDir="$1"
+	local outDir="$1"
 	local clusterName="$2"
 	local idx="$(getClusterIdx "$clusterName")"
 	local expectedMismatchCnt=$3
@@ -858,12 +858,31 @@ function vagrantValidateDifferResults {
 	local expectedDeletedSrcCnt=${6:-}
 	local expectedDeletedTgtCnt=${7:-}
 
-	cmd="${VSSH[$idx]} \"cat ${differDir}/outputs/mutationDiff/mutationDiffDetails\""
+	cmd="${VSSH[$idx]} \"cat ${outDir}/mutationDiff/mutationDiffDetails\""
 	echo "==== Running $cmd > $tmpFile ===="
 	eval $cmd >$tmpFile
 
 	resultOutput=$(cat $tmpFile)
 	validateDifferResultsInternal "$resultOutput" "$expectedMismatchCnt" "$expectedMissingSrcCnt" "$expectedMissingTgtCnt" "$expectedDeletedSrcCnt" "$expectedDeletedTgtCnt"
+}
+
+function runXdcrDifferValidation {
+	local xdcrDifferDir="$1"
+	local clusterName="$2"
+	local bucketName="$3"
+	local tgtClusterName="$4"
+	local tgtBucketName="$5"
+	local outDir="/tmp/differOut/"
+	local cmd
+
+	# Create output directory
+	local idx="$(getClusterIdx "$clusterName")"
+	cmd="${VSSH[$idx]} \"mkdir -p ${outDir}\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	vagrantRunXdcrDiffer "${xdcrDifferDir}" "$clusterName" "$bucketName" "$tgtClusterName" "$tgtBucketName" "-o ${outDir}"
+	vagrantValidateDifferResults "${outDir}" "$clusterName" 0 0 0
 }
 
 function vagrantSetBucket {

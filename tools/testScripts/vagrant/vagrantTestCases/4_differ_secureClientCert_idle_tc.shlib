@@ -77,6 +77,7 @@ function runNonSecureDifferTest {
 	echo "============================================================================"
 	echo "Running Non- secure"
 	echo "============================================================================"
+	local xdcrDifferDir=$1
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
@@ -90,8 +91,7 @@ function runNonSecureDifferTest {
 
 	checkUnidirectionalChangesLeft
 
-	vagrantRunXdcrDiffer "${xdcrDifferDir}" "C1" "B1" "C2" "B2"
-	vagrantValidateDifferResults "${xdcrDifferDir}" "C1" 0 0 0
+	runXdcrDifferValidation "$xdcrDifferDir" "C1" "B1" "C2" "B2"
 
 	if (($? == 1)); then
 		echo "Test case failed"
@@ -107,6 +107,7 @@ function runSecureCertDifferTest {
 	echo "============================================================================"
 	echo "Running Full secure with client cert replication with xdcrDiffer"
 	echo "============================================================================"
+	local xdcrDifferDir=$1
 
 	sleep 5
 	setupCertsForTesting
@@ -127,8 +128,7 @@ function runSecureCertDifferTest {
 
 	checkUnidirectionalChangesLeft
 
-	vagrantRunXdcrDiffer "${xdcrDifferDir}" "C1" "B1" "C2" "B2"
-	vagrantValidateDifferResults "${xdcrDifferDir}" "C1" 0 0 0
+	runXdcrDifferValidation "$xdcrDifferDir" "C1" "B1" "C2" "B2"
 
 	if (($? == 1)); then
 		echo "Test case failed"
@@ -149,6 +149,7 @@ function runSecureDifferTest {
 	echo "============================================================================"
 	echo "Running Full secure replication with xdcrDiffer"
 	echo "============================================================================"
+	local xdcrDifferDir=$1
 
 	sleep 5
 	createSecureRemoteClusterReference "C1" "C2"
@@ -162,8 +163,7 @@ function runSecureDifferTest {
 
 	checkUnidirectionalChangesLeft
 
-	vagrantRunXdcrDiffer "${xdcrDifferDir}" "C1" "B1" "C2" "B2"
-	vagrantValidateDifferResults "${xdcrDifferDir}" "C1" 0 0 0
+	runXdcrDifferValidation "$xdcrDifferDir" "C1" "B1" "C2" "B2"
 
 	if (($? == 1)); then
 		echo "Test case failed"
@@ -198,6 +198,14 @@ function runTestCase {
 			echo "============================================================================"
 			echo "Running test with source $srcVersionToTest and target $tgtVersionToTest"
 			echo "============================================================================"
+
+			# Remove this once morpheus is the oldest version supported
+			if [[ "$srcVersionToTest" != "morpheus" ]]; then
+					echo "ERROR: Only morpheus supports differ. Skipping test on source version $srcVersionToTest"
+					continue
+			fi
+
+			xdcrDifferDir="/opt/couchbase/bin"
 			loadVersion "$srcVersionToTest" "$tgtVersionToTest"
 
 			# Bucket properties
@@ -225,16 +233,16 @@ function runTestCase {
 			setupTopologies
 			runDifferTestRebalanceIn
 
-			runNonSecureDifferTest
+			runNonSecureDifferTest "$xdcrDifferDir"
 			cleanupBucketReplications
 			cleanupRemoteClusterRefs
 
-			runSecureDifferTest
+			runSecureDifferTest "$xdcrDifferDir"
 			cleanupBucketReplications
 			cleanupRemoteClusterRefs
 
 			# Run cert test as the last
-			runSecureCertDifferTest
+			runSecureCertDifferTest "$xdcrDifferDir"
 			cleanupBucketReplications
 			cleanupRemoteClusterRefs
 			cleanupBuckets

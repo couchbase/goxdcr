@@ -117,7 +117,7 @@ function runTestCase {
 	runDataLoad
 
 	sleep 30
-	checkUnidirectionalChangesLeft
+	checkUnidirectionalChangesLeftSGW
 	vagrantGrepForPanicAll
 	verifyPromStats
 
