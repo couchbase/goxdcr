@@ -2240,8 +2240,14 @@ func (u *Utilities) getExternalHostName(nodeInfo map[string]interface{}) (string
 }
 
 // Checks if alternate address setup for the cluster is valid.
-// Note that XDCR does not support the alternate address setup for private links
-func (u *Utilities) TargetHasSharedExternalHostname(targetBucketInfo map[string]interface{}) (bool, error) {
+// For proper port forwarding based load balancing, it is expected that:
+// Each node has an unique FQDN:mgmt port
+// Example 1:
+// If there are 3 nodes, each of the 3 nodes share the same FQDN, each node needs to have its own unique
+// management port number.
+// Example 2:
+// If there are 3 nodes, each of the 3 nodes do not have unique mgmt port, each of it must has its own unique FQDN
+func (u *Utilities) TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo map[string]interface{}) (bool, error) {
 	uniqueAddresses := make(map[string]bool)
 
 	nodesList, err := u.GetNodeListFromInfoMap(targetBucketInfo, u.logger_utils)
@@ -2252,28 +2258,39 @@ func (u *Utilities) TargetHasSharedExternalHostname(targetBucketInfo map[string]
 	for _, nodeInfoRaw := range nodesList {
 		nodeInfo, ok := nodeInfoRaw.(map[string]interface{})
 		if !ok {
-			u.logger_utils.Warnf("TargetHasSharedExternalHostname: unable to cast nodeInfo as map[string]interface{}, got: %v", nodeInfoRaw)
+			u.logger_utils.Warnf("TargetHasSharedExternalHostnameAndMgmtPort: unable to cast nodeInfo as map[string]interface{}, got: %v", nodeInfoRaw)
 			return false, fmt.Errorf("expected nodeInfo to be map[string]interface{}, got %T", nodeInfoRaw)
 		}
 
-		externalAddr, err := u.getExternalHostName(nodeInfo)
-		if err != nil {
-			if err == base.ErrorResourceDoesNotExist {
-				// In a valid private endpoint setup, all the nodes should have alternate address configured
-				// Hence if any node is missing an alternate address, private endpoint is not set up
-				return false, nil
+		externalAddr, mgmtPort, mgmtPortErr := u.GetExternalMgtHostAndPort(nodeInfo, false /*isHttps*/)
+		switch mgmtPortErr {
+		case base.ErrorResourceDoesNotExist:
+			// In a proper alternate address setup, all nodes should have alternate address configured
+			// If any node is missing an alternate address, return false
+			// It is not XDCR's responsibility to ensure that the alternate address is set up properly
+			return false, nil
+		case base.ErrorNoPortNumber:
+			// Use https
+			_, mgmtPort, mgmtPortErr = u.GetExternalMgtHostAndPort(nodeInfo, true /*isHttps*/)
+			if mgmtPortErr == base.ErrorNoPortNumber {
+				// Alternate address behavior is such that if the port is not specified,
+				// use the original port number
+				mgmtPort = int(base.DefaultAdminPort)
+			} else if mgmtPortErr != nil {
+				u.logger_utils.Warnf("TargetHasSharedExternalHostnameAndMgmtPort: unable to get external management port from nodeInfo %v, err=%v", nodeInfo, mgmtPortErr)
+				return false, mgmtPortErr
 			}
-			return false, err
 		}
 
+		externalAddr = base.GetHostAddr(externalAddr, (uint16)(mgmtPort))
 		uniqueAddresses[externalAddr] = true
 	}
 
-	// If all nodes share the same alternate address, private endpoints are set up
+	// If all nodes share the same alternate address with management port, this means
+	// that the load balancing is not properly set up for port forwarding
 	if len(uniqueAddresses) == 1 && len(nodesList) > 1 {
 		return true, nil
 	}
-
 	return false, nil
 }
 

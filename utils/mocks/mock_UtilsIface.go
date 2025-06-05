@@ -6486,11 +6486,11 @@ func (_c *UtilsIface_StartDiagStopwatch_Call) RunAndReturn(run func(string, time
 }
 
 // TargetHasSharedExternalHostname provides a mock function with given fields: bucketInfo
-func (_m *UtilsIface) TargetHasSharedExternalHostname(bucketInfo map[string]interface{}) (bool, error) {
+func (_m *UtilsIface) TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo map[string]interface{}) (bool, error) {
 	ret := _m.Called(bucketInfo)
 
 	if len(ret) == 0 {
-		panic("no return value specified for TargetHasSharedExternalHostname")
+		panic("no return value specified for TargetHasSharedExternalHostnameAndMgmtPort")
 	}
 
 	var r0 bool
@@ -6513,7 +6513,7 @@ func (_m *UtilsIface) TargetHasSharedExternalHostname(bucketInfo map[string]inte
 	return r0, r1
 }
 
-// UtilsIface_TargetHasSharedExternalHostname_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TargetHasSharedExternalHostname'
+// UtilsIface_TargetHasSharedExternalHostname_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TargetHasSharedExternalHostnameAndMgmtPort'
 type UtilsIface_TargetHasSharedExternalHostname_Call struct {
 	*mock.Call
 }
@@ -6521,7 +6521,7 @@ type UtilsIface_TargetHasSharedExternalHostname_Call struct {
 // TargetHasSharedExternalHostname is a helper method to define mock.On call
 //   - bucketInfo map[string]interface{}
 func (_e *UtilsIface_Expecter) TargetHasSharedExternalHostname(bucketInfo interface{}) *UtilsIface_TargetHasSharedExternalHostname_Call {
-	return &UtilsIface_TargetHasSharedExternalHostname_Call{Call: _e.mock.On("TargetHasSharedExternalHostname", bucketInfo)}
+	return &UtilsIface_TargetHasSharedExternalHostname_Call{Call: _e.mock.On("TargetHasSharedExternalHostnameAndMgmtPort", bucketInfo)}
 }
 
 func (_c *UtilsIface_TargetHasSharedExternalHostname_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_TargetHasSharedExternalHostname_Call {

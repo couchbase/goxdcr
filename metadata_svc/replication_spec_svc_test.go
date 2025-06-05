@@ -154,7 +154,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 
 	// Real utilities object to check the existance of private endpoints
 	realUtilsMockObj := utilities.NewUtilities()
-	privateEndpointsExists, err1 := realUtilsMockObj.TargetHasSharedExternalHostname(tgtBucketInfo)
+	privateEndpointsExists, err1 := realUtilsMockObj.TargetHasSharedExternalHostnameAndMgmtPort(tgtBucketInfo)
 
 	// Utilities mock
 	var port uint16 = 9000
@@ -174,7 +174,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
 	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
 	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
-	utilitiesMock.On("TargetHasSharedExternalHostname", tgtBucketInfo).Return(privateEndpointsExists, err1)
+	utilitiesMock.On("TargetHasSharedExternalHostnameAndMgmtPort", tgtBucketInfo).Return(privateEndpointsExists, err1)
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType

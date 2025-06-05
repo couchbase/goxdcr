@@ -102,7 +102,7 @@ type UtilsIface interface {
 	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func(nodes []string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error)
 	GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error)
 	ParseClientCertOutput(clientCertInput map[string]interface{}) (isMandatory bool, err error)
-	TargetHasSharedExternalHostname(bucketInfo map[string]interface{}) (bool, error)
+	TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo map[string]interface{}) (bool, error)
 
 	// Network related utilities
 	ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error)

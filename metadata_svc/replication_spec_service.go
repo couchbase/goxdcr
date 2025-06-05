@@ -510,7 +510,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap = service.validateTargetBucket(validateTargetBucketErrMap, remoteConnstr, targetBucket, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster, useExternal)
 
 				// Validate the alternate/external address setup, particularly to check if private link is configured.
-				hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostname(targetBucketInfo)
+				hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo)
 				if err != nil {
 					errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
 					service.logger.Error(errMsg)

@@ -1013,7 +1013,7 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json")
 	bucketInfo, _, err := readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err := testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	exists, err := testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
 	assert.Nil(err)
 	assert.Equal(true, exists)
 
@@ -1021,7 +1021,7 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_b2.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 
@@ -1029,7 +1029,7 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 
@@ -1037,7 +1037,15 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostname(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+
+	// Case 5: Network Load Balancer with Port Forwarding set up
+	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "nlb_pools_default_bucket_b2.json")
+	bucketInfo, _, err = readJsonHelper(fileName)
+	assert.Nil(err)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 }
