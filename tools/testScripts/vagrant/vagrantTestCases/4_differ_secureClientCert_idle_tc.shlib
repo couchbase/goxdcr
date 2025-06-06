@@ -201,8 +201,8 @@ function runTestCase {
 
 			# Remove this once morpheus is the oldest version supported
 			if [[ "$srcVersionToTest" != "morpheus" ]]; then
-					echo "ERROR: Only morpheus supports differ. Skipping test on source version $srcVersionToTest"
-					continue
+				echo "ERROR: Only morpheus supports differ. Skipping test on source version $srcVersionToTest"
+				continue
 			fi
 
 			xdcrDifferDir="/opt/couchbase/bin"

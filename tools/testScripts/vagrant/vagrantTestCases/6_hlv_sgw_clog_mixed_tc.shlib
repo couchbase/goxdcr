@@ -1,0 +1,138 @@
+# Copyright 2022-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C2"]=15001 ["C3"]=15002 ["C4"]=15003)
+CLUSTER_NAME_SSLPORT_MAP=(["C1"]=15020 ["C2"]=15021 ["C3"]=15022 ["C4"]=15023)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C2"]=15997 ["C3"]=15998 ["C4"]=15999)
+VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C2"]=15101 ["C3"]=15102 ["C4"]=15103)
+VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C2"]=15201 ["C3"]=15202 ["C4"]=15203)
+VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C2"]=15011 ["C3"]=15012 ["C4"]=15013)
+VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C2"]="192.168.56.3" ["C3"]="192.168.56.4" ["C4"]="192.168.56.5")
+VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C2" ["2"]="C3" ["3"]="C4")
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3" ["C4"]="B4")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A LWWBucketProperty=(["ramQuotaMB"]=100 ["conflictResolutionType"]="lww" ["storageBackend"]="couchstore")
+insertPropertyIntoBucketNamePropertyMap "B0" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B3" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B4" LWWBucketProperty
+
+declare -A MobileBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Test cases assume vagrant up has already been called
+
+function runDataLoad {
+	local i
+	local clusterName
+	local bucketName
+
+	for ((i = 1; i <= 4; i++)); do
+		local clusterName="C${i}"
+		local bucketName="B${i}"
+
+		runCbWorkloadGenBucket "$clusterName" "$bucketName" &
+		runCbWorkloadGenCollection "$clusterName" "$bucketName" "S1" "col1" "col_" &
+	done
+
+	waitForBgJobs
+}
+
+function setupSGW {
+	local clusterName=$1
+	vagrantRemoveSGW "$clusterName"
+	vagrantInstallSGW "$clusterName" "4.0.0"
+	vagrantStopSGW "$clusterName"
+	vagrantSetConfigSGW "$clusterName"
+	vagrantStartSGW "$clusterName"
+}
+
+function configureBidirectionalBetweenHLVClusters {
+	setupSGW "C1"
+	setupSGW "C2"
+	vagrantSGWAddDbConfig "C1" "B1" "b1db"
+	vagrantSGWAddDbConfig "C2" "B2" "b2db"
+	echo "Waiting 30 sec for SGW to finish init"
+	sleep 20
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" MobileBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" MobileBucketReplProperties
+}
+
+function configureBidirectionalBetweenClusters {
+	createRemoteClusterReference "C3" "C4"
+	createRemoteClusterReference "C4" "C3"
+	sleep 1
+	createBucketReplication "C3" "B3" "C4" "B4" DefaultBucketReplProperties
+	createBucketReplication "C4" "B4" "C3" "B3" DefaultBucketReplProperties
+}
+
+function runTestCase {
+	local maxRuns=30
+	local versionWithHLV="morpheus"
+	local versionWithoutHLV="trinity"
+	echo "============================================================================"
+	echo "Running 4 clusters mixed mode with SGW and conflict logging test case"
+	echo "============================================================================"
+
+	vagrantRemoveCbServerAll
+	vagrantRemoveSGWAll
+
+	# C1 and C2 are clusters with Morpheus that supports HLV
+	# C3 and C4 are non-Morpheus clusters that do not support HLV
+	vagrantInstallCBServer 0 "$versionWithHLV"
+	vagrantInstallCBServer 1 "$versionWithHLV"
+	vagrantInstallCBServer 2 "$versionWithoutHLV"
+	vagrantInstallCBServer 3 "$versionWithoutHLV"
+
+	sleep 20
+
+	setupTopologies
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	# First step is to make sure two islands are functional
+	configureBidirectionalBetweenHLVClusters
+	configureBidirectionalBetweenClusters
+
+	sleep 30
+	runDataLoad
+	sleep 10
+	checkBidirectionalChangesLeftSGW
+	# Check C3 and C4 manually
+	checkChangesLeftInternal "C3" "B3" "C4" "B4"
+	checkChangesLeftInternal "C4" "B4" "C3" "B3"
+	vagrantGrepForPanicAll
+	local xdcrDifferDir="/opt/couchbase/bin"
+	runXdcrDifferValidation "$xdcrDifferDir" "C1" "B1" "C2" "B2"
+	runXdcrDifferValidation "$xdcrDifferDir" "C2" "B2" "C1" "B1"
+
+	# TODO - link with legacy clusters
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}

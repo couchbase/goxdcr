@@ -101,6 +101,7 @@ function runFullSecureAlternateClientCertAndNLB {
 
 	cleanupBucketReplications
 	cleanupBuckets
+	vagrantRemoveHaproxy 4
 	unset VAGRANT_LB_IP
 }
 
