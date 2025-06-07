@@ -808,6 +808,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetBucketUUIDDiffere
 		shouldTryAgain = true
 		return
 	}
+
 	if curTargetClusterUUID != spec.TargetClusterUUID {
 		// case 4, target node has been moved to a different cluster. skip target check
 		logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
@@ -815,8 +816,19 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetBucketUUIDDiffere
 		shouldTryAgain = true
 		return
 	}
-	// if we get here, it is case 5, delete repl spec
-	reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
-	err = top_detect_svc.DelReplicationSpec(spec, reason)
+
+	// if we get here, it is case 5 - delete repl spec IF skipReplSpecAutoGc=false
+	updatedSpec, err := top_detect_svc.repl_spec_svc.ReplicationSpecReadOnly(spec.Id) // since the 'spec' passed in can be stale
+	if err != nil || updatedSpec == nil {
+		shouldTryAgain = true
+		return
+	}
+	if !updatedSpec.Settings.GetSkipAutoGC() {
+		reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
+		err = top_detect_svc.DelReplicationSpec(updatedSpec, reason)
+		if err != nil {
+			shouldTryAgain = true
+		}
+	}
 	return
 }

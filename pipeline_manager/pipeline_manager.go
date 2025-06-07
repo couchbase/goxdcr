@@ -38,7 +38,7 @@ var ErrorBackfillSpecHasNoVBTasks = errors.New("backfill spec VBTasksMap is empt
 var ErrorNoKVService = errors.New("this node does not have KV service")
 var ErrorBackfillSpecUpdatePending = errors.New("backfill spec update is still pending")
 var ErrorBackfillSpecUpdateStatusNotFound = errors.New("backfill spec update status object not found")
-var ErrorAutoPauseString = "SkipAutoGC is set - forcing it to be paused"
+var ErrorAutoPauseString = "The replication has been paused instead of being deleted because 'skipReplSpecAutoGc' is true"
 
 var default_failure_restart_interval = 10
 
@@ -2676,9 +2676,11 @@ func (pipelineMgr *PipelineManager) ValidateAndGC(spec *metadata.ReplicationSpec
 		return
 	}
 
+	bucketLocation := "Source"
 	needToRemove, detailErr := pipelineMgr.gcSourceBucket(spec)
 	if !needToRemove {
 		needToRemove, detailErr = pipelineMgr.gcTargetBucket(spec)
+		bucketLocation = "Target"
 	}
 
 	if detailErr != nil {
@@ -2687,7 +2689,7 @@ func (pipelineMgr *PipelineManager) ValidateAndGC(spec *metadata.ReplicationSpec
 
 	if needToRemove {
 		if spec.Settings.GetSkipAutoGC() {
-			autoPauseMsg := fmt.Sprintf("Replication specification %v is no longer valid, but %s. error=%v", spec.Id, ErrorAutoPauseString, detailErr)
+			autoPauseMsg := fmt.Sprintf("Replication specification %v is no longer valid as %s %s. %s. Please delete and recreate the replication manually.", spec.Id, bucketLocation, detailErr, ErrorAutoPauseString)
 			pipelineMgr.logger.Errorf(autoPauseMsg)
 			autoPauseErr := pipelineMgr.AutoPauseReplication(spec.Id)
 			if autoPauseErr != nil {
@@ -2697,6 +2699,7 @@ func (pipelineMgr *PipelineManager) ValidateAndGC(spec *metadata.ReplicationSpec
 			if err != nil {
 				pipelineMgr.logger.Errorf("Unable to get replication status for %v. error=%v\n", spec.Id, err)
 			}
+			pipelineMgr.uilog_svc.Write(autoPauseMsg)
 			repStatus.GetEventsProducer().AddEvent(base.PersistentMsg, autoPauseMsg, base.NewEventsMap(), nil)
 		} else {
 			pipelineMgr.logger.Errorf("Replication specification %v is no longer valid, garbage collect it. error=%v", spec.Id, detailErr)
@@ -2771,7 +2774,7 @@ func (pm *PipelineManager) incrementGCCnt(gcMap specGCMap, specId string) bool {
 type specGCMap map[string]int
 
 func getBucketMissingError(bucketName string) error {
-	return fmt.Errorf("Bucket %v has been missing for %v times", bucketName, base.ReplicationSpecGCCnt)
+	return fmt.Errorf("Bucket %v was not found in %v tries, and thus presumed deleted", bucketName, base.ReplicationSpecGCCnt)
 }
 
 func getBucketChangedError(bucketName, origUUID, newUUID string) error {
