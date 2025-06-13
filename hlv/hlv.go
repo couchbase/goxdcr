@@ -348,11 +348,27 @@ func BytesRequired(vMap VersionsMap) int {
 }
 
 func (sourceHlv *HLV) SameAs(targetHlv *HLV, sourcePruningFunc, targetPruningFunc base.PruningFunc) (bool, error) {
+	same, err := sourceHlv.SameAsWithoutCvCas(targetHlv, sourcePruningFunc, targetPruningFunc)
+	if !same || err != nil {
+		return same, err
+	}
+
+	if sourceHlv.GetCvCas() != targetHlv.GetCvCas() {
+		return false, nil
+	}
+	return true, nil
+}
+
+// With NewHLV(), the cvCAS can be modified
+// Use this when other pre-requisites have been met
+func (sourceHlv *HLV) SameAsWithoutCvCas(targetHlv *HLV, sourcePruningFunc, targetPruningFunc base.PruningFunc) (bool, error) {
 	if sourceHlv == nil || targetHlv == nil {
 		return false, fmt.Errorf("cannot compare if the HLVs are nil")
 	}
-	if sourceHlv.GetCvCas() != targetHlv.GetCvCas() || sourceHlv.GetCvSrc() != targetHlv.GetCvSrc() || sourceHlv.GetCvVer() != targetHlv.GetCvVer() ||
-		!comparePv(sourceHlv.GetPV(), targetHlv.GetPV(), sourcePruningFunc, targetPruningFunc) {
+	if sourceHlv.GetCvSrc() != targetHlv.GetCvSrc() || sourceHlv.GetCvVer() != targetHlv.GetCvVer() {
+		return false, nil
+	}
+	if !comparePv(sourceHlv.GetPV(), targetHlv.GetPV(), sourcePruningFunc, targetPruningFunc) {
 		return false, nil
 	}
 	return true, nil

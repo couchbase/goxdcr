@@ -79,7 +79,7 @@ OVERRIDE_MOBILE=0
 OVERRIDE_CRMODE=""
 OVERRIDE_ECCV=0
 
-optspec="homf:r:c:x:-:"
+optspec="homf:r:c:x:-:s:"
 while getopts "$optspec" optchar; do
 	case "${optchar}" in
 	-)

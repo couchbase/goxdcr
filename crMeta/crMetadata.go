@@ -95,6 +95,9 @@ func (m *CRMetadata) GetImportCas() uint64 {
 }
 func (m *CRMetadata) SetImportCas(importCas uint64) {
 	m.importCas = importCas
+	if m.GetDocumentMetadata().Cas == importCas {
+		m.isImport = true
+	}
 }
 
 func (m *CRMetadata) Merge(other *CRMetadata) (*CRMetadata, error) {
@@ -239,20 +242,71 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 
 }
 
+// When subdoc set occurs, the following are true:
+// 1. CAS == cvCAS (because cvCAS was macro-expanded to match regenerated CAS)
+// 2. CAS > cvVer (because CAS was regenerated)
+func (m *CRMetadata) WrittenWithSubdocSet() bool {
+	if m == nil || m.hlv == nil {
+		return false
+	}
+
+	return m.GetDocumentMetadata().Cas == m.GetHLV().GetCvCas() &&
+		m.GetDocumentMetadata().Cas > m.GetHLV().GetCvVer()
+}
+
 func (source *CRMetadata) Diff(target *CRMetadata, sourcePruningFunc, targetPruningFunc base.PruningFunc) (bool, error) {
 	if source.docMeta.Opcode != target.docMeta.Opcode {
 		return false, nil
 	}
-	if source.docMeta.Opcode == mc.UPR_MUTATION {
-		if source.docMeta.RevSeq != target.docMeta.RevSeq || source.docMeta.Cas != target.docMeta.Cas || source.docMeta.Flags != target.docMeta.Flags ||
-			(source.docMeta.DataType&base.JSONDataType != target.docMeta.DataType&base.JSONDataType) || (source.docMeta.DataType&base.XattrDataType != target.docMeta.DataType&base.XattrDataType) {
+
+	var casDivergenceAllowed bool
+	if source.docMeta.Opcode == mc.UPR_MUTATION || source.docMeta.Opcode == mc.UPR_DELETION || source.docMeta.Opcode == mc.UPR_EXPIRATION {
+		// CAS/RevID divergence can occur in a few cases:
+		// 1.  Subdoc set occurs, which bumps CAS with macro expansion but theoretically they are the same
+		// 2.  Import occurs, which bumps CAS as well
+		// 2a. When import occurs, it will check whether or not CAS==CvCAS. If so, it won't update the HLV.
+		//     This means that when this import operation will cause CAS to be increased, but not cvCAS
+		//     The import will set importCAS
+		//     In the meantime, it won't change the CV
+		//     For import, the HLV constructor should have set the cas properly, so we still check for CAS
+		//     divergence given that the CAS after the constructor should have been the pre-import CAS
+		//
+		// Per introduction of subdoc op code to write to the target memcached,
+		// CAS convergence is no longer a guarantee
+		//
+		// On the contrary, if SetWithMeta was issued instead of subdoc set, the following is true:
+		// CAS == cvCAS == cvVer of the source and target documents
+		//
+		// When the subdoc set occurs from A -> B, the HLV on B will have the above properties
+		// Additionally, the CV will contain A as the actor of the source
+		// XDCR considers this a "short-circuit", where B will notice that A was the source
+		// of the write, and not replicate back to A.
+
+		if source.WrittenWithSubdocSet() || target.WrittenWithSubdocSet() {
+			// At this point, CAS divergence is allowed
+			// The assumption is that HLV is implicitly created using NewHLV()
+			// For example, using differ's SetHlv() method
+			// The source ID should be there in both HLVs
+			// By having NewHLV() as a prerequisite, it ensures that the CV comparison is valid
+			// Note that casDivergenceAllowed also means that revSeqno can be diverged
+			casDivergenceAllowed = true
+		}
+
+		if !casDivergenceAllowed && (source.docMeta.RevSeq != target.docMeta.RevSeq || source.docMeta.Cas != target.docMeta.Cas) {
 			return false, nil
 		}
-		same, err := source.hlv.SameAs(target.hlv, sourcePruningFunc, targetPruningFunc)
-		if err != nil {
-			return false, err
+
+		if source.docMeta.Flags != target.docMeta.Flags ||
+			(source.docMeta.DataType&base.JSONDataType != target.docMeta.DataType&base.JSONDataType) ||
+			(source.docMeta.DataType&base.XattrDataType != target.docMeta.DataType&base.XattrDataType) {
+			return false, nil
 		}
-		return same, nil
+
+		if casDivergenceAllowed {
+			return source.hlv.SameAsWithoutCvCas(target.hlv, sourcePruningFunc, targetPruningFunc)
+		} else {
+			return source.hlv.SameAs(target.hlv, sourcePruningFunc, targetPruningFunc)
+		}
 	}
 	return true, nil
 }
