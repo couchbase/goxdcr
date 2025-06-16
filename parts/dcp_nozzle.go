@@ -2176,7 +2176,14 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 			return err
 		}
 
-		client, _, err := dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcp.savedMcReqFeatures, dcp.Logger())
+		customUsername, customPassword, customAuthErr := dcp.getCustomPlainAuth()
+		var client mcc.ClientIface
+
+		if customAuthErr == nil {
+			client, _, err = dcp.utils.GetRemoteMemcachedConnectionWFeatures(addr, customUsername, customPassword, dcp.sourceBucketName, dcp.user_agent, true, base.KeepAlivePeriod, dcp.savedMcReqFeatures, dcp.Logger())
+		} else {
+			client, _, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcp.savedMcReqFeatures, dcp.Logger())
+		}
 		if err != nil {
 			return err
 		}
