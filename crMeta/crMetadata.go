@@ -296,9 +296,23 @@ func (source *CRMetadata) Diff(target *CRMetadata, sourcePruningFunc, targetPrun
 			return false, nil
 		}
 
-		if source.docMeta.Flags != target.docMeta.Flags ||
-			(source.docMeta.DataType&base.JSONDataType != target.docMeta.DataType&base.JSONDataType) ||
-			(source.docMeta.DataType&base.XattrDataType != target.docMeta.DataType&base.XattrDataType) {
+		sourceHasXattr := source.docMeta.DataType & base.XattrDataType
+		targetHasXattr := target.docMeta.DataType & base.XattrDataType
+
+		if sourceHasXattr == 0 && source.GetHLV() != nil && source.GetHLV().Updated {
+			sourceHasXattr |= base.XattrDataType // source has HLV updated, so it has Xattr
+		}
+		if targetHasXattr == 0 && target.GetHLV() != nil && target.GetHLV().Updated {
+			targetHasXattr |= base.XattrDataType // target has HLV updated, so it has Xattr
+		}
+
+		if sourceHasXattr != targetHasXattr {
+			// flags can be different if one has Xattr and the other doesn't and one has hlv updated
+			return false, nil
+		}
+
+		if (source.docMeta.DataType&base.JSONDataType != target.docMeta.DataType&base.JSONDataType) ||
+			source.docMeta.Flags != target.docMeta.Flags {
 			return false, nil
 		}
 
