@@ -9,6 +9,7 @@
 package service_impl
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -40,6 +41,21 @@ func (service *UILogSvc) Write(message string) {
 	}
 
 	go service.writeUILog_async(message)
+}
+
+func (service *UILogSvc) WriteForLocalNode(message string) {
+	if message == "" {
+		return
+	}
+
+	hostname, err := service.top_svc.MyConnectionStr()
+	if err != nil {
+		// should never get here. in case we do, log error and abort
+		service.logger.Warnf("Failed to write ui log. err=%v, message=%v", err, message)
+		return
+	}
+
+	service.Write(fmt.Sprintf("Node [%v]: %v", hostname, message))
 }
 
 func (service *UILogSvc) writeUILog_async(message string) {

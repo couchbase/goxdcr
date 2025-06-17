@@ -207,6 +207,7 @@ func main() {
 		}
 	} else {
 		uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
+		internalSettings_svc.SetUILogSvc(uilog_svc)
 		eventlog_svc := service_impl.NewEventLog(top_svc, utils, nil)
 		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, log.GetOrCreateContext(base.RemClusterSvcKey), utils)
 		if err != nil {

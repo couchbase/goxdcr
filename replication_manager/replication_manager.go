@@ -259,8 +259,6 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.MemStatsLogIntervalKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxNumOfMetakvRetriesKey].(int),
 		time.Duration(internal_settings.Values[metadata.RetryIntervalMetakvKey].(int))*time.Millisecond,
-		internal_settings.Values[metadata.UprFeedDataChanLengthKey].(int),
-		internal_settings.Values[metadata.UprFeedBufferSizeKey].(int),
 		internal_settings.Values[metadata.XmemMaxRetryKey].(int),
 		time.Duration(internal_settings.Values[metadata.XmemWriteTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.XmemReadTimeoutKey].(int))*time.Second,
@@ -790,16 +788,50 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	collectionMode := replSpec.Settings.GetCollectionModes()
 	oldCompressionType := replSpec.Settings.Values[metadata.CompressionTypeKey].(int)
 	filterVersion := replSpec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
+
 	_, CompressionOk := settings[metadata.CompressionTypeKey]
 
 	shouldValidateSettings := ShouldValidateReplicationSettings(settings)
 	if shouldValidateSettings {
 		performRemoteValidation := CheckIfRemoteValidationRequired(justValidate, replSpec.Settings.ToMap(false), settings)
+
+		// populate the missing setting with default value - required for validation
+		_, dataChanFound := settings[metadata.DCPFeedDataChanLengthKey]
+		_, connBuffFound := settings[metadata.DCPConnectionBufferSizeKey]
+		if dataChanFound || connBuffFound {
+			if !dataChanFound {
+				settings[metadata.DCPFeedDataChanLengthKey] = replSpec.Settings.GetDCPFeedDataChanLength()
+			}
+			if !connBuffFound {
+				settings[metadata.DCPConnectionBufferSizeKey] = replSpec.Settings.GetDCPConnectionBufferSize()
+			}
+		}
+
 		validateRoutineErrorMap, validateErr, warnings = ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName, replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings, performRemoteValidation)
+		if validateErr == base.ErrDCPFlowControlSettings {
+			validateErr = nil // reset err since ErrDCPFlowControlSettings conveys a user error, to be populated in the errorMap instead
+
+			if dataChanFound {
+				validateRoutineErrorMap[metadata.DCPFeedDataChanLengthKey] = fmt.Errorf("(%v * %v) cannot be lesser than %v", metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize, metadata.DCPConnectionBufferSizeKey)
+			}
+			if connBuffFound {
+				validateRoutineErrorMap[metadata.DCPConnectionBufferSizeKey] = fmt.Errorf("%v cannot be greater than (%v * %v)", metadata.DCPConnectionBufferSizeKey, metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize)
+			}
+		}
 		if len(validateRoutineErrorMap) > 0 {
 			return validateRoutineErrorMap, nil, nil
 		} else if validateErr != nil {
 			return nil, validateErr, nil
+		}
+
+		// remove the extra settings added for validation
+		if dataChanFound || connBuffFound {
+			if !dataChanFound {
+				delete(settings, metadata.DCPFeedDataChanLengthKey)
+			}
+			if !connBuffFound {
+				delete(settings, metadata.DCPConnectionBufferSizeKey)
+			}
 		}
 	}
 
@@ -951,18 +983,51 @@ func GetAllStatistics() (*expvar.Map, []string, []string, error) {
 func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, service_def.UIWarnings) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
-	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings, manifests := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
-	if err != nil || len(errorMap) > 0 {
-		return nil, errorMap, err, nil
-	}
 
-	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid(), targetBucket, targetBucketUUID)
+	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
 	if err != nil {
 		return nil, nil, err, nil
 	}
 
-	replSettings, err := ReplicationSettingsService().GetDefaultReplicationSettings()
+	// populate the missing setting with default value - required for validation
+	_, dataChanFound := settings[metadata.DCPFeedDataChanLengthKey]
+	_, connBuffFound := settings[metadata.DCPConnectionBufferSizeKey]
+	if dataChanFound || connBuffFound {
+		if !dataChanFound {
+			settings[metadata.DCPFeedDataChanLengthKey] = replSettings.GetDCPFeedDataChanLength()
+		}
+		if !connBuffFound {
+			settings[metadata.DCPConnectionBufferSizeKey] = replSettings.GetDCPConnectionBufferSize()
+		}
+	}
+
+	// validate that everything is alright with the replication configuration before actually creating it
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings, manifests := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
+	if err == base.ErrDCPFlowControlSettings {
+		err = nil // reset err since ErrDCPFlowControlSettings conveys a user error, to be populated in the errorMap instead
+
+		if dataChanFound {
+			errorMap[metadata.DCPFeedDataChanLengthKey] = fmt.Errorf("(%v * %v) cannot be lesser than %v", metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize, metadata.DCPConnectionBufferSizeKey)
+		}
+		if connBuffFound {
+			errorMap[metadata.DCPConnectionBufferSizeKey] = fmt.Errorf("%v cannot be greater than (%v * %v)", metadata.DCPConnectionBufferSizeKey, metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize)
+		}
+	}
+	if err != nil || len(errorMap) > 0 {
+		return nil, errorMap, err, nil
+	}
+
+	// remove the extra settings added for validation
+	if dataChanFound || connBuffFound {
+		if !dataChanFound {
+			delete(settings, metadata.DCPFeedDataChanLengthKey)
+		}
+		if !connBuffFound {
+			delete(settings, metadata.DCPConnectionBufferSizeKey)
+		}
+	}
+
+	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid(), targetBucket, targetBucketUUID)
 	if err != nil {
 		return nil, nil, err, nil
 	}

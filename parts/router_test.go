@@ -1028,10 +1028,10 @@ func TestClosedListenerCase(t *testing.T) {
 
 	assert.Nil(err)
 
-	listener := component.NewDefaultAsyncComponentEventListenerImpl("1", "", log.DefaultLoggerContext)
+	listener := component.NewDefaultAsyncComponentEventListenerImpl("1", "", log.DefaultLoggerContext, base.MaxEventChanSize)
 	router.RegisterComponentEventListener(common.BrokenRoutingUpdateEvent, listener)
 
-	listener = component.NewDefaultAsyncComponentEventListenerImpl("2", "", log.DefaultLoggerContext)
+	listener = component.NewDefaultAsyncComponentEventListenerImpl("2", "", log.DefaultLoggerContext, base.MaxEventChanSize)
 	router.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, listener)
 
 	listeners := router.AsyncComponentEventListeners()

@@ -68,6 +68,9 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	// Enable compression by default
 	settingsMap[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
 
+	settingsMap[metadata.DCPFeedDataChanLengthKey] = base.MaxDCPFeedDataChanLength
+	settingsMap[base.DCPConnectionBufferSizeKey] = int(base.MaxDCPConnectionBufferSize)
+
 	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp
 }
 

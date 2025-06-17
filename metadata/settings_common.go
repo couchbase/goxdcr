@@ -188,10 +188,23 @@ func (s *Settings) HandleDataTypeConversionAfterUnmarshalling() {
 	for settingKey, settingValue := range s.Values {
 		settingConfig, ok := configMap[settingKey]
 		if !ok {
-			// should never get here
-			errorsMap[settingKey] = errors.New("not a valid setting")
+			// process deprecated settings separately
+			isDeprecatedSetting := false
+			for _, key := range DeprecatedSettingsIntegerType {
+				if settingKey != key {
+					continue
+				}
+				s.Values[settingKey], _ = handleIntTypeConversion(settingValue)
+				isDeprecatedSetting = true
+				break
+			}
+
+			if !isDeprecatedSetting {
+				errorsMap[settingKey] = errors.New("not a valid setting")
+			}
 			continue
 		}
+
 		valueTypeKind := reflect.TypeOf(settingConfig.defaultValue).Kind()
 		switch valueTypeKind {
 		case reflect.Int:
@@ -378,3 +391,5 @@ func nonCAPIOnlyFeature(convertedValue, defaultValue interface{}, isCapi bool) e
 	}
 	return nil
 }
+
+var DeprecatedSettingsIntegerType = [...]string{DeprecatedUprFeedDataChanLengthKey, DeprecatedUprFeedBufferSizeKey}
