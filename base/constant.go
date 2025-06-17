@@ -484,7 +484,7 @@ const (
 	DefaultRequestPoolSize      = 10000
 )
 
-var EventChanSize = 10000
+const MaxEventChanSize = 10000
 
 // names of async component event listeners
 const (
@@ -934,21 +934,6 @@ var MaxNumOfMetakvRetries = 5
 // interval between metakv retries
 var RetryIntervalMetakv = 500 * time.Millisecond
 
-// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
-// should be no larger than the size of the dcp data channel.
-// This way we can ensure that gomemcached is never blocked on writing to data channel,
-// and thus can always respond to dcp commands such as NOOP
-// In other words, the following three parameters should be selected such that
-// MinimumMutationSize * UprFeedDataChanLength >= UprFeedBufferSize
-// where MinimumMutationSize is the minimum size of a SetMeta/DelMeta mutation,
-// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
-
-// length of data channel between dcp nozzle and gomemcached
-var UprFeedDataChanLength = 20000
-
-// dcp flow control buffer size (number of bytes)
-var UprFeedBufferSize uint32 = 1024 * 1024
-
 // max retry for xmem operations like batch send, resend, etc.
 var XmemMaxRetry = 5
 
@@ -1040,8 +1025,8 @@ var WaitTimeBetweenMetadataChangeListeners = 500 * time.Millisecond
 // Keep alive period for tcp connections
 var KeepAlivePeriod = 30 * time.Second
 
-// actual size of data chan is logged when it exceeds ThresholdForEventChanSizeLogging
-var ThresholdForEventChanSizeLogging = EventChanSize * 9 / 10
+// actual size of data chan is logged when it exceeds (ThresholdPercentForEventChanSizeLogging/100)% of the channel capacity
+var ThresholdPercentForEventChanSizeLogging = 90
 
 // if through seqno computation takes longer than the threshold, it will be logged
 var ThresholdForThroughSeqnoComputation = 100 * time.Millisecond
@@ -1207,7 +1192,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxRetryForLiveUpdatePipeline int, waitTimeForLiveUpdatePipeline time.Duration,
 	replSpecCheckInterval time.Duration, memStatsLogInterval time.Duration,
 	maxNumOfMetakvRetries int, retryIntervalMetakv time.Duration,
-	uprFeedDataChanLength int, uprFeedBufferSize int,
 	xmemMaxRetry int, xmemWriteTimeout time.Duration,
 	xmemReadTimeout time.Duration, xmemMaxReadDownTime time.Duration,
 	xmemBackoffWaitTime time.Duration, xmemMaxBackoffFactor int, xmemMaxRetryNewConn int,
@@ -1308,8 +1292,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MemStatsLogInterval = memStatsLogInterval
 	MaxNumOfMetakvRetries = maxNumOfMetakvRetries
 	RetryIntervalMetakv = retryIntervalMetakv
-	UprFeedDataChanLength = uprFeedDataChanLength
-	UprFeedBufferSize = uint32(uprFeedBufferSize)
 	XmemMaxRetry = xmemMaxRetry
 	XmemWriteTimeout = xmemWriteTimeout
 	XmemReadTimeout = xmemReadTimeout
@@ -1340,7 +1322,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	HELOTimeout = heloTimeout
 	WaitTimeBetweenMetadataChangeListeners = waitTimeBetweenMetadataChangeListeners
 	KeepAlivePeriod = keepAlivePeriod
-	ThresholdForEventChanSizeLogging = EventChanSize * thresholdPercentageForEventChanSizeLogging / 100
+	ThresholdPercentForEventChanSizeLogging = thresholdPercentageForEventChanSizeLogging
 	ThresholdForThroughSeqnoComputation = thresholdForThroughSeqnoComputation
 	StatsLogInterval = statsLogInterval
 	XmemDefaultRespTimeout = xmemDefaultRespTimeout
@@ -1980,3 +1962,23 @@ const PipelineReinitHash = "pipelineReinitHash"
 const Backfill = "backfill"
 
 const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
+
+// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
+// should be no larger than the size of the dcp data channel.
+// This way we can ensure that gomemcached is never blocked on writing to data channel,
+// and thus can always respond to dcp commands such as NOOP
+// In other words, the following three parameters should be selected such that
+// MinimumMutationSize * dcpFeedDataChanLength >= dcpConnectionBufferSize
+// where MinimumMutationSize is the minimum size of a SetMeta/DelMeta mutation.
+// A DCP mutation has size 54 + key + body; 60 should be a safe value to use.
+
+const DCPFeedDataChanLengthKey = "dcpFeedDataChanLength"
+const DCPConnectionBufferSizeKey = "dcpConnectionBufferSize"
+
+var ErrDCPFlowControlSettings = fmt.Errorf("errDCPFlowControlSettings")
+
+const MinimumMutationSize = 60                        // estimated minimum size of a mutation
+const MaxDCPFeedDataChanLength = 20000                // historical length of the data channel (between DCP nozzle and gomemcached)
+const MaxDCPConnectionBufferSize uint32 = 1024 * 1024 // historical DCP flow control buffer size in bytes (Technically legal values are in the range [1, 2^32))
+
+const ComponentEventsChanLengthKey = "componentEventsChanLength"

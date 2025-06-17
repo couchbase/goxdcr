@@ -277,6 +277,17 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		return err
 	}
 
+	// re-populate replication settings that may have been skipped by a legacy node (during mixed-mode operation)
+	if oldSpec != nil {
+		for _, key := range metadata.UpgradeReplicationSettings {
+			if _, exists := oldSpec.Settings.Values[key]; exists {
+				if _, ok := newSpec.Settings.Values[key]; !ok {
+					newSpec.Settings.Values[key] = oldSpec.Settings.Values[key]
+				}
+			}
+		}
+	}
+
 	specActive := newSpec.Settings.Active
 	//if the replication doesn't exit, it is treated the same as it exits, but it is paused
 	specActiveOld := false
@@ -446,6 +457,9 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
 	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
+	dcpFeedDataChanLengthChanged := oldSettings.GetDCPFeedDataChanLength() != newSettings.GetDCPFeedDataChanLength()
+	dcpConnectionBufferSizeChanged := oldSettings.GetDCPConnectionBufferSize() != newSettings.GetDCPConnectionBufferSize()
+	componentEventsChanLengthChanged := oldSettings.GetComponentEventsChanLength() != newSettings.GetComponentEventsChanLength()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -455,7 +469,8 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
-		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged
+		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
+		dcpFeedDataChanLengthChanged || dcpConnectionBufferSizeChanged || componentEventsChanLengthChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()

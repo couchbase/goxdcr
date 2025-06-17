@@ -8,8 +8,7 @@
 
 package service_def
 
-import ()
-
 type UILogSvc interface {
 	Write(message string)
+	WriteForLocalNode(message string)
 }

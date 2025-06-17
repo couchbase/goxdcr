@@ -123,6 +123,9 @@ const (
 	CLogConnPoolReapIntervalKey       = base.CLogConnPoolReapInterval
 	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
 	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
+	DCPFeedDataChanLengthKey          = base.DCPFeedDataChanLengthKey
+	DCPConnectionBufferSizeKey        = base.DCPConnectionBufferSizeKey
+	ComponentEventsChanLengthKey      = base.ComponentEventsChanLengthKey
 )
 
 // constants for parsing create/change/view replication response
@@ -259,6 +262,9 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CLogConnPoolReapIntervalKey:       metadata.CLogConnPoolReapIntervalKey,
 	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
 	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
+	DCPFeedDataChanLengthKey:          metadata.DCPFeedDataChanLengthKey,
+	DCPConnectionBufferSizeKey:        metadata.DCPConnectionBufferSizeKey,
+	ComponentEventsChanLengthKey:      metadata.ComponentEventsChanLengthKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -327,6 +333,9 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
+	metadata.DCPFeedDataChanLengthKey:             DCPFeedDataChanLengthKey,
+	metadata.DCPConnectionBufferSizeKey:           DCPConnectionBufferSizeKey,
+	metadata.ComponentEventsChanLengthKey:         ComponentEventsChanLengthKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

@@ -12,11 +12,13 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"sync"
 )
 
 const (
@@ -37,6 +39,7 @@ type InternalSettingsSvc struct {
 	metadata_svc             service_def.MetadataSvc
 	metadata_change_callback base.MetadataChangeHandlerCallback
 	logger                   *log.CommonLogger
+	uilog_svc                service_def.UILogSvc
 	// keeps a single copy of internal settings
 	internal_settings   *metadata.InternalSettings
 	internalSettingsMtx sync.RWMutex
@@ -64,6 +67,10 @@ func (service *InternalSettingsSvc) initializeInternalSettings() {
 		service.logger.Warnf("%v. Use default values instead.", err)
 		service.internal_settings = metadata.DefaultInternalSettings()
 	}
+}
+
+func (service *InternalSettingsSvc) SetUILogSvc(uilog_svc service_def.UILogSvc) {
+	service.uilog_svc = uilog_svc
 }
 
 // getter for internal settings
@@ -212,6 +219,39 @@ func (service *InternalSettingsSvc) constructV2InternalSettingsObject(value []by
 
 	v2_settings.Revision = rev
 	v2_settings.PostProcessAfterUnmarshalling()
+
+	// handle deprecated settings
+	for _, deprecatedKey := range metadata.DeprecatedInternalSettings {
+		settingValue, exists := v2_settings.Settings.Values[deprecatedKey]
+		if !exists {
+			continue
+		}
+
+		var msg string
+		switch deprecatedKey {
+		case metadata.DeprecatedUprFeedDataChanLengthKey:
+			oldConnBufferSize, _ := settingValue.(int)
+			if oldConnBufferSize != int(base.MaxDCPConnectionBufferSize) {
+				msg = fmt.Sprintf("connection_buffer_size value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldConnBufferSize, metadata.DeprecatedUprFeedBufferSizeKey, base.DCPConnectionBufferSizeKey)
+			}
+
+		case metadata.DeprecatedUprFeedBufferSizeKey:
+			oldDataChanLen, _ := settingValue.(int)
+			if oldDataChanLen != base.MaxDCPFeedDataChanLength {
+				msg = fmt.Sprintf("data-channel length value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldDataChanLen, metadata.DeprecatedUprFeedDataChanLengthKey, base.DCPFeedDataChanLengthKey)
+			}
+		}
+
+		if msg != "" {
+			service.logger.Warnf(msg)
+			if service.uilog_svc != nil {
+				service.uilog_svc.WriteForLocalNode(msg)
+			}
+		}
+
+		// remove deprecated settings now that they have been processed
+		delete(v2_settings.Settings.Values, deprecatedKey)
+	}
 
 	return v2_settings, nil
 }

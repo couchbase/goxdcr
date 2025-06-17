@@ -3789,7 +3789,7 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 	if err != nil {
 		return nil, err
 	}
-	err = feed.UprOpen(ckmgr.UserAgent, uint32(0), base.UprFeedBufferSize)
+	err = feed.UprOpen(ckmgr.UserAgent, uint32(0), base.MaxDCPConnectionBufferSize)
 	if err != nil {
 		return nil, err
 	}

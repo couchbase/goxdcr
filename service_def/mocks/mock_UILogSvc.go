@@ -50,6 +50,39 @@ func (_c *UILogSvc_Write_Call) RunAndReturn(run func(string)) *UILogSvc_Write_Ca
 	return _c
 }
 
+// WriteForLocalNode provides a mock function with given fields: message
+func (_m *UILogSvc) WriteForLocalNode(message string) {
+	_m.Called(message)
+}
+
+// UILogSvc_WriteForLocalNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WriteForLocalNode'
+type UILogSvc_WriteForLocalNode_Call struct {
+	*mock.Call
+}
+
+// WriteForLocalNode is a helper method to define mock.On call
+//   - message string
+func (_e *UILogSvc_Expecter) WriteForLocalNode(message interface{}) *UILogSvc_WriteForLocalNode_Call {
+	return &UILogSvc_WriteForLocalNode_Call{Call: _e.mock.On("WriteForLocalNode", message)}
+}
+
+func (_c *UILogSvc_WriteForLocalNode_Call) Run(run func(message string)) *UILogSvc_WriteForLocalNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *UILogSvc_WriteForLocalNode_Call) Return() *UILogSvc_WriteForLocalNode_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *UILogSvc_WriteForLocalNode_Call) RunAndReturn(run func(string)) *UILogSvc_WriteForLocalNode_Call {
+	_c.Run(run)
+	return _c
+}
+
 // NewUILogSvc creates a new instance of UILogSvc. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewUILogSvc(t interface {

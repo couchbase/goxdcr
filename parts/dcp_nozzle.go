@@ -394,6 +394,8 @@ type DcpNozzle struct {
 
 	customPlainAuthGetter func() (string, string, error)
 	customAuthMtx         sync.RWMutex
+
+	connectionBufferSize uint32
 }
 
 func NewDcpNozzle(id string,
@@ -600,7 +602,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 
 	if dcp.is_capi {
 		// no need to enable features for capi replication
-		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), base.UprFeedBufferSize)
+		err = dcp.uprFeed.UprOpen(uprFeedName, uint32(0), dcp.connectionBufferSize)
 	} else {
 		var uprFeatures mcc.UprFeatures
 		// always enable xattr for xmem replication
@@ -623,7 +625,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 			err = fmt.Errorf("%v uprfeed is nil", dcp.Id())
 			return err
 		}
-		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
+		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, dcp.connectionBufferSize, uprFeatures)
 		if featuresErr != nil {
 			err = featuresErr
 			dcp.Logger().Errorf("Trying to activate UPRFeatures received error code: %v", err.Error())
@@ -674,6 +676,9 @@ func (dcp *DcpNozzle) initializeCompressionSettings(settings metadata.Replicatio
 
 func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err error) {
 	err = dcp.initializeCompressionSettings(settings)
+	if err != nil {
+		return err
+	}
 
 	if val, ok := settings[DCP_Priority]; ok {
 		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
@@ -791,6 +796,11 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		dcp.Logger().Infof("%v with OSO mode requested", dcp.Id())
 	}
 
+	dcp.connectionBufferSize = uint32(settings[metadata.DCPConnectionBufferSizeKey].(int))
+	if dcp.connectionBufferSize == 0 {
+		return fmt.Errorf("received invalid value (0) for replication setting %v", metadata.DCPConnectionBufferSizeKey)
+	}
+
 	err = dcp.initializeUprFeed()
 	if err != nil {
 		return err
@@ -853,7 +863,7 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 
 	uprFeed := dcp.getUprFeed()
 	if uprFeed != nil {
-		uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
+		uprFeed.StartFeedWithConfig(settings[metadata.DCPFeedDataChanLengthKey].(int))
 	}
 
 	//start datachan length stats collection
