@@ -44,12 +44,20 @@ type ThroughputThrottler struct {
 	unused_high_tokens int64
 	// unused high tokens that have been reassigned to low priority replications, as number of mutations.
 	reassigned_high_tokens int64
-	// max number of high tokens that can be reassigned to low priority replications in a time slot
-	max_reassignable_tokens_per_slot int64
+	// max number of base high tokens that can be reassigned to low priority replications in a time slot
+	max_reassignable_tokens_per_slot_base int64
+	// remainder from integer division when computing max reassignable tokens per slot.
+	// distributed as +1 token to one slot at a time until the remainder is exhausted.
+	max_reassignable_tokens_per_slot_remainder uint32
 	// whether calibation(stop reassigning tokens to low priority replications) is needed
 	needToCalibrate *base.AtomicBooleanType
 	// number of times update() method is called. needed for calibration
 	updateCount uint64
+
+	// Marks the updateCount at the start of a new token cycle i.e every refresh cycle of the resource manager(1sec).
+	// used to uniformly distribute the remainder from integer division
+	// when splitting tokens uniformly across base.NumberOfSlotsForThroughputThrottling.
+	cycleStartMarker uint64
 
 	cond_var *sync.Cond
 
@@ -149,6 +157,8 @@ func (throttler *ThroughputThrottler) update() error {
 
 func (throttler *ThroughputThrottler) updateOnce() {
 	var new_throughput_quota int64
+	var currentUpdateCount uint64
+	var cycleStartMarker uint64
 
 	// update throughput_quota
 	for {
@@ -157,15 +167,46 @@ func (throttler *ThroughputThrottler) updateOnce() {
 			// nothing to do
 			break
 		}
+		// load the current update count and the cycleStartMarker
+		currentUpdateCount = atomic.LoadUint64(&throttler.updateCount)
+		cycleStartMarker = atomic.LoadUint64(&throttler.cycleStartMarker)
 
-		throughput_quota := atomic.LoadInt64(&throttler.throughput_quota)
-		// increment quota
-		new_throughput_quota = throughput_quota + throughput_limit/int64(base.NumberOfSlotsForThroughputThrottling)
+		// Load the current throughput quota
+		currentQuota := atomic.LoadInt64(&throttler.throughput_quota)
+
+		// Start with the existing quota to preserve any unused tokens
+		new_throughput_quota = currentQuota
+
+		// Compute the per-slot base quota and remainder
+		baseQuota := throughput_limit / int64(base.NumberOfSlotsForThroughputThrottling)
+		remainder := throughput_limit % int64(base.NumberOfSlotsForThroughputThrottling)
+
+		// If the throughput limit is very low and the quota is depleted, inject a minimal quota to unblock processing
+		if throughput_limit < int64(base.NumberOfSlotsForThroughputThrottling) && currentQuota == 0 {
+			new_throughput_quota += 1
+		} else {
+			// Distribute the remainder tokens evenly across the initial slots in the cycle.
+			// The remainder is always in the range [1, base.NumberOfSlotsForThroughputThrottling - 1].
+			//
+			// The resource manager (RM) computes the low token budget (throughput_limit) every second,
+			// and this budget is distributed across 'base.NumberOfSlotsForThroughputThrottling' slots,
+			// with a slot computed every (1 / base.NumberOfSlotsForThroughputThrottling) seconds.
+			//
+			// To evenly distribute the leftover tokens from integer division (the remainder),
+			// we assign one extra token to each of the first 'remainder' slots in the current cycle.
+			// For example, if throughput_limit is 17 and NumberOfSlotsForThroughputThrottling is 10,
+			// then baseQuota is 1 and remainder is 7. The first 7 slots will each receive 1 extra token.
+			if uint32(remainder) > uint32(currentUpdateCount-cycleStartMarker) {
+				baseQuota += 1
+			}
+			new_throughput_quota += baseQuota
+		}
+
 		if new_throughput_quota > throughput_limit {
 			// keep quota below limit
 			new_throughput_quota = throughput_limit
 		}
-		if atomic.CompareAndSwapInt64(&throttler.throughput_quota, throughput_quota, new_throughput_quota) {
+		if atomic.CompareAndSwapInt64(&throttler.throughput_quota, currentQuota, new_throughput_quota) {
 			break
 		}
 	}
@@ -175,12 +216,22 @@ func (throttler *ThroughputThrottler) updateOnce() {
 	// process unused_high_tokens
 	high_tokens := atomic.LoadInt64(&throttler.high_tokens)
 	new_high_tokens := high_tokens / int64(base.NumberOfSlotsForThroughputThrottling)
+	high_remainder := high_tokens % int64(base.NumberOfSlotsForThroughputThrottling)
+	// distribute the remainder if it isn't exhausted yet
+	if uint32(high_remainder) > uint32(currentUpdateCount-cycleStartMarker) {
+		new_high_tokens = new_high_tokens + 1
+	}
 
 	// reassign tokes to low priority replications when
 	// 1. calibration is not enabled
 	// or 2. calibration is enabled, and current time slot is not picked for calibration
 	if !throttler.needToCalibrate.Get() || int(math.Mod(float64(throttler.updateCount), float64(base.IntervalForThrottlerCalibration))) != 0 {
-		max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
+		max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot_base)
+		max_reassignable_tokens_per_slot_remainder := atomic.LoadUint32(&throttler.max_reassignable_tokens_per_slot_remainder)
+		// distribute the remainder if it isn't exhausted yet
+		if max_reassignable_tokens_per_slot_remainder > uint32(currentUpdateCount-cycleStartMarker) {
+			max_reassignable_tokens_per_slot += 1
+		}
 
 		// tokens that can be reassigned to low priority replications
 		// = min(unused_high_tokens, max_reassignable_high_tokens)
@@ -209,7 +260,7 @@ func (throttler *ThroughputThrottler) updateOnce() {
 	// 2. unused_high_tokens being a little off due to race condition is not a critial problem
 	atomic.StoreInt64(&throttler.unused_high_tokens, new_high_tokens)
 
-	throttler.updateCount++
+	atomic.AddUint64(&throttler.updateCount, 1)
 
 	throttler.broadcast()
 }
@@ -458,6 +509,11 @@ func (throttler *ThroughputThrottler) UpdateSettings(settings map[string]interfa
 		throttler.needToCalibrate.Set(needToCalibrate.(bool))
 	}
 
+	// capture the current value of updateCount into cycleStartMarker.
+	// this is used to ensure that the remainder from integer division while computing quota is
+	// evenly distributed across the base.NumberOfSlotsForThroughputThrottling.
+	atomic.StoreUint64(&throttler.cycleStartMarker, atomic.LoadUint64(&throttler.updateCount))
+
 	throttler.logger.Tracef("throughput throttler update settings: %#v", throttler)
 
 	return errMap
@@ -483,7 +539,8 @@ func (throttler *ThroughputThrottler) setMaxReassignableHighTokens(tokens int64)
 		return fmt.Errorf("Max reassignable tokens cannot be negative. tokens=%v\n", tokens)
 	}
 
-	atomic.StoreInt64(&throttler.max_reassignable_tokens_per_slot, tokens/int64(base.NumberOfSlotsForThroughputThrottling))
+	atomic.StoreInt64(&throttler.max_reassignable_tokens_per_slot_base, tokens/int64(base.NumberOfSlotsForThroughputThrottling))
+	atomic.StoreUint32(&throttler.max_reassignable_tokens_per_slot_remainder, uint32(tokens%int64(base.NumberOfSlotsForThroughputThrottling)))
 
 	return nil
 }
@@ -553,7 +610,8 @@ func (throttler *ThroughputThrottler) logStatsOnce(prefixMsg string) {
 	clogQuota := atomic.LoadInt64(&throttler.conflictLogQuota)
 	unused_high_tokens := atomic.LoadInt64(&throttler.unused_high_tokens)
 	reassigned_high_tokens := atomic.LoadInt64(&throttler.reassigned_high_tokens)
-	max_reassignable_tokens_per_slot := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot)
+	max_reassignable_tokens_per_slot_base := atomic.LoadInt64(&throttler.max_reassignable_tokens_per_slot_base)
+	max_reassignable_tokens_per_slot_remainder := atomic.LoadUint32(&throttler.max_reassignable_tokens_per_slot_remainder)
 	needToCalibrate := throttler.needToCalibrate.Get()
 	clogEnabled := throttler.conflictLogEnabled.Get()
 
@@ -562,6 +620,6 @@ func (throttler *ThroughputThrottler) logStatsOnce(prefixMsg string) {
 		msg = "went over the limit. "
 	}
 
-	throttler.logger.Infof("%s%v %sthroughput_limit=%v, throughput_quota=%v, high_tokens=%v, clogEnabled:%v, clog_tokens=%v, clog_quota=%v, unused_tokens=%v, reassignable_tokens=%v, reassigned_tokens=%v, needToCalibrate=%v\n",
-		prefixMsg, throttler.id, msg, throughput_limit, throughput_quota, high_tokens, clogEnabled, clogTokens, clogQuota, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot, needToCalibrate)
+	throttler.logger.Infof("%s%v %sthroughput_limit=%v, throughput_quota=%v, high_tokens=%v, clogEnabled:%v, clog_tokens=%v, clog_quota=%v, unused_tokens=%v, reassigned_tokens=%v, reassignable_tokens_base=%v,reassignable_tokens_remainder=%v needToCalibrate=%v\n",
+		prefixMsg, throttler.id, msg, throughput_limit, throughput_quota, high_tokens, clogEnabled, clogTokens, clogQuota, unused_high_tokens, reassigned_high_tokens, max_reassignable_tokens_per_slot_base, max_reassignable_tokens_per_slot_remainder, needToCalibrate)
 }

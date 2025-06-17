@@ -1,7 +1,10 @@
 package throttlerSvcImpl
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
@@ -285,6 +288,15 @@ func Test_updateOnce(t *testing.T) {
 				ClogQuota: 20,
 			},
 		},
+		{
+			Name:      "low,high token replenish",
+			LowLimit:  118,
+			HighLimit: 219,
+			Expected: &quotaVals{
+				LowQuota:  12,
+				HighQuota: 22,
+			},
+		},
 	}
 
 	for _, tt := range testData {
@@ -347,4 +359,111 @@ func Test_CanSend(t *testing.T) {
 			th.logStatsOnce("unit-test ")
 		})
 	}
+}
+
+func TestLowTokensThrottling(t *testing.T) {
+	// Test ensures that the system can recover when the overall throughput is completely driven by low priority pipelines
+	const (
+		itemCount        = 100
+		initialLowTokens = int64(1)
+		numOfSlots       = 10
+		numConsumers     = 3
+		tickInterval     = 1 * time.Second
+	)
+
+	itemsQueue := make(chan throttlerSvc.ThrottlerReq, itemCount)
+	throttler := NewThroughputThrottlerSvc(&log.LoggerContext{})
+
+	var (
+		prevLowTokens      = initialLowTokens
+		prevItemsProcessed int64
+		itemsProcessed     int64
+		onceStarted        bool
+		wg                 sync.WaitGroup
+	)
+
+	// Producer
+	go func() {
+		defer close(itemsQueue)
+		for i := 0; i < itemCount; i++ {
+			itemsQueue <- throttlerSvc.ThrottlerReqLowRepl
+		}
+	}()
+
+	// Consumer
+	consumer := func() {
+		defer wg.Done()
+		for item := range itemsQueue {
+			for {
+				if throttler.CanSend(item) {
+					atomic.AddInt64(&itemsProcessed, 1)
+					break
+				}
+				throttler.Wait()
+			}
+		}
+	}
+
+	// Setup and start throttler + consumers
+	startThrottler := func() {
+		throttler.UpdateSettings(map[string]interface{}{
+			throttlerSvc.LowTokensKey:  initialLowTokens,
+			throttlerSvc.HighTokensKey: int64(0),
+		})
+		throttler.Start()
+
+		prevLowTokens = initialLowTokens
+		prevItemsProcessed = 0
+
+		for i := 0; i < numConsumers; i++ {
+			wg.Add(1)
+			go consumer()
+		}
+	}
+
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
+
+testLoop:
+	for {
+		select {
+		case <-ticker.C:
+			if !onceStarted {
+				startThrottler()
+				onceStarted = true
+				continue
+			}
+
+			currQueueLen := len(itemsQueue)
+			if currQueueLen == 0 {
+				break testLoop
+			}
+
+			totalProcessed := atomic.LoadInt64(&itemsProcessed)
+			batchProcessed := totalProcessed - prevItemsProcessed
+
+			if prevLowTokens < numOfSlots {
+				// Allowing off-by-one error due to a possible race condition
+				// It is possible that a consumer might be executing CanSend function concurrently when here
+				// As a result the the itemsProcessed does not reflect the exact expected count(prevLowTokens)
+				// Hence allow a delta of 1.
+				assert.InDelta(t, float64(numOfSlots), float64(batchProcessed), 1)
+			} else {
+				assert.InDelta(t, float64(prevLowTokens), float64(batchProcessed), 1)
+			}
+
+			// grow by 10%
+			newLowTokens := batchProcessed + (batchProcessed * 10 / 100)
+			throttler.UpdateSettings(map[string]interface{}{
+				throttlerSvc.LowTokensKey: newLowTokens,
+			})
+			prevLowTokens = newLowTokens
+			prevItemsProcessed = totalProcessed
+		}
+	}
+
+	wg.Wait()
+
+	// Final assertion: All items should be processed
+	assert.Equal(t, int64(itemCount), atomic.LoadInt64(&itemsProcessed), "Not all items were processed")
 }
