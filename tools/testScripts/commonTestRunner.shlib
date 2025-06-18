@@ -53,7 +53,7 @@ function man() {
 	echo "-x <path/to/xdcrDifferBin> "
 	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>        : Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
 	echo "-s <path/to/mobileImportSimBin> "
-	echo "OR --mobileImportDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
+	echo "OR --mobileImportSimDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
 }
 
 # variables

@@ -54,20 +54,7 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	local retVal
-	runXdcrDiffer "C1" "B1" "C2" "B2"
-	retVal=$?
-	if (($retVal != 0)); then
-		echo "Differ returned non-0 exit code"
-		return $retVal
-	fi
-
-	validateDifferResults 0 0 0 0 0
-	retVal=$?
-	if (($retVal != 0)); then
-		echo "Failed"
-		return $retVal
-	fi
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
 	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0

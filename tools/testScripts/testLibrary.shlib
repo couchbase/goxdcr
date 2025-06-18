@@ -850,6 +850,28 @@ function runXdcrDiffer {
 	return $retVal
 }
 
+function runXdcrDifferValidateNoDiff {
+	local srcCluster=$1
+	local srcBucket=$2
+	local tgtCluster=$3
+	local tgtBucket=$4
+
+	local retVal
+	runXdcrDiffer "$srcCluster" "$srcBucket" "$tgtCluster" "$tgtBucket"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		exit 1
+	fi
+
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		exit 1
+	fi
+}
+
 function differGetTotalNumber {
 	local input="$1"
 	local collectionIDs

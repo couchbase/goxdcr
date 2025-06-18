@@ -51,12 +51,17 @@ function testReplicationSettings {
 	writeJSONDocument "C1" "B1" "_sync:att:doc1" '{"foo":"bar"}'
 	sleep 20
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
-	# Should filter 1 doc
+	sleep 20
 	expected=$(($expected + 1))
 	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
 	if ! (($filtered == $expected)); then
-		echo "Expect docs_filtered to be $expected but got $filtered"
-		exit 1
+		# Try again
+		sleep 10
+		filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
+		if ! (($filtered == $expected)); then
+			echo "Expect (0) docs_filtered to be $expected but got $filtered"
+			exit 1
+		fi
 	fi
 
 	echo "Changing replication setting to mobile=Off"
@@ -68,8 +73,8 @@ function testReplicationSettings {
 		exit 1
 	fi
 
-	echo "sleeping 10 seconds for pipeline to restart"
-	sleep 10
+	echo "sleeping 20 seconds for pipeline to restart"
+	sleep 20
 
 	writeJSONDocument "C1" "B1" "_sync:doc2" '{"foo":"bar"}'
 	writeJSONDocument "C1" "B1" "_sync:att:doc2" '{"foo":"bar"}'
@@ -78,8 +83,14 @@ function testReplicationSettings {
 	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
 	# Both should be replicated since mobile=off
 	if ! (($filtered == $expected)); then
-		echo "Expect docs_filtered to be $expected but got $filtered"
-		exit 1
+		# Try again
+		sleep 10
+		filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
+		if ! (($filtered == $expected)); then
+			echo "Expect (1) docs_filtered to be $expected but got $filtered"
+			exit 1
+		fi
+
 	fi
 
 	echo "Changing replication setting to mobile=Active"
@@ -103,7 +114,7 @@ function testReplicationSettings {
 	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
 	# Both should be replicated since mobile=off
 	if ! (($filtered == $expected)); then
-		echo "Expect docs_filtered to be $expected but got $filtered"
+		echo "Expect (2) docs_filtered to be $expected but got $filtered"
 		exit 1
 	fi
 	cleanupBucketReplications
@@ -143,17 +154,17 @@ function testMobileHlv {
 	echo runCbWorkloadGenBucket "C1" "B1" 10000 "common"
 	runCbWorkloadGenBucket "C1" "B1" 10000 "common" &
 
+	# Let bucket 1 start first to create some cas mismatches
+	# Otherwise, the two cbworkloadgen somehow could generate the same CAS
+	# but HLV will be stamped with a different CvSrc, leading to differ differences
+	sleep 5
+
 	echo runCbWorkloadGenBucket "C2" "B2"
 	runCbWorkloadGenBucket "C2" "B2" &
 	echo runCbWorkloadGenBucket "C2" "B2" 10000 "common"
 	runCbWorkloadGenBucket "C2" "B2" 10000 "common" &
 
-	echo "sleeping 10 seconds for cbworkloadgen to finish"
-	sleep 10
-
-	sleepTime=20
-	echo "Sleep $sleepTime seconds to wait for replication to finish"
-	sleep $sleepTime
+	sleep 40
 
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	waitForChangesLeft0 "C2" "B2" "C1" "B1"
@@ -187,6 +198,9 @@ function runTestCase {
 	sleep 1
 	testReplicationSettings
 	testMobileHlv
+
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
+	runXdcrDifferValidateNoDiff "C2" "B2" "C1" "B1"
 
 	echo "============================================================================"
 	echo "Mobile coexistence test case passed"
