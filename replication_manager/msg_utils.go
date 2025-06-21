@@ -121,6 +121,7 @@ const (
 	CLogConnPoolGCIntervalKey         = base.CLogConnPoolGCInterval
 	CLogConnPoolReapIntervalKey       = base.CLogConnPoolReapInterval
 	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
+	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
 )
 
 // constants for parsing create/change/view replication response
@@ -272,6 +273,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CLogConnPoolGCIntervalKey:         metadata.CLogConnPoolGCIntervalKey,
 	CLogConnPoolReapIntervalKey:       metadata.CLogConnPoolReapIntervalKey,
 	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
+	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -355,6 +357,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogConnPoolGCIntervalKey:            CLogConnPoolGCIntervalKey,
 	metadata.CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
+	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

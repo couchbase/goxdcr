@@ -1991,3 +1991,5 @@ const PipelineReinitHash = "pipelineReinitHash"
 
 // constant used for paring get all replications request
 const Backfill = "backfill"
+
+const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"

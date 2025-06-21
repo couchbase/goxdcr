@@ -145,6 +145,8 @@ const (
 
 	// randomised hash, stamped on the replication spec whenever the pipline is re-initialised (i.e. streams from seq num 0)
 	PipelineReinitHashKey = base.PipelineReinitHash
+
+	DisableHlvBasedShortCircuitKey = base.DisableHlvBasedShortCircuitKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -303,6 +305,10 @@ var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
 
 var PipelineReinitHashConfig = &SettingsConfig{"", nil}
 
+// If HLV exists on a document, outnozzle will skip replicating back documents which were sent by the target side
+// of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
+var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -374,6 +380,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CLogReattemptDurationKey:             CLogReattemptDurationConfig,
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	PipelineReinitHashKey:                PipelineReinitHashConfig,
+	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1550,6 +1557,12 @@ func (s *ReplicationSettings) GetCLogReattemptDuration() time.Duration {
 	val, _ := s.GetSettingValueOrDefaultValue(CLogReattemptDurationKey)
 	msInt := val.(int)
 	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetHlvBasedShortCircuitToggle() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(DisableHlvBasedShortCircuitKey)
+	toggle := val.(bool)
+	return toggle
 }
 
 // need to reconstruct pipeline if:

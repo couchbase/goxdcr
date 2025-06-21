@@ -1562,7 +1562,7 @@ func changeClusterRunBucketSetting(port int, bucketname, key, val string) string
 func turnOnCrossXVersioningClusterRun(port int, bucketname string) {
 	defer time.Sleep(3 * time.Second)
 	op := changeClusterRunBucketSetting(port, bucketname, "enableCrossClusterVersioning", "true")
-	for op != "" && op != "Cross cluster versioning already enabled" {
+	for op != "" && !strings.Contains(op, "Cross Cluster Versioning is already enabled") {
 		time.Sleep(2 * time.Second)
 		op = changeClusterRunBucketSetting(port, bucketname, "enableCrossClusterVersioning", "true")
 	}

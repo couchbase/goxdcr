@@ -601,6 +601,9 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 		if val, ok := settings[MOBILE_COMPATBILE]; ok {
 			config.mobileCompatible = uint32(val.(int))
 		}
+		if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
+			config.DisableHlvBasedShortCircuit.Store(val.(bool))
+		}
 	}
 	return err
 }
@@ -3077,6 +3080,12 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		return false, nil
 	}
 
+	if xmem.config.DisableHlvBasedShortCircuit.Load() {
+		// The short-circuiting behaviour is explicitly turned off
+		// for this replication.
+		return false, nil
+	}
+
 	doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
 	meta, err := doc.GetMetadata(xmem.uncompressBody)
 	if err != nil {
@@ -4867,6 +4876,14 @@ func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 		atomic.StoreUint32(&xmem.config.hlvPruningWindowSec, uint32(hlvPruningWindowInt))
 		if oldvPruningWindowInt != hlvPruningWindowInt {
 			xmem.Logger().Infof("%v updated %v to %v\n", xmem.Id(), HLV_PRUNING_WINDOW, hlvPruningWindowInt)
+		}
+	}
+	disableHlvBasedShortCircuit, ok := settings[DISABLE_HLV_SHORT_CIRCUIT]
+	if ok {
+		disableHlvBasedShortCircuitBool := disableHlvBasedShortCircuit.(bool)
+		if xmem.config.DisableHlvBasedShortCircuit.Load() != disableHlvBasedShortCircuitBool {
+			xmem.config.DisableHlvBasedShortCircuit.Store(disableHlvBasedShortCircuitBool)
+			xmem.Logger().Infof("%v updated %v to %v", xmem.Id(), DISABLE_HLV_SHORT_CIRCUIT, disableHlvBasedShortCircuitBool)
 		}
 	}
 

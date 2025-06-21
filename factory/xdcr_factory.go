@@ -1022,6 +1022,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 		xmemSettings[parts.CLogging] = conflictLoggingMap
 	}
 
+	disableHlvBasedShortCircuitToggle, ok := settings[metadata.DisableHlvBasedShortCircuitKey]
+	if ok {
+		xmemSettings[parts.DISABLE_HLV_SHORT_CIRCUIT] = disableHlvBasedShortCircuitToggle
+	}
+
 	return xmemSettings
 }
 
@@ -1283,6 +1288,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	}
 	if val, ok := settings[base.TargetHlvVbMaxCasKey]; ok {
 		xmemSettings[base.TargetHlvVbMaxCasKey] = val
+	}
+	if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
+		xmemSettings[base.DisableHlvBasedShortCircuitKey] = val
 	}
 
 	return xmemSettings, nil
