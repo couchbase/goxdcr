@@ -1734,3 +1734,5 @@ const IsPipelineReinitStreamKey = "isPipelineReinitStream"
 
 // Duration of delay for allowing lagging peer nodes to catch up when processing a `PipelineReinitStream` update
 var PipelineReinitStreamDelaySec = 3 * time.Second
+
+const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"

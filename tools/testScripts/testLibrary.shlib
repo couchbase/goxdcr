@@ -430,6 +430,23 @@ function killMemcached {
 	ps -ef | grep memcached | grep -v grep | grep -v beam | grep "$nodePrefix" | awk '{print $2}' | xargs kill -9
 }
 
+function killMobileImportSim {
+	local clusterName=$1
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local bucketName=$2
+
+	if [[ -z "$sourcePort" ]]; then
+		echo "Unable to kill MobileImportSim as source port is not found"
+	fi
+
+	if [[ -z "$bucketName" ]]; then
+		echo "Unable to kill MobileImportSim as bucketName is not found"
+	fi
+
+	echo "Killing mobile import simulator for $clusterName with port $sourcePort and $bucketName..."
+	ps -ef | grep mobileImportSim | grep "hostAddr 127.0.0.1:$sourcePort" | grep "bucketname $bucketName" | awk '{print $2}' | xargs kill
+}
+
 # Input:
 # 1 - cluster name
 # 2 - String to look for
@@ -1771,10 +1788,33 @@ function validatePrometheusStatsIs0 {
 	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
+
 	if (($count > 0)); then
 		echo "Stat $prometheusStatsName shows $count"
 		exit 1
 	fi
+}
+
+function getPrometheusStat {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local prometheusStatsName=$4
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local cmd
+
+	prometheusOut=$(getPrometheusStats "$node")
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
+
+	echo $count
 }
 
 function validatePrometheusStatsRRNon0 {
@@ -1894,6 +1934,36 @@ function runCbepctl {
 	$cbepctl localhost:$kvPort -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucket set $paramType $param $val
 
 	return 0
+}
+
+function setCrossClusterVersioningForBucket {
+	local cluster=$1
+	local bucketName=$2
+	local setting="enableCrossClusterVersioning"
+	local value="true"
+	local output
+
+	echo "setBucket $cluster $bucketName $setting $value"
+
+	if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
+		# not vagrant
+		output=$(setBucket $cluster $bucketName $setting $value)
+	else
+		output=$(vagrantSetBucket $cluster $bucketName $setting $value)
+	fi
+
+	echo $output
+	while [[ ! -z "${output:-}" ]] && [[ ! "$output" =~ Cross\ cluster\ versioning\ already\ enabled ]]; do
+		echo "retrying..."
+		sleep 2
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
+			# not vagrant
+			output=$(setBucket $cluster $bucketName $setting $value)
+		else
+			output=$(vagrantSetBucket $cluster $bucketName $setting $value)
+		fi
+		echo $output
+	done
 }
 
 function setBucket {

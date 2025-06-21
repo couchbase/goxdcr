@@ -133,6 +133,8 @@ const (
 
 	// flag to track if the current pipeline restart is in response to a `PipelineReinitStream` update
 	IsPipelineReinitStreamKey = base.IsPipelineReinitStreamKey
+
+	DisableHlvBasedShortCircuitKey = base.DisableHlvBasedShortCircuitKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -273,6 +275,10 @@ var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Ran
 
 var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
 
+// If HLV exists on a document, outnozzle will skip replicating back documents which were sent by the target side
+// of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
+var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -334,6 +340,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CASDriftThresholdSecsKey:             CasDriftThresholdSecsConfig,
 	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
+	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1434,3 +1441,9 @@ func GetP2PTimeoutFromSettings(settings ReplicationSettingsMap) time.Duration {
 }
 
 const P2PDynamicWaitDurationKey = "P2PDynamicWaitDuration"
+
+func (s *ReplicationSettings) GetHlvBasedShortCircuitToggle() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(DisableHlvBasedShortCircuitKey)
+	toggle := val.(bool)
+	return toggle
+}

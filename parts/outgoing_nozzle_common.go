@@ -51,10 +51,11 @@ const (
 	EVENT_ADDI_REQ_EXPIRY_SET = "req_expiry_set"
 	EVENT_ADDI_REQ_SIZE       = "req_size"
 
-	HLV_PRUNING_WINDOW = "versionPruningWindow"
-	HLV_ENABLE         = "hlvEnable"
-	HLV_MAX_CAS        = "hlv_vb_max_cas"
-	MOBILE_COMPATBILE  = base.MobileCompatibleKey
+	HLV_PRUNING_WINDOW        = "versionPruningWindow"
+	HLV_ENABLE                = "hlvEnable"
+	HLV_MAX_CAS               = "hlv_vb_max_cas"
+	MOBILE_COMPATBILE         = base.MobileCompatibleKey
+	DISABLE_HLV_SHORT_CIRCUIT = base.DisableHlvBasedShortCircuitKey
 )
 
 type NeedSendStatus int
@@ -105,6 +106,8 @@ type baseConfig struct {
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
+
+	DisableHlvBasedShortCircuit atomic.Bool
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes

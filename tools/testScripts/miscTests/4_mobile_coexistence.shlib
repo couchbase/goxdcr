@@ -19,6 +19,72 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
 
+function testHlvShortCircuiting {
+	# kill mobile import sim first, so that docs_written stat is accurate
+	# when short circuiting is turned off.
+	killMobileImportSim "C1" "B1"
+	killMobileImportSim "C2" "B2"
+	sleep 5
+
+	# default is short-circuiting
+	c1DocsWritten1=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten1=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	writeJSONDocument "C1" "B1" "shortCircuitDoc1" '{"foo":"bar"}'
+
+	echo "Waiting for changes_left to go to 0 for 5s"
+	sleep 5
+
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1DocsWritten2=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten2=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+	if [ $((c1DocsWritten2 - c1DocsWritten1)) -ne 1 ] || [ $((c2DocsWritten2 - c2DocsWritten1)) -ne 0 ]; then
+		echo "FAILED: docs_written difference expected is one in C1 and 0 in C2 due to short-circuiting"
+		exit 1
+	fi
+
+	# turn short-circuiting off. There will be a C2 -> C1 write because C1's doc
+	# wil not have xattr and C2's doc will have HLV as xattr (last step of conflict resolution).
+	setReplicationSettings "C1" "B1" "C2" "B2" "disableHlvBasedShortCircuit=true"
+	setReplicationSettings "C2" "B2" "C1" "B1" "disableHlvBasedShortCircuit=true"
+
+	writeJSONDocument "C1" "B1" "shortCircuitDoc2" '{"foo":"bar"}'
+
+	echo "Waiting for changes_left to go to 0 for 5s"
+	sleep 5
+
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1DocsWritten3=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten3=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+	if [ $((c1DocsWritten3 - c1DocsWritten2)) -ne 1 ] || [ $((c2DocsWritten3 - c2DocsWritten2)) -ne 1 ]; then
+		echo "FAILED: docs_written difference expected is one due to no short-circuiting"
+		exit 1
+	fi
+
+	# turn short-circuiting on again
+	setReplicationSettings "C1" "B1" "C2" "B2" "disableHlvBasedShortCircuit=false"
+	setReplicationSettings "C2" "B2" "C1" "B1" "disableHlvBasedShortCircuit=false"
+
+	writeJSONDocument "C1" "B1" "shortCircuitDoc3" '{"foo":"bar"}'
+
+	echo "Waiting for changes_left to go to 0 for 5s"
+	sleep 5
+
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1DocsWritten4=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten4=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+	if [ $((c1DocsWritten4 - c1DocsWritten3)) -ne 1 ] || [ $((c2DocsWritten4 - c2DocsWritten3)) -ne 0 ]; then
+		echo "FAILED: docs_written difference expected is one for C1 and 0 for C2 due to short-circuiting"
+		exit 1
+	fi
+}
+
 function verifyPromStats {
 	# verify no data-corruption
 	validateBinaryFilteredIs0 "C1" "B1" "B2"
@@ -179,6 +245,11 @@ function runTestCase {
 	sleep 1
 	testReplicationSettings
 	testMobileHlv
+	testHlvShortCircuiting
+
+	grepForAbnormalities
+
+	verifyPromStats
 
 	echo "============================================================================"
 	echo "Mobile coexistence test case passed"

@@ -875,6 +875,12 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 	if ok {
 		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
 	}
+
+	disableHlvBasedShortCircuitToggle, ok := settings[metadata.DisableHlvBasedShortCircuitKey]
+	if ok {
+		xmemSettings[parts.DISABLE_HLV_SHORT_CIRCUIT] = disableHlvBasedShortCircuitToggle
+	}
+
 	return xmemSettings
 }
 
@@ -1129,6 +1135,10 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
 		xmemSettings[base.VersionPruningWindowHrsKey] = val
 	}
+	if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
+		xmemSettings[base.DisableHlvBasedShortCircuitKey] = val
+	}
+
 	return xmemSettings, nil
 
 }
