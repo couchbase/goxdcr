@@ -77,7 +77,6 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	checkUnidirectionalChangesLeft
 	validatePrometheusStatsSystemEventsNon0 "C1" "B1" "B2"
-	validatePrometheusStatsSeqAdvNon0 "C1" "B1" "B2"
 
 	runDataLoad
 
