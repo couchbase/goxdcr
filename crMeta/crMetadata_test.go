@@ -691,8 +691,8 @@ func TestCRMetadata_Diff(t *testing.T) {
 			args: args{
 				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_DELETION},
 				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_DELETION},
-				sourceHlv:         nil,
-				targetHlv:         nil,
+				sourceHlv:         &hlv.HLV{},
+				targetHlv:         &hlv.HLV{},
 				sourcePruningFunc: nil,
 				targetPruningFunc: nil,
 			},
