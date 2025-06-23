@@ -689,3 +689,89 @@ func TestBackfillReqHandlerStopAfterChannelFull(t *testing.T) {
 	// If the test timed out, that means there was a stuckage.
 	done.Wait()
 }
+
+func TestBackfillHandlerParentSpecUpdate(t *testing.T) {
+	fmt.Println("============== Test case start: TestBackfillHandlerParentSpecUpdate =================")
+	defer fmt.Println("============== Test case end: TestBackfillHandlerParentSpecUpdate =================")
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils := setupBoilerPlate()
+	utilsExpoRetMap := make(map[string]*backfillMgrTestUtilsRetStruct)
+	// set up mocks
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, utilsExpoRetMap)
+	xdcrCompTopologySvc.On("IsKVNode").Return(true, nil).Once()
+	xdcrCompTopologySvc.On("IsKVNode").Return(false, nil).Once()
+	xdcrCompTopologySvc.On("IsKVNode").Return(true, nil)
+	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, nil)
+	// create spec and setup backfillMgr
+	spec := createTestSpec()
+	specs := map[string]*metadata.ReplicationSpecification{spec.Id: spec}
+	manifestPairs := map[string]*metadata.CollectionsManifestPair{spec.Id: metadata.NewDefaultCollectionsManifestPair()}
+	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
+	assert.NotNil(t, backfillMgr)
+
+	// call replicationSpecChangeCallBack since a spec was created
+	var oldSpec *metadata.ReplicationSpecification = nil
+	err := backfillMgr.ReplicationSpecChangeCallback(spec.Id, oldSpec, spec, nil)
+	assert.Nil(t, err)
+	handler, exists := backfillMgr.specToReqHandlerMap[spec.Id]
+	assert.Equal(t, true, exists)
+	assert.NotNil(t, handler)
+
+	// initially the spec should be nil
+	assert.Nil(t, handler.cachedBackfillSpec)
+	handler.updateBackfillSpec(nil, nil, nil, nil, false, 0)
+	// since we are calling the updateBackfillSpec directly and not through the handler,
+	// remove the queuedResponse channel
+	handler.queuedResps = handler.queuedResps[:0]
+
+	// with the creation of the backfill spec above, the cachedBackfillSpec should now be a non nil value
+	assert.NotNil(t, handler.cachedBackfillSpec)
+	defaultPriority, _ := handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.PriorityKey].(base.PriorityType)
+	defaultBwlimit, _ := handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.BandwidthLimitKey].(int)
+	// check if the values match the default ones
+	assert.Equal(t, base.PriorityTypeHigh, defaultPriority)
+	assert.Equal(t, 0, defaultBwlimit)
+
+	// change the settings
+	newSpec := spec.Clone()
+	newSpec.Settings.Values[metadata.PriorityKey] = base.PriorityTypeLow
+	newSpec.Settings.Values[metadata.BandwidthLimitKey] = int(100)
+
+	// call replicationSpecChangeCallBack since the settings was changed
+	err = backfillMgr.ReplicationSpecChangeCallback(newSpec.Id, spec, newSpec, nil)
+	assert.Nil(t, err)
+	// reset the cachedBackfillSpec to nil to ensure the newly created backfill spec will inherit the new settings
+	handler.cachedBackfillSpec = nil
+	handler.updateBackfillSpec(nil, &metadata.VBTasksMapType{}, nil, nil, false, 0)
+	// since we are calling the updateBackfillSpec directly and not through the handler,
+	// remove the queuedResponse channel
+	handler.queuedResps = handler.queuedResps[:0]
+
+	changedPriority, _ := handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.PriorityKey].(base.PriorityType)
+	changedBwlimit, _ := handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.BandwidthLimitKey].(int)
+
+	// check if the values match the changed ones
+	assert.Equal(t, base.PriorityTypeLow, changedPriority)
+	assert.Equal(t, 100, changedBwlimit)
+
+	// change the settings
+	newSpec2 := newSpec.Clone()
+	newSpec2.Settings.Values[metadata.PriorityKey] = base.PriorityTypeMedium
+	newSpec2.Settings.Values[metadata.BandwidthLimitKey] = int(200)
+
+	// call replicationSpecChangeCallBack since the settings was changed
+	err = backfillMgr.ReplicationSpecChangeCallback(newSpec.Id, newSpec, newSpec2, nil)
+	assert.Nil(t, err)
+
+	handler.updateBackfillSpec(nil, &metadata.VBTasksMapType{}, nil, nil, false, 0)
+	// since we are calling the updateBackfillSpec directly and not through the handler,
+	// remove the queuedResponse channel
+	handler.queuedResps = handler.queuedResps[:0]
+
+	defaultPriority, _ = handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.PriorityKey].(base.PriorityType)
+	defaultBwlimit, _ = handler.cachedBackfillSpec.GetReplicationSpec().Settings.Values[metadata.BandwidthLimitKey].(int)
+
+	// check if the values match the changed ones
+	assert.Equal(t, base.PriorityTypeMedium, defaultPriority)
+	assert.Equal(t, 200, defaultBwlimit)
+}

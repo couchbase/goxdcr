@@ -111,6 +111,9 @@ type BackfillRequestHandler struct {
 
 	// debugging helpers
 	devVbDelayEnabled bool
+
+	// to update the cached values at the handler level when changes are made to the parent spec
+	parentSpecUpdateCh chan *parentSpecUpdateRequest
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -119,6 +122,11 @@ type SeqnosGetter2 func(throughSeqnoErr error) (map[uint16]uint64, error)
 type MyVBsGetter func() ([]uint16, error)
 
 type MyVBsTasksDoneNotifier func(startNewTask bool)
+
+type parentSpecUpdateRequest struct {
+	spec  *metadata.ReplicationSpecification
+	errCh chan error
+}
 
 type ReqAndResp struct {
 	Request         interface{}
@@ -156,6 +164,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		getLatestSrcManifestId:       getLatestSrcManifestId,
 		getSpecUpdateStatus:          getSpecUpdateStatus,
 		setSpecUpdateStatus:          setSpecUpdateStatus,
+		parentSpecUpdateCh:           make(chan *parentSpecUpdateRequest, 1),
 	}
 }
 
@@ -388,6 +397,10 @@ func (b *BackfillRequestHandler) run() {
 			timeUpdated := b.latestCachedSourceNotification.GetLocalTopologyUpdatedTime()
 			b.latestCachedSourceNotificationMtx.Unlock()
 			atomic.StoreInt64(&b.latestVbsUpdatedTime, timeUpdated.UnixNano())
+		case req := <-b.parentSpecUpdateCh:
+			b.updateParentSpec(req)
+			// request persistance
+			requestPersistFunc()
 		}
 	}
 }
@@ -1441,6 +1454,46 @@ func (b *BackfillRequestHandler) registerNonOwnedVBsForGC(req internalPeerBackfi
 			b.registerVbForGC(vbToCheck)
 		}
 	}
+}
+
+// sendUpdateParentSpecRequest sends a request to update the parent replication spec,
+// and waits synchronously for the operation to complete. It returns any error encountered.
+func (b *BackfillRequestHandler) sendUpdateParentSpecRequest(spec *metadata.ReplicationSpecification) error {
+	errch := make(chan error, 1)
+	req := &parentSpecUpdateRequest{
+		spec:  spec,
+		errCh: errch,
+	}
+	b.parentSpecUpdateCh <- req
+
+	// wait until the operation is done
+	return <-errch
+}
+
+func (b *BackfillRequestHandler) updateParentSpec(req *parentSpecUpdateRequest) {
+	// update the parent spec cached at the handler level
+	b.spec = req.spec.Clone()
+	var err error
+	if b.cachedBackfillSpec != nil {
+		// If a backfill spec currently exists, update its parent spec as well
+		// Perform a quick cache read to verify the existence of the backfill spec.
+		// This is a defensive check.
+		_, err = b.backfillReplSvc.BackfillReplSpec(req.spec.GetFullId())
+		if err == nil {
+			b.cachedBackfillSpec.SetReplicationSpec(req.spec.Clone())
+			// write to metakv and update the backfill replication service cache
+			b.requestPersistence(SetOp, req.errCh)
+			return
+		} else {
+			// should never happen
+			if err == base.ReplNotFoundErr {
+				// when backfill spec is not present, no meta kv persistance needed.
+				err = nil
+			}
+		}
+	}
+	req.errCh <- err
+	return
 }
 
 type internalDelBackfillReq struct {

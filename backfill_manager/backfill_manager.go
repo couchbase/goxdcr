@@ -842,6 +842,22 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		}
 		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
 	} else {
+
+		// The original(parent) replication spec might have been updated
+		// Update the backfill spec to reflect the latest parent spec
+		b.specReqHandlersMtx.RLock()
+		reqHandler, exists := b.specToReqHandlerMap[changedSpecId]
+		b.specReqHandlersMtx.RUnlock()
+		if exists {
+			err = reqHandler.sendUpdateParentSpecRequest(newSpec)
+			if err != nil {
+				// This cache update is a best-effort operation.
+				// avoid error propagation, log the error.
+				b.logger.Errorf("BackfillRequestHandler: failed to update cache for %v after parent spec change; err=%v", changedSpecId, err)
+				err = nil
+			}
+		}
+
 		if newSpec.Settings.GetBoolSettingValue(metadata.DevBackfillMgrVbsTasksDoneNotifierDelay) {
 			atomic.StoreUint32(&b.debugVbsTaskDoneNotifierHang, 1)
 		}
