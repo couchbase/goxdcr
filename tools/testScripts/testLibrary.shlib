@@ -1684,3 +1684,49 @@ function updateNsServerSimpleStore {
 	echo "simple store update failed"
 	exit 1
 }
+
+# HELP xdcr_pipeline_status The pipeline status for a specific pipeline, where it could be paused, running or, error.
+# TYPE xdcr_pipeline_status gauge
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="Paused"} 0
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="Running"} 0
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="Error"} 1
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Backfill", status="Paused"} 1
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Backfill", status="Running"} 0
+#   xdcr_pipeline_status {targetClusterUUID="a8b73b82ec06ae15944919b0706c3556", sourceBucketName="B1", targetBucketName="B2", pipelineType="Backfill", status="Error"} 0
+function validatePrometheusPipelineStatusIs1Internal {
+	local sourceBucket=$1
+	local targetBucket=$2
+	local pipelineType=$3
+	local statusType=$4
+	local prometheusOut="$5"
+
+	local count
+	count=$(echo "$prometheusOut" | grep "xdcr_pipeline_status" | grep "pipelineType=\"$pipelineType\"" | grep "status=\"$statusType\"" |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if (($count == 0)); then
+		echo "Pipeline status $pipelineType $statusType shows 0"
+		exit 1
+	fi
+}
+
+function validatePrometheusPipelineStatusIs1 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local statusType=$5
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	if [[ -z "${prometheusOut:-}" ]]; then
+		prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+		if [[ -z "${prometheusOut:-}" ]]; then
+			echo "Warning Unable to get prometheus stats"
+			echo "Command is $CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics"
+		fi
+	fi
+
+	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
+}

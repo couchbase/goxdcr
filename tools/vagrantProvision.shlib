@@ -52,10 +52,14 @@ function vscp {
 }
 
 declare -A CBServerLink=(
-	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
-	["6.6.3"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.3/couchbase-server-enterprise_6.6.3-ubuntu18.04_amd64.deb"
-	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
-	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
+	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-linux_arm64.deb"
+	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-linux_arm64.deb"
+	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-linux_arm64.deb"
+	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/21114/couchbase-server-enterprise_8.0.0-21114-linux_amd64.deb" # to be filled out
+)
+
+declare -A SGWLink=(
+	["4.0.0-2"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/2/couchbase-sync-gateway-enterprise_4.0.0-2_x86_64.deb"
 )
 
 function vagrantUp {
@@ -325,4 +329,184 @@ function vagrantRunCBWorkloadGenCollection {
 	cmd="${VSSH[$idx]} \"$workloadGenLoc -i $CBWORKLOAD_COLLECTION_NUM_ITEMS -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+}
+
+function setupVagrantAltPortForwarding {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	# First install needed software
+	vagrantInstallSocat "$idx"
+
+	# For each port, need to launch a bg task to port forward
+	echo "Setting up port forwarding for $clusterName"
+	# mgmtPort
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_PORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:8091)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# mgmtSSLPort
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_SSLPORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:18091)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# kv
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KV_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11210)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# kvSSL
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KVSSL_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11207)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+}
+
+function checkAndWaitForUnattendedUpgrade {
+	local idx=$1
+	local cmd
+	local count=1
+
+	cmd="${VSSH[$idx]} \"ps -ef | grep unattended-upgrade-shutdown | grep -v grep | grep -v shutdown | grep -c .\""
+
+	echo "==== Running $cmd repeatedly until upgrade is finished ===="
+	while [[ ! "$count" =~ 0 ]]; do
+		count=$(eval $cmd)
+		sleep 10
+	done
+
+	count=1
+	cmd="${VSSH[$idx]} \"ps -ef | grep /usr/bin/unattended-upgrade | grep -v grep | grep -c .\""
+	echo "==== Running $cmd repeatedly until upgrade is finished ===="
+	while [[ ! "$count" =~ 0 ]]; do
+		count=$(eval $cmd)
+		sleep 10
+	done
+
+}
+
+function vagrantStopSGW {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	${VSSH[$idx]} "sudo systemctl stop sync_gateway"
+}
+
+function vagrantStartSGW {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	${VSSH[$idx]} "sudo systemctl start sync_gateway"
+}
+
+function vagrantSetConfigSGW {
+	local clusterName="$1"
+	local idx="$(getClusterIdx "$clusterName")"
+	local tmpFile="/tmp/sgwConfig.cfg"
+
+	cat <<EOF >$tmpFile
+{
+  "bootstrap": {
+    "server": "couchbase://${VAGRANT_VM_IP_MAP[$clusterName]}",
+    "username": "$DEFAULT_ADMIN",
+    "password": "$DEFAULT_PW",
+    "use_tls_server": false
+  },
+  "logging": {
+    "console": {
+      "enabled": true,
+      "log_level": "debug",
+      "log_keys": ["*"]
+    }
+  }
+}
+EOF
+
+	vscp "$idx" "$tmpFile" "$tmpFile"
+	${VSSH[$idx]} "sudo mv $tmpFile /home/sync_gateway/sync_gateway.json"
+}
+
+function vagrantSetSecureConfigSGW {
+	local clusterName="$1"
+	local idx="$(getClusterIdx "$clusterName")"
+	local tmpFile="/tmp/sgwConfig.cfg"
+
+	cat <<EOF >$tmpFile
+{
+  "bootstrap": {
+    "server": "couchbases://${VAGRANT_VM_IP_MAP[$clusterName]}",
+    "username": "$DEFAULT_ADMIN",
+    "password": "$DEFAULT_PW",
+    "server_tls_skip_verify": true,
+    "use_tls_server": true
+  },
+  "logging": {
+    "console": {
+      "enabled": true,
+      "log_level": "debug",
+      "log_keys": ["*"]
+    }
+  }
+}
+EOF
+
+	vscp "$idx" "$tmpFile" "$tmpFile"
+	${VSSH[$idx]} "sudo mv $tmpFile /home/sync_gateway/sync_gateway.json"
+}
+
+function vagrantSGWDigest {
+	local digest
+	digest=$(echo -n "$DEFAULT_ADMIN:$DEFAULT_PW" | base64)
+	echo "$digest"
+}
+
+function vagrantSGWAddDbConfig {
+	local clusterName="$1"
+	local bucketName="$2"
+	local dbName="$3"
+	local digest=$(vagrantSGWDigest)
+
+	local idx="$(getClusterIdx "$clusterName")"
+
+	# The following adds a specific user in case admin is not what we want to use:
+	#${VSSH[$idx]} "curl -X PUT http://127.0.0.1:8091/settings/rbac/users/local/$DEFAULT_ADMIN -u $DEFAULT_ADMIN:$DEFAULT_PW -d password=$DEFAULT_PW -d roles='mobile_sync_gateway[*]'"
+
+	# the following will create a sync gateway database config
+	${VSSH[$idx]} "curl -X PUT 'http://127.0.0.1:4985/$dbName/' --header \"Authorization: Basic $digest\"  --header 'Content-Type: application/json' --data-raw '{\"bucket\": \"$bucketName\", \"num_index_replicas\": 0, \"use_views\": true}'"
+}
+
+function vagrantInstallXdcrDiffer {
+	local clusterName="$1"
+	local differDir="$2"
+	local idx="$(getClusterIdx "$clusterName")"
+
+	vagrantAptInstall "$idx" "git"
+	vagrantAptInstall "$idx" "golang-go"
+
+	${VSSH[$idx]} "mkdir -p $differDir"
+	${VSSH[$idx]} "git clone https://github.com/couchbaselabs/xdcrDiffer.git $differDir"
+	cmd="${VSSH[$i]} \"cd /home/vagrant/xdcrDiffer; make clean; make deps; make\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantValidatePrometheusPipelineStatusIs1 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local statusType=$5
+	local idx="$(getClusterIdx "$node")"
+	local output
+	local prometheusOut
+	local tmpFile="/tmp/vagrantPrometheusOut"
+
+	local idx="$(getClusterIdx "$node")"
+
+	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
+	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
+	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
 }
