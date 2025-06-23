@@ -697,18 +697,8 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 		}
 		return err
 	} else {
-		// It's possible that changes have gone into the original replication spec
-		backfillSpec, err := b.backfillSpec(id)
-		if err != nil {
-			if err == base.ReplNotFoundErr {
-				// It's possible backfill replications don't exist yet
-				err = nil
-			}
-			return err
-		}
-		newBackfillSpec := backfillSpec.Clone()
-		newBackfillSpec.SetReplicationSpec(newSpec)
-		b.updateCache(id, newBackfillSpec)
+		// It's possible that the changes have gone into the original(parent) replication spec.
+		// This case is handled by the backfill manager
 	}
 	return nil
 }
