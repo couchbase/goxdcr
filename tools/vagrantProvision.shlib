@@ -54,10 +54,17 @@ function vscp {
 }
 
 declare -A CBServerLink=(
+<<<<<<< HEAD
 	["cheshirecat"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/cheshire-cat/latest/couchbase-server-enterprise_cheshire-cat-ubuntu20.04_amd64.deb"
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-ubuntu20.04_amd64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-ubuntu20.04_amd64.deb"
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
+=======
+	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-linux_arm64.deb"
+	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-linux_arm64.deb"
+	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-linux_arm64.deb"
+	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/21114/couchbase-server-enterprise_8.0.0-21114-linux_amd64.deb" # to be filled out
+>>>>>>> 58176e9c (MB-67286: NLB secure port replaced by 18091)
 )
 
 declare -A SGWLink=(
@@ -728,4 +735,22 @@ function vagrantInstallXdcrDiffer {
 	cmd="${VSSH[$i]} \"cd /home/vagrant/xdcrDiffer; make clean; make deps; make\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+}
+
+function vagrantValidatePrometheusPipelineStatusIs1 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local statusType=$5
+	local idx="$(getClusterIdx "$node")"
+	local output
+	local prometheusOut
+	local tmpFile="/tmp/vagrantPrometheusOut"
+
+	local idx="$(getClusterIdx "$node")"
+
+	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
+	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
+	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
 }

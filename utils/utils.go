@@ -1849,34 +1849,55 @@ func (u *Utilities) replacePortWithHttpsMgtPort(hostAddr string, nodeInfo map[st
 func (u *Utilities) GetHostAddrFromNodeInfo(connStr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error) {
 	var hostAddr string
 	if useExternal {
-		found := false
+		var foundExternal bool
+		var foundExternalButNeedsPort bool
 		// If external info exists, use it
 		if externalAddr, externalMgtPort, externalErr := u.GetExternalMgtHostAndPort(nodeInfo, isHttps); externalErr == nil {
 			hostAddr = base.GetHostAddr(externalAddr, (uint16)(externalMgtPort))
-			found = true
+			foundExternal = true
 		} else if externalErr == base.ErrorNoPortNumber {
 			// Extract original internal node management port
 			if hostname, exists := nodeInfo[base.HostNameKey].(string); exists {
 				hostPort, portErr := base.GetPortNumber(hostname)
 				if portErr == nil {
 					// Combine externalHost:internalPort
-					hostAddr = base.GetHostAddr(externalAddr, (uint16)(hostPort))
+					hostAddr = base.GetHostAddr(externalAddr, hostPort)
+					if isHttps && hostPort == base.DefaultAdminPort {
+						if isHttps {
+						}
+						return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
+					}
 				} else {
 					// Original internal address did not have port number, so continue to just have externalAddr[:noPort]
 					hostAddr = externalAddr
+					foundExternalButNeedsPort = true
 				}
-				found = true
 			}
+			foundExternal = true
 		}
-		if found {
+		if foundExternal {
 			// Verify that the hostAddr can be mapped if necessary
+			// We are passing "false" for isTLS because we only use it to check for IPv4/IPv6 and not utilizing the
+			// return value itself
 			if _, err := base.MapToSupportedIpFamily(hostAddr, false); err != nil {
 				return "", err
 			}
-			// We found the info from the external address
-			if isHttps {
-				return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
+			// We foundExternal the info from the external address
+			if foundExternalButNeedsPort {
+				if isHttps {
+					// When external addressing is used, the external port could optionally be specified
+					// If it's not specified, we'll use the original http or https port
+					return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
+				} else {
+					// This is the case where external addressing section exists
+					// within that section the hostname is specified, but no port
+					// Using the internal hostnaame and port, we cannot extract the internal port
+					// So we'll just use the default port
+					hostAddr = base.GetHostAddr(hostAddr, base.DefaultAdminPort)
+					return hostAddr, nil
+				}
 			} else {
+				// hostAddr should already be compiled with properly externalMgmtport already
 				return hostAddr, nil
 			}
 		}
@@ -1891,6 +1912,8 @@ func (u *Utilities) GetHostAddrFromNodeInfo(connStr string, nodeInfo map[string]
 	}
 
 	if isHttps {
+		// When not using external addressing, it is very highly chances are the admin port is 8091
+		// as well as 18091 for secure, which this is going to be doing
 		return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
 	}
 	return hostAddr, nil
@@ -2215,6 +2238,8 @@ func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeIn
 			return "", fmt.Errorf("Error getting host address from target cluster %v. host name, %v, is of wrong type\n", adminHostAddr, hostAddrObj)
 		}
 	}
+	// We are passing "false" for isTLS because we only use it to check for IPv4/IPv6 and not utilizing the
+	// return value itself
 	_, err := base.MapToSupportedIpFamily(hostAddr, false)
 	if err != nil {
 		// The hostAddr cannot be mapped to the supported IP Address

@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 // The test data's external node name is 10.10.10.10 instead of the regular 127.0.0.1
@@ -128,6 +129,15 @@ func getBucketInfoWithManifestHexId() map[string]interface{} {
 
 func getKvSSLFromBPath() map[string]interface{} {
 	fileName := fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_ssl.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getNlbDefaultPool() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_nlb.json")
 	retMap, _, err := readJsonHelper(fileName)
 	if err != nil {
 		panic(err)
@@ -1004,4 +1014,17 @@ func TestGetHostAddrFromNodeInfo(t *testing.T) {
 	// We should return error
 	assert.NotNil(err)
 
+	// Test 5: NLB
+	nlbRef, err := metadata.NewRemoteClusterReference("testuuid", "C2", "192.168.56.10:15022", "test",
+		"test", metadata.HostnameMode_None, true, base.SecureTypeFull, nil, nil, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(nlbRef)
+	defaultPoolsInfo := getNlbDefaultPool()
+	nodeList, err := testUtils.GetNodeListFromInfoMap(defaultPoolsInfo, logger)
+	assert.Nil(err)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, nlbRef.HostName(), true, logger, true)
+	for _, addressPair := range nodeAddressesList {
+		assert.False(strings.Contains(addressPair.GetFirstString(), "18091"))
+		assert.False(strings.Contains(addressPair.GetSecondString(), "18091"))
+	}
 }

@@ -657,6 +657,7 @@ func (rctx *refreshContext) initialize() {
 	}
 	rctx.agent.refMtx.RUnlock()
 
+	var printNodeListPostBootstrap bool
 	if rctx.agent.IsBootstrap() {
 		rctx.agent.logger.Infof("%s starting agent refresh context bootstrap ref:%s", rctx.refCache.Name(), rctx.refCache.SmallString())
 		// if bootstrap fails it could mean one of the two things:
@@ -671,6 +672,7 @@ func (rctx *refreshContext) initialize() {
 			return
 		}
 
+		printNodeListPostBootstrap = true
 		rctx.agent.ClearBootstrap()
 		// We clear the active host names because an active host name could be one of the SRV nodes
 		// We have to retain the original hostname
@@ -696,6 +698,9 @@ func (rctx *refreshContext) initialize() {
 	} else if len(rctx.cachedRefNodesList) > 1 {
 		// Randomize the list of hosts to walk through
 		base.ShuffleStringPairList(rctx.cachedRefNodesList)
+	}
+	if printNodeListPostBootstrap {
+		rctx.agent.logger.Infof("%s refresh context bootstrap node list: %s", rctx.refCache.Name(), rctx.cachedRefNodesList)
 	}
 }
 
@@ -1218,7 +1223,7 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
 			return
 		}
 	}
-	rctx.agent.logger.Warnf("Error: Unable to replace bootstrap node in RemoteClusterReference. It may be invalid if XDCR restarts")
+	rctx.agent.logger.Warnf("Error: Unable to replace bootstrap node in RemoteClusterReference with any nodes of %v. It may be invalid if XDCR restarts", sortedList)
 }
 
 func (rctx *refreshContext) updateHeartbeatMap(nodeList []interface{}) {
