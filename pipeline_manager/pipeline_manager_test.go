@@ -94,6 +94,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 		return backfillMgrIface
 	}
 	backfillMgrIface.On("GetBackfillSpecUpdateStatus", mock.Anything).Return(base.BackfillSpecUpdateComplete, nil)
+	backfillMgrIface.On("DeleteBackfillSpec", mock.Anything).Return(nil)
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
 	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil, getBackfillMgr)

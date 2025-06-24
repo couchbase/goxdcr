@@ -111,6 +111,10 @@ type BackfillRequestHandler struct {
 
 	// debugging helpers
 	devVbDelayEnabled bool
+
+	// Updates handler-level cached values in response to parent spec changes.
+	// Persists the updated backfill spec to metakv.
+	backfillSpecOpsCh chan interface{}
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -119,6 +123,16 @@ type SeqnosGetter2 func(throughSeqnoErr error) (map[uint16]uint64, error)
 type MyVBsGetter func() ([]uint16, error)
 
 type MyVBsTasksDoneNotifier func(startNewTask bool)
+
+type parentSpecUpdateRequest struct {
+	spec  *metadata.ReplicationSpecification
+	errCh chan error
+}
+
+type backfillSpecDeleteRequest struct {
+	specId string
+	errCh  chan error
+}
 
 type ReqAndResp struct {
 	Request         interface{}
@@ -156,6 +170,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		getLatestSrcManifestId:       getLatestSrcManifestId,
 		getSpecUpdateStatus:          getSpecUpdateStatus,
 		setSpecUpdateStatus:          setSpecUpdateStatus,
+		backfillSpecOpsCh:            make(chan interface{}, 1),
 	}
 }
 
@@ -385,6 +400,33 @@ func (b *BackfillRequestHandler) run() {
 			timeUpdated := b.latestCachedSourceNotification.GetLocalTopologyUpdatedTime()
 			b.latestCachedSourceNotificationMtx.Unlock()
 			atomic.StoreInt64(&b.latestVbsUpdatedTime, timeUpdated.UnixNano())
+		case r := <-b.backfillSpecOpsCh:
+			switch req := r.(type) {
+			case *parentSpecUpdateRequest:
+				persistanceRequested := b.updateParentSpec(req)
+				if persistanceRequested {
+					// request persistance
+					requestPersistFunc()
+				}
+			case *backfillSpecDeleteRequest:
+				// check if the backfill spec exists currently
+				if b.cachedBackfillSpec != nil {
+					// note that the requestPersistance call below is synchronous since its a delete op
+					err := b.requestPersistence(DelOp, req.errCh)
+					// since delOps are synchronous and any previous add or sets are invalidated,
+					// revoke the batchPersistance
+					cancelPersistFunc()
+					if err == nil {
+						// clear the cache only if the deletion was successful
+						b.cachedBackfillSpec = nil
+					}
+				} else {
+					req.errCh <- nil
+				}
+			default:
+				b.logger.Errorf("backfill request handler for %v received unknown type %T over backfillSpecOpsCh", b.Id(), r)
+			}
+
 		}
 	}
 }
@@ -1436,6 +1478,74 @@ func (b *BackfillRequestHandler) registerNonOwnedVBsForGC(req internalPeerBackfi
 		if _, found := base.SearchVBInSortedList(vbToCheck, sortedVBs); !found {
 			// VB is not owned by this node and needs to be GCed
 			b.registerVbForGC(vbToCheck)
+		}
+	}
+}
+
+// sendUpdateParentSpecRequest sends a request to update the parent replication spec,
+// and waits synchronously for the operation to complete. It returns any error encountered.
+func (b *BackfillRequestHandler) sendUpdateParentSpecRequest(spec *metadata.ReplicationSpecification) error {
+	errch := make(chan error, 1)
+	req := &parentSpecUpdateRequest{
+		spec:  spec,
+		errCh: errch,
+	}
+	select {
+	case <-b.finCh:
+		return errorStopped
+	case b.backfillSpecOpsCh <- req:
+		select {
+		case <-b.finCh:
+			return errorStopped
+		case err := <-errch:
+			return err
+		}
+	}
+}
+
+func (b *BackfillRequestHandler) updateParentSpec(req *parentSpecUpdateRequest) bool {
+	// update the parent spec cached at the handler level
+	b.spec = req.spec.Clone()
+	var err error
+	var persistanceRequested bool = false
+	if b.cachedBackfillSpec != nil {
+		// If a backfill spec currently exists, update its parent spec as well
+		// Perform a quick cache read to verify the existence of the backfill spec.
+		// This is a defensive check.
+		_, err = b.backfillReplSvc.BackfillReplSpec(req.spec.GetFullId())
+		if err == nil {
+			b.cachedBackfillSpec.SetReplicationSpec(req.spec.Clone())
+			// write to metakv and update the backfill replication service cache
+			b.requestPersistence(SetOp, req.errCh)
+			persistanceRequested = true
+			return persistanceRequested
+		} else {
+			// should never happen
+			if err == base.ReplNotFoundErr {
+				// when backfill spec is not present, no meta kv persistance needed.
+				err = nil
+			}
+		}
+	}
+	req.errCh <- err
+	return persistanceRequested
+}
+
+func (b *BackfillRequestHandler) deleteBackfillSpec(specId string) error {
+	errch := make(chan error, 1)
+	req := &backfillSpecDeleteRequest{
+		specId: specId,
+		errCh:  errch,
+	}
+	select {
+	case <-b.finCh:
+		return errorStopped
+	case b.backfillSpecOpsCh <- req:
+		select {
+		case <-b.finCh:
+			return errorStopped
+		case err := <-errch:
+			return err
 		}
 	}
 }

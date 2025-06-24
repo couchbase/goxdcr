@@ -33,6 +33,9 @@ type BackfillMgrIface interface {
 	//To get/set backfillSpec update status
 	GetBackfillSpecUpdateStatus(specId string) (base.BackfillSpecUpdateStatus, error)
 	SetBackfillSpecUpdateStatus(specId string, status base.BackfillSpecUpdateStatus)
+
+	// deletes the backfill spec
+	DeleteBackfillSpec(specId string) error
 }
 
 type BackfillMgrComponentListenerGetter interface {
