@@ -755,7 +755,7 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 
 	// When pipeline is "cleaned up", we don't need anymore backfill specs
 	retryOp = func() error {
-		_, err := pipelineMgr.backfillReplSvc.DelBackfillReplSpec(replId)
+		err := pipelineMgr.getBackfillMgr().DeleteBackfillSpec(replId)
 		return err
 	}
 	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelBackfillReplSpec %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)

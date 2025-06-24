@@ -26,6 +26,52 @@ func (_m *BackfillMgrIface) EXPECT() *BackfillMgrIface_Expecter {
 	return &BackfillMgrIface_Expecter{mock: &_m.Mock}
 }
 
+// DeleteBackfillSpec provides a mock function with given fields: specId
+func (_m *BackfillMgrIface) DeleteBackfillSpec(specId string) error {
+	ret := _m.Called(specId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteBackfillSpec")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(specId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// BackfillMgrIface_DeleteBackfillSpec_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteBackfillSpec'
+type BackfillMgrIface_DeleteBackfillSpec_Call struct {
+	*mock.Call
+}
+
+// DeleteBackfillSpec is a helper method to define mock.On call
+//   - specId string
+func (_e *BackfillMgrIface_Expecter) DeleteBackfillSpec(specId interface{}) *BackfillMgrIface_DeleteBackfillSpec_Call {
+	return &BackfillMgrIface_DeleteBackfillSpec_Call{Call: _e.mock.On("DeleteBackfillSpec", specId)}
+}
+
+func (_c *BackfillMgrIface_DeleteBackfillSpec_Call) Run(run func(specId string)) *BackfillMgrIface_DeleteBackfillSpec_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *BackfillMgrIface_DeleteBackfillSpec_Call) Return(_a0 error) *BackfillMgrIface_DeleteBackfillSpec_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *BackfillMgrIface_DeleteBackfillSpec_Call) RunAndReturn(run func(string) error) *BackfillMgrIface_DeleteBackfillSpec_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetBackfillSpecUpdateStatus provides a mock function with given fields: specId
 func (_m *BackfillMgrIface) GetBackfillSpecUpdateStatus(specId string) (base.BackfillSpecUpdateStatus, error) {
 	ret := _m.Called(specId)

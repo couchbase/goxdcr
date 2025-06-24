@@ -2474,3 +2474,14 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 	}
 	return nil
 }
+
+func (b *BackfillMgr) DeleteBackfillSpec(specId string) error {
+	b.specReqHandlersMtx.RLock()
+	handler, exists := b.specToReqHandlerMap[specId]
+	b.specReqHandlersMtx.RUnlock()
+	var err error
+	if exists {
+		err = handler.deleteBackfillSpec(specId)
+	}
+	return err
+}
