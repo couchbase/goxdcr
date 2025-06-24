@@ -24,14 +24,14 @@ VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.6" ["C1P"]="192.168.56.7" ["C2"]="19
 VAGRANT_LB_IP="192.168.56.10"
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+cluster1BucketsArr=("B0" "B1" "B2")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 unset CLUSTER_SETUP_DONE_MAP
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A BucketProperty=(["ramQuotaMB"]=1000)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1000 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
@@ -49,64 +49,82 @@ function runDataLoad {
 
 function runFullSecureAlternateClientCertAndNLB {
 	local versionToLoad="$1"
+	local setupNeeded=$2
+	local teardownNeeded=$3
 
 	echo "============================================================================"
 	echo "Running Full secure with client cert replication with NLB with version $versionToLoad"
 	echo "============================================================================"
 
-	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "$versionToLoad"
+	if [[ $setupNeeded -eq 1 ]]; then
+		vagrantRemoveCbServerAll
+		vagrantInstallCBServerAll "$versionToLoad"
 
-	# Node 5 (idx 4) is to be haproxy
-	vagrantRemoveCbServer 4
-	vagrantRemoveHaproxy 4
-	vagrantInstallHaproxy 4
+		# Node 5 (idx 4) is to be haproxy
+		vagrantRemoveCbServer 4
+		vagrantRemoveHaproxy 4
+		vagrantInstallHaproxy 4
 
-	local tempCfgFile=$(mktemp)
-	vagrantCompileHaproxyCfg $tempCfgFile
-	vscp 4 "$tempCfgFile" "/tmp/haproxyCfg"
-	${VSSH[4]} "cat /tmp/haproxyCfg | sudo tee -a /etc/haproxy/haproxy.cfg > /dev/null"
-	vagrantRestartHaproxy 4
+		local tempCfgFile=$(mktemp)
+		vagrantCompileHaproxyCfg $tempCfgFile
+		vscp 4 "$tempCfgFile" "/tmp/haproxyCfg"
+		${VSSH[4]} "cat /tmp/haproxyCfg | sudo tee -a /etc/haproxy/haproxy.cfg > /dev/null"
+		vagrantRestartHaproxy 4
 
-	setupTopologies
+		setupTopologies
 
-	addNodesIn
-	sleep 5
-	startRebalancing "C1"
-	startRebalancing "C2"
+		addNodesIn
+		sleep 5
+		startRebalancing "C1"
+		startRebalancing "C2"
 
-	sleep 5
-	setupCertsForTesting
-	vagrantLoadCerts
-	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-		setEnableClientCert "$clusterName"
-	done
+		sleep 5
+		setupCertsForTesting
+		vagrantLoadCerts
+		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+			setEnableClientCert "$clusterName"
+		done
+	else
+		echo "Set up already done, doing rolling upgrade"
+		vagrantInstallCBServerAll "$versionToLoad"
+		setupBuckets
+	fi
 
+	echo "Running core part of testing"
 	sleep 5
 	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
 	createSecureRemoteClusterReference "C2" "C1" "${CLUSTER_ROOT_CERTIFICATE_MAP["C1"]}"
-	sleep 1
+
+	# Sleep 30 seconds to let refresh take place to ensure it didn't screw up port maps
+	echo "Sleeping for a bit to let remote cluster agent refresh take place"
+	sleep 30
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 	runDataLoad
-	sleep 20
+	sleep 60
+
+	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	vagrantValidatePrometheusPipelineStatusIs1 "C2" "B2" "B1" "Main" "Running"
 
 	checkUnidirectionalChangesLeft
 
 	echo "============================================================================"
-	echo "PASSED"
+	echo "$versionToLoad PASSED"
 	echo "============================================================================"
-
 	cleanupBucketReplications
+	cleanupRemoteClusterRefs
 	cleanupBuckets
-	vagrantRemoveHaproxy 4
-	unset VAGRANT_LB_IP
+
+	if [[ $teardownNeeded -eq 1 ]]; then
+		vagrantRemoveHaproxy 4
+		unset VAGRANT_LB_IP
+	fi
 }
 
 function runTestCase {
-	runFullSecureAlternateClientCertAndNLB "neo" &&
-		runFullSecureAlternateClientCertAndNLB "trinity" &&
-		runFullSecureAlternateClientCertAndNLB "morpheus"
+	runFullSecureAlternateClientCertAndNLB "neo" 1 0 &&
+		runFullSecureAlternateClientCertAndNLB "trinity" 0 0 &&
+		runFullSecureAlternateClientCertAndNLB "morpheus" 0 1
 }

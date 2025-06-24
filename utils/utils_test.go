@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"io/ioutil"
 	"math/rand"
 	"strings"
@@ -128,6 +129,15 @@ func getBucketInfoWithManifestHexId() map[string]interface{} {
 
 func getKvSSLFromBPath() map[string]interface{} {
 	fileName := fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_ssl.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getNlbDefaultPool() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_nlb.json")
 	retMap, _, err := readJsonHelper(fileName)
 	if err != nil {
 		panic(err)
@@ -1004,9 +1014,24 @@ func TestGetHostAddrFromNodeInfo(t *testing.T) {
 	// We should return error
 	assert.NotNil(err)
 
+	// Test 5: NLB
+	nlbRef, err := metadata.NewRemoteClusterReference("testuuid", "C2", "192.168.56.10:15022", "test",
+		"test", metadata.HostnameMode_None, true, base.SecureTypeFull, nil, nil, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(nlbRef)
+	defaultPoolsInfo := getNlbDefaultPool()
+	nodeList, err := testUtils.GetNodeListFromInfoMap(defaultPoolsInfo, logger)
+	assert.Nil(err)
+	nodeAddressesList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, nlbRef.HostName(), true, logger, true)
+	for _, addressPair := range nodeAddressesList {
+		assert.False(strings.Contains(addressPair.GetFirstString(), "18091"))
+		assert.False(strings.Contains(addressPair.GetSecondString(), "18091"))
+	}
 }
 
 func TestTargetHasSharedExternalHostname(t *testing.T) {
+	fmt.Println("============== Test case start: TestTargetHasSharedExternalHostname =================")
+	defer fmt.Println("============== Test case end: TestTargetHasSharedExternalHostname =================")
 	assert := assert.New(t)
 
 	// Case 1 : with alternate address setup + privateLinks

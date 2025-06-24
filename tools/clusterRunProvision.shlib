@@ -1858,60 +1858,25 @@ function runCbWorkloadGenCollectionCont {
 }
 
 function waitForBgJobs {
-	waitForBgJobInternal 0 "greater"
-}
-
-# Input:
-# 1. totalBgJobs
-# 2. "equal" or "greater" for check condition
-function waitForBgJobInternal {
-	local totalBgJobs=$1
-	local operation=$2
-	local periodicPrinter=0
-	local conditionHit=0
-
 	echo "Waiting for background jobs to start..."
 	sleep 5
 
 	echo "Waiting for background jobs to finish..."
 	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
-
-	while (($conditionHit == 0)); do
-
-		if [[ "$operation" == "equal" ]]; then
-			if [[ "$jobsCnt" -eq "$totalBgJobs" ]]; then
-				conditionHit=1
-			fi
-		elif [[ "$operation" == "greater" ]]; then
-			if [[ "$jobsCnt" -gt "$totalBgJobs" ]]; then
-				conditionHit=1
-			fi
-		else
-			echo "Invalid operation: $operation"
-			exit 1
-		fi
-
+	while (($jobsCnt > 0)); do
 		sleep 1
 		jobsCnt=$(jobs -l | grep -c "Running")
-		periodicPrinter=$(($periodicPrinter + 1))
-		if (($periodicPrinter % 10 == 0)); then
-			echo "$jobsCnt background jobs are still running..."
-		fi
-		if ((periodicPrinter % 60 == 0)); then
-			echo "Jobs output: $(jobs -l)"
-		fi
 	done
-}
-
-function waitWhenAnyBgJobStops {
-	local totalBgJobs=$1
-	waitForBgJobInternal "$totalBgJobs" "equal"
 }
 
 function stopWhenAnyBgJobStops {
 	local totalBgJobs=$1
-	waitWhenAnyBgJobStops $totalBgJobs
+	local jobsCnt=$(jobs -l | grep -c "Running")
+	while (($jobsCnt == $totalBgJobs)); do
+		jobsCnt=$(jobs -l | grep -c "Running")
+		sleep 3
+	done
 	exit 0
 }
 

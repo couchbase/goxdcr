@@ -896,3 +896,21 @@ function vagrantSetBucket {
 	cmd="${VSSH[$idx]} \"curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/pools/default/buckets/$bucketName -d $setting=$value\""
 	eval $cmd
 }
+
+function vagrantValidatePrometheusPipelineStatusIs1 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local statusType=$5
+	local idx="$(getClusterIdx "$node")"
+	local output
+	local prometheusOut
+	local tmpFile="/tmp/vagrantPrometheusOut"
+
+	local idx="$(getClusterIdx "$node")"
+
+	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
+	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
+	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
+}

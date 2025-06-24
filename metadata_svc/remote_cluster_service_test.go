@@ -181,6 +181,7 @@ type clusterVersion int
 const (
 	clusterMadHatter   clusterVersion = iota
 	clusterCheshireCat clusterVersion = iota
+	clusterNlbMorpheus clusterVersion = iota
 )
 
 func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetworkDelay time.Duration, getNodeListWithMinInfoErr error, extHost string, extPort int, extErr error, getExternalData bool, getExternalPort bool, accurateData bool, version clusterVersion, nonAccurateNodeAddressesList base.StringPairList) {
@@ -224,6 +225,9 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	case clusterCheshireCat:
 		clusterInfo, _ = getPoolsDefault70()
 		poolsInfo, _ = getPools70()
+	case clusterNlbMorpheus:
+		clusterInfo, _ = getNlbPools()
+		poolsInfo, _ = getPoolsNlb80()
 	default:
 		panic("Not implemented")
 	}
@@ -1480,6 +1484,18 @@ func getPoolsPre70() (map[string]interface{}, error) {
 
 func getPools70() (map[string]interface{}, error) {
 	fileName := fmt.Sprintf("%v%v", testIntDataDir, "pools_7.0.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
+func getNlbPools() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExtDataDir, "pools_default_nlb.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
+func getPoolsNlb80() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExtDataDir, "pools_nlb_8_0.json")
 	retMap, _, err := readJsonHelper(fileName)
 	return retMap, err
 }
@@ -2976,5 +2992,61 @@ func TestConnectivityHelper_SyncWithValidList(t *testing.T) {
 			}
 
 		})
+	}
+}
+
+func TestNLBPoolsDefaultSSLMgmt(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestNLBPoolsDefaultSSLMgmt =================")
+	defer fmt.Println("============== Test case end: TestNLBPoolsDefaultSSLMgmt =================")
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	utilsMockFunc := func() {
+		//setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false,
+		//	false, clusterNlbMorpheus, nil)
+
+		clusterInfo, _ := getNlbPools()
+		poolsInfo, _ := getPoolsNlb80()
+		oneDelay := 100 * time.Millisecond
+		utilitiesMock.On("GetClusterInfo", mock.Anything, base.DefaultPoolPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(clusterInfo, nil)
+		utilitiesMock.On("GetClusterInfo", mock.Anything, base.PoolsPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(poolsInfo, nil)
+		utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
+		nodeList, _ := testUtils.GetNodeListFromInfoMap(clusterInfo, nil)
+		utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nodeList, nil)
+		remoteNodeAddressList, err := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, "", true, nil, true)
+		utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, true, mock.Anything, mock.Anything).Return(remoteNodeAddressList, err)
+	}
+
+	idAndName := "test"
+	ref, _ := metadata.NewRemoteClusterReference(uuidField, idAndName, "192.168.56.10:15022", "", "", metadata.HostnameMode_External, true, metadata.EncryptionType_Full, nil, nil, nil, nil)
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+	agent.initDone = uint32(1)
+
+	clonedRef := ref.Clone()
+	agent.pendingRef = *clonedRef
+
+	time.Sleep(2 * time.Second)
+
+	rctx, _, err := agent.initializeNewRefreshContext()
+	assert.Nil(err)
+	assert.NotNil(rctx)
+
+	agent.syncInternalsFromStagedReference(rctx)
+
+	assert.NotNil(agent.pendingRefNodes)
+	for _, nodePair := range agent.pendingRefNodes {
+		assert.False(strings.Contains(nodePair.GetFirstString(), "18091"))
+		assert.False(strings.Contains(nodePair.GetSecondString(), "18091"))
 	}
 }
