@@ -423,6 +423,8 @@ func (b *BackfillRequestHandler) run() {
 						// clear the cache only if the deletion was successful
 						b.cachedBackfillSpec = nil
 					}
+				} else {
+					req.errCh <- nil
 				}
 			default:
 				b.logger.Errorf("backfill request handler for %v received unknown type %T over backfillSpecOpsCh", b.Id(), r)
