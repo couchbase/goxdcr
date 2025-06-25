@@ -300,7 +300,7 @@ func (t *ThroughputThrottler) consumeQuota(limit, quota *int64, n int64) (retry,
 	}
 
 	q := atomic.LoadInt64(quota)
-	if q-n <= 0 {
+	if q-n < 0 {
 		return
 	}
 
@@ -319,7 +319,7 @@ func (t *ThroughputThrottler) consumeQuota(limit, quota *int64, n int64) (retry,
 func (t *ThroughputThrottler) consumeReassignedTokens(n int64) (retry, result bool) {
 	// if there is no quota left, check if we can get allowance from reassigned high tokens
 	reassigned_high_tokens := atomic.LoadInt64(&t.reassigned_high_tokens)
-	if reassigned_high_tokens-n > 0 {
+	if reassigned_high_tokens-n >= 0 {
 		if atomic.CompareAndSwapInt64(&t.reassigned_high_tokens, reassigned_high_tokens, reassigned_high_tokens-n) {
 			result = true
 		} else {

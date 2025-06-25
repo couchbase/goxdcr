@@ -136,6 +136,28 @@ func Test_handleClogReq(t *testing.T) {
 			},
 			CanSendStatus: false,
 		},
+		{
+			Name:      "[positive] has exactly enough qouta",
+			ClogLimit: 30,
+			Existing: &quotaVals{
+				ClogQuota: 3,
+			},
+			Expected: &quotaVals{
+				ClogQuota: 0,
+			},
+			CanSendStatus: true,
+		},
+		{
+			Name:      "[positive] has no quota but exactly enough reassignable tokens",
+			ClogLimit: 10,
+			Existing: &quotaVals{
+				MaxReassignable: 3,
+			},
+			Expected: &quotaVals{
+				MaxReassignable: 0,
+			},
+			CanSendStatus: true,
+		},
 	}
 
 	for _, tt := range testData {
