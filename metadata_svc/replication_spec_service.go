@@ -906,12 +906,12 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 	if err == service.utils.GetNonExistentBucketError() {
 		service.logger.Errorf("Spec [sourceBucket=%v, targetCluster=%v, targetBucket=%v] refers to non-existent %v bucket\n", sourceBucket, targetCluster, targetBucket, qualifier)
 		errorMap[errKey] = service.utils.BucketNotFoundError(bucketName)
-	} else if bucketType != base.CouchbaseBucketType && bucketType != base.EphemeralBucketType {
-		errMsg := fmt.Sprintf("Incompatible %v bucket '%v'", qualifier, bucketName)
-		service.logger.Error(errMsg)
-		errorMap[errKey] = fmt.Errorf(errMsg)
 	} else if err != nil {
 		errMsg := fmt.Sprintf("Error validating %v bucket '%v'. err=%v", qualifier, bucketName, err)
+		service.logger.Error(errMsg)
+		errorMap[errKey] = fmt.Errorf(errMsg)
+	} else if bucketType != base.CouchbaseBucketType && bucketType != base.EphemeralBucketType {
+		errMsg := fmt.Sprintf("Incompatible %v bucket '%v' as it's bucketType is '%v'", qualifier, bucketName, bucketType)
 		service.logger.Error(errMsg)
 		errorMap[errKey] = fmt.Errorf(errMsg)
 	} else if bucketType == base.EphemeralBucketType && !isEnterprise {

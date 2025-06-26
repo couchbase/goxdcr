@@ -1498,9 +1498,15 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}
-	if statusCode == http.StatusNotFound {
+
+	switch statusCode {
+	case http.StatusNotFound:
 		return nil, u.GetNonExistentBucketError()
-	} else {
+	case http.StatusUnauthorized:
+		return nil, base.ErrorUnauthorized
+	case http.StatusForbidden:
+		return nil, base.ErrorForbidden
+	default:
 		logger.Errorf("Failed to get bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
 		return nil, fmt.Errorf("Failed to get bucket info.")
 	}

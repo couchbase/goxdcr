@@ -35,6 +35,7 @@ var (
 	ErrorNoPortNumber                            = errors.New("No port number")
 	ErrorInvalidPortNumber                       = errors.New("Port number is not a valid integer")
 	ErrorUnauthorized                            = errors.New("unauthorized")
+	ErrorForbidden                               = errors.New("forbidden")
 	ErrorCompressionNotSupported                 = errors.New("Specified compression type is not supported.")
 	ErrorCompressionUnableToConvert              = errors.New("Unable to translate user input to internal compression Type")
 	ErrorCompressionDcpInvalidHandshake          = errors.New("DCP connection is established as compressed even though compression is not requested.")
