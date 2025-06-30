@@ -2241,7 +2241,6 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 	return fmt.Errorf("error unmarshaling target vb opaque. data=%v", data)
 }
 
-// Darshan TODO - Make changes to accomodate global timestamp
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()

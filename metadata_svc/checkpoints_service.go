@@ -513,7 +513,7 @@ func (ckpt_svc *CheckpointsService) PreUpsertBrokenMapping(replicationId string,
 	if oneBrokenMapping == nil || len(*oneBrokenMapping) == 0 {
 		return nil
 	}
-	return ckpt_svc.brokenMapRefCountSvc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping)
+	return ckpt_svc.brokenMapRefCountSvc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping, true)
 }
 
 func (ckpt_svc *CheckpointsService) UpsertBrokenMapping(replicationId string, specInternalId string) error {
@@ -521,16 +521,26 @@ func (ckpt_svc *CheckpointsService) UpsertBrokenMapping(replicationId string, sp
 }
 
 func (ckpt_svc *CheckpointsService) UpsertGlobalInfo(replicationId string, specInternalId string) error {
-	return ckpt_svc.globalInfoRefCountSvc.UpsertGlobalInfo(replicationId, specInternalId)
+	return ckpt_svc.globalInfoRefCountSvc.UpsertGlobalInfo(replicationId, specInternalId, true)
 }
 
-func (ckpt_svc *CheckpointsService) PreUpsertGlobalInfo(replicationId string, specInternalId string, gts metadata.GlobalInfo) error {
-	err := ckpt_svc.globalInfoRefCountSvc.RegisterMapping(replicationId, specInternalId, gts)
-	if err == errUpsertAlreadyOccurring {
-		// It'll be re-upserted later
-		err = nil
+func (ckpt_svc *CheckpointsService) PreUpsertGlobalInfo(replicationId string, specInternalId string, globalts metadata.GlobalInfo, globalCounters metadata.GlobalInfo) base.ErrorMap {
+	errMap := make(base.ErrorMap)
+	// Register global timestamp mapping (no metaKV write)
+	if err := ckpt_svc.globalInfoRefCountSvc.RegisterMapping(replicationId, specInternalId, globalts, false); err != nil {
+		errMap["register_global_timestamp"] = err
 	}
-	return err
+	// Register global counters mapping (no metaKV write)
+	if err := ckpt_svc.globalInfoRefCountSvc.RegisterMapping(replicationId, specInternalId, globalCounters, false); err != nil {
+		errMap["register_global_counters"] = err
+	}
+	// Attempt to upsert mappings to metaKV
+	// Note: If an upsert is already in progress, this will return errUpsertAlreadyOccurring and the persistence will be retried later.
+	// Hence ok to ignore errUpsertAlreadyOccurring.
+	if err := ckpt_svc.globalInfoRefCountSvc.UpsertGlobalInfo(replicationId, specInternalId, false); err != nil && err != errUpsertAlreadyOccurring {
+		errMap["upsert_to_metakv"] = err
+	}
+	return errMap
 }
 
 func (ckpt_svc *CheckpointsService) LoadAllShaMappings(replicationId string) (*metadata.CollectionNsMappingsDoc, *metadata.GlobalInfoCompressedDoc, error) {

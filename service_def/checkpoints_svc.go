@@ -11,6 +11,7 @@ package service_def
 import (
 	"sync"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
@@ -23,7 +24,7 @@ type CheckpointsService interface {
 	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
-	PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo) error
+	PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo, globalCounters metadata.GlobalInfo) base.ErrorMap
 	UpsertBrokenMapping(replicationId string, specInternalId string) error
 	UpsertGlobalInfo(replicationId string, specInternalId string) error
 

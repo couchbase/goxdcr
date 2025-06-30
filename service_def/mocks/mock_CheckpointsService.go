@@ -3,7 +3,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/v8/base"
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
+
 	mock "github.com/stretchr/testify/mock"
 
 	service_def "github.com/couchbase/goxdcr/v8/service_def"
@@ -689,19 +691,21 @@ func (_c *CheckpointsService_PreUpsertBrokenMapping_Call) RunAndReturn(run func(
 	return _c
 }
 
-// PreUpsertGlobalInfo provides a mock function with given fields: replicationId, specInternalId, globalTs
-func (_m *CheckpointsService) PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo) error {
-	ret := _m.Called(replicationId, specInternalId, globalTs)
+// PreUpsertGlobalInfo provides a mock function with given fields: replicationId, specInternalId, globalTs, globalCounters
+func (_m *CheckpointsService) PreUpsertGlobalInfo(replicationId string, specInternalId string, globalTs metadata.GlobalInfo, globalCounters metadata.GlobalInfo) base.ErrorMap {
+	ret := _m.Called(replicationId, specInternalId, globalTs, globalCounters)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PreUpsertGlobalInfo")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, metadata.GlobalInfo) error); ok {
-		r0 = rf(replicationId, specInternalId, globalTs)
+	var r0 base.ErrorMap
+	if rf, ok := ret.Get(0).(func(string, string, metadata.GlobalInfo, metadata.GlobalInfo) base.ErrorMap); ok {
+		r0 = rf(replicationId, specInternalId, globalTs, globalCounters)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
 	}
 
 	return r0
@@ -716,23 +720,24 @@ type CheckpointsService_PreUpsertGlobalInfo_Call struct {
 //   - replicationId string
 //   - specInternalId string
 //   - globalTs metadata.GlobalInfo
-func (_e *CheckpointsService_Expecter) PreUpsertGlobalInfo(replicationId interface{}, specInternalId interface{}, globalTs interface{}) *CheckpointsService_PreUpsertGlobalInfo_Call {
-	return &CheckpointsService_PreUpsertGlobalInfo_Call{Call: _e.mock.On("PreUpsertGlobalInfo", replicationId, specInternalId, globalTs)}
+//   - globalCounters metadata.GlobalInfo
+func (_e *CheckpointsService_Expecter) PreUpsertGlobalInfo(replicationId interface{}, specInternalId interface{}, globalTs interface{}, globalCounters interface{}) *CheckpointsService_PreUpsertGlobalInfo_Call {
+	return &CheckpointsService_PreUpsertGlobalInfo_Call{Call: _e.mock.On("PreUpsertGlobalInfo", replicationId, specInternalId, globalTs, globalCounters)}
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Run(run func(replicationId string, specInternalId string, globalTs metadata.GlobalInfo)) *CheckpointsService_PreUpsertGlobalInfo_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Run(run func(replicationId string, specInternalId string, globalTs metadata.GlobalInfo, globalCounters metadata.GlobalInfo)) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(metadata.GlobalInfo))
+		run(args[0].(string), args[1].(string), args[2].(metadata.GlobalInfo), args[3].(metadata.GlobalInfo))
 	})
 	return _c
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Return(_a0 error) *CheckpointsService_PreUpsertGlobalInfo_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) Return(_a0 base.ErrorMap) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) RunAndReturn(run func(string, string, metadata.GlobalInfo) error) *CheckpointsService_PreUpsertGlobalInfo_Call {
+func (_c *CheckpointsService_PreUpsertGlobalInfo_Call) RunAndReturn(run func(string, string, metadata.GlobalInfo, metadata.GlobalInfo) base.ErrorMap) *CheckpointsService_PreUpsertGlobalInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

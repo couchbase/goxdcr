@@ -238,8 +238,8 @@ func (s *ShaRefCounterService) InitCounterShaToActualMappings(topic, internalSpe
 
 // Register a specific mapping - without actually adding a count
 // If the mapping is already registered, then no-op
-// If the mapping does not exist, then the mapping is saved and upserted to metakv
-func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, mapping interface{}) error {
+// If the mapping does not exist, then the mapping is saved and upserted to metakv if `upsert` flag is set to true
+func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, mapping interface{}, upsert bool) error {
 	if mapping == nil {
 		return base.ErrorInvalidInput
 	}
@@ -257,7 +257,7 @@ func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, map
 		return base.ErrorInvalidInput
 	}
 
-	return counter.RegisterMapping(internalSpecId, mapping)
+	return counter.RegisterMapping(internalSpecId, mapping, upsert)
 }
 
 func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error {
@@ -272,7 +272,7 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 	return counter.upsertMapping(specInternalId, true)
 }
 
-func (s *ShaRefCounterService) UpsertGlobalInfo(topic, specInternalId string) error {
+func (s *ShaRefCounterService) UpsertGlobalInfo(topic, specInternalId string, cleanup bool) error {
 	s.topicMapMtx.RLock()
 	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
@@ -281,7 +281,7 @@ func (s *ShaRefCounterService) UpsertGlobalInfo(topic, specInternalId string) er
 		return base.ErrorInvalidInput
 	}
 
-	return counter.upsertGInfo(specInternalId, true)
+	return counter.upsertGInfo(specInternalId, cleanup)
 }
 
 func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.UtilsIface) error {
@@ -575,31 +575,34 @@ func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string,
 }
 
 // Currently, starts count at 0
-func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mappingGeneric interface{}) error {
+// upsert: determines whether the data should be written to metaKV — written if true, skipped if false.
+// The caller is responsible for setting this flag appropriately.
+func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mappingGeneric interface{}, upsert bool) error {
 	if c.isClosed() {
 		return mapShaRefCounterStopped
 	}
 
-	colMapping, collectionOk := mappingGeneric.(*metadata.CollectionNamespaceMapping)
-	gInfo, gInfoOK := mappingGeneric.(metadata.GlobalInfo)
-	if !collectionOk && !gInfoOK {
-		return fmt.Errorf("invalid type %T", mappingGeneric)
-	}
+	switch mapping := mappingGeneric.(type) {
+	case *metadata.CollectionNamespaceMapping:
+		if err := c.registerCollectionMapping(mapping); err != nil {
+			return err
+		}
+		if upsert {
+			return c.upsertMapping(internalSpecId, false)
+		}
+		return nil
 
-	if collectionOk {
-		err := c.registerCollectionMapping(colMapping)
-		if err != nil {
+	case metadata.GlobalInfo:
+		if err := c.registerGInfoMapping(mapping); err != nil {
 			return err
 		}
-		return c.upsertMapping(internalSpecId, false)
-	} else if gInfoOK {
-		err := c.registerGInfoMapping(gInfo)
-		if err != nil {
-			return err
+		if upsert {
+			return c.upsertGInfo(internalSpecId, false)
 		}
-		return c.upsertGInfo(internalSpecId, false)
-	} else {
-		return fmt.Errorf("invalid type: %T", mappingGeneric)
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported mapping type: %T", mappingGeneric)
 	}
 }
 

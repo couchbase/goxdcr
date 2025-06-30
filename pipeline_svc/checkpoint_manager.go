@@ -2527,19 +2527,11 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	}
 
 	if ckmgr.isVariableVBMode() {
-		// Darshan TODO - currently this will result in 2 metaKV writes incase both the GlobalTimestamp and GlobalCounters are new
-		// Need to optmizise this so that a single metaKV write is performed
-		err = ckmgr.checkpoints_svc.PreUpsertGlobalInfo(ckmgr.pipeline.FullTopic(),
-			ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalTimestamp)
-		if err != nil {
-			ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global timestamp %v",
-				vbno, err)
-		}
-		err = ckmgr.checkpoints_svc.PreUpsertGlobalInfo(ckmgr.pipeline.FullTopic(),
-			ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalCounters)
-		if err != nil {
-			ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global counters %v",
-				vbno, err)
+		errMap := ckmgr.checkpoints_svc.PreUpsertGlobalInfo(ckmgr.pipeline.FullTopic(),
+			ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newCkpt.GlobalTimestamp, &newCkpt.GlobalCounters)
+		if len(errMap) > 0 {
+			ckmgr.logger.Warnf("checkpointing for vb=%v had issues registering global info %v",
+				vbno, errMap)
 		}
 	}
 
