@@ -283,7 +283,7 @@ func TestRouterSkipExpiration(t *testing.T) {
 	fmt.Println("============== Test case end: TestRouterSkipExpiration =================")
 }
 
-func TestRouterSkipDeletesStripTTL(t *testing.T) {
+func TestRouterSkipExpiryStripTTL(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterSkipExpiryStripTTL =================")
 	assert := assert.New(t)
 

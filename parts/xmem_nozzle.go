@@ -1437,7 +1437,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				// this still counts as data sent
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					Opcode:         item.GetMemcachedCommand(),
-					IsExpirySet:    (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					IsExpirySet:    len(item.Req.Extras) >= 28 && (binary.BigEndian.Uint32(item.Req.Extras[24:28])&base.IS_EXPIRATION != 0),
 					VBucket:        item.Req.VBucket,
 					ManifestId:     item.GetManifestId(),
 					Cloned:         item.Cloned,
@@ -3132,16 +3132,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				resp_wait_time = time.Since(*sent_time)
 				manifestId = wrappedReq.GetManifestId()
 
-				isExpirySet := false
+				isExpiration := false
 				if wrappedReq.IsSubdocOp() {
-					isExpirySet = (len(req.Extras) > 1)
+					isExpiration = (len(req.Extras) > 1)
 				} else {
-					isExpirySet = (len(req.Extras) >= 8 && binary.BigEndian.Uint32(req.Extras[4:8]) != 0)
+					isExpiration = len(req.Extras) >= 28 && (binary.BigEndian.Uint32(req.Extras[24:28])&base.IS_EXPIRATION != 0)
 				}
 				additionalInfo := DataSentEventAdditional{Seqno: seqno,
 					IsOptRepd:            xmem.optimisticRep(wrappedReq),
 					Opcode:               req.Opcode,
-					IsExpirySet:          isExpirySet,
+					IsExpiration:         isExpiration,
 					VBucket:              req.VBucket,
 					Req_size:             req.Size(),
 					Commit_time:          committing_time,

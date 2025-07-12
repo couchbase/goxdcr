@@ -1686,8 +1686,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		if event_otherInfo.FailedTargetCR {
 			metricMap[service_def.DOCS_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 		}
-		expiry_set := event_otherInfo.IsExpirySet
-		if expiry_set {
+
+		if event_otherInfo.IsExpiration {
 			metricMap[service_def.EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 			if event_otherInfo.FailedTargetCR {
 				metricMap[service_def.EXPIRY_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
@@ -2007,8 +2007,6 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 			metric_map[service_def.DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[service_def.SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
-		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
-			metric_map[service_def.EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.IsSystemEvent() {
 			// ignore system events
 		} else {
@@ -2378,10 +2376,6 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		metric_map[service_def.DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
-
-		if uprEvent.Expiry != 0 {
-			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
-		}
 
 		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
 		isTombstone := (uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION)

@@ -787,12 +787,12 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			// requests in req_list have strictly increasing seqnos
 			// each seqno is the new high seqno
 			additionalInfo := DataSentEventAdditional{Seqno: req.Seqno,
-				IsOptRepd:   capi.optimisticRep(req),
-				Commit_time: time.Since(req.Start_time),
-				Opcode:      req.Req.Opcode,
-				IsExpirySet: (len(req.Req.Extras) >= 8 && binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
-				VBucket:     req.Req.VBucket,
-				Req_size:    req.Req.Size(),
+				IsOptRepd:    capi.optimisticRep(req),
+				Commit_time:  time.Since(req.Start_time),
+				Opcode:       req.Req.Opcode,
+				IsExpiration: len(req.Req.Extras) >= 28 && (binary.BigEndian.Uint32(req.Req.Extras[24:28])&base.IS_EXPIRATION != 0),
+				VBucket:      req.Req.VBucket,
+				Req_size:     req.Req.Size(),
 			}
 			capi.RaiseEvent(common.NewEvent(common.DataSent, nil, capi, nil, additionalInfo))
 

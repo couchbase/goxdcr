@@ -151,7 +151,7 @@ type DataSentEventAdditional struct {
 	Commit_time          time.Duration
 	Resp_wait_time       time.Duration
 	Opcode               mc.CommandCode
-	IsExpirySet          bool
+	IsExpiration         bool
 	VBucket              uint16
 	Req_size             int
 	ManifestId           uint64
