@@ -799,7 +799,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 				IsOptRepd:     capi.optimisticRep(req),
 				Commit_time:   time.Since(req.Start_time),
 				Opcode:        req.Req.Opcode,
-				IsExpirySet:   (len(req.Req.Extras) >= 8 && binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
+				IsExpiration:  len(req.Req.Extras) >= 28 && (binary.BigEndian.Uint32(req.Req.Extras[24:28])&base.IS_EXPIRATION != 0),
 				Req_size:      req.Req.Size(),
 			}
 			capi.RaiseEvent(common.NewEvent(common.DataSent, nil, capi, nil, additionalInfo))
