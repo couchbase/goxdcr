@@ -541,7 +541,7 @@
     },
     "xdcr_expiry_target_docs_skipped_total": {
         "type": "counter",
-        "help": "Subset of the number of Document Mutations that originated from the Target that specifically had Expiry flag set",
+        "help": "Subset of the number of mutations (with Expiry flag set) and deletions/expirations that originated from the Target",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",

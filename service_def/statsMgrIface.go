@@ -910,7 +910,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Subset of the number of Document Mutations that originated from the Target that specifically had Expiry flag set",
+		Description:  "Subset of the number of mutations (with Expiry flag set) and deletions/expirations that originated from the Target",
 		Stability:    Internal,
 		Labels:       StandardLabels,
 	},
