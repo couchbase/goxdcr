@@ -116,6 +116,9 @@ function runTestCase {
 		exit $?
 	fi
 
+	# Given this test will need to create a non-KV node, hard reset all
+	hardResetNodes
+
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
 	if (($? != 0)); then
@@ -168,6 +171,5 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
-	restoreClusterBack "C1"
-	restoreClusterBack "C2"
+	hardResetNodes
 }

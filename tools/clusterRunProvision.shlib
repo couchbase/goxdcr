@@ -476,6 +476,35 @@ function getClusterIdx {
 	echo "$nodeDirIdx"
 }
 
+function hardResetNodes {
+	local initPort
+	local port
+	local hostIP
+	local clusterName
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+
+		port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
+			initPort="$port"
+		else
+			initPort=8091
+		fi
+
+		hostIP="127.0.0.1"
+		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+			hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+		fi
+
+		echo "RESETTING cluster name $clusterName on port $initPort with hostIP $hostIP"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode >/dev/null 2>&1
+	done
+
+	CLUSTER_SETUP_DONE_MAP=()
+	declare -gA CLUSTER_SETUP_DONE_MAP
+}
+
 function setupCluster {
 	local initPort
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
