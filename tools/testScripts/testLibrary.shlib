@@ -2171,7 +2171,7 @@ function setCrossClusterVersioningForBucket {
 	fi
 
 	echo $output
-	while [[ ! -z "${output:-}" ]] && [[ ! "$output" == *"Cross Cluster Versioning is already enabled"* ]]; do
+	while [[ ! -z "${output:-}" ]] && [[ ! "$output" =~ [Cc]ross\ [Cc]luster\ [Vv]ersioning\ [Ii]s\ [Aa]lready\ [Ee]nabled ]]; do
 		echo "retrying..."
 		sleep 2
 		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
