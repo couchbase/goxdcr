@@ -1833,7 +1833,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 	}
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
+func (xmem *XmemNozzle) ComposeRequestForGetMeta(wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 	req.Body = req.Body[:0]
@@ -1856,7 +1856,7 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCReque
 }
 
 // GetEx is like Get, but returns the document body with the entire xattr section prefixed.
-func (xmem *XmemNozzle) composeRequestForGetEx(wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
+func (xmem *XmemNozzle) ComposeRequestForGetEx(wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 	req.Body = req.Body[:0]
@@ -1915,7 +1915,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			getWrappedReq, getSpec := xmem.composeRequestForGet(originalReq, opaque, getEx)
+			getWrappedReq, getSpec := xmem.ComposeRequestForGet(originalReq, opaque, getEx)
 			getWrappedReqToRecycle = append(getWrappedReqToRecycle, getWrappedReq)
 			req := getWrappedReq.Req
 			if getSpec != nil {
@@ -2589,24 +2589,24 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 }
 
 // if getEx is true, it takes priority and the routine composes a getEx request.
-func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32, getEx bool) (*base.WrappedMCRequest, []base.SubdocLookupPathSpec) {
+func (xmem *XmemNozzle) ComposeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32, getEx bool) (*base.WrappedMCRequest, []base.SubdocLookupPathSpec) {
 	if getEx {
-		return xmem.composeRequestForGetEx(wrappedReq, opaque), nil
+		return xmem.ComposeRequestForGetEx(wrappedReq, opaque), nil
 	}
 
 	opcode, specs := xmem.opcodeAndSpecsForGetOp(wrappedReq)
 	switch opcode {
 	case base.GET_WITH_META:
-		return xmem.composeRequestForGetMeta(wrappedReq, opaque), nil
+		return xmem.ComposeRequestForGetMeta(wrappedReq, opaque), nil
 	case mc.SUBDOC_MULTI_LOOKUP:
-		return xmem.composeRequestForSubdocGet(specs, wrappedReq, opaque, 0), specs
+		return xmem.ComposeRequestForSubdocGet(specs, wrappedReq, opaque, 0), specs
 	default:
 		panic(fmt.Sprintf("Unknown opcode %v. Need to implement", opcode))
 	}
 }
 
 // Request to get _xdcr or _vv XATTR. If document body is included, it must be the last path
-func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSpecs, wrappedReq *base.WrappedMCRequest, opaque uint32, cas uint64) *base.WrappedMCRequest {
+func (xmem *XmemNozzle) ComposeRequestForSubdocGet(specs base.SubdocLookupPathSpecs, wrappedReq *base.WrappedMCRequest, opaque uint32, cas uint64) *base.WrappedMCRequest {
 	newReq := xmem.mcRequestPool.Get()
 	req := newReq.Req
 
@@ -5098,4 +5098,12 @@ func (xmem *XmemNozzle) PrintResponseStatusError(status mc.Status) string {
 
 	return fmt.Sprintf("response errCode: %v errName: %v errDesc: %v ", statusCodeStr,
 		errDetail[errorMapNameKey], errDetail[errorMapDescKey])
+}
+
+func (xmem *XmemNozzle) ForceXattrOn() {
+	xmem.xattrEnabled = true
+}
+
+func (xmem *XmemNozzle) ForceInitDataPool() {
+	xmem.dataPool = base.NewDataPool()
 }
