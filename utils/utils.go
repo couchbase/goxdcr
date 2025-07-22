@@ -1805,7 +1805,7 @@ func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{
 		if needHttps {
 			hostHttpsAddr, err = u.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true /*isHttps*/, logger, useExternal)
 			if err != nil {
-				errMsg := fmt.Sprintf("cannot get https hostname from node info %v", nodeInfoMap)
+				errMsg := fmt.Sprintf("cannot get https hostname from node info err: %v nodeInfoMap: %v", err, nodeInfoMap)
 				logger.Error(errMsg)
 				return nil, errors.New(errMsg)
 			}
