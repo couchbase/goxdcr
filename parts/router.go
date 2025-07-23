@@ -2315,19 +2315,15 @@ func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
 		return true
 	}
 
-	if expDelMode&base.FilterExpDelSkipDeletes > 0 {
-		if uprEvent.Opcode == mc.UPR_DELETION {
-			return false
-		}
+	if expDelMode&base.FilterExpDelSkipDeletes > 0 && uprEvent.Opcode == mc.UPR_DELETION {
+		return false
 	}
 
-	if expDelMode&base.FilterExpDelSkipExpiration > 0 {
-		if uprEvent.Opcode == mc.UPR_EXPIRATION {
-			return false
-		}
+	if expDelMode&base.FilterExpDelSkipExpiration > 0 && uprEvent.Opcode == mc.UPR_EXPIRATION {
+		return false
 	}
 
-	if expDelMode&base.FilterExpDelStripExpiration > 0 {
+	if expDelMode&base.FilterExpDelStripExpiration > 0 && uprEvent.Opcode == mc.UPR_MUTATION {
 		uprEvent.Expiry = uint32(0)
 		router.RaiseEvent(common.NewEvent(common.ExpiryFieldStripped, uprEvent, router, nil, nil))
 	}
