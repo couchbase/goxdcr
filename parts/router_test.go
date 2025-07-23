@@ -283,13 +283,13 @@ func TestRouterSkipExpiration(t *testing.T) {
 	fmt.Println("============== Test case end: TestRouterSkipExpiration =================")
 }
 
-func TestRouterSkipExpiryStripTTL(t *testing.T) {
-	fmt.Println("============== Test case start: TestRouterSkipExpiryStripTTL =================")
+func TestRouterSkipExpiry(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipExpiry =================")
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 
-	expDelMode = base.FilterExpDelSkipExpiration | base.FilterExpDelStripExpiration
+	expDelMode = base.FilterExpDelSkipExpiration
 
 	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil, nil, nil)
 
@@ -298,24 +298,71 @@ func TestRouterSkipExpiryStripTTL(t *testing.T) {
 
 	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
 
-	// delEvent contains expiry
+	mutEvent, err := RetrieveUprFile("./testdata/noXattrs.json")
+	assert.Nil(err)
+	assert.NotNil(mutEvent)
+	shouldContinue := router.ProcessExpDelTTL(mutEvent)
+	assert.True(shouldContinue)
+
 	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
 	assert.Nil(err)
 	assert.NotNil(delEvent)
+	shouldContinue = router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
 
 	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
 	assert.Nil(err)
 	assert.NotNil(expEvent)
-
-	assert.NotEqual(0, int(delEvent.Expiry))
-	shouldContinue := router.ProcessExpDelTTL(delEvent)
-	assert.True(shouldContinue)
-	assert.Equal(0, int(delEvent.Expiry))
-
 	shouldContinue = router.ProcessExpDelTTL(expEvent)
 	assert.False(shouldContinue)
 
-	fmt.Println("============== Test case end: TestRouterSkipExpiryStripTTL =================")
+	fmt.Println("============== Test case end: TestRouterSkipExpiry =================")
+}
+
+func TestRouterStripTTL(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterStripTTL =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
+
+	expDelMode = base.FilterExpDelStripExpiration
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil, nil, nil)
+
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	assert.NotEqual(base.FilterExpDelNone, router.expDelMode.Get())
+
+	mutEvent, err := RetrieveUprFile("./testdata/noXattrs.json")
+	assert.Nil(err)
+	assert.NotNil(mutEvent)
+	assert.NotEqual(0, int(mutEvent.Expiry))
+	shouldContinue := router.ProcessExpDelTTL(mutEvent)
+	assert.True(shouldContinue)
+	assert.Equal(0, int(mutEvent.Expiry))
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+	assert.NotEqual(0, int(delEvent.Expiry))
+	expiryBefore := int(delEvent.Expiry)
+	shouldContinue = router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+	assert.NotEqual(0, int(delEvent.Expiry))
+	assert.Equal(expiryBefore, int(delEvent.Expiry))
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+	assert.NotEqual(0, int(expEvent.Expiry))
+	expiryBefore = int(expEvent.Expiry)
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.True(shouldContinue)
+	assert.NotEqual(0, int(expEvent.Expiry))
+	assert.Equal(expiryBefore, int(expEvent.Expiry))
+
+	fmt.Println("============== Test case end: TestRouterStripTTL =================")
 }
 
 func TestRouterExpDelAllMode(t *testing.T) {
