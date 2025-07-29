@@ -2953,7 +2953,7 @@ function getPrometheusStats {
 	local output
 	local idx
 
-	if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$node]:-}" ]]; then
+	if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
 		# not vagrant
 		output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/_prometheusMetrics | grep -v \#)
 	else

@@ -1,0 +1,98 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=5000)
+declare -A Bucket1Properties=(["ramQuotaMB"]=5000 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S2.col2":"S3.col2"}')
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	runCbWorkloadGenCollection "C1" "B1" "S2" "col2"
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function runTestCase {
+	OLD_ITEM_COUNT=$CBWORKLOAD_COLLECTION_NUM_ITEMS
+	OLD_CHANGES_LEFT_WAIT=$$CHANGES_LEFT_0_WAIT_SECS
+	OLD_CHECK_CHANGES_LEFT_MAX=$CHECK_CHANGES_LEFT_MAX
+
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=10000000
+	CHANGES_LEFT_0_WAIT_SECS=5
+	CHECK_CHANGES_LEFT_MAX=300
+
+	echo "============================================================================"
+	echo "Running basic explicit mapping test case - new explicit map replication"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	runDataLoad
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+
+	runPeriodicPprof "C1" 5 10 "profile" "$(PWD)/testPprofOut/perf_1/" &
+
+	startTime=$(date +%s)
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	endTime=$(date +%s)
+	elapsedTime=$((endTime - startTime))
+	echo "Time taken for replication: $elapsedTime seconds. Throughput: $((CBWORKLOAD_COLLECTION_NUM_ITEMS / elapsedTime)) items/sec"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	killAllBgJobs
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$OLD_ITEM_COUNT
+	CHANGES_LEFT_0_WAIT_SECS=$OLD_CHANGES_LEFT_WAIT
+	CHECK_CHANGES_LEFT_MAX=$OLD_CHECK_CHANGES_LEFT_MAX
+}

@@ -42,6 +42,7 @@ CKPTSEQNO_BACKARD="Checkpoint seqno went backward"
 CKPT_GET_ERR="Error getting ckpt docs for"
 BACKFILL_DEL_OP="metakv operation on backfill spec op=2"
 BACKFILL_CLEANED="BackfillPipelineClean"
+CHANGES_LEFT_0_WAIT_SECS=10
 
 # These should be imported after clusterRunProvision script
 
@@ -334,7 +335,7 @@ function waitForChangesLeft0 {
 	local changesLeft
 	local i
 
-	for ((i = 0; $i < 5; i = $(($i + 1)))); do
+	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($? != 0)); then
 			echo "Failed to get changes_left"
@@ -343,11 +344,11 @@ function waitForChangesLeft0 {
 		fi
 		if [[ -z "${changesLeft:-}" ]]; then
 			echo "Changes left is empty. Trying again..."
-			sleep 10
+			sleep $CHANGES_LEFT_0_WAIT_SECS
 			continue
 		elif [[ "$changesLeft" == "null" ]]; then
 			echo "Changes left is null. Trying again..."
-			sleep 10
+			sleep $CHANGES_LEFT_0_WAIT_SECS
 			continue
 		elif (($changesLeft > 0)); then
 			echo "Changes left $changesLeft is not 0 yet..."
@@ -356,8 +357,8 @@ function waitForChangesLeft0 {
 		else
 			echo "Changes left unknown value: $changesLeft"
 		fi
-		echo "Sleeping 10 seconds and retrying..."
-		sleep 10
+		echo "Sleeping $CHANGES_LEFT_0_WAIT_SECS seconds and retrying..."
+		sleep $CHANGES_LEFT_0_WAIT_SECS
 	done
 
 	echo "changes_left never went to zero for $1.$2 -> $3.$4"
@@ -2427,4 +2428,46 @@ function validatePrometheusPipelineStatusIs1 {
 	fi
 
 	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
+}
+
+# Runs pprof periodically
+# Input:
+# 1. node - node name
+# 2. captureCnt - number of captures to take
+# 3. sleepTime - time to sleep between captures
+# 4. type - pprof type (heap, cpu, etc.)
+# 5. outputDir - directory to save the pprof files
+function runPeriodicPprof {
+	local node=$1
+	local captureCnt=$2
+	local sleepTime=$3
+	local type=$4
+	local outputDir=$5
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+
+	if [[ -z "${port:-}" ]]; then
+		echo "Error: port for node $node is not set in CLUSTER_NAME_XDCR_PORT_MAP"
+		exit 1
+	fi
+
+	if [[ -z "${outputDir:-}" ]]; then
+		echo "Error: output directory is not set"
+		exit 1
+	fi
+
+	mkdir -p "$outputDir"
+	for ((i = 1; i <= captureCnt; i++)); do
+		sleep "$sleepTime"
+		echo "Capturing pprof $type for node $node, capture $i of $captureCnt"
+		local outputFile="$outputDir/${node}_${type}_$(date +%Y%m%d_%H%M%S).pprof"
+
+		# Run pprof command
+		$CURL -X GET http://127.0.0.1:$port/debug/pprof/$type >"$outputFile"
+
+		if (($? != 0)); then
+			echo "Error capturing pprof for node $node, capture $i"
+			exit 1
+		fi
+		echo "Captured pprof $type for node $node, capture $i of $captureCnt to $outputFile"
+	done
 }

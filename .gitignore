@@ -38,6 +38,7 @@ tools/testScripts/vagrant/ubuntu-bionic-18.04-cloudimg-console.log
 tools/testScripts/vagrant/*.deb
 tools/testScripts/vagrant/.vagrant
 tools/testScripts/vagrant/data
+tools/testScripts/testPprofOut
 
 build/
 
