@@ -2216,17 +2216,6 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 func TestDNSSrv(t *testing.T) {
 	fmt.Println("============== Test case start: TestDNSSrv =================")
 
-	// Test to see if above set up has been done correctly
-	cname, addrs, err := net.LookupSRV("", "", dnsSrvHostname)
-	if err != nil {
-		fmt.Printf("Local DNS look up failed for %v, skipping DNSSRV unit test\n", dnsSrvHostname)
-		return
-	}
-	fmt.Printf("Lookup cname: %v, addrs: %v, err: %v\n", cname, addrs, err)
-	for _, addr := range addrs {
-		fmt.Printf("Address: %v port: %v, priority: %v weight: %v\n", addr.Target, addr.Port, addr.Priority, addr.Weight)
-	}
-
 	assert := assert.New(t)
 
 	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
@@ -3046,4 +3035,67 @@ func TestNLBPoolsDefaultSSLMgmt(t *testing.T) {
 		assert.False(strings.Contains(nodePair.GetFirstString(), "18091"))
 		assert.False(strings.Contains(nodePair.GetSecondString(), "18091"))
 	}
+}
+
+func TestBootstrapNodeMoves(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBootstrapNodeMoves =================")
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMockErr, remoteClusterSvc := setupBoilerPlateRCS()
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, remoteClusterSvc, ref, func() {
+		utilitiesMockErr.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("Dummy error to force pendingRefNodes to contain only the ref's SRV hostname"))
+		utilitiesMockErr.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField2, nil, nil)
+		setupUtilsMockGeneric(utilitiesMockErr, 0)
+	})
+
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+	agent.waitForRefreshEnabled()
+
+	agent.SetBootstrap()
+	assert.Equal(BootStrapNodeHasMovedError, agent.Refresh())
+
+	fmt.Println("============== Test case end: TestBootstrapNodeMoves =================")
+}
+
+func TestBootstrapNodeMovesWithDNSSrv(t *testing.T) {
+	fmt.Println("============== Test case start: TestBootstrapNodeMovesWithDNSSrv =================")
+
+	assert := assert.New(t)
+
+	srvHelper := &baseMock.DnsSrvHelperIface{}
+	srvEntry := &net.SRV{
+		Target: "192.168.0.1.",
+		Port:   9001,
+	}
+	var srvList []*net.SRV
+	srvList = append(srvList, srvEntry)
+
+	srvHelper.On("DnsSrvLookup", dnsSrvHostname).Return(srvList, base2.SrvRecordsNonSecure, nil)
+
+	idAndName := "test"
+	ref := createRemoteClusterReferenceDNSSRV(idAndName, srvHelper)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMockErr, remoteClusterSvc := setupBoilerPlateRCS()
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, remoteClusterSvc, ref, func() {
+		utilitiesMockErr.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("Dummy error to force pendingRefNodes to contain only the ref's SRV hostname"))
+		utilitiesMockErr.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField2, nil, nil)
+		setupUtilsMockGeneric(utilitiesMockErr, 0)
+	})
+
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+	agent.waitForRefreshEnabled()
+
+	agent.SetBootstrap()
+	assert.Equal(ErrorRefreshUnreachable, agent.Refresh())
+
+	fmt.Println("============== Test case end: TestBootstrapNodeMovesWithDNSSrv =================")
 }

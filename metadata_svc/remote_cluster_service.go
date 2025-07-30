@@ -1010,9 +1010,14 @@ func (agent *RemoteClusterAgent) Refresh() error {
 		if err != nil {
 			if err == UUIDMismatchError {
 				if rctx.hostName == rctx.refOrig.HostName() && len(rctx.cachedRefNodesList) == 1 {
-					// If this is the only node to be checked AND this is the bootstrap node
-					// then there's nothing to do now as there is no more nodes in the list to walk
-					err = BootStrapNodeHasMovedError
+					if rctx.refOrig.IsDnsSRV() {
+						// If the reference HostName has a DNS SRV record, XDCR can use that to re-bootstrap
+						err = ErrorRefreshUnreachable
+					} else {
+						// If this is the only node to be checked AND it is the bootstrap node,
+						// then XDCR has no recourse towards identifying a new bootstrap node
+						err = BootStrapNodeHasMovedError
+					}
 					return err
 				}
 			} else if err == RefreshAborted {
