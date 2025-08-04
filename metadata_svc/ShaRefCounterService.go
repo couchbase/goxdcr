@@ -703,7 +703,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Compre
 			err = c.upsertCompressedMappingDoc(emptyDoc, true /*addOp*/)
 			return emptyDoc, err
 		}
-		return nil, err
+		return nil, service_def.MetadataNotFoundErr
 	}
 
 	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc", c.id)
