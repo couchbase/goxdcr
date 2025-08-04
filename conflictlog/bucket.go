@@ -11,6 +11,8 @@ licenses/APL2.txt.
 package conflictlog
 
 import (
+	"fmt"
+
 	"github.com/couchbase/goxdcr/v8/base"
 )
 
@@ -24,6 +26,11 @@ type BucketInfo struct {
 
 func (b *BucketInfo) GetAddrByVB(vbno uint16, replicaNum int) (idx int, hostname string, port, sslPort uint16, thisNode bool, err error) {
 	idx = b.VBucketServerMap.VBucketMap[int(vbno)][replicaNum]
+	if idx < 0 {
+		err = fmt.Errorf("%w: vbno=%v, replicaNum=%v", base.ErrorMasterNegativeIndex, vbno, replicaNum)
+		return
+	}
+
 	nodesExtNodeInfo := &b.NodesExt[idx]
 	origAddr := b.VBucketServerMap.ServerList[idx]
 
