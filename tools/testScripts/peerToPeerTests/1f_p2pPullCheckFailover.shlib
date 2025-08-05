@@ -131,8 +131,10 @@ function runOneRebalanceCycle {
 }
 
 function runTestCase {
+	hardResetNodes
 	runTestCaseWithUser "$DEFAULT_ADMIN"
 	runTestCaseWithUser "xdcrInbound"
+	hardResetNodes
 }
 
 function runTestCaseWithUser {

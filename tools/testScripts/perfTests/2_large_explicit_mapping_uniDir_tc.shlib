@@ -37,7 +37,7 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
 # ----------------------
 declare -a collection1Arr
 for i in {1..998}; do
-  collection1Arr+=("col$i")
+	collection1Arr+=("col$i")
 done
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
