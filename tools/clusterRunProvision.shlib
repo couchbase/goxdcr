@@ -2356,16 +2356,25 @@ function getClusterUuidUsingNameFromLogs {
 	local logs
 	logs=$(getInternalNodeXdcrLog "$logNodeName")
 	if ! (($? == 0)); then
-		# echo "Unable to get log for validation"
+		echo "Unable to get log for validation" >&2
 		return 1
 	fi
 
+	# filter the logs to only capture specific strings
 	local clusterCbStrings
+	local -a arrToReverse=()
 	clusterCbStrings=$(echo "$logs" | grep "remoteClusterChangedCallback called on id")
 	local oneLine
 	local OLDIFS="$IFS"
 	IFS=$'\n'
 	for oneLine in $(echo "$clusterCbStrings"); do
+		arrToReverse[${#arrToReverse[@]}]="$oneLine"
+	done
+
+	local maxLines=${#arrToReverse[@]}
+	# Now go through the array in reverse order to find the first match
+	for ((i = $maxLines - 1; $i >= 0; i--)); do
+		oneLine=${arrToReverse[$i]}
 		if [[ "$oneLine" =~ name:${clusterName} ]]; then
 			if [[ "$oneLine" =~ uuid:([[:alnum:]]+) ]]; then
 				echo ${BASH_REMATCH[1]}
@@ -2374,6 +2383,7 @@ function getClusterUuidUsingNameFromLogs {
 			fi
 		fi
 	done
+
 	IFS="$OLDIFS"
 	return 2
 }
@@ -2393,7 +2403,7 @@ function getSetVBTimestampMsgsFromLogs {
 	clusterUuid=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$clusterName")
 	local retVal=$?
 	if ((!$retVal == 0)); then
-		echo "Unable to get clusterUUID with return code $retVal"
+		echo "Unable to get clusterUUID with return code $retVal" >&2
 		return 1
 	fi
 

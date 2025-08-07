@@ -159,6 +159,10 @@ function runTestCase {
 	sleep 15
 	local node1Non0VBResumeCnt
 	node1Non0VBResumeCnt=$(getNumOfBackfillCkptTookPlaceVB "C1" "C2" "B0" "B1")
+	if (($? != 0)); then
+		echo "Failed to get number of VBs that resumed with non-0 seqno"
+		exit $?
+	fi
 	echo "For node C1, it had $node1Non0VBResumeCnt VBs that resumed from 0 prior to failover"
 
 	local logsC1

@@ -643,7 +643,7 @@ function getInternalNodeXdcrLog {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 	if [[ -z "$port" ]]; then
-		echo "Invalid clustername $clusterName"
+		echo "Invalid clustername $clusterName" >&2
 		return 1
 	fi
 
@@ -651,7 +651,7 @@ function getInternalNodeXdcrLog {
 
 	local goxdcrLogFile=${logfileDir}/goxdcr.log
 	if ! [[ -f "$goxdcrLogFile" ]]; then
-		echo "Unable to find file $goxdcrLogFile"
+		echo "Unable to find file $goxdcrLogFile" >&2
 		return 1
 	fi
 
@@ -705,7 +705,7 @@ function waitForOneReplicationToBeDeleted {
 
 	logs=$(getInternalNodeXdcrLog "$clusterName")
 	if ((!$? == 0)); then
-		echo "Unable to get log for validation"
+		echo "Unable to get log for validation" >&2
 		exit 1
 	fi
 
@@ -714,7 +714,7 @@ function waitForOneReplicationToBeDeleted {
 	waitForInternalLogInstance "$clusterName" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($currentInstanceCnt + 1))" 2 "$srcBucketName\/$tgtBucketName"
 
 	if ((!$? == 0)); then
-		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG with buckets "$srcBucketName/$tgtBucketName" to increase from $currentInstanceCnt by 1"
+		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG with buckets "$srcBucketName/$tgtBucketName" to increase from $currentInstanceCnt by 1" >&2
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi
@@ -736,20 +736,20 @@ function waitForInternalLogInstance {
 	while (($minElapsed < $minToWait)); do
 		logs=$(getInternalNodeXdcrLog "$clusterName")
 		if ((!$? == 0)); then
-			echo "Unable to get log for validation"
-			exit 1
+			echo "Unable to get log for validation" >&2
+			return 1
 		fi
 
 		if [[ -z "$optionalGrepStr" ]]; then
 			count=$(echo "$logs" | grep -c "$grepStr")
 			if (($count >= $instanceCnt)); then
-				echo "Found $instanceCnt instances of the string: $grepStr"
+				echo "Found $instanceCnt instances of the string: $grepStr" >&2
 				return
 			fi
 		else
 			count=$(echo "$logs" | grep "$grepStr" | grep -c "$optionalGrepStr")
 			if (($count >= $instanceCnt)); then
-				echo "Found $instanceCnt instances of the string: $grepStr with $optionalGrepStr"
+				echo "Found $instanceCnt instances of the string: $grepStr with $optionalGrepStr" >&2
 				return
 			fi
 		fi
@@ -784,17 +784,17 @@ function validateInternalLogWithInstance {
 	count=$(echo "$logs" | grep -c "$grepStr")
 	if (($count != $instanceCnt)); then
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
-			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
-			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
-			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
+			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count" >&2
 		else
-			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+			echo "Error - requested count for $grepStr is $instanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
@@ -1314,6 +1314,7 @@ function dumpDebugInfoBeforeExit {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		getGoroutinesStack "$clusterName" >/tmp/$clusterName.pprof.log
 		getGoHeap "$clusterName" >/tmp/$clusterName.hprof.log
+		getInternalNodeXdcrLog "$clusterName" >/tmp/node${clusterName}_xdcrLog.log
 	done
 }
 
@@ -1626,8 +1627,8 @@ function validateLastBackfillContainsVBTask {
 	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
 	local result=$?
 	if ((!$result == 0)); then
-		echo "Unable to parse UUID return code $result"
-		return 1
+		echo "Unable to parse UUID return code $result" >&2
+		exit 1
 	fi
 
 	local inputToInternal
@@ -1655,7 +1656,7 @@ function getNon0StartingBackfillVB {
 	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
 	local result=$?
 	if ((!$result == 0)); then
-		echo "Unable to parse UUID return code $result"
+		echo "Unable to parse UUID return code $result" >&2
 		return 1
 	fi
 
@@ -1771,7 +1772,8 @@ function getNumOfBackfillCkptTookPlaceVB {
 	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
 	local result=$?
 	if ((!$result == 0)); then
-		echo "Unable to parse UUID return code $result"
+		echo "Unable to parse UUID return code $result" >&2
+		getInternalNodeXdcrLog "$logNodeName" >/tmp/node${logNodeName}XdcrLog.log
 		return 1
 	fi
 
@@ -1805,14 +1807,15 @@ function getNumOfBackfillCkptTookPlaceVB {
 		else
 			echo "Unable to parse \"$oneLine\""
 			IFS="$OLDIFS"
-			exit 1
+			return 1
 		fi
 	done
 	IFS="$OLDIFS"
 
 	if [[ -z "${atLeastOneFound:-}" ]]; then
-		echo "Unable to parse"
-		getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" >/tmp/getSetVBTimestamp
+		echo "No checkpoint found, node $logNodeName, remCluster $remClusterName src $srcBucketName tgt $tgtBucketName stored to /tmp/getSetVBTimestamp" >&2
+		getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" "backfill" >/tmp/getSetVBTimestamp_${logNodeName}.log
+		getInternalNodeXdcrLog "$logNodeName" >/tmp/node${logNodeName}_xdcrLog.log
 		return 1
 	fi
 
