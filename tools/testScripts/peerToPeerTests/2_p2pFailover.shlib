@@ -120,6 +120,9 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
+	# The test before (1f) could have caused $P2P_UNABLE_TO_RESPOND_MSG to show up, causing false test failures
+	cleanupGoxdcrLogs
+
 	runOneRebalanceCycle
 	runOneReplicationCycle
 
