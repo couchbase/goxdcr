@@ -501,6 +501,9 @@ function hardResetNodes {
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode >/dev/null 2>&1
 	done
 
+	# give it 5 seconds before other "setupTopologies" may be called
+	sleep 5
+
 	CLUSTER_SETUP_DONE_MAP=()
 	declare -gA CLUSTER_SETUP_DONE_MAP
 }
