@@ -922,7 +922,12 @@ function restoreClusterBack {
 		startRebalancing "$nodeName" "$otpNodeNameStripped"
 		echo "Sleeping 20 seconds before checking"
 		sleep 20
-		local postEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
+		local postEjectCnt
+		postEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
+		if (($? != 0)); then
+			echo "Error when trying to get postEjectCnt"
+			return 1
+		fi
 		if (($postEjectCnt != $(($preEjectCnt - $totalFoundNode)))); then
 			echo "Error - failover $totalFoundNode nodes resulted going from $preEjectCnt to $postEjectCnt"
 			return 1

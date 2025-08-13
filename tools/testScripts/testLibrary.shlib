@@ -2408,6 +2408,8 @@ function validatePrometheusPipelineStatusIs1Internal {
 
 	if (($count == 0)); then
 		echo "Pipeline status $pipelineType $statusType shows 0"
+		echo "Full prometheus output:"
+		echo "$prometheusOut"
 		exit 1
 	fi
 }
