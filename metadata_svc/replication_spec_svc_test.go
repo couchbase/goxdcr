@@ -677,10 +677,10 @@ func TestValidPrivateEndpointsSetup(t *testing.T) {
 	fmt.Println("============== Test case end: TestPrivateEndpointsSetup =================")
 }
 
-func TestInvalidPrivateEndpointsSetup(t *testing.T) {
+func TestInvalidPrivateEndpointsSetup1(t *testing.T) {
 	assert := assert.New(t)
 
-	fmt.Println("============== Test case start: TestInvalidPrivateEndpointsSetup =================")
+	fmt.Println("============== Test case start: TestInvalidPrivateEndpointsSetup1 =================")
 	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		utilitiesMock, replSpecSvc,
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
@@ -695,5 +695,5 @@ func TestInvalidPrivateEndpointsSetup(t *testing.T) {
 	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	// Should have no error
 	assert.Equal(len(errMap), 0)
-	fmt.Println("============== Test case end: TestInvalidPrivateEndpointsSetup =================")
+	fmt.Println("============== Test case end: TestInvalidPrivateEndpointsSetup1 =================")
 }
