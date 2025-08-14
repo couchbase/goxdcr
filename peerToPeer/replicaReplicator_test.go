@@ -60,7 +60,6 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	}
 	replicator.agentMapMtx.Unlock()
 	replicator.HandleSpecChange(spec, newSpec)
-	time.Sleep(50 * time.Millisecond)
 	replicator.minIntervalMtx.Lock()
 	assert.Equal(float64(30), replicator.minInterval.Minutes())
 	replicator.minIntervalMtx.Unlock()
@@ -110,6 +109,7 @@ func TestReplicatorWithSpecAndIntervalChangeNonKVNode(t *testing.T) {
 	newSpec := spec.Clone()
 	newSpec.Settings.Values[metadata.ReplicateCkptIntervalKey] = 30 // 30 min
 
+	time.Sleep(1 * time.Second)
 	// Without the fixes, the following will lock up
 	for i := 0; i < base.P2PReplicaReplicatorReloadChSize+2; i++ {
 		replicator.HandleSpecChange(spec, newSpec)

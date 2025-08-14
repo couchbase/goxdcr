@@ -85,6 +85,7 @@ func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, logge
 type replicatorReloadPair struct {
 	interval time.Duration
 	isNew    bool
+	done     chan bool
 }
 
 func (r *ReplicaReplicatorImpl) HandleSpecCreation(newSpec *metadata.ReplicationSpecification) {
@@ -141,8 +142,10 @@ func (r *ReplicaReplicatorImpl) checkAndUpdateTicker(potentialMinInterval time.D
 		pair := replicatorReloadPair{
 			interval: potentialMinInterval,
 			isNew:    oldSpecDuration == 0,
+			done:     make(chan bool),
 		}
 		r.tickerReloadCh <- pair
+		<-pair.done
 	}
 }
 
@@ -206,8 +209,19 @@ func (r *ReplicaReplicatorImpl) HandleSpecChange(oldSpec, newSpec *metadata.Repl
 	}
 
 	oldInterval := oldSpec.Settings.GetReplicateCkptInterval()
-	cbFunc := func() {
-		r.refreshIntervalTicker(oldInterval)
+	var cbFunc func()
+	var waitGrp sync.WaitGroup
+	if r.unitTest && agent.IsRunning() {
+		waitGrp.Add(1)
+		defer waitGrp.Wait()
+		cbFunc = func() {
+			r.refreshIntervalTicker(oldInterval)
+			waitGrp.Done()
+		}
+	} else {
+		cbFunc = func() {
+			r.refreshIntervalTicker(oldInterval)
+		}
 	}
 	agent.SetUpdatedSpecAsync(newSpec, cbFunc)
 }
@@ -253,6 +267,7 @@ func (r *ReplicaReplicatorImpl) run() {
 			}
 			ticker.Reset(timeBoolPair.interval)
 			tickerHasNotFiredBefore = timeBoolPair.isNew
+			close(timeBoolPair.done)
 		}
 	}
 }
@@ -376,6 +391,7 @@ type ReplicatorAgent interface {
 	SetUpdatedSpecAsync(spec *metadata.ReplicationSpecification, cbFunc func())
 	GetAndClearInfoToReplicate() (*metadata.ReplicationSpecification, *VBPeriodicReplicateReq, error)
 	RequestImmediateDataGather() error
+	IsRunning() bool
 }
 
 type ReplicatorAgentImpl struct {
@@ -726,4 +742,8 @@ func (a *ReplicatorAgentImpl) RequestImmediateDataGather() error {
 	case <-a.finCh:
 		return replicatorStopErr
 	}
+}
+
+func (a *ReplicatorAgentImpl) IsRunning() bool {
+	return atomic.LoadUint32(&a.isRunning) == 1
 }
