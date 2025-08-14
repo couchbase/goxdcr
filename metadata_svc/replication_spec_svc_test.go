@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	mrand "math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -588,6 +589,7 @@ func TestSpecMetadataCache(t *testing.T) {
 	setupPipelineMock(pipelineMgr, testPipeline, testTopic, pipelineMock, ckptMock, spec)
 
 	//Needs N+1 loops to create N number of concurrent access of the cache
+	var waitGroup sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		fmt.Println("	Test case TestSpecMetadataCache looping:", i)
 		internalId := fmt.Sprintf("%s-%v", testTopic, i)
@@ -609,10 +611,14 @@ func TestSpecMetadataCache(t *testing.T) {
 		//objecat from the cache
 		spec.InternalId = internalId + "1"
 		fmt.Println("	Stopping replication testTopic:", i)
-		go pipelineMgr.RemoveReplicationStatus(testTopic)
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			pipelineMgr.RemoveReplicationStatus(testTopic)
+		}()
 	}
 	//wait for RemoveReplicationStatus to finish
-	time.Sleep(2 * time.Second)
+	waitGroup.Wait()
 	fmt.Println("============== Test case end: TestSpecMetadataCache =================")
 }
 
