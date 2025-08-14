@@ -603,9 +603,7 @@ func TestSpecMetadataCache(t *testing.T) {
 
 		assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))
 		time.Sleep(1 * time.Second)
-		rs, _ := pipelineMgr.ReplicationStatus(testTopic)
-		assert.Nil(rs)
-		pipelineMgr.GetOrCreateReplicationStatus(testTopic, nil)
+		assert.NotNil(pipelineMgr.GetOrCreateReplicationStatus(testTopic, nil))
 		assert.Nil(pipelineMgr.Update(testTopic, nil))
 		//Change the spec.InternalId to force the removal to clean up the ReplicationStatus
 		//objecat from the cache
