@@ -1309,12 +1309,15 @@ function xdcrMemRss {
 
 function dumpDebugInfoBeforeExit {
 	local clusterName
+	local testOutputDir
 
 	xdcrMemRss
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-		getGoroutinesStack "$clusterName" >/tmp/$clusterName.pprof.log
-		getGoHeap "$clusterName" >/tmp/$clusterName.hprof.log
-		getInternalNodeXdcrLog "$clusterName" >/tmp/node${clusterName}_xdcrLog.log
+		mkdir -p "testOutput"
+		testOutputDir=$(realpath "testOutput")
+		getGoroutinesStack "$clusterName" >${testOutputDir}/$clusterName.pprof.log
+		getGoHeap "$clusterName" >${testOutputDir}/$clusterName.hprof.log
+		getInternalNodeXdcrLog "$clusterName" >${testOutputDir}/node${clusterName}_xdcrLog.log
 	done
 }
 
