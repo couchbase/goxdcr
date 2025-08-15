@@ -43,6 +43,7 @@ CKPT_GET_ERR="Error getting ckpt docs for"
 BACKFILL_DEL_OP="metakv operation on backfill spec op=2"
 BACKFILL_CLEANED="BackfillPipelineClean"
 CHANGES_LEFT_0_WAIT_SECS=10
+VAGRANT_LOG_DIR="/opt/couchbase/var/lib/couchbase/logs"
 
 # These should be imported after clusterRunProvision script
 
@@ -631,6 +632,8 @@ function getInternalNodeMemcachedLog {
 		return 1
 	fi
 
+	# TODO - memcached log rotates and the filename changes
+	# Vagrant may be harder
 	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
 
 	local memcachedLog
@@ -645,6 +648,11 @@ function getInternalNodeXdcrLog {
 	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName" >&2
 		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "goxdcr.log"
+		return $?
 	fi
 
 	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
@@ -664,6 +672,11 @@ function getInternalNodeMetaKvLog {
 	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "metakv.log"
+		return $?
 	fi
 
 	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
@@ -2517,4 +2530,14 @@ function validateCkptResumeForDependentNodes {
 	done
 
 	return $lastResult
+}
+
+function vagrantGetInternalNodeLog {
+	local clusterName=$1
+	local logFileName=$2
+	local logFile="$VAGRANT_LOG_DIR/$logFileName"
+	local idx
+
+	idx="$(getClusterIdx "$clusterName")"
+	${VSSH[$idx]} "cat $logFile"
 }

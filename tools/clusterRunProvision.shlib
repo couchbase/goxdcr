@@ -2347,12 +2347,18 @@ function getInternalSetting {
 function getClusterLogs {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local idx
 	if [[ -z "$port" ]]; then
 		echo "Invalid depedentClusterName $clusterName"
 		return 1
 	fi
 
-	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag 2>&1
+	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag 2>&1
+	else
+		idx="$(getClusterIdx "$clusterName")"
+		${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/diag"
+	fi
 }
 
 # 1. Node ID's log to get
