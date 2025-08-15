@@ -136,6 +136,7 @@ function runReplicationResume {
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 

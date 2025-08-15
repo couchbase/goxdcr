@@ -185,6 +185,7 @@ function runReplicationResume {
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -193,6 +194,7 @@ function runReplicationResume {
 	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
 	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
 		echo "C1P unable to find upserted checkpoints"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
