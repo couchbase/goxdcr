@@ -2479,3 +2479,42 @@ function runPeriodicPprof {
 		echo "Captured pprof $type for node $node, capture $i of $captureCnt to $outputFile"
 	done
 }
+
+function validateCkptResume {
+	local dependentNodeName=${1:-}
+	local tempLogs
+	tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
+	# CKPT_RESUME_FOUND="checkpoint documents for"
+	ckptFoundWith0Count=$(echo "$tempLogs" | grep -v "Backfill" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	ckptFoundTotalCount=$(echo "$tempLogs" | grep -v "Backfill" | grep -c "$CKPT_RESUME_FOUND")
+	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
+		if (($ckptFoundTotalCount == 0)); then
+			echo "$dependentNodeName shows no resume message"
+			return 1
+		else
+			echo "$dependentNodeName unable to find upserted checkpoints"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+	fi
+}
+
+function validateCkptResumeForDependentNodes {
+	local dependentNodeName
+	local retry
+	local lastResult
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		validateCkptResume "$dependentNodeName"
+		lastResult=$?
+		retry=0
+		while ((!$? == 0 && $retry < 5)); do
+			echo "Trying again $retry out of 5..."
+			sleep 10
+			validateCkptResume "$dependentNodeName"
+			lastResult=$?
+			retry=$(($retry + 1))
+		done
+	done
+
+	return $lastResult
+}

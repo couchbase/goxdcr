@@ -152,24 +152,6 @@ function rebalanceNodesOut {
 	done
 }
 
-function validateCkptResume {
-	local dependentNodeName=$1
-	tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
-	# CKPT_RESUME_FOUND="checkpoint documents for"
-	ckptFoundWith0Count=$(echo "$tempLogs" | grep -v "Backfill" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
-	ckptFoundTotalCount=$(echo "$tempLogs" | grep -v "Backfill" | grep -c "$CKPT_RESUME_FOUND")
-	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
-		if (($ckptFoundTotalCount == 0)); then
-			echo "$dependentNodeName shows no resume message"
-			return 1
-		else
-			echo "$dependentNodeName unable to find upserted checkpoints:"
-			dumpDebugInfoBeforeExit
-			exit 1
-		fi
-	fi
-}
-
 function runReplicationResume {
 	local logs
 	local resumeFrom0Cnt
@@ -215,19 +197,11 @@ function runReplicationResume {
 		exit 1
 	fi
 
-	local ckptFoundWith0Count
-	local ckptFoundTotalCount
-	local retry
-	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		validateCkptResume "$dependentNodeName"
-		retry=0
-		while ((!$? == 0 && $retry < 5)); do
-			echo "Trying again $retry out of 5..."
-			sleep 10
-			validateCkptResume "$dependentNodeName"
-			retry=$(($retry + 1))
-		done
-	done
+	validateCkptResumeForDependentNodes
+	if (($? != 0)); then
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
 
 	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		local oneNodeCurRetrievedCkptCnt="${curDepsCkptRetrievedCntMap[$dependentClusterName]}"
