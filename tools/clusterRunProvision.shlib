@@ -94,6 +94,7 @@ declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
 CHECK_CHANGES_LEFT_MAX=5
+declare BULK_COLLECTION_THRESHOLD=10
 
 # With python 3.9 to bypass "OpenSSL 3.0's legacy provider failed to load" message when running cbworkloadgen
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
@@ -1034,8 +1035,15 @@ function createBucket {
 	fi
 
 	# If bucket has scopes
+	local totalScopesAndCollectionsToCreate
 	if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]]; then
-		setupScopes $clusterName $bucketName
+		totalScopesAndCollectionsToCreate=$(getNonCreatedScopeAndCollectionCount "$clusterName" "$bucketName")
+		echo "Bucket $bucketName has $totalScopesAndCollectionsToCreate scopes and collections to create"
+		if (($totalScopesAndCollectionsToCreate > $BULK_COLLECTION_THRESHOLD)); then
+			setupBulkScopeAndCollection "$clusterName" "$bucketName"
+		else
+			setupScopes "$clusterName" "$bucketName"
+		fi
 	fi
 
 	if ([[ ! -z "${OVERRIDE_MOBILE:-}" ]] && ((${OVERRIDE_MOBILE:-} != 0))) || ([[ ! -z "${OVERRIDE_ECCV:-}" ]] && ((${OVERRIDE_ECCV:-} != 0))); then
@@ -1212,6 +1220,207 @@ function deleteScope {
 
 	echo "For cluster $clusterName bucket $bucketName DELETING scope $scopeName"
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/ >/dev/null 2>&1
+}
+
+function getNonCreatedScopeAndCollectionCount {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName
+	local collectionName
+
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+
+	local nonCreatedScopeCnt=0
+	local nonCreatedCollectionCnt=0
+	local -a scopesArr
+	local -a collectionsArr
+
+	scopesArr=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
+	if [[ -z "${scopesArr:-}" ]]; then
+		echo "No scopes found for bucket $bucketName"
+		return 1
+	fi
+
+	for scopeName in $(echo ${scopesArr[@]}); do
+		collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
+		checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName"
+		if (($? == 1)); then
+			nonCreatedScopeCnt=$(($nonCreatedScopeCnt + 1))
+			# If a scope is not created, all collections in that scope are also not created
+			if [[ -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]]; then
+				echo "No collections found for scope $scopeName" >&2
+				return 1
+			fi
+			nonCreatedCollectionCnt=$(($nonCreatedCollectionCnt + ${#collectionsArr[@]}))
+		else
+			# scope is created, check collections
+			for collectionName in $(echo ${collectionsArr[@]}); do
+				checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName" "$collectionName"
+				if (($? == 1)); then
+					nonCreatedCollectionCnt=$(($nonCreatedCollectionCnt + 1))
+				fi
+			done
+		fi
+	done
+
+	local total
+	total=$(($nonCreatedScopeCnt + $nonCreatedCollectionCnt))
+	echo "$total"
+}
+
+function getBulkCollectionPayload {
+	local clusterName=$1
+	local bucketName=$2
+
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
+		echo "Invalid input" >&2
+		return 1
+	fi
+
+	# Get scopes for the bucket
+	local -a scopesArr=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
+	if [[ -z "${scopesArr:-}" ]]; then
+		echo "No scopes found for bucket $bucketName" >&2
+		return 1
+	fi
+
+	# Start building the JSON
+	local json="{
+  \"scopes\": ["
+
+	# Check if _default scope exists in the array
+	local default_scope_exists=false
+	for scopeName in "${scopesArr[@]}"; do
+		if [[ "$scopeName" == "_default" ]]; then
+			default_scope_exists=true
+			break
+		fi
+	done
+
+	# Add _default scope first if not found in the array
+	if [[ "$default_scope_exists" == "false" ]]; then
+		json="${json}
+    {
+      \"name\": \"_default\",
+      \"collections\": [
+        {
+          \"name\": \"_default\"
+        }
+      ]
+    }"
+
+		# Add comma if we have more scopes to add
+		if [[ ${#scopesArr[@]} -gt 0 ]]; then
+			json="${json},"
+		fi
+	fi
+
+	# Process all scopes from the array
+	local scopeCount=0
+	for scopeName in "${scopesArr[@]}"; do
+		if [[ $scopeCount -gt 0 ]]; then
+			json="${json},"
+		fi
+
+		json="${json}
+    {
+      \"name\": \"$scopeName\",
+      \"collections\": ["
+
+		# Get collections for this scope
+		local -a collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
+
+		# For _default scope, ensure _default collection exists
+		local collectionCount=0
+		if [[ "$scopeName" == "_default" ]]; then
+			local default_collection_exists=false
+			for collectionName in "${collectionsArr[@]}"; do
+				if [[ "$collectionName" == "_default" ]]; then
+					default_collection_exists=true
+					break
+				fi
+			done
+
+			if [[ "$default_collection_exists" == "false" ]]; then
+				json="${json}
+        {
+          \"name\": \"_default\"
+        }"
+
+				if [[ ${#collectionsArr[@]} -gt 0 ]]; then
+					json="${json},"
+				fi
+			fi
+		fi
+
+		# Add all collections for this scope
+		collectionCount=0
+		for collectionName in "${collectionsArr[@]}"; do
+			# Skip _default in _default scope if we already added it manually
+			if [[ "$scopeName" == "_default" && "$collectionName" == "_default" && "$default_collection_exists" == "false" ]]; then
+				continue
+			fi
+
+			if [[ $collectionCount -gt 0 ]]; then
+				json="${json},"
+			fi
+
+			json="${json}
+        {
+          \"name\": \"$collectionName\"
+        }"
+
+			((collectionCount++))
+		done
+
+		json="${json}
+      ]
+    }"
+
+		((scopeCount++))
+	done
+
+	# Close JSON structure
+	json="${json}
+  ]
+}"
+
+	# Output the formatted JSON string
+	echo "$json"
+}
+
+function setupBulkScopeAndCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local payload
+	local idx
+
+	# Do error checking
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+
+	# Get the JSON payload for scopes and collections
+	payload="$(getBulkCollectionPayload $clusterName $bucketName)"
+	if (($? != 0)); then
+		echo "Error generating payload for $clusterName and $bucketName"
+		return 1
+	fi
+
+	echo "For cluster $clusterName bucket $bucketName CREATING scopes and collections with payload: $payload"
+
+	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+	  $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1
+	else
+	  # For Vagrant, we need to use the VM IP address
+		idx="$(getClusterIdx "$clusterName")"
+		${VSSH[$idx]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H 'Content-Type: application/json' -d '$payload'" >/dev/null 2>&1
+	fi
 }
 
 # inputs
