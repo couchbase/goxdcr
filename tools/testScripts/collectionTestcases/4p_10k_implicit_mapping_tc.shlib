@@ -1,0 +1,121 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+#declare -a collection1Arr=("col1" "col2")
+#declare -a collection2Arr=("col1" "col2" "col3")
+#SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	for ((i = 0; i < 5; i = (($i + 1)))); do
+		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
+	done
+	waitForBgJobs
+}
+
+declare -a collectionArray=()
+function runTestCase {
+	local maxCollectionCnt=2000
+	echo "============================================================================"
+	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local etcDir
+	local oldProfile
+	etcDir=$(findInstallEtcDir)
+	oldProfile=$(cat $etcDir/couchbase/default_profile)
+	echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
+	# need to hard reset nodes for ns_server to pick up the new profile
+	hardResetNodes
+
+	for ((i = 1; i < $maxCollectionCnt; i = (($i + 1)))); do
+		collectionArray[${#collectionArray[@]}]="col$i"
+	done
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArray[@]})
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Now while it's up and running, restore profile back in case the script stops running at any point
+	echo "$oldProfile" >$etcDir/couchbase/default_profile
+
+	# Get current instance
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
+	local currentXdcrLog
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
+	currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+
+	trap killAllBgJobs EXIT
+	runDataLoad
+
+	# This large number of collections will not allow data to flow - simply check for timeout messages
+	echo "Waiting 60 seconds to see if pipeline start had errors"
+	sleep 60
+
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+
+	grepForPanics
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	exportProvisionedConfig
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	# Reset the nodes after test to reload non-10k collections
+	hardResetNodes
+}

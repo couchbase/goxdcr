@@ -1412,12 +1412,13 @@ function setupBulkScopeAndCollection {
 		return 1
 	fi
 
-	echo "For cluster $clusterName bucket $bucketName CREATING scopes and collections with payload: $payload"
+	# Payload can be big, uncomment below for debugging
+	#echo "For cluster $clusterName bucket $bucketName CREATING scopes and collections with payload: $payload"
 
 	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
-	  $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1
 	else
-	  # For Vagrant, we need to use the VM IP address
+		# For Vagrant, we need to use the VM IP address
 		idx="$(getClusterIdx "$clusterName")"
 		${VSSH[$idx]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H 'Content-Type: application/json' -d '$payload'" >/dev/null 2>&1
 	fi
@@ -1529,6 +1530,11 @@ function setupTopologies {
 	setupCluster
 	if (($? != 0)); then
 		return $?
+	fi
+
+	# Silently find workloadgen in the background
+	if [[ -z "${CBWORKLOADGEN:-}" ]]; then
+		findCbWorkloadGen >/dev/null &
 	fi
 
 	if (($developerPreviewSet == 1)); then
@@ -1886,8 +1892,29 @@ function runCbimport {
 }
 
 function findCbWorkloadGen {
+	local lockfile="/tmp/findCbWorkloadGen.lock"
+	local timeout=30
+	local elapsed=0
+
+	# Acquire lock with timeout
+	while ! (
+		set -C
+		echo $$ >"$lockfile"
+	) 2>/dev/null; do
+		if [ $elapsed -ge $timeout ]; then
+			echo "Failed to acquire lock for findCbWorkloadGen after ${timeout}s" >&2
+			return 1
+		fi
+		sleep 1
+		elapsed=$((elapsed + 1))
+	done
+
+	# Ensure lock is released on function exit
+	trap "rm -f \"$lockfile\"" EXIT
+
 	if [[ ! -z "${CBWORKLOADGEN:-}" ]]; then
 		echo "$CBWORKLOADGEN"
+		rm -f "$lockfile"
 		return 0
 	fi
 
@@ -1907,11 +1934,13 @@ function findCbWorkloadGen {
 				CBWORKLOADGEN=$workloadGen
 			fi
 			echo "$workloadGen"
+			rm -f "$lockfile"
 			return 0
 		fi
 		path=$(dirname "$path")
 	done
 	echo ""
+	rm -f "$lockfile"
 	return 1
 }
 
@@ -3293,12 +3322,14 @@ function regenerateCertificate {
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${port}/controller/regenerateCertificate
 }
 
-function findNsServerDir {
+function findDirInternal {
+	local dirToFind="$1"
 	local i=0
+
 	local outStr=""
 	pushd "$PWD" >/dev/null
 
-	while [[ "$PWD" != / ]] && [[ ! -d "ns_server" ]]; do
+	while [[ "$PWD" != / ]] && [[ ! -d "$dirToFind" ]]; do
 		i=$(($i + 1))
 		cd ..
 	done
@@ -3307,30 +3338,22 @@ function findNsServerDir {
 	for ((j = 0; $j < $i; j = $(($j + 1)))); do
 		outStr="${outStr}../"
 	done
-	outStr="${outStr}ns_server"
+	outStr="${outStr}${dirToFind}"
 	popd >/dev/null
 
 	echo "$outStr"
 }
 
+function findNsServerDir {
+	findDirInternal "ns_server"
+}
+
 function findInstallBinDir {
-	local i=0
-	local outStr=""
-	pushd "$PWD" >/dev/null
+	findDirInternal "install/bin"
+}
 
-	while [[ "$PWD" != / ]] && [[ ! -d "install/bin" ]]; do
-		i=$(($i + 1))
-		cd ..
-	done
-
-	local j
-	for ((j = 0; j < $i; j = $(($j + 1)))); do
-		outStr="${outStr}../"
-	done
-	outStr="${outStr}install/bin"
-	popd >/dev/null
-
-	echo "$outStr"
+function findInstallEtcDir {
+	findDirInternal "install/etc"
 }
 
 function insertNXattrs {
