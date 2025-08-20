@@ -71,6 +71,10 @@ declare -A VAGRANT_VM_IP_MAP
 declare -A VAGRANT_VM_IDX_MAP
 declare -A VAGRANT_VERSION_MAP
 declare -A CLUSTER_NAME_KV_PORT_MAP
+declare -A BUCKET_MANIFEST_CACHE_MAP
+declare -A MANIFEST_CACHE_MAP
+declare -A MANIFEST_CKSUM_SCOPE_MAP
+declare -A MANIFEST_CKSUM_COLLECTION_MAP
 
 # optional globals
 # -----------------
@@ -1050,6 +1054,10 @@ function createBucket {
 		echo "INFO: Overriding enableCrossClusterVersioning setting to true due to OVERRIDE_MOBILE=${OVERRIDE_MOBILE:-} and OVERRIDE_ECCV=${OVERRIDE_ECCV:-}"
 		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi
+
+	echo "Indexing scopes and collection cache from manifest..."
+	manifestOutput=$(getManifest $clusterName $bucketName)
+	populateManifestMaps "$manifestOutput"
 }
 
 function writeJSONDocument {
@@ -1162,6 +1170,19 @@ function setupBuckets {
 	done
 }
 
+function deleteBucketManifestCacheEntry {
+	local clusterName=$1
+	local bucketName=$2
+	local key="${clusterName},${bucketName}"
+
+	if [[ -n "${BUCKET_MANIFEST_CACHE_MAP[$key]:-}" ]]; then
+		unset BUCKET_MANIFEST_CACHE_MAP[$key]
+		return 0
+	else
+		return 1
+	fi
+}
+
 function deleteBucket {
 	local clusterName=$1
 	local bucketName=$2
@@ -1169,6 +1190,7 @@ function deleteBucket {
 
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName >/dev/null 2>&1
 	deleteBucketRecordNamespace "$clusterName" "$bucketName"
+	deleteBucketManifestCacheEntry "$clusterName" "$bucketName"
 }
 
 function flushBucket {
@@ -1191,6 +1213,7 @@ function cleanupBuckets {
 	CLUSTER_NAME_BUCKET_DONE_MAP=()
 	BUCKET_NAME_SCOPE_DONE_MAP=()
 	SCOPE_NAME_COLLECTION_DONE_MAP=()
+	BUCKET_MANIFEST_CACHE_MAP=()
 }
 
 function forceBucketPurge {
@@ -1533,8 +1556,10 @@ function setupTopologies {
 	fi
 
 	# Silently find workloadgen in the background
+	local needToFindCbworkloadGen=0
 	if [[ -z "${CBWORKLOADGEN:-}" ]]; then
-		findCbWorkloadGen >/dev/null &
+		needToFindCbworkloadGen=1
+		findCbWorkloadGen >/tmp/cbworkloadGenLoc.tmp &
 	fi
 
 	if (($developerPreviewSet == 1)); then
@@ -1547,6 +1572,18 @@ function setupTopologies {
 	setupBuckets
 	if (($? != 0)); then
 		return $?
+	fi
+
+	if (($needToFindCbworkloadGen == 1)); then
+		waitForBgJobs
+		CBWORKLOADGEN=$(cat /tmp/cbworkloadGenLoc.tmp)
+		rm -f /tmp/cbworkloadGenLoc.tmp
+		if [[ -z "${CBWORKLOADGEN:-}" ]]; then
+			echo "Could not find cbworkloadgen in PATH. Please set CBWORKLOADGEN variable"
+			return 1
+		else
+			echo "Found cbworkloadgen at $CBWORKLOADGEN"
+		fi
 	fi
 }
 
@@ -1891,10 +1928,15 @@ function runCbimport {
 	done
 }
 
+function getCbworkloadGenGlobal {
+	echo "$CBWORKLOADGEN"
+}
+
 function findCbWorkloadGen {
 	local lockfile="/tmp/findCbWorkloadGen.lock"
-	local timeout=30
+	local timeout=120
 	local elapsed=0
+	local workloadGenCache
 
 	# Acquire lock with timeout
 	while ! (
@@ -1929,7 +1971,7 @@ function findCbWorkloadGen {
 		count=$(echo "$findResult" | grep -c .)
 		if (($count > 0)); then
 			workloadGen=$(echo "$findResult" | grep "${cbworkloadgenBin}$" | grep -e "build" -e "install" -e "bin" | head -n 1)
-			if [[ -z "$CBWORKLOADGEN" ]]; then
+			if [[ -z "${CBWORKLOADGEN:-}" ]]; then
 				# set it in case needed it in future
 				CBWORKLOADGEN=$workloadGen
 			fi
@@ -2161,13 +2203,26 @@ function getManifest {
 	local clusterName="$1"
 	local bucketName="$2"
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local manifest
+	local key="${clusterName},${bucketName}"
 
 	if [[ -z "${port:-}" ]]; then
 		echo ""
 		return 1
 	fi
 
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes
+	if [[ -z "${BUCKET_MANIFEST_CACHE_MAP[$key]:-}" ]]; then
+		manifest=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes)
+		if (($? != 0)); then
+			echo "Error retrieving manifest for cluster $clusterName bucket $bucketName" >&2
+			return 1
+		fi
+		BUCKET_MANIFEST_CACHE_MAP["$key"]="$manifest"
+	else
+		manifest=${BUCKET_MANIFEST_CACHE_MAP["$key"]}
+	fi
+
+	echo "$manifest"
 }
 
 # Called hexString because input is in a form of double quoted string
@@ -2212,40 +2267,135 @@ function prettyPrintManifest {
 	done
 }
 
-# Returns non-0 if not found
-function getCollectionIdFromScopeAndCollectionName {
-	local manifest=$1
-	local requestedScopeName=$2
-	local requestedCollectionName=$3
-	local i
+# Function to calculate a checksum signature for a string
+function getSignature {
+	local input="$1"
+	echo "$input" | cksum | cut -d' ' -f1
+}
 
+# Function to populate manifest maps from a manifest JSON
+function populateManifestMaps {
+	local manifest="$1"
+	local manifestCksum=$(getSignature "$manifest")
+	local lockfile="/tmp/populateManifestMaps.lock"
+	# 2k collection parsing on Intel Mac took about 2 min 30 secs
+	local timeout=180
+	local elapsed=0
+
+	# Acquire lock with timeout
+	while ! (
+		set -C
+		echo $$ >"$lockfile"
+	) 2>/dev/null; do
+		if [ $elapsed -ge $timeout ]; then
+			echo "Failed to acquire lock for populateManifestMaps after ${timeout}s" >&2
+			return 1
+		fi
+		sleep 1
+		elapsed=$((elapsed + 1))
+	done
+
+	# Ensure lock is released on function exit
+	trap "rm -f \"$lockfile\"" EXIT
+
+	if [[ ! -z "${MANIFEST_CACHE_MAP[$manifestCksum]:-}" ]]; then
+		rm -f "$lockfile"
+		return 0
+	fi
+
+	# Cache the manifest
+	MANIFEST_CACHE_MAP["$manifestCksum"]="$manifest"
+
+	# Parse the manifest
 	local scopesList=$(echo "$manifest" | jq '.scopes')
 	local scopesListLen=$(echo "$manifest" | jq '.scopes | length')
 
 	for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
 		local scopeOutput=$(echo "$scopesList" | jq .[$i])
-		# Requested doesn't have double quotes, but manifest output does
-		local scopeName=$(echo "$scopeOutput" | jq '.name' | sed 's/"//g')
-		if [[ "$scopeName" == "$requestedScopeName" ]]; then
-			local collectionsList=$(echo "$scopeOutput" | jq '.collections')
-			local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
-			for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
-				local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
-				# Requested doesn't have double quotes, but manifest output does
-				local collectionName=$(echo "$collectionsOutput" | jq '.name' | sed 's/"//g')
-				local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
-				local collectionUIDdec=$(hexStringToDec "$collectionUID")
-				if [[ "$collectionName" == "$requestedCollectionName" ]]; then
-					echo "$collectionUIDdec"
-					return 0
-				fi
-			done
-		fi
+		local scopeName=$(echo "$scopeOutput" | jq -r '.name')
+		local scopeCksum=$(getSignature "$scopeOutput")
+
+		# Store scope checksum in the scope map
+		MANIFEST_CKSUM_SCOPE_MAP["${manifestCksum},${scopeName}"]="$scopeCksum"
+
+		# Process collections within this scope
+		local collectionsList=$(echo "$scopeOutput" | jq '.collections')
+		local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
+
+		for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
+			local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
+			local collectionName=$(echo "$collectionsOutput" | jq -r '.name')
+			local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
+			local collectionUIDdec=$(hexStringToDec "$collectionUID")
+
+			# Store collection ID in the collection map
+			MANIFEST_CKSUM_COLLECTION_MAP["${scopeCksum},${collectionName}"]="$collectionUIDdec"
+		done
 	done
 
-	# Not found
-	echo ""
-	return 1
+	# Clean up lock (trap will also handle this)
+	rm -f "$lockfile"
+}
+
+# Function to get a collection ID using the cache
+# Returns collection ID if found, empty string if not found
+function getCollectionIdFromManifestCache {
+	local manifest="$1"
+	local scopeName="$2"
+	local collectionName="$3"
+
+	# Get manifest checksum
+	local manifestCksum=$(getSignature "$manifest")
+
+	# Ensure maps are populated
+	if [[ -z "${MANIFEST_CACHE_MAP[$manifestCksum]:-}" ]]; then
+		populateManifestMaps "$manifest"
+	fi
+
+	# Look up scope checksum
+	local combinedKey="${manifestCksum},${scopeName}"
+	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]}"
+	if [[ -z "$scopeCksum" ]]; then
+		echo ""
+		return 1
+	fi
+
+	# Look up collection ID
+	combinedKey="${scopeCksum},${collectionName}"
+	local collectionId="${MANIFEST_CKSUM_COLLECTION_MAP[$combinedKey]:-}"
+	if [[ -z "${collectionId:-}" ]]; then
+		echo "key $combinedKey not found in MANIFEST_CKSUM_COLLECTION_MAP" >&2
+		echo ""
+		exit 1
+		return 1
+	fi
+
+	echo "$collectionId"
+	return 0
+}
+
+# Returns non-0 if not found
+function getCollectionIdFromScopeAndCollectionName {
+	local manifest=$1
+	local requestedScopeName=$2
+	local requestedCollectionName=$3
+	local collectionId
+
+	collectionId=$(getCollectionIdFromManifestCache "$manifest" "$requestedScopeName" "$requestedCollectionName")
+	if (($? > 0)); then
+		echo "Error retrieving collection ID for scope $requestedScopeName collection $requestedCollectionName" >&2
+		echo ""
+		return 1
+	fi
+
+	if [[ -z "${collectionId:-}" ]]; then
+		echo "Collection ID not found for scope $requestedScopeName collection $requestedCollectionName" >&2
+		echo ""
+		return 1
+	fi
+
+	# If we got here, we found the collection ID
+	echo "$collectionId"
 }
 
 function printSingleClusterBucketScopeAndCollection {
