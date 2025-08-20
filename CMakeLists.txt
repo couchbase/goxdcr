@@ -50,11 +50,6 @@ ENDIF (DEFINED FORESTDB_TARGET)
 #)
 
 SET (LDFLAGS)
-IF (APPLE)
-  # On macOS, we must use -rpath to locate libraries
-  # TODO: Remove debug info stripping (-s) added to allow 1.7.6 to work on macOS
-  SET (LDFLAGS "-s -extldflags '-Wl,-rpath,@executable_path/../lib'")
-ENDIF ()
 
 IF (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building EE edition of XDCR")
