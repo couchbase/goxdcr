@@ -167,5 +167,6 @@ function runMajorReleasesUpgrade {
 
 function runTestCase {
 	runMajorReleasesUpgrade "neo" "trinity" &&
-		runMajorReleasesUpgrade "trinity" "morpheus"
+		runMajorReleasesUpgrade "trinity" "morpheus" &&
+		runMajorReleasesUpgrade "morpheus" "totoro"
 }

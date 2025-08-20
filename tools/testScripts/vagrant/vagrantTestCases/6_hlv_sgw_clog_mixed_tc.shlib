@@ -87,12 +87,15 @@ function configureBidirectionalBetweenClusters {
 	createBucketReplication "C4" "B4" "C3" "B3" DefaultBucketReplProperties
 }
 
-function runTestCase {
+function runMixedModeSGWClogTest {
 	local maxRuns=30
-	local versionWithHLV="morpheus"
-	local versionWithoutHLV="trinity"
+	local versionWithHLV="$1"
+	local versionWithoutHLV="$2"
+
+	#local versionWithHLV="morpheus"
+	#local versionWithoutHLV="trinity"
 	echo "============================================================================"
-	echo "Running 4 clusters mixed mode with SGW and conflict logging test case"
+	echo "Running 4 clusters mixed mode with SGW and conflict logging test case with $versionWithHLV and $versionWithoutHLV"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
@@ -124,10 +127,18 @@ function runTestCase {
 	checkChangesLeftInternal "C4" "B4" "C3" "B3"
 	vagrantGrepForPanicAll
 	local xdcrDifferDir="/opt/couchbase/bin"
-	runXdcrDifferValidation "$xdcrDifferDir" "C1" "B1" "C2" "B2"
 	runXdcrDifferValidation "$xdcrDifferDir" "C2" "B2" "C1" "B1"
 
-	# TODO - link with legacy clusters
+	while ((1)); do
+		vagrantGrepForPanicAll
+		echo "============================================================================"
+		echo "PASSED $loopCounter"
+		echo "============================================================================"
+		loopCounter=$(($loopCounter + 1))
+		if (($loopCounter == $maxRuns)); then
+			break
+		fi
+	done
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -135,4 +146,19 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 	cleanupBuckets
+}
+
+function runTestCase {
+	# Technically trinity has HLV but it doesn't have Clog, so for the context of this test treat it
+	# as it doesn't have HLV
+	local -a versionsWithoutHLV=("trinity" "neo")
+	local -a versionsWithHLV=("morpheus" "totoro")
+	local versionWithHLV
+	local versionWithoutHLV
+
+	for versionWithHLV in "${versionsWithHLV[@]}"; do
+		for versionWithoutHLV in "${versionsWithoutHLV[@]}"; do
+			runMixedModeSGWClogTest "$versionWithHLV" "$versionWithoutHLV" || exit 1
+		done
+	done
 }

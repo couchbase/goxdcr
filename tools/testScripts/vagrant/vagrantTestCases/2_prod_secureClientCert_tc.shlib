@@ -94,5 +94,6 @@ function runFullSecureClientCert {
 function runTestCase {
 	runFullSecureClientCert "neo" &&
 		runFullSecureClientCert "trinity" &&
-		runFullSecureClientCert "morpheus"
+		runFullSecureClientCert "morpheus" &&
+		runFullSecureClientCert "totoro"
 }

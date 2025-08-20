@@ -75,15 +75,17 @@ function verifyPromStats {
 	validateDatapoolFailIs0 "C2" "B2" "B3"
 }
 
-function runTestCase {
+function runActivePassiveSgwReplication {
+	local versionToLoad="$1"
+
 	local maxRuns=30
 	echo "============================================================================"
-	echo "Running active passive sgw replication"
+	echo "Running active passive sgw replication on $versionToLoad"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
 	vagrantRemoveSGWAll
-	vagrantInstallCBServerAll "morpheus"
+	vagrantInstallCBServerAll "$versionToLoad"
 
 	setupTopologies
 	setCrossClusterVersioningForBucket "C1" "B1"
@@ -127,4 +129,10 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 	cleanupBuckets
+}
+
+function runTestCase {
+	runActivePassiveSgwReplication "trinity" &&
+		runActivePassiveSgwReplication "morpheus" &&
+		runActivePassiveSgwReplication "totoro"
 }

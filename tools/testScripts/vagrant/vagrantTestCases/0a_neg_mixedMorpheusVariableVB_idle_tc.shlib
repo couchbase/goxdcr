@@ -96,6 +96,13 @@ function runMorpheusTrinityMorpheusTestCase {
 
 	# Check that changes left from B2 to B1 is 0
 	checkChangesLeftInternal "C2" "B2" "C1" "B1"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
 }
 
 function runTestCase {

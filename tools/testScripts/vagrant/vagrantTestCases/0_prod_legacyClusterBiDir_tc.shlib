@@ -136,19 +136,27 @@ function runLegacyCurrentBidir {
 	echo "Rebalancing nodes to become a 2-node target cluster"
 	startRebalancing "C2"
 
-	if [ "$c1Ver" != "morpheus" ] || [ "$c2Ver" != "trinity" ]; then
-		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-		createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-		runDataLoadBothSidesAndCheck
-		pauseAndResumeBothSidesAndCheck
-		deleteRecreateReplicationsAndCheck
-	else
+	if [ "$c1Ver" == "morpheus" ] && [ "$c2Ver" == "trinity" ]; then
+		echo "Morpheus -> Trinity replication works but not the other way around, so only create one way replication"
 		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 		runDataLoadOnC1AndCheck
 		# Morpheus versions contain xdcrDiffer. Test it when morpheus is the source
 		runXdcrDifferValidation "/opt/couchbase/bin" "C1" "B1" "C2" "B2"
 		pauseAndResumeOnC1AndCheck
 		deleteRecreateReplicationOnC1AndCheck
+	else
+		echo "Creating bidirectional replications"
+		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+		createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+		runDataLoadBothSidesAndCheck
+
+		if [ "$c1Ver" == "neo" ] || [ "$c1Ver" == "trinity" ]; then
+			echo "Neo and Trinity do not have xdcrDiffer, skipping xdcrDiffer validation"
+		else
+			runXdcrDifferValidation "/opt/couchbase/bin" "C1" "B1" "C2" "B2"
+		fi
+		pauseAndResumeBothSidesAndCheck
+		deleteRecreateReplicationsAndCheck
 	fi
 
 	cleanupBucketReplications
@@ -158,5 +166,6 @@ function runLegacyCurrentBidir {
 
 function runTestCase {
 	runLegacyCurrentBidir "neo" "trinity" &&
-		runLegacyCurrentBidir "morpheus" "trinity" # morpheus -> trinity replication works but not the other way around
+		runLegacyCurrentBidir "morpheus" "trinity" && # morpheus -> trinity replication works but not the other way around
+		runLegacyCurrentBidir "morpheus" "totoro"
 }
