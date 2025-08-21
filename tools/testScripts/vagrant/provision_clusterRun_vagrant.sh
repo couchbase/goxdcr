@@ -132,6 +132,6 @@ createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 runDataLoad
 
 checkUnidirectionalChangesLeft
-
+dumpDebugInfoBeforeExit
 read -p "Press enter to tear-down..."
 vagrantHalt

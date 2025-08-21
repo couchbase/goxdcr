@@ -1283,6 +1283,12 @@ function getGoroutinesStack {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
+	# check vagrant
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetPprof "$clusterName" "goroutine"
+		return $?
+	fi
+
 	$CURL -s http://localhost:$sourcePort/debug/pprof/goroutine?debug=1
 }
 
@@ -1290,11 +1296,23 @@ function getGoHeap {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
+	# check vagrant
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetPprof "$clusterName" "heap"
+		return $?
+	fi
+
 	$CURL -s http://localhost:$sourcePort/debug/pprof/heap?debug=1
 }
 
 function xdcrMemRss {
 	local -A PORT_PID_MAP
+
+	# skip if vagrant
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["C1"]:-}" ]]; then
+		echo "Skipping xdcrMemRss for vagrant"
+		return 0
+	fi
 
 	if (($(ps -ef | grep goxdcr | grep -cv grep) == 0)); then
 		echo "No XDCR processes found"
@@ -2540,5 +2558,14 @@ function vagrantGetInternalNodeLog {
 	local idx
 
 	idx="$(getClusterIdx "$clusterName")"
-	${VSSH[$idx]} "cat $logFile"
+	${VSSH[$idx]} "sudo cat $logFile"
+}
+
+function vagrantGetPprof {
+	local clusterName=$1
+	local pprofType=$2
+	local idx
+	idx="$(getClusterIdx "$clusterName")"
+
+	${VSSH[$idx]} "curl -s http://localhost:9998/debug/pprof/$pprofType?debug=1"
 }
