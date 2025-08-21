@@ -1526,6 +1526,122 @@ function validatePrometheusStatsNon0 {
 	fi
 }
 
+function validatePrometheusSourceNodesCnt {
+	local node=$1
+	local expectedCnt=$2
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local idleSleepCnt=0
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	local count
+	count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_nodes_total" | grep -v "HELP" | grep -v "TYPE" |
+		awk '{print $NF}')
+
+	while (($idleSleepCnt < 3)); do
+		if [[ -z "${count:-}" ]]; then
+			echo "Heartbeat not found yet"
+			idleSleepCnt=$(($idleSleepCnt + 1))
+			sleep 15
+			prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+			count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_nodes_total" | grep -v "HELP" | grep -v "TYPE" |
+				awk '{print $NF}')
+		else
+			break
+		fi
+	done
+
+	if [[ -z "${count:-}" ]]; then
+		echo "Stat xdcr_number_of_source_nodes_total not found"
+		exit 1
+	fi
+
+	if (($count != expectedCnt)); then
+		echo "Stat xdcr_number_of_source_nodes_total shows $count when expecting $expectedCnt"
+		exit 1
+	fi
+}
+
+function validatePrometheusSourceRunningReplCnt {
+	local node=$1
+	local expectedCnt=$2
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local idleSleepCnt=0
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	local count
+	count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_replications_total" | grep -v "HELP" | grep -v "TYPE" |
+		grep "Running" | awk '{print $NF}')
+	while (($idleSleepCnt < 5)); do
+		if [[ -z "${count:-}" ]]; then
+			echo "Heartbeat not found yet"
+			idleSleepCnt=$(($idleSleepCnt + 1))
+			sleep 15
+			prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+			count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_replications_total" | grep -v "HELP" | grep -v "TYPE" |
+				grep "Running" | awk '{print $NF}')
+		else
+			break
+		fi
+	done
+
+	if [[ -z "${count:-}" ]]; then
+		echo "Stat xdcr_number_of_source_replications_total not found"
+		exit 1
+	fi
+
+	if (($count != expectedCnt)); then
+		echo "Stat xdcr_number_of_source_replications_total for running shows $count when expecting $expectedCnt"
+		exit 1
+	fi
+}
+
+# Validates that the result is 0
+function validatePrometheusStatsIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local prometheusStatsName=$4
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local cmd
+
+	prometheusOut=$(getPrometheusStats "$node")
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
+
+	if (($count > 0)); then
+		echo "Stat $prometheusStatsName shows $count"
+		exit 1
+	fi
+}
+
+function getPrometheusStat {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local prometheusStatsName=$4
+	local pipelineType=${5:-Main}
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local cmd
+
+	prometheusOut=$(getPrometheusStats "$node")
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep "$pipelineType" | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
+
+	echo $count
+}
+
 function validatePrometheusStatsRRNon0 {
 	local node=$1
 	local sourceBucket=$2

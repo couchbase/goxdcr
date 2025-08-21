@@ -681,11 +681,9 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.GetSpecInternalId(), spec.InternalId)
 		}
 
-		if bp != nil {
-			// reset stats for backfill pipeline
-			// checkpoints for backfill pipeline will be deleted as part of replication spec change callbacks of backfill components in postDeleteBackfillRepl
-			rep_status.ResetStorage(common.BackfillPipeline)
-		}
+		// reset stats for backfill pipeline
+		// checkpoints for backfill pipeline will be deleted as part of replication spec change callbacks of backfill components in postDeleteBackfillRepl
+		rep_status.ResetStorage(common.BackfillPipeline)
 
 		err := pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
 		if err != nil {
