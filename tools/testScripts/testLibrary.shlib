@@ -1802,13 +1802,14 @@ function getPrometheusStat {
 	local sourceBucket=$2
 	local targetBucket=$3
 	local prometheusStatsName=$4
+	local pipelineType=${5:-Main}
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
 	local prometheusOut
 	local cmd
 
 	prometheusOut=$(getPrometheusStats "$node")
 	local count
-	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+	count=$(echo "$prometheusOut" | grep pipelineType | grep "$pipelineType" | grep $prometheusStatsName |
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
 	# Strip out non-numerics since vssh prints out newlines
