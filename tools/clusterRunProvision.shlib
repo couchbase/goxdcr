@@ -1737,7 +1737,9 @@ function createBucketReplication {
 			sleep 10
 		fi
 	done
-	return 1
+	echo "Error - unable to create replication from $sourceCluster $sourceBucket to $targetCluster $targetBucket"
+	dumpDebugInfoBeforeExit
+	exit 1
 }
 
 function cleanupRemoteClusterRefs {
