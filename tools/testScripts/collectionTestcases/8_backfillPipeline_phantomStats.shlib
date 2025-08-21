@@ -1,0 +1,125 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have B1 bucket and c2 to have B2 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=10000)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collectionArr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
+	waitForBgJobs
+}
+
+BACKFILL_PIPELINE_START_MSG="Starting BackfillPipeline backfill_"
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running Backfill pipeline phantom stats test"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
+	sleep 10
+	testIdleXdcrCPU
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	# Clear the logs at the beginning.
+	# This is necessary because we later use 'grep' to search for specific log lines and count their occurrences.
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+
+	# delete collections from B2 on C2 to create broken map
+	deleteCollection "C2" "B2" "S1" "col2"
+	deleteCollection "C2" "B2" "S1" "col3"
+	sleep 5
+	printGlobalScopeAndCollectionInfo
+
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 3
+	setCustomManifestRefreshInterval "C1"
+
+	runDataLoad
+
+	echo "Waiting 5 seconds before checking changes_left"
+	sleep 5
+	checkUnidirectionalChangesLeft
+
+	# now re-create collection col3 at C2
+	createCollection "C2" "B2" "S1" "col2"
+	printGlobalScopeAndCollectionInfo
+	echo "Sleep 7sec for the collection manifest to diff latest manifests and raise backfill"
+	sleep 7
+	echo "check for the existance of backfill message"
+	validateInternalLogWithInstance "C1" "$BACKFILL_PIPELINE_START_MSG" 1
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 2
+
+	# Delete and recreate the replication
+	deleteBucketReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 10
+	validateInternalLogWithInstance "C1" "$BACKFILL_PIPELINE_START_MSG" 1
+
+	echo "Getting changes left for the backfill pipeline"
+	changes_left=$(getPrometheusStat "C1" "B1" "B2" "xdcr_changes_left_total" "Backfill")
+	echo "Found changes_left to be $changes_left"
+	if (($changes_left != 0)); then
+		echo "Found non zero changes_left for backfill pipeline when it does not exist"
+		echo "============================================================================"
+		echo "FAILED"
+		echo "============================================================================"
+		exit 1
+	fi
+
+	grepForPanics
+	resetCustomManifestRefreshInterval "C1"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
