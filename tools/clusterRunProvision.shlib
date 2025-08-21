@@ -1486,6 +1486,11 @@ function createCollection {
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/collections -d name=$collectionName >/dev/null 2>&1
+
+	# When collections are created or deleted outside of the "setupBuckets" call
+	# it will cause the bucket's manifest to be out of date
+	# This function will ensure that cache is cleared so it can get re-pulled as needed
+	deleteBucketManifestCacheEntry "$clusterName" "$bucketName"
 }
 
 function deleteCollection {
@@ -1497,6 +1502,11 @@ function deleteCollection {
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName DELETING collection $collectionName"
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/collections/$collectionName >/dev/null 2>&1
+
+	# When collections are created or deleted outside of the "setupBuckets" call
+	# it will cause the bucket's manifest to be out of date
+	# This function will ensure that cache is cleared so it can get re-pulled as needed
+	deleteBucketManifestCacheEntry "$clusterName" "$bucketName"
 }
 
 # inputs
@@ -2374,6 +2384,7 @@ function getCollectionIdFromManifestCache {
 	return 0
 }
 
+# Pre-req: getManifest must be called to ensure cache is up to date
 # Returns non-0 if not found
 function getCollectionIdFromScopeAndCollectionName {
 	local manifest=$1
