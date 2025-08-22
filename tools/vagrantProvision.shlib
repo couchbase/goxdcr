@@ -87,6 +87,10 @@ function vagrantRemoveCbServer {
 	cmd="${VSSH[$i]} \"sudo rm -rf /opt/couchbase\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+
+	cmd="${VSSH[$i]} \"sudo pkill -9 socat\""
+	echo "==== Running $cmd ===="
+	eval $cmd
 }
 
 function vagrantRemoveCbServerAll {
@@ -635,6 +639,7 @@ function vagrantRunCBWorkloadGenCollection {
 
 function setupVagrantAltPortForwarding {
 	local clusterName=$1
+
 	local idx="$(getClusterIdx "$clusterName")"
 
 	# First install needed software
