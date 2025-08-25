@@ -1,0 +1,107 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# Process pool configuration
+declare -g POOL_MAX_CONCURRENT=5 # Default concurrency
+declare -g POOL_ACTIVE_JOBS=()   # Array to track active job PIDs
+declare -g POOL_PENDING_JOBS=()  # Array to track pending jobs
+declare -g POOL_COMPLETED=0      # Counter for completed jobs
+
+# Initialize the process pool with specified concurrency
+function initProcessPool {
+	local concurrency=${1:-5}
+	POOL_MAX_CONCURRENT=$concurrency
+	POOL_ACTIVE_JOBS=()
+	POOL_PENDING_JOBS=()
+	POOL_COMPLETED=0
+	echo "Process pool initialized with concurrency: $POOL_MAX_CONCURRENT"
+}
+
+# Add a job to the pool (job is a function name with its arguments)
+function addJobToPool {
+	local jobFunction="$1"
+	shift
+	local jobArgs=("$@")
+
+	# Store the complete job command
+	POOL_PENDING_JOBS+=("$jobFunction ${jobArgs[*]}")
+}
+
+# Check for completed jobs and remove them from active list
+function cleanupCompletedJobs {
+	local newActiveJobs=()
+	local completedCount=0
+
+	for pid in "${POOL_ACTIVE_JOBS[@]}"; do
+		if kill -0 "$pid" 2>/dev/null; then
+			# Job still running
+			newActiveJobs+=("$pid")
+		else
+			# Job completed
+			completedCount=$((completedCount + 1))
+			POOL_COMPLETED=$((POOL_COMPLETED + 1))
+		fi
+	done
+
+	POOL_ACTIVE_JOBS=("${newActiveJobs[@]}")
+	echo "Cleaned up $completedCount completed jobs. Active: ${#POOL_ACTIVE_JOBS[@]}, Completed: $POOL_COMPLETED"
+}
+
+# Start new jobs up to the concurrency limit
+function startPendingJobs {
+	while [[ ${#POOL_ACTIVE_JOBS[@]} -lt $POOL_MAX_CONCURRENT ]] && [[ ${#POOL_PENDING_JOBS[@]} -gt 0 ]]; do
+		# Get the next pending job
+		local jobCommand="${POOL_PENDING_JOBS[0]}"
+
+		# Remove it from pending jobs array
+		POOL_PENDING_JOBS=("${POOL_PENDING_JOBS[@]:1}")
+
+		# Start the job in background
+		echo "Starting job: $jobCommand"
+		eval "$jobCommand" &
+		local jobPid=$!
+
+		# Add to active jobs
+		POOL_ACTIVE_JOBS+=("$jobPid")
+		echo "Job started with PID: $jobPid. Active jobs: ${#POOL_ACTIVE_JOBS[@]}"
+	done
+}
+
+# Run the process pool until all jobs are complete
+function runProcessPool {
+	echo "Starting process pool with ${#POOL_PENDING_JOBS[@]} jobs and concurrency $POOL_MAX_CONCURRENT"
+
+	local totalJobs=${#POOL_PENDING_JOBS[@]}
+
+	# Start initial batch of jobs
+	startPendingJobs
+
+	# Monitor and manage jobs until all are complete
+	while [[ ${#POOL_ACTIVE_JOBS[@]} -gt 0 ]] || [[ ${#POOL_PENDING_JOBS[@]} -gt 0 ]]; do
+		sleep 2
+		cleanupCompletedJobs
+		startPendingJobs
+
+		echo "Pool status - Active: ${#POOL_ACTIVE_JOBS[@]}, Pending: ${#POOL_PENDING_JOBS[@]}, Completed: $POOL_COMPLETED/$totalJobs"
+	done
+
+	echo "All jobs completed! Total: $POOL_COMPLETED"
+}
+
+# Wait for all active jobs to complete (alternative to runProcessPool for simpler cases)
+function waitForPoolCompletion {
+	echo "Waiting for ${#POOL_ACTIVE_JOBS[@]} active jobs to complete..."
+
+	while [[ ${#POOL_ACTIVE_JOBS[@]} -gt 0 ]]; do
+		sleep 2
+		cleanupCompletedJobs
+		echo "Still waiting for ${#POOL_ACTIVE_JOBS[@]} jobs to complete..."
+	done
+
+	echo "All active jobs completed!"
+}

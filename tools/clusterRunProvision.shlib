@@ -24,6 +24,7 @@ if (($bash_major_version < 4)); then
 fi
 
 . ./importExporter.shlib
+. ./processPool.shlib
 
 # globals
 # -----------------
@@ -1981,6 +1982,18 @@ function findCbWorkloadGen {
 
 	# Ensure lock is released on function exit
 	trap "rm -f \"$lockfile\"" EXIT
+
+	if [[ -f "/tmp/cbworkloadGenLoc.tmp" ]]; then
+		workloadGenCache=$(cat /tmp/cbworkloadGenLoc.tmp)
+		if [[ ! -z "${workloadGenCache:-}" ]]; then
+			echo "$workloadGenCache"
+			rm -f "$lockfile"
+			return 0
+		elif [[ ! -z "${workloadGenCache:-}" ]] && [[ ! -f "$workloadGenCache" ]]; then
+			# The cache file is out of date
+			rm -f /tmp/cbworkloadGenLoc.tmp
+		fi
+	fi
 
 	if [[ ! -z "${CBWORKLOADGEN:-}" ]]; then
 		echo "$CBWORKLOADGEN"

@@ -38,17 +38,35 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
 #declare -a collection2Arr=("col1" "col2" "col3")
 #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
+#function runDataLoad {
+#	local collectionsToRunLoad=500
+#	local itemsPerCollection=10
+#
+#	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
+#	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
+#	# Run CBWorkloadgen in parallel
+#	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
+#		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
+#	done
+#	waitForBgJobs
+#	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
+#}
+
 function runDataLoad {
 	local collectionsToRunLoad=500
 	local itemsPerCollection=10
+	local concurrency=5
+
+	initProcessPool $concurrency
 
 	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
 	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
 	# Run CBWorkloadgen in parallel
 	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
-		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
+		addJobToPool "runCbWorkloadGenCollection" "C1" "B1" "S1" "col$i"
 	done
-	waitForBgJobs
+
+	runProcessPool
 	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
 }
 
