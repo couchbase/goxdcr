@@ -510,8 +510,10 @@ function hardResetNodes {
 		fi
 
 		echo "RESETTING cluster name $clusterName on port $initPort with hostIP $hostIP"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode >/dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode >/dev/null 2>&1 &
 	done
+
+	waitForBgJobs
 
 	# give it 5 seconds before other "setupTopologies" may be called
 	sleep 5
@@ -1108,6 +1110,7 @@ function createBucket {
 		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi
 
+	echo "Indexing scopes and collection cache from manifest for cluster $clusterName and bucket $bucketName..."
 	manifestOutput=$(getManifest $clusterName $bucketName)
 	echo "Indexing manifest: $clusterName $bucketName has manifest checksum : $manifestOutput"
 	populateManifestMaps "$manifestOutput"
@@ -2325,13 +2328,83 @@ function getSignature {
 	echo "$input" | cksum | cut -d' ' -f1
 }
 
-# Function to populate manifest maps from a manifest JSON
+# Configuration variables for manifest processing
+declare -g MANIFEST_PARALLEL_SCOPE_THRESHOLD=10
+declare -g MANIFEST_PARALLEL_COLLECTION_THRESHOLD=50
+declare -g MANIFEST_COLLECTION_BATCH_SIZE=25
+
+# Function to process a single scope in a subshell
+function processScopeInSubshell {
+	local scopeOutput="$(echo "$1" | base64 -d)"
+	local manifestCksum="$2"
+	local tempScopeFile="$3"
+	local tempCollectionFile="$4"
+	local collectionBatchSize="$5"
+
+	local scopeName=$(echo "$scopeOutput" | jq -r '.name')
+	local scopeCksum=$(getSignature "$scopeOutput")
+
+	# Write scope mapping to temp file
+	echo "${manifestCksum},${scopeName}=${scopeCksum}" >>"$tempScopeFile"
+
+	# Process collections within this scope
+	local collectionsList=$(echo "$scopeOutput" | jq '.collections')
+	local collectionsListLen=$(echo "$collectionsList" | jq 'length')
+
+	# If collections are below batch threshold, process directly
+	if [[ $collectionsListLen -le $MANIFEST_PARALLEL_COLLECTION_THRESHOLD ]]; then
+		for ((j = 0; j < collectionsListLen; j++)); do
+			local collectionOutput=$(echo "$collectionsList" | jq .[$j])
+			local collectionName=$(echo "$collectionOutput" | jq -r '.name')
+			local collectionUID=$(echo "$collectionOutput" | jq '.uid')
+			local collectionUIDdec=$(hexStringToDec "$collectionUID")
+			echo "${scopeCksum},${collectionName}=${collectionUIDdec}" >>"$tempCollectionFile"
+		done
+	else
+		# Use parallel processing for collections with batching
+		local collectionTempDir=$(mktemp -d)
+		local collectionPids=()
+
+		# Process collections in batches
+		for ((startIdx = 0; startIdx < collectionsListLen; startIdx += collectionBatchSize)); do
+			local endIdx=$((startIdx + collectionBatchSize))
+			if [[ $endIdx -gt $collectionsListLen ]]; then
+				endIdx=$collectionsListLen
+			fi
+
+			local batchTempFile="${collectionTempDir}/collections_${startIdx}_${endIdx}.tmp"
+
+			# Launch collection batch processing in background
+			(
+				for ((j = startIdx; j < endIdx; j++)); do
+					local collectionOutput=$(echo "$collectionsList" | jq .[$j])
+					local collectionName=$(echo "$collectionOutput" | jq -r '.name')
+					local collectionUID=$(echo "$collectionOutput" | jq '.uid')
+					local collectionUIDdec=$(hexStringToDec "$collectionUID")
+					echo "${scopeCksum},${collectionName}=${collectionUIDdec}" >>"$batchTempFile"
+				done
+			) &
+
+			collectionPids+=($!)
+		done
+
+		# Wait for all collection batches to complete
+		for pid in "${collectionPids[@]}"; do
+			wait "$pid"
+		done
+
+		# Merge all collection batch files into main collection file
+		cat "${collectionTempDir}"/collections_*.tmp >>"$tempCollectionFile" 2>/dev/null || true
+		rm -rf "$collectionTempDir"
+	fi
+}
+
+# Enhanced populateManifestMaps function with parallelism
 function populateManifestMaps {
 	local manifest="$1"
 	local manifestCksum=$(getSignature "$manifest")
 	local lockfile="/tmp/populateManifestMaps.lock"
-	# 2k collection parsing on Intel Mac took about 2 min 30 secs
-	local timeout=180
+	local timeout=300 # Increased timeout for parallel processing
 	local elapsed=0
 
 	# Acquire lock with timeout
@@ -2340,7 +2413,7 @@ function populateManifestMaps {
 		echo $$ >"$lockfile"
 	) 2>/dev/null; do
 		if [ $elapsed -ge $timeout ]; then
-			echo "Failed to acquire lock for populateManifestMaps after ${timeout}s" >&2
+			echo "Timeout waiting for populateManifestMaps lock"
 			return 1
 		fi
 		sleep 1
@@ -2350,43 +2423,110 @@ function populateManifestMaps {
 	# Ensure lock is released on function exit
 	trap "rm -f \"$lockfile\"" EXIT
 
-	if [[ ! -z "${MANIFEST_CACHE_MAP[$manifestCksum]:-}" ]]; then
-		rm -f "$lockfile"
-		return 0
+	if [[ -z "${MANIFEST_CACHE_MAP[$manifestCksum]:-}" ]]; then
+		# Cache the manifest
+		MANIFEST_CACHE_MAP["$manifestCksum"]="$manifest"
 	fi
-
-	# Cache the manifest
-	MANIFEST_CACHE_MAP["$manifestCksum"]="$manifest"
 
 	# Parse the manifest
 	local scopesList=$(echo "$manifest" | jq '.scopes')
-	local scopesListLen=$(echo "$manifest" | jq '.scopes | length')
+	local scopesListLen=$(echo "$scopesList" | jq 'length')
 
-	for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
-		local scopeOutput=$(echo "$scopesList" | jq .[$i])
-		local scopeName=$(echo "$scopeOutput" | jq -r '.name')
-		local scopeCksum=$(getSignature "$scopeOutput")
+	echo "Processing manifest with $scopesListLen scopes..."
 
-		# Store scope checksum in the scope map
-		MANIFEST_CKSUM_SCOPE_MAP["${manifestCksum},${scopeName}"]="$scopeCksum"
+	# Create temporary files for collecting results
+	local tempScopeFile=$(mktemp)
+	local tempCollectionFile=$(mktemp)
 
-		# Process collections within this scope
-		local collectionsList=$(echo "$scopeOutput" | jq '.collections')
-		local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
+	# Ensure temp files are cleaned up
+	trap "rm -f \"$lockfile\" \"$tempScopeFile\" \"$tempCollectionFile\"" EXIT
 
-		for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
-			local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
-			local collectionName=$(echo "$collectionsOutput" | jq -r '.name')
-			local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
-			local collectionUIDdec=$(hexStringToDec "$collectionUID")
-
-			# Store collection ID in the collection map
-			MANIFEST_CKSUM_COLLECTION_MAP["${scopeCksum},${collectionName}"]="$collectionUIDdec"
+	# Decide whether to use parallel processing
+	if [[ $scopesListLen -le $MANIFEST_PARALLEL_SCOPE_THRESHOLD ]]; then
+		echo "Using sequential processing for $scopesListLen scopes"
+		# Sequential processing for small scope counts
+		for ((i = 0; i < scopesListLen; i++)); do
+			local scopeOutput=$(echo "$scopesList" | jq .[$i])
+			processScopeInSubshell "$(echo "$scopeOutput" | base64)" "$manifestCksum" "$tempScopeFile" "$tempCollectionFile" "$MANIFEST_COLLECTION_BATCH_SIZE"
 		done
-	done
+	else
+		echo "Using parallel processing for $scopesListLen scopes with concurrency ${POOL_MAX_CONCURRENT:-5}"
+		# Initialize process pool for parallel processing
+		initProcessPool "${POOL_MAX_CONCURRENT:-5}"
 
-	# Clean up lock (trap will also handle this)
+		# Add scope processing jobs to the pool
+		for ((i = 0; i < scopesListLen; i++)); do
+			local scopeOutput=$(echo "$scopesList" | jq .[$i])
+
+			# Create unique temp files for this scope
+			local scopeTempFile="${tempScopeFile}.scope_${i}"
+			local collectionTempFile="${tempCollectionFile}.collection_${i}"
+
+			# Add job to process pool
+			addJobToPool "processScopeInSubshell" "$(echo "$scopeOutput" | base64)" "$manifestCksum" "$scopeTempFile" "$collectionTempFile" "$MANIFEST_COLLECTION_BATCH_SIZE"
+		done
+
+		# Run the process pool and wait for completion
+		echo "Starting parallel scope processing..."
+		runProcessPool
+
+		# Merge all scope temp files
+		cat "${tempScopeFile}".scope_* >>"$tempScopeFile" 2>/dev/null || true
+		cat "${tempCollectionFile}".collection_* >>"$tempCollectionFile" 2>/dev/null || true
+
+		# Clean up individual temp files
+		rm -f "${tempScopeFile}".scope_* "${tempCollectionFile}".collection_*
+	fi
+
+	# Read results back into global maps
+	echo "Rebuilding global maps from temporary files..."
+
+	# Process scope mappings
+	if [[ -f "$tempScopeFile" && -s "$tempScopeFile" ]]; then
+		while IFS='=' read -r key value; do
+			if [[ -n "$key" && -n "$value" ]]; then
+				MANIFEST_CKSUM_SCOPE_MAP["$key"]="$value"
+			fi
+		done <"$tempScopeFile"
+	fi
+
+	# Process collection mappings
+	if [[ -f "$tempCollectionFile" && -s "$tempCollectionFile" ]]; then
+		while IFS='=' read -r key value; do
+			if [[ -n "$key" && -n "$value" ]]; then
+				MANIFEST_CKSUM_COLLECTION_MAP["$key"]="$value"
+			fi
+		done <"$tempCollectionFile"
+	fi
+
+	local scopeCount=${#MANIFEST_CKSUM_SCOPE_MAP[@]}
+	local collectionCount=${#MANIFEST_CKSUM_COLLECTION_MAP[@]}
+	echo "Manifest processing complete. Processed scopes: $scopeCount, collections: $collectionCount"
+
 	rm -f "$lockfile"
+}
+
+# Function to configure parallel manifest processing
+function setManifestParallelConfig {
+	local scopeThreshold=${1:-10}
+	local collectionThreshold=${2:-50}
+	local collectionBatchSize=${3:-25}
+	local concurrency=${4:-5}
+
+	MANIFEST_PARALLEL_SCOPE_THRESHOLD=$scopeThreshold
+	MANIFEST_PARALLEL_COLLECTION_THRESHOLD=$collectionThreshold
+	MANIFEST_COLLECTION_BATCH_SIZE=$collectionBatchSize
+
+	echo "Manifest parallel config updated:"
+	echo "  Scope threshold: $MANIFEST_PARALLEL_SCOPE_THRESHOLD"
+	echo "  Collection threshold: $MANIFEST_PARALLEL_COLLECTION_THRESHOLD"
+	echo "  Collection batch size: $MANIFEST_COLLECTION_BATCH_SIZE"
+	echo "  Process pool concurrency: $concurrency"
+
+	# Update process pool concurrency if it's initialized
+	if [[ ${#POOL_ACTIVE_JOBS[@]} -eq 0 && ${#POOL_PENDING_JOBS[@]} -eq 0 ]]; then
+		initProcessPool "$concurrency"
+	fi
 }
 
 # Function to get a collection ID using the cache
@@ -2401,7 +2541,7 @@ function getCollectionIdFromManifestCache {
 
 	# Ensure maps are populated
 	if [[ -z "${MANIFEST_CACHE_MAP[$manifestCksum]:-}" ]]; then
-		populateManifestMaps "$manifest"
+		populateManifestMaps "$manifest" >&2
 	fi
 
 	# Look up scope checksum
@@ -2423,7 +2563,6 @@ function getCollectionIdFromManifestCache {
 	if [[ -z "${collectionId:-}" ]]; then
 		echo "key $combinedKey not found in MANIFEST_CKSUM_COLLECTION_MAP" >&2
 		echo ""
-		exit 1
 		return 1
 	fi
 

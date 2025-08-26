@@ -32,30 +32,10 @@ declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpoint
 # -----------------
 BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
 
-# Scopes -> Collections
-# ----------------------
-#declare -a collection1Arr=("col1" "col2")
-#declare -a collection2Arr=("col1" "col2" "col3")
-#SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
-
-#function runDataLoad {
-#	local collectionsToRunLoad=500
-#	local itemsPerCollection=10
-#
-#	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
-#	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
-#	# Run CBWorkloadgen in parallel
-#	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
-#		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
-#	done
-#	waitForBgJobs
-#	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
-#}
-
 function runDataLoad {
-	local collectionsToRunLoad=500
-	local itemsPerCollection=10
-	local concurrency=5
+	local collectionsToRunLoad=$1
+	local itemsPerCollection=$2
+	local concurrency=10
 
 	initProcessPool $concurrency
 
@@ -74,6 +54,11 @@ declare -a collectionArray=()
 function runTestCase {
 	# TODO MB-68226 is preventing > 4000 from being created
 	local maxCollectionCnt=4000
+
+	# Data load variables
+	local collectionsToRunLoad=500
+	local itemsPerCollection=100
+	local totalItemsCnt=$(($collectionsToRunLoad * $itemsPerCollection))
 
 	echo "============================================================================"
 	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections"
@@ -95,6 +80,9 @@ function runTestCase {
 		collectionArray[${#collectionArray[@]}]="col$i"
 	done
 	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArray[@]})
+
+	# With high number of collections, processing will take time, use paralellism
+	setManifestParallelConfig 1 50 100 5
 
 	setupTopologies
 	if (($? != 0)); then
@@ -127,11 +115,12 @@ function runTestCase {
 	seedInjectXmemNetworkErrors "C2" "B2" "C1" "B1" $SEED_INJ_MAX_NETWORK_FAULT_PERCENT
 
 	trap killAllBgJobs EXIT
-	runDataLoad
+	runDataLoad "$collectionsToRunLoad" "$itemsPerCollection"
 
-	# This large number of collections will not allow data to flow - simply check for timeout messages
-	echo "Waiting 60 seconds to see if pipeline start had errors"
-	sleep 60
+	# This will take a while
+	checkItemCnt "C1" "B1" "$totalItemsCnt"
+	checkItemCnt "C2" "B2" "$totalItemsCnt"
+
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
 

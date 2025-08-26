@@ -62,7 +62,12 @@ function startPendingJobs {
 		POOL_PENDING_JOBS=("${POOL_PENDING_JOBS[@]:1}")
 
 		# Start the job in background
-		echo "Starting job: $jobCommand"
+		# If job command is too long, don't print it
+		if ((${#jobCommand} > 600)); then
+			echo "Starting a long job command (length ${#jobCommand})..."
+		else
+			echo "Starting job command: $jobCommand"
+		fi
 		eval "$jobCommand" &
 		local jobPid=$!
 
