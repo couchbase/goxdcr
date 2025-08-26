@@ -1999,3 +1999,7 @@ const (
 	// FilterExpirationsWithFEKey is a toggle to enable filter expression based filtering on expirations.
 	FilterExpirationsWithFEKey string = "filterExpirationsWithExpression"
 )
+
+const MaxValueLenForLogging = 512
+
+var ValueTooLongForLogging = []byte("...<value too long to display>")

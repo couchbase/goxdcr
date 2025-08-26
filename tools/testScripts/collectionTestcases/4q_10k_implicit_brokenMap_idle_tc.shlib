@@ -25,17 +25,18 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
 
 # Bucket -> Scopes
 # -----------------
-BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+# For this test, first do not create scope for bucket 2
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="")
 
 function runDataLoad {
 	local collectionsToRunLoad=$1
 	local itemsPerCollection=$2
-	local concurrency=10
+	local concurrency=25
 
 	initProcessPool $concurrency
 
@@ -56,12 +57,12 @@ function runTestCase {
 	local maxCollectionCnt=4000
 
 	# Data load variables
-	local collectionsToRunLoad=500
-	local itemsPerCollection=100
+	local collectionsToRunLoad=2000
+	local itemsPerCollection=5
 	local totalItemsCnt=$(($collectionsToRunLoad * $itemsPerCollection))
 
 	echo "============================================================================"
-	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections"
+	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections and broken map"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -73,7 +74,6 @@ function runTestCase {
 	#etcDir=$(findInstallEtcDir)
 	#oldProfile=$(cat $etcDir/couchbase/default_profile)
 	#echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
-	##echo "{max_collections_per_bucket, unlimited}." >>$etcDir/couchbase/default_profile
 	## need to hard reset nodes for ns_server to pick up the new profile
 	#hardResetNodes
 
@@ -109,23 +109,24 @@ function runTestCase {
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
-	seedInjectXmemNetworkErrors "C1" "B1" "C2" "B2" $SEED_INJ_MAX_NETWORK_FAULT_PERCENT
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-	seedInjectMainPipelineDelay "C2" "B2" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
-	seedInjectXmemNetworkErrors "C2" "B2" "C1" "B1" $SEED_INJ_MAX_NETWORK_FAULT_PERCENT
 
 	trap killAllBgJobs EXIT
 	runDataLoad "$collectionsToRunLoad" "$itemsPerCollection"
 
 	# This will take a while
 	checkItemCnt "C1" "B1" "$totalItemsCnt"
-	checkItemCnt "C2" "B2" "$totalItemsCnt"
+
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
 
 	grepForPanics
+	validateBrokenMapExists "C1"
+
+  # TODO - file MB
+	read -p "NEIL DEBUG ready to pause with brokenmap"
 
 	echo "Pausing replication"
 	pauseReplication "C1" "B1" "C2" "B2"

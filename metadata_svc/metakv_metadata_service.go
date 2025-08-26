@@ -179,6 +179,11 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 	var err error
 	var redactedValue []byte
 	valueToPrint := &value
+	var valueLen = len(value)
+
+	if len(value) > base.MaxValueLenForLogging {
+		valueToPrint = &base.ValueTooLongForLogging
+	}
 
 	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("Set(%v)", key), base.DiagInternalThreshold)
 	defer stopFunc()
@@ -207,7 +212,7 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 			return nil
 		} else {
 			redactOnce()
-			meta_svc.logger.Warnf("metakv.Set failed. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
+			meta_svc.logger.Warnf("metakv.Set failed. key=%v, value=%v, valueLen=%v, err=%v\n", key, valueToPrint, valueLen, err)
 			return err
 		}
 	}
@@ -217,7 +222,7 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 
 	if expOpErr != nil {
 		redactOnce()
-		meta_svc.logger.Errorf("metakv.Set failed after max retry. key=%v, value=%v, err=%v\n", key, valueToPrint, err)
+		meta_svc.logger.Errorf("metakv.Set failed after max retry. key=%v, value=%v, valueLen=%v, err=%v\n", key, valueToPrint, valueLen, err)
 		err = expOpErr
 	}
 	return err

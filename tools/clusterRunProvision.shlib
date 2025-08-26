@@ -1483,6 +1483,7 @@ function setupBulkScopeAndCollection {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 	local payload
 	local idx
+	local output
 
 	# Do error checking
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
@@ -1501,12 +1502,20 @@ function setupBulkScopeAndCollection {
 	#echo "For cluster $clusterName bucket $bucketName CREATING scopes and collections with payload: $payload"
 
 	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null
+		output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload")
 	else
 		# For Vagrant, we need to use the VM IP address
 		idx="$(getClusterIdx "$clusterName")"
-		${VSSH[$idx]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H 'Content-Type: application/json' -d '$payload'" >/dev/null 2>&1
+		output=$(${VSSH[$idx]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H 'Content-Type: application/json' -d '$payload'" >/dev/null 2>&1)
 	fi
+
+	if [[ ! -z "${output:-}" ]] && [[ $(echo "$output" | grep -c "error") -gt 0 ]]; then
+    echo "Error creating scopes and collections for bucket $bucketName on cluster $clusterName: $output"
+    exit 1
+  else
+    echo "Successfully created scopes and collections for bucket $bucketName on cluster $clusterName"
+    return 0
+  fi
 }
 
 # inputs
