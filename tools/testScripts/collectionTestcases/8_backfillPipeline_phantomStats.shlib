@@ -88,8 +88,8 @@ function runTestCase {
 	# now re-create collection col3 at C2
 	createCollection "C2" "B2" "S1" "col2"
 	printGlobalScopeAndCollectionInfo
-	echo "Sleep 7sec for the collection manifest to diff latest manifests and raise backfill"
-	sleep 7
+	echo "Sleep 15 sec for the collection manifest to diff latest manifests and raise backfill"
+	sleep 15
 	echo "check for the existance of backfill message"
 	validateInternalLogWithInstance "C1" "$BACKFILL_PIPELINE_START_MSG" 1
 	pauseReplication "C1" "B1" "C2" "B2"
