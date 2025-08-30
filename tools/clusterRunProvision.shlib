@@ -1579,6 +1579,8 @@ function setupTopologies {
 		fi
 	fi
 
+	# Give ns_server some time
+	sleep 5
 	setupBuckets
 	if (($? != 0)); then
 		return $?
