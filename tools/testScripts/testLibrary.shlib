@@ -1916,6 +1916,7 @@ function validateVBTasksProgress {
 			if (($staticCounter == $maxStaticCount)); then
 				echo "VB task has remained the same for $maxStaticCount times"
 				IFS="$OLDIFS"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		fi
@@ -1939,6 +1940,7 @@ function validatePrometheusStatsNon0 {
 
 	if (($count == 0)); then
 		echo "Stat $prometheusStatsName shows 0"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1970,11 +1972,13 @@ function validatePrometheusSourceNodesCnt {
 
 	if [[ -z "${count:-}" ]]; then
 		echo "Stat xdcr_number_of_source_nodes_total not found"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
 	if (($count != expectedCnt)); then
 		echo "Stat xdcr_number_of_source_nodes_total shows $count when expecting $expectedCnt"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
