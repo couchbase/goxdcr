@@ -195,6 +195,7 @@ function runReplicationResume {
 	local expectedMax=$(((($curCkptsFoundDocsCnt + ${#CLUSTER_DEPENDENCY_MAP[@]})) * 2))
 	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $expectedMax)); then
 		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill)... expecting > $curCkptsFoundDocsCnt and <= $expectedMax"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
