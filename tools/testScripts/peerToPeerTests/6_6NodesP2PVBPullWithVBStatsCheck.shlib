@@ -45,9 +45,8 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	echo "RUNNING dataload..."
-	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
-	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
-	waitForBgJobs
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1"
 	echo "RUNNING dataload DONE"
 }
 
@@ -313,12 +312,7 @@ function checkFilteringStatsAreEqual {
 				echo "============================================================================"
 				echo "FAILED"
 				echo "============================================================================"
-				cleanupBucketReplications
-				cleanupBuckets
-				cleanupRemoteClusterRefs
-
-				echo "Cleaning up topology..."
-				restoreClusterBack "C1"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		else
@@ -328,12 +322,7 @@ function checkFilteringStatsAreEqual {
 				echo "============================================================================"
 				echo "FAILED"
 				echo "============================================================================"
-				cleanupBucketReplications
-				cleanupBuckets
-				cleanupRemoteClusterRefs
-
-				echo "Cleaning up topology..."
-				restoreClusterBack "C1"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		fi
@@ -349,12 +338,7 @@ function checkGuardrailStatsAreEqual {
 			echo "============================================================================"
 			echo "FAILED"
 			echo "============================================================================"
-			cleanupBucketReplications
-			cleanupBuckets
-			cleanupRemoteClusterRefs
-
-			echo "Cleaning up topology..."
-			restoreClusterBack "C1"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
@@ -368,12 +352,7 @@ function checkCasPoisonStatsAreEqual {
 			echo "============================================================================"
 			echo "FAILED"
 			echo "============================================================================"
-			cleanupBucketReplications
-			cleanupBuckets
-			cleanupRemoteClusterRefs
-
-			echo "Cleaning up topology..."
-			restoreClusterBack "C1"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done

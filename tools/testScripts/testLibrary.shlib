@@ -1349,6 +1349,7 @@ function dumpDebugInfoBeforeExit {
 		getGoroutinesStack "$clusterName" >${testOutputDir}/$clusterName.pprof.log
 		getGoHeap "$clusterName" >${testOutputDir}/$clusterName.hprof.log
 		getInternalNodeXdcrLog "$clusterName" >${testOutputDir}/node${clusterName}_xdcrLog.log
+		getInternalNodeMemcachedLog "$clusterName" >${testOutputDir}/node${clusterName}_memcachedLog.log
 	done
 }
 
