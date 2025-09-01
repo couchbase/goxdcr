@@ -587,12 +587,24 @@ function setupClusterWithN1QL {
 		echo "SETTING up cluster name $clusterName on port $port with hostIP $hostIP"
 
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
+		if (($? != 0)); then
+			echo "Node $port not found. Skipping cluster_run XDCR init"
+			exit 1
+		fi
 		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostIP" >/dev/null 2>&1
+		if (($? != 0)); then
+			echo "non-0 error when renaming node"
+			exit 1
+		fi
 		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv%2Cn1ql >/dev/null 2>&1
+		if (($? != 0)); then
+			echo "non-0 error when setting up services"
+			exit 1
+		fi
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
 		if (($? != 0)); then
 			echo "non-0 error when setting up cluster"
-			return $?
+			exit 1
 		fi
 
 		# Vagrant, set up alternate address so cbworkloadgen can run from dev machine onto vagrants
