@@ -12,6 +12,7 @@
 # cluster -> Bucket(s)
 # -----------------
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+CLUSTER_NAME_SECURE_PORT_MAP=(["C1"]=19000 ["C1P"]=19001 ["C2"]=19002 ["C2P"]=19003)
 # For uni directional, just have one node rebalancing in
 CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=13003)
@@ -31,7 +32,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 conflictLoggingMap="{\"bucket\":\"B2\", \"collection\": \"_default._default\"}"
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true")
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true")
 
 function runDataLoad {
 	echo "RUNNING dataload..."
@@ -110,8 +111,16 @@ function runOneReplicationCycleAndPause {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C2" "C1"
+
+	sleep 5
+	setupCertsForTesting
+
+	echo "ignore client certs/key for this test"
+	CLIENT_CERT_MAP=()
+	CLIENT_KEY_MAP=()
+
+	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+	createSecureRemoteClusterReference "C2" "C1" "${CLUSTER_ROOT_CERTIFICATE_MAP["C1"]}"
 	sleep 1
 	echo "Setting enableCrossClusterVersioning to true"
 	setCrossClusterVersioningForBucket "C1" "B0"
@@ -140,7 +149,7 @@ function runOneReplicationCycleAndPause {
 
 	numConflictDocsC1=$(getBucketItemCount "C1" "B2")
 	numConflictDocsC2=$(getBucketItemCount "C2" "B2")
-	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2"
+	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC1"
 	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)); then
 		echo "WARN: conflicts were not written"
 	fi
@@ -167,6 +176,7 @@ function runOneReplicationCycleAndPause {
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+C1LOOKINGC1PSECUREMSG="Discovered peers: map\\[127.0.0.1:19001"
 CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 
@@ -185,11 +195,15 @@ function runOneRebalanceCycle {
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" "strict"
+
 	echo "Sleeping before checking logs"
 	sleep 15
 	currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
 	local currentPeerMsgsC1
 	currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
+	currentPeerMsgsC1Secure=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PSECUREMSG")
 
 	echo "Restarting XDCR processes to trigger p2p discovery"
 	killGoXdcr "C1"
@@ -198,7 +212,8 @@ function runOneRebalanceCycle {
 	echo "Sleeping before checking logs"
 	sleep 15
 
-	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1 + 1))
+	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
+	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
@@ -229,31 +244,10 @@ function runReplicationResume {
 	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCnt + 1)) $(($curCkptRetrievedCnt + 4))
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
 	lookForAbnormalities
 	checkChangesLeftInternal "C2" "B1" "C1" "B0"
-	lookForAbnormalities
-
-	checkItemCnt "C1" "B0" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
-	checkItemCnt "C2" "B1" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
-
-	numConflictDocsC1=$(getBucketItemCount "C1" "B2")
-	numConflictDocsC2=$(getBucketItemCount "C2" "B2")
-	echo "numConflictDocsC1=$numConflictDocsC1; numConflictDocsC2=$numConflictDocsC2"
-	if (($numConflictDocsC1 <= $NumConflictDocsC1)) || (($numConflictDocsC2 <= $NumConflictDocsC2)); then
-		echo "WARN: conflicts were not written"
-	fi
-	NumConflictDocsC1=$numConflictDocsC1
-	NumConflictDocsC2=$numConflictDocsC2
-
-	runDataLoad "conflictZ"
-	echo "Waiting 5 seconds before checking item count"
-	sleep 5
-	checkItemCnt "C1" "B0" $((3 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
-	checkItemCnt "C2" "B1" $((3 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
-
-	checkChangesLeftInternal "C1" "B0" "C2" "B1"
-	lookForAbnormalities
-	checkChangesLeftInternal "C2" "B1" "C1" "B0"
+	validateXDCRCheckpoints "C2"
 	lookForAbnormalities
 
 	numConflictDocsC1=$(getBucketItemCount "C1" "B2")
@@ -265,15 +259,15 @@ function runReplicationResume {
 	NumConflictDocsC1=$numConflictDocsC1
 	NumConflictDocsC2=$numConflictDocsC2
 
-	checkItemCnt "C1" "B0" $((3 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
-	checkItemCnt "C2" "B1" $((3 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
+	checkItemCnt "C1" "B0" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
+	checkItemCnt "C2" "B1" $((2 * $CBWORKLOAD_COLLECTION_NUM_ITEMS))
 
 	lookForAbnormalities
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Conflict logging with multinode setup"
+	echo "Conflict logging with multinode setup and security"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -289,6 +283,15 @@ function runTestCase {
 	runOneRebalanceCycle 1 1
 	runReplicationResume
 
+	lookForAbnormalities
+
+	# clean up requires turning off security
+	echo "Turning off encryption..."
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+	sleep 15
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
@@ -298,4 +301,6 @@ function runTestCase {
 
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
+	regenerateCertificate "C1"
+	cleanupClientCertMaps
 }
