@@ -231,8 +231,8 @@ function executeTxn {
 }
 
 function ensureAllStatsAre0Initially {
-  local clusterName=$1
-  local sourceBucketName=$2
+	local clusterName=$1
+	local sourceBucketName=$2
 
 	for statKey in $(echo ${!filteringStatsBefore[@]}); do
 		if (($(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey) != 0)); then

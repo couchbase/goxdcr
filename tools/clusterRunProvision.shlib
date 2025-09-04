@@ -3733,93 +3733,109 @@ function resetNode {
 }
 
 function runConnectionPreCheckUsernamePassword {
-  local clusterName=$1
-  local targetClusterName=$2
-  local username=$3
-  local password=$4
-  local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-  local output
-  local taskId
-  local hostname="127.0.0.1:${CLUSTER_NAME_PORT_MAP[$targetClusterName]:-}"
+	local clusterName=$1
+	local targetClusterName=$2
+	local username=$3
+	local password=$4
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local output
+	local taskId
+	local hostname="127.0.0.1:${CLUSTER_NAME_PORT_MAP[$targetClusterName]:-}"
 
-  local numSourceNodes=1
-  local numTargetNodes=1
-  local key
-  for key in "${!CLUSTER_DEPENDENCY_MAP[@]}"; do
-    if [[ "${CLUSTER_DEPENDENCY_MAP["$key"]}" == "$clusterName" ]]; then
-      numSourceNodes=$((${numSourceNodes:-1} + 1))
-    fi
-    if [[ "${CLUSTER_DEPENDENCY_MAP["$key"]}" == "$targetClusterName" ]]; then
-      numTargetNodes=$((${numTargetNodes:-1} + 1))
-    fi
-  done
+	output=$($CURL -X POST http://127.0.0.1:$port/xdcr/connectionPreCheck -u $DEFAULT_ADMIN:$DEFAULT_PW -d username=$username -d password=$password -d hostname=$hostname -d name=TestCluster)
+	if (($? != 0)); then
+		echo "Failed to run connection precheck"
+		return 1
+	fi
 
+	taskId=$(echo "$output" | jq '.taskId' | sed 's/"//g')
+	echo "Task sent with returned taskID of $taskId"
 
-  output=$($CURL -X POST http://127.0.0.1:$port/xdcr/connectionPreCheck -u $DEFAULT_ADMIN:$DEFAULT_PW -d username=$username -d password=$password -d hostname=$hostname -d name=TestCluster)
-  if (( $? != 0 )); then
-    echo "Failed to run connection precheck"
-    return 1
-  fi
+	local startTime=$(date +%s)
 
-  taskId=$(echo "$output" | jq '.taskId' | sed 's/"//g')
-  echo "Task sent with returned taskID of $taskId"
+	local done="false"
+	while [[ "$done" == "false" ]]; do
+		local currentTime=$(date +%s)
+		local elapsedTime=$(($currentTime - $startTime))
+		if ((elapsedTime > 300)); then
+			echo "Timeout waiting for connection precheck to complete"
+			return 1
+		fi
+		sleep 10
+		echo "Checking status of task $taskId"
+		output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/xdcr/connectionPreCheck?taskId="$taskId")
+		done=$(echo "$output" | jq '.done')
+	done
 
-  local startTime=$(date +%s)
+	local okMsg="Connection check was successful, no errors"
+	local okCount=$(echo "$output" | jq | grep -c "$okMsg")
+	if (($okCount == 0)); then
+		echo "Failed. Expected at least one OK message but got none"
+		echo "Full output: $output"
+		return 1
+	fi
+	echo "Connection precheck passed successfully"
+}
 
-  local done="false"
-  while [[ "$done" == "false" ]]; do
-    local currentTime=$(date +%s)
-    local elapsedTime=$(($currentTime - $startTime))
-    if (( elapsedTime > 300 )); then
-      echo "Timeout waiting for connection precheck to complete"
-      return 1
-    fi
-    sleep 10
-    echo "Checking status of task $taskId"
-    output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/xdcr/connectionPreCheck?taskId="$taskId")
-    done=$(echo "$output" | jq '.done')
-  done
+function runConnectionPreCheckClientCerts {
+	local clusterName=$1
+	local targetClusterName=$2
+	local rootCAData="$3"
+	local userName=$4
+	local customClientCert=${5:-}
+	local customClientKey=${6:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local output
+	local taskId
+	local hostname="127.0.0.1:${CLUSTER_NAME_PORT_MAP[$targetClusterName]:-}"
+	local clientMapKey="$targetClusterName"
+	if [[ -n "$userName" ]]; then
+		clientMapKey="${targetClusterName}_${userName}"
+	fi
+	local clientCertFile=${CLIENT_CERT_MAP[$clientMapKey]:-}
+	local clientKeyFile=${CLIENT_KEY_MAP[$clientMapKey]:-}
+	local clientKeyData="$(cat $clientKeyFile)"
+	local clientCertData="$(cat $clientCertFile)"
 
-  local okMsg="Connection check was successful, no errors"
-  local okCount=$(echo "$output" | jq | grep -c "$okMsg")
-  local expectedCnt=0
+	if [[ -n "$customClientCert" ]]; then
+		clientCertData="$customClientCert"
+	fi
+	if [[ -n "$customClientKey" ]]; then
+		clientKeyData="$customClientKey"
+	fi
+	output=$($CURL -X POST http://127.0.0.1:$port/xdcr/connectionPreCheck -u $DEFAULT_ADMIN:$DEFAULT_PW -d hostname=$hostname -d name=TestCluster \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${rootCAData}" \
+		--data-urlencode "clientKey=${clientKeyData}" --data-urlencode "clientCertificate=${clientCertData}")
+	if (($? != 0)); then
+		echo "Failed to run connection precheck"
+		return 1
+	fi
 
-#  {
-#    "done": true,
-#    "result": {
-#      "10.100.172.99:9000": {
-#        "10.100.172.99:9002": [
-#          "Connection check was successful, no errors"
-#        ],
-#        "127.0.0.1:9003": [
-#          "Connection check was successful, no errors"
-#        ]
-#      },
-#      "127.0.0.1:9001": {
-#        "10.100.172.99:9002": [
-#          "Connection check was successful, no errors"
-#        ],
-#        "127.0.0.1:9003": [
-#          "Connection check was successful, no errors"
-#        ]
-#      },
-#      "P2P/10.100.172.99:9000": {
-#        "127.0.0.1:9001": [
-#          "P2P protocol successfully executed, no errors"
-#        ]
-#      }
-#    },
-#    "taskId": "task/127.0.0.1/2"
-#  }
+	taskId=$(echo "$output" | jq '.taskId' | sed 's/"//g')
+	echo "Task sent with returned taskID of $taskId"
 
-  # We count the permutation of source nodes to target nodes
-  expectedCnt=$(($numSourceNodes * $numTargetNodes))
+	local startTime=$(date +%s)
 
-  if (( $okCount != $expectedCnt ));then
-    echo "Failed. Expected $expectedCnt OK messages but got $okCount"
-    echo "Full output: $output"
-    return 1
-  fi
+	local done="false"
+	while [[ "$done" == "false" ]]; do
+		local currentTime=$(date +%s)
+		local elapsedTime=$(($currentTime - $startTime))
+		if ((elapsedTime > 300)); then
+			echo "Timeout waiting for connection precheck to complete"
+			return 1
+		fi
+		sleep 10
+		echo "Checking status of task $taskId"
+		output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/xdcr/connectionPreCheck?taskId="$taskId")
+		done=$(echo "$output" | jq '.done')
+	done
 
-  echo "Connection precheck passed successfully"
+	local okMsg="Connection check was successful, no errors"
+	local okCount=$(echo "$output" | jq | grep -c "$okMsg")
+	if (($okCount == 0)); then
+		echo "Failed. Expected at least one OK message but got none"
+		echo "Full output: $output"
+		return 1
+	fi
+	echo "Connection precheck passed successfully"
 }

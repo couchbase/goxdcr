@@ -61,6 +61,10 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running basic replication with certificate rotation (mTLS)"
 	echo "============================================================================"
+
+	# Previous test may have set up some certs
+	hardResetNodes
+
 	setupTopologies
 	if (($? != 0)); then
 		exit 1
@@ -106,13 +110,21 @@ function runTestCase {
 
 	createCertsForUser "C2" "$DEFAULT_XDCR_INBOUND"
 
-	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
+	runConnectionPreCheckClientCerts "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}" "$DEFAULT_XDCR_INBOUND"
+	if (($? != 0)); then
+		echo "Connection pre-check with correct client cert failed"
+		exit 1
+	fi
+
 	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}" "$DEFAULT_XDCR_INBOUND"
 	sleep 5
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	runDataLoad
+	sleep 5
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 
+	echo "Staging new credentials"
 	# stage credentials
 	port=${CLUSTER_NAME_PORT_MAP["C1"]:-}
 	curl -X POST -u "$DEFAULT_ADMIN:$DEFAULT_PW" http://127.0.0.1:$port/pools/default/remoteClusters/C2 \
@@ -120,6 +132,7 @@ function runTestCase {
 		--data-urlencode "clientCertificate=$(<"${CLIENT_CERT_MAP["C2"]}")" \
 		--data-urlencode "clientKey=$(<"${CLIENT_KEY_MAP["C2"]}")"
 
+	echo "Introducing auth errors by deleting the root CA that signed the XDCR_Inbound certificate"
 	# introduce auth errors by deleting the root CA that signed the XDCR_Inbound certificate
 	port=${CLUSTER_NAME_PORT_MAP["C2"]:-}
 	curl -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/pools/default/trustedCAs/2
@@ -127,9 +140,23 @@ function runTestCase {
 	echo "Wait for 15sec before grepping for errors"
 	sleep 15
 
+	# original client cert should fail now
+	runConnectionPreCheckClientCerts "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}" "$DEFAULT_XDCR_INBOUND"
+	if (($? == 0)); then
+		echo "Connection pre-check with old client cert succeeded but should have failed"
+		exit 1
+	fi
+
 	validateLogWithInstance "C1" "$CREDENTIALS_CHANGE_ERR_MSG" "0"
 
 	checkRemoteClusterConnectivity "C1"
+
+	# run precheck with new client cert
+	runConnectionPreCheckClientCerts "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}" "$DEFAULT_XDCR_INBOUND" "$(<"${CLIENT_CERT_MAP["C2"]}")" "$(<"${CLIENT_KEY_MAP["C2"]}")"
+	if (($? != 0)); then
+		echo "Connection pre-check with correct client cert failed"
+		exit 1
+	fi
 
 	# run data load again
 	runDataLoad
