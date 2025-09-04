@@ -133,6 +133,7 @@ function runTestCase {
 	echo "Sleeping 15 seconds for collectionsManifestSvc to pull new manifest"
 	sleep 15
 
+	validateInternalLogWithInstance "C1" "$GETHIGHSEQNO_COLID_DNE" 0
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

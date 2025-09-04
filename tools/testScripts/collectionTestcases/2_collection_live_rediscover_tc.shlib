@@ -243,6 +243,7 @@ function runTestCase {
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
+	validateInternalLogWithInstance "C1" "$GETHIGHSEQNO_COLID_DNE" 0
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -163,6 +163,8 @@ function runTestCase {
 		exit 1
 	fi
 
+	validateInternalLogWithInstance "C1" "$REPL_MISSING_WHEN_STARTING" 0
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

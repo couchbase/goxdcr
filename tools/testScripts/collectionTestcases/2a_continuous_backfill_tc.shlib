@@ -130,6 +130,7 @@ function deleteAndRecreateBackfillMultiples {
 
 		validateInternalLogWithInstance "C1" "$BAD_MAGIC_MSG" "0"
 		validateDatapoolFailIs0 "C1" "B1" "B2"
+		validateInternalLogWithInstance "C1" "$GETHIGHSEQNO_COLID_DNE" 0
 
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15

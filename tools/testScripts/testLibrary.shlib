@@ -44,6 +44,8 @@ BACKFILL_DEL_OP="metakv operation on backfill spec op=2"
 BACKFILL_CLEANED="BackfillPipelineClean"
 CHANGES_LEFT_0_WAIT_SECS=10
 VAGRANT_LOG_DIR="/opt/couchbase/var/lib/couchbase/logs"
+GETHIGHSEQNO_COLID_DNE="getHighSeqno could not find collection ID"
+REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline"
 
 # These should be imported after clusterRunProvision script
 
