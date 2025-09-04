@@ -737,7 +737,7 @@ func DecodeRemoteClusterStagingRequest(request *http.Request, remoteClusterName 
 	}
 	// If there are invalid parameters, build an error message.
 	if len(invalidParams) > 0 {
-		err = fmt.Errorf("invalid parameters provided: %v. Valid parameters for staging are '%s', '%s', '%s', '%s'",
+		errorsMap[base.ErrKeyInvalidStagingParameters] = fmt.Errorf("invalid parameters provided: %v. Valid parameters for staging are '%s', '%s', '%s', '%s'",
 			invalidParams, base.RemoteClusterUserName, base.RemoteClusterPassword,
 			base.RemoteClusterClientCertificate, base.RemoteClusterClientKey)
 		return

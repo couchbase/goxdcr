@@ -349,6 +349,7 @@ const (
 	RestrictHostnameReplace        = "restrictHostnameReplace"
 	StageCredentials               = "stage"
 	ErrKeyInvalidClientCert        = "InvalidClientCertKeyPair"
+	ErrKeyInvalidStagingParameters = "InvalidStagingParameters"
 )
 
 // secure type for remote cluster reference
