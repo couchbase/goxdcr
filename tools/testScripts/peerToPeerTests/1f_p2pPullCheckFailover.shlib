@@ -239,7 +239,7 @@ function runTestCaseWithUser {
 
 		if [[ $globalMaxGoroutinesIncreased -gt $globalMaxIncreaseThreshold ]]; then
 			echo "Global max goroutines increased $globalMaxGoroutinesIncreased times, potential leak"
-			getGoroutinesStack "C1P1" | head -n 40
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
