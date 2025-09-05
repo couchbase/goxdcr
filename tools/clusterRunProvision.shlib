@@ -1036,7 +1036,7 @@ function createBucket {
 	local ramQuotaCheck=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
 	if [[ -z "$ramQuotaCheck" ]]; then
 		echo "Missing ramQuota for $bucketName"
-		return 1
+		exit 1
 	fi
 	getBucketPropertiesRESTString
 
@@ -1045,7 +1045,8 @@ function createBucket {
 	if ((!$? == 0)); then
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]} >/dev/null 2>&1
 		if (($? != 0)); then
-			return $?
+			dumpDebugInfoBeforeExit
+			exit 1
 		fi
 		recordNamespaceCreated "$clusterName" "$bucketName"
 	fi
