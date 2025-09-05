@@ -188,6 +188,7 @@ function runTestCase {
 	local nonCkptVBs=$(($resumeFrom0CntNewC1 - $resumeFrom0CntOrigC1 - $resumeFrom0CntOrigC1P0))
 	if (($nonCkptVBs > 0)); then
 		echo "TEST FAILED: After failover, Source node 9000 resumed from sequence number 0 for $nonCkptVBs VBs instead of resuming from checkpoints pushed by node 9001"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
