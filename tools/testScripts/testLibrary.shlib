@@ -508,6 +508,7 @@ function getSpecificInternalSettings {
 function killGoXdcr {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local sourceXdcrPort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
 	if [[ -z "$sourcePort" ]]; then
 		echo "Unable to kill goxdcr as source port is not found"
@@ -515,6 +516,14 @@ function killGoXdcr {
 
 	echo "Killing GoXDCR for $clusterName with port $sourcePort..."
 	ps -ef | grep goxdcr | grep $sourcePort | awk '{print $2}' | xargs kill
+
+	local checkCode=1
+	local currentTime=$(date +%s)
+	while (($checkCode != 0)); do
+		sleep 5
+		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourceXdcrPort/pools/default/replications >/dev/null 2>&1
+		checkCode=$?
+	done
 }
 
 function killMemcached {
