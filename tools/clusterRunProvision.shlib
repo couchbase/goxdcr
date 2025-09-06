@@ -1030,6 +1030,7 @@ function createBucket {
 	local clusterName=$1
 	local bucketName=$2
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local output
 
 	getPropertiesFromBucketNamePropertyMap "$bucketName"
 	echo "For cluster $clusterName CREATING bucket $bucketName with properties $(printBucketPropertiesResults)"
@@ -1043,8 +1044,19 @@ function createBucket {
 	# Only run the bucket create command if it hasn't been executed before
 	checkNamespaceCreated "$clusterName" "$bucketName"
 	if ((!$? == 0)); then
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]} >/dev/null 2>&1
-		if (($? != 0)); then
+		local retry=0
+		local max_retry=5
+		while ((retry < max_retry)); do
+			output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName "${getBucketOutArr[@]}" 2>&1)
+			if (($? == 0)); then
+				break
+			fi
+			echo "Retrying bucket creation for $bucketName. Attempt $((retry + 1))/$max_retry. Last error:"
+			echo "$output"
+			sleep 5
+			retry=$((retry + 1))
+		done
+		if ((retry == max_retry)); then
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
