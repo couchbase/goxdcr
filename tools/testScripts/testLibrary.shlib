@@ -718,7 +718,7 @@ function clearInternalNodeXdcrLog {
 		return 1
 	fi
 
-	echo "" >$goxdcrLogFile
+	echo "" >$goxdcrLogFile && sync "$goxdcrLogFile"
 }
 
 function waitForOneReplicationToBeDeleted {
