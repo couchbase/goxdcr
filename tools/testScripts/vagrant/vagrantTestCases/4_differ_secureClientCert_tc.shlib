@@ -208,6 +208,9 @@ function runTestCase {
 			xdcrDifferDir="/opt/couchbase/bin"
 			loadVersion "$srcVersionToTest" "$tgtVersionToTest"
 
+			unset CLUSTER_NAME_BUCKET_DONE_MAP
+			declare -gA CLUSTER_NAME_BUCKET_DONE_MAP
+
 			# Bucket properties
 			cleanupBucketNamePropertyMap
 			unset Bucket1Property
