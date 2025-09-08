@@ -31,7 +31,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty_128
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty_128
 
 conflictLoggingMap="{\"bucket\":\"B2\", \"collection\": \"_default._default\"}"
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true")
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true")
 
 function fetchClogStatsBefore {
 	getClogStatsBefore "C1" "B0" "B1"

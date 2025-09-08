@@ -30,15 +30,15 @@ insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty_1024 # conflict buck
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty_128  # bucket to test conflict records are not replicated
 
 conflictLoggingMap1="{\"bucket\":\"B4\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B4\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B4\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap1)
+declare -A BucketReplProperties1=(["replicationType"]="continuous" ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap1)
 
 conflictLoggingMap2="{\"bucket\":\"B5\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B5\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B5\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap2)
+declare -A BucketReplProperties2=(["replicationType"]="continuous" ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap2)
 
 conflictLoggingMap3="{\"bucket\":\"B6\", \"collection\": \"_default._default\", \"loggingRules\": {\"S1.col1\": {\"bucket\":\"B6\", \"collection\": \"S1.col1\", \"S1.col2\": {\"bucket\":\"B6\", \"collection\": \"S1.col2\"}}}}"
-declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap3)
+declare -A BucketReplProperties3=(["replicationType"]="continuous" ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap3)
 
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true) # replication to test conflict records are not replicated
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["statsInterval"]=500 ["filterBinary"]=true) # replication to test conflict records are not replicated
 
 # Bucket -> Scopes
 # -----------------
@@ -182,7 +182,7 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=30
+	sleepTime=60
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 
@@ -197,8 +197,8 @@ function testReplicationWithConflictLogging {
 	pauseReplication "C2" "B2" "C3" "B3"
 	pauseReplication "C3" "B3" "C2" "B2"
 
-	echo "sleep 30seconds for pause to complete"
-	sleep 30
+	echo "sleep 60seconds for pause to complete"
+	sleep 60
 
 	# fetch clog stats before replication resume
 	fetchClogStatsBefore
@@ -220,8 +220,8 @@ function testReplicationWithConflictLogging {
 	resumeReplication "C2" "B2" "C3" "B3"
 	resumeReplication "C3" "B3" "C2" "B2"
 
-	echo "sleeping 30seconds for backfill to finish"
-	sleep 30
+	echo "sleeping 60seconds for backfill to finish"
+	sleep 60
 
 	waitForChangesLeft0ForTopology
 
