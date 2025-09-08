@@ -701,6 +701,54 @@ function getInternalNodeMetaKvLog {
 	cat $metaKvLog
 }
 
+function getInternalNodeNsServerInfoLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "info.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local info=${logfileDir}/info.log
+	if ! [[ -f "$info" ]]; then
+		echo "Unable to find file $info"
+		return 1
+	fi
+
+	cat $info
+}
+
+function getInternalNodeNsServerDebugLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "debug.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local debug=${logfileDir}/debug.log
+	if ! [[ -f "$debug" ]]; then
+		echo "Unable to find file $debug"
+		return 1
+	fi
+
+	cat $debug
+}
+
 # Used only if the log needs to be clean for parsing purposes
 function clearInternalNodeXdcrLog {
 	local clusterName=$1
@@ -1361,6 +1409,9 @@ function dumpDebugInfoBeforeExit {
 		getGoHeap "$clusterName" >${testOutputDir}/$clusterName.hprof.log
 		getInternalNodeXdcrLog "$clusterName" >${testOutputDir}/node${clusterName}_xdcrLog.log
 		getInternalNodeMemcachedLog "$clusterName" >${testOutputDir}/node${clusterName}_memcachedLog.log
+		getInternalNodeNsServerInfoLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_info.log
+		getInternalNodeNsServerDebugLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_debug.log
+		getInternalNodeMetaKvLog "$clusterName" >${testOutputDir}/node${clusterName}_metakv.log
 	done
 }
 
