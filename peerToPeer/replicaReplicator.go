@@ -273,13 +273,17 @@ func (r *ReplicaReplicatorImpl) run() {
 }
 
 func (r *ReplicaReplicatorImpl) pullAndSend() error {
+	stopFunc := r.utils.StartDiagStopwatch("ReplicaReplicator_populateInfo", base.DiagInternalThreshold)
 	populateMap := r.populateInformationFromAgents()
+	stopFunc()
 	if len(populateMap) == 0 {
 		// Nothing to send
 		return nil
 	}
 
+	stopFunc2 := r.utils.StartDiagStopwatch("ReplicaReplicator_reOrganize", base.DiagInternalThreshold)
 	toSendMap, errMap := r.reOrganizePopulateMap(populateMap)
+	stopFunc2()
 	if len(errMap) > 0 {
 		return errors.New(base.FlattenErrorMap(errMap))
 	}
@@ -288,7 +292,9 @@ func (r *ReplicaReplicatorImpl) pullAndSend() error {
 }
 
 func (r *ReplicaReplicatorImpl) pullAndSendSpecific(replId string) error {
+	stopFunc := r.utils.StartDiagStopwatch("ReplicaReplicator_populateInfoFromOne", base.DiagInternalThreshold)
 	populateMap, err := r.populateInformationFromOneAgent(replId)
+	stopFunc()
 	if err != nil {
 		return err
 	}
@@ -297,7 +303,9 @@ func (r *ReplicaReplicatorImpl) pullAndSendSpecific(replId string) error {
 		return nil
 	}
 
+	stopFunc2 := r.utils.StartDiagStopwatch("ReplicaReplicator_reOrganize", base.DiagInternalThreshold)
 	toSendMap, errMap := r.reOrganizePopulateMap(populateMap)
+	stopFunc2()
 	if len(errMap) > 0 {
 		return errors.New(base.FlattenErrorMap(errMap))
 	}
