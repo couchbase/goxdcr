@@ -3321,7 +3321,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 	}
 
-	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash)
+	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash, ckmgr.logger)
 
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
@@ -3695,10 +3695,11 @@ func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, src
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
 
-func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, currentReinitHash string) []metadata.VBsCkptsDocMap {
+func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, currentReinitHash string, logger *log.CommonLogger) []metadata.VBsCkptsDocMap {
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
+	reinitHashRecordMap := make(map[uint16]map[string]bool)
 
 	for i, ckptsMap := range ckptsMaps {
 		switch i {
@@ -3726,12 +3727,19 @@ func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, c
 				}
 
 				if ckptRecord.PipelineReinitHash != currentReinitHash {
+					if _, exists := reinitHashRecordMap[vbno]; !exists {
+						reinitHashRecordMap[vbno] = make(map[string]bool)
+					}
+					reinitHashRecordMap[vbno][ckptRecord.PipelineReinitHash] = true
 					continue
 				}
 
 				combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
 			}
 		}
+	}
+	if len(reinitHashRecordMap) > 0 {
+		logger.Warnf("filterCkptsBasedOnPipelineReinitHash based on current hash %v removed records with reinitHashes: %v", currentReinitHash, reinitHashRecordMap)
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
@@ -4074,7 +4082,7 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash)
+	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash, ckmgr.logger)
 
 	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {

@@ -103,7 +103,8 @@ func TestCombineFailoverlogs(t *testing.T) {
 	assert.Len(result[1].Checkpoint_records, 2)
 	assert.Len(result[2].Checkpoint_records, 1)
 
-	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash")
+	logger := log.NewLogger("", nil)
+	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash", logger)
 	hashFilteredResult := hashFilteredResults[0]
 	assert.Len(hashFilteredResult, len(result))
 
