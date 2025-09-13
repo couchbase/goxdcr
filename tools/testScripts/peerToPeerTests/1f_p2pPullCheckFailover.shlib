@@ -246,7 +246,7 @@ function runTestCaseWithUser {
 	done
 
 	validateInternalLogWithInstance "C1P1" "$PRE_REPLICATE_ERR_MSG" 0
-	validateInternalLogWithInstanceWithGrepV "C1P1" "$PRE_REPLICATE_CKPT_PULL_ERR_MSG" "$OPERATION_INTERRUPTED"  0
+	validateInternalLogWithInstanceWithGrepV "C1P1" "$PRE_REPLICATE_CKPT_PULL_ERR_MSG" "$OPERATION_INTERRUPTED" 0
 
 	echo "============================================================================"
 	echo "PASSED"

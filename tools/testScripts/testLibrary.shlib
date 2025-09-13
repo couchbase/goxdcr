@@ -766,10 +766,9 @@ function clearInternalNodeXdcrLog {
 		return 1
 	fi
 
-	# First kill goxdcr to release its file handle
-	killGoXdcr "$clusterName" > /dev/null 2>&1
-	# Then clear the log file and ensure it's flushed to disk
-	echo "" >$goxdcrLogFile && sync "$goxdcrLogFile"
+	local gcFileName=${goxdcrLogFile}.$(date +%s)
+	mv $goxdcrLogFile $gcFileName
+	rm $gcFileName
 }
 
 function waitForOneReplicationToBeDeleted {
