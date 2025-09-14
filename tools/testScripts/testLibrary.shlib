@@ -890,7 +890,7 @@ function validateInternalLogWithInstanceWithGrepV {
 		exit 1
 	fi
 
-	count=$(echo "$logs" | grep -c "$grepStr" | grep -v "$inverseStr")
+	count=$(echo "$logs" | grep "$grepStr" | grep -v "$inverseStr" | wc -l)
 	if (($count != $instanceCnt)); then
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for \"$grepStr\" without \"$inverseStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
