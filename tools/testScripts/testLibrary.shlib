@@ -365,6 +365,7 @@ function waitForChangesLeft0 {
 	done
 
 	echo "changes_left never went to zero for $1.$2 -> $3.$4"
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
