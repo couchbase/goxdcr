@@ -224,12 +224,13 @@ function runTestCaseWithUser {
 	local currentMaxGoroutines=0
 	local globalMaxGoroutinesIncreased=0
 	local globalMaxIncreaseThreshold=5
+	local pauseResumeSleepTime=10
 	for ((i = 0; i < 30; i++)); do
 		echo "Running repeated pause and resume to test for goroutine leak $((i + 1)) of 30"
 		pauseReplication "C1" "B0" "C2" "B1"
-		sleep 5
+		sleep $pauseResumeSleepTime
 		resumeReplication "C1" "B0" "C2" "B1"
-		sleep 5
+		sleep $pauseResumeSleepTime
 
 		currentMaxGoroutines=$(getGoroutinesStack "C1P1" | grep total | awk '{print $NF}')
 		if [[ $currentMaxGoroutines -gt $globalMaxGoroutines ]]; then
