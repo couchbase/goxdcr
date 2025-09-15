@@ -141,7 +141,7 @@ function runTestCase {
 	# By this point backfill should exist
 	checkNoErrorInErrorList "C1"
 
-	local delaySec=300
+	local delaySec=600
 	echo "Force a node C1P to be respond to manifest changes after $delaySec seconds"
 	local c1pPort=${CLUSTER_NAME_PORT_MAP["C1P"]}
 	# Set the push interval to 1 min as well as now is the time to receive the push, not before
@@ -168,6 +168,8 @@ function runTestCase {
 	local c1CntOrig=0
 	local c1Cnt
 	local c1Log
+	local timeoutCounter=0
+	local timeoutMaxCount=30
 	c1Log=$(getInternalNodeXdcrLog "C1")
 	c1CntOrig=$(echo "$c1Log" | grep -c "$P2P_BACKFILL_PUSH_RECEIVED_MSG")
 	c1Cnt=$c1CntOrig
@@ -175,6 +177,12 @@ function runTestCase {
 		c1Log=$(getInternalNodeXdcrLog "C1")
 		c1Cnt=$(echo "$c1Log" | grep -c "$P2P_BACKFILL_PUSH_RECEIVED_MSG")
 		sleep 20
+		timeoutCounter=$(($timeoutCounter + 1))
+		if (($timeoutCounter >= $timeoutMaxCount)); then
+			echo "Timed out waiting for C1 to receive a push from C1P"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
 	done
 	echo "C1 has received a push from C1P that should have an out-of-date backfill information"
 
