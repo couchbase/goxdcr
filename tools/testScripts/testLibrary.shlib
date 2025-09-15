@@ -1485,7 +1485,7 @@ function setupCertificateAuthority {
 	# intended to be self-signed, meaning that it will not be vouched for by any other authority. This means that it can
 	# be created directly, based on the existing private key ca.key, without assistance from a third party.
 	openssl req -new -x509 -days 3650 -sha256 -key "./${caFileName}.key" -out "./${caFileName}.pem" \
-		-subj "/CN=${CN}"
+		-subj "/CN=${CN}" -addext "basicConstraints=CA:TRUE"
 	#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
 	# -subj "/CN=${CN}"
 
