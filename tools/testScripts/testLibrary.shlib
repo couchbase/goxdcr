@@ -1783,6 +1783,7 @@ function validateLastBackfillContainsVBTask {
 	local result=$?
 	if ((!$result == 0)); then
 		echo "Unable to parse UUID return code $result" >&2
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1790,6 +1791,8 @@ function validateLastBackfillContainsVBTask {
 	inputToInternal=$(getInternalNodeXdcrLog "$logNodeName")
 	echo "$inputToInternal" | validateVBTaskExistsInternnal "$vb"
 	if ((!$? == 0)); then
+		echo "Unable to validate VB $vb exists in last backfill task instance for node $logNodeName cluster $remClusterName ($remClusterUUID)" >&2
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
