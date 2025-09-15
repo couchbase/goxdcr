@@ -165,6 +165,7 @@ function runTestCase {
 	done
 
 	echo "Finished deleting source collections and now waiting for C1 to receive a push from C1P..."
+	echo $(date)
 	local c1CntOrig=0
 	local c1Cnt
 	local c1Log
