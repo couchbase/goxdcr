@@ -3628,6 +3628,7 @@ function setupXdcrAdminUser {
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_admin
 }
 
+# This function could be slow
 function cleanupGoxdcrLogs {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"

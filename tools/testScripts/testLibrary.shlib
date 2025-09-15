@@ -769,6 +769,28 @@ function clearInternalNodeXdcrLog {
 	local gcFileName=${goxdcrLogFile}.$(date +%s)
 	mv $goxdcrLogFile $gcFileName
 	rm $gcFileName
+
+	sleep 2
+	local logValidated=0
+	local checkOpCode=1
+	local logs
+
+	while (($logValidated == 0)); do
+		logs=$(getInternalNodeXdcrLog "$clusterName")
+		checkOpCode=$?
+		while (($checkOpCode != 0)); do
+			sleep 2
+			logs=$(getInternalNodeXdcrLog "$clusterName")
+			checkOpCode=$?
+		done
+
+		# Check lines in the logs
+		local lineCnt=0
+		lineCnt=$(echo "$logs" | wc -l)
+		if (($lineCnt > 0)); then
+			logValidated=1
+		fi
+	done
 }
 
 function waitForOneReplicationToBeDeleted {
