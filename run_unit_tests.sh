@@ -108,17 +108,19 @@ trap killAllBgOnExit EXIT
 
 pids=""
 totalTasks=0
+mkdir -p "testOutput"
+testOutputDir=$(realpath "testOutput")
 for directory in ${DIRS_WITH_UT[@]}; do
 	cd ${ROOT_DIR}/${directory}
 	fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 	if [[ -z "$runAllTests" ]]; then
-		go test -timeout 100s -short >/tmp/${fileFriendlyFileName}.out 2>&1 &
+		go test -timeout 100s -short >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	else
-		go test -timeout 100s >/tmp/${fileFriendlyFileName}.out 2>&1 &
+		go test -timeout 100s >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	fi
 	lastPid="$!"
 	echo "INFO: Test $directory with background PID $lastPid"
-	outputs[$lastPid]="/tmp/${fileFriendlyFileName}.out"
+	outputs[$lastPid]="$testOutputDir/${fileFriendlyFileName}.out"
 	pids+=" $lastPid"
 	totalTasks=$(($totalTasks + 1))
 	pcreTestsFound=false
@@ -131,14 +133,14 @@ for directory in ${DIRS_WITH_UT[@]}; do
 	if [[ "$pcreTestsFound" == "true" ]] && [[ ! -z "$runAllTests" ]]; then
 		fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 		if [[ -z "$runAllTests" ]]; then
-			go test -short -tags=pcre >/tmp/${fileFriendlyFileName}_pcre.out 2>&1 &
+			go test -short -tags=pcre >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
 		else
-			go test -tags=pcre >/tmp/${fileFriendlyFileName}_pcre.out 2>&1 &
+			go test -tags=pcre >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
 		fi
 		lastPid2="$!"
 		echo "INFO: Test $directory PCRE tests with background PID $lastPid2"
 		pids+=" $lastPid2"
-		outputs[$lastPid2]="/tmp/${fileFriendlyFileName}_pcre.out"
+		outputs[$lastPid2]="$testOutputDir/${fileFriendlyFileName}_pcre.out"
 		totalTasks=$(($totalTasks + 1))
 	fi
 done

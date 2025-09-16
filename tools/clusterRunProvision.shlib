@@ -235,9 +235,10 @@ function deleteBucketRecordNamespace {
 function insertPropertyIntoBucketNamePropertyMap {
 	local bucketName=$1
 	local -n incomingMap=$2
-	for key in ${!incomingMap[@]}; do
+	for key in "${!incomingMap[@]}"; do
 		BUCKET_NAME_PROPERTIES_MAP["${bucketName},${key}"]=${incomingMap[$key]}
 	done
+
 	export BUCKET_NAME_PROPERTIES_MAP
 }
 
@@ -260,7 +261,7 @@ function getPropertiesFromBucketNamePropertyMap {
 	BUCKET_PROPERTIES_OUTPUT_MAP=()
 
 	# key is bucketName,Property
-	for bp in ${!BUCKET_NAME_PROPERTIES_MAP[@]}; do
+	for bp in "${!BUCKET_NAME_PROPERTIES_MAP[@]}"; do
 		key=$(echo "$bp" | cut -d, -f1)
 		property=$(echo "$bp" | cut -d, -f2)
 		if [[ $key != $bucketName ]]; then
@@ -445,8 +446,13 @@ function getBucketItemCount {
 
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
-	for port in ${CLUSTER_NAME_PORT_MAP[@]}; do
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
+	local port
+	for port in "${CLUSTER_NAME_PORT_MAP[@]:-}"; do
+		if [[ -z "${port:-}" ]]; then
+			continue
+		fi
+
+		$CURL -X GET http://localhost:$port/pools >/dev/null 2>&1
 		if (($? != 0)); then
 			echo "Node $port not found. Skipping cluster_run XDCR init"
 			return 1
@@ -2218,6 +2224,7 @@ function waitForBgJobs {
 	sleep 5
 
 	echo "Waiting for background jobs to finish..."
+
 	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
 	while (($jobsCnt > 0)); do
@@ -3550,6 +3557,10 @@ function findInstallBinDir {
 
 function findInstallEtcDir {
 	findDirInternal "install/etc"
+}
+
+function findBuildDir {
+	findDirInternal "build"
 }
 
 function insertNXattrs {

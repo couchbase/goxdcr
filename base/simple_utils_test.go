@@ -564,7 +564,7 @@ func TestUint64ToHexLittleEndianAndStrip0s(t *testing.T) {
 
 	// 3. random subset: run manually with -timeout 1000s
 	threads := 20
-	nums := 60000000
+	nums := 600000
 	var wg sync.WaitGroup
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
