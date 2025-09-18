@@ -336,7 +336,7 @@ function waitForChangesLeft0 {
 	local targetCluster=$3
 	local targetBucket=$4
 	local changesLeft
-	local lastChangesLeft
+	local lastChangesLeft=-1
 	local i
 
 	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
