@@ -336,6 +336,7 @@ function waitForChangesLeft0 {
 	local targetCluster=$3
 	local targetBucket=$4
 	local changesLeft
+	local lastChangesLeft
 	local i
 
 	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
@@ -360,7 +361,13 @@ function waitForChangesLeft0 {
 		else
 			echo "Changes left unknown value: $changesLeft"
 		fi
-		echo "Sleeping $CHANGES_LEFT_0_WAIT_SECS seconds and retrying..."
+		if (($changesLeft == $lastChangesLeft)); then
+			echo "Changes left is not going down. It is still $changesLeft"
+		else
+			lastChangesLeft=$changesLeft
+			i=$(($i - 1))
+			echo "Changes left is not 0. It is $changesLeft... it is decreasing"
+		fi
 		sleep $CHANGES_LEFT_0_WAIT_SECS
 	done
 
