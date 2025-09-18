@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
+	"net"
 	"reflect"
 	"sort"
 	"strconv"
@@ -3748,4 +3749,109 @@ func (v VbStringMap) FilterByVBs(vbsList []uint16) VbStringMap {
 		}
 	}
 	return filteredMap
+}
+
+// Credentials stores authentication details used for connecting to the remote cluster.
+type Credentials struct {
+	UserName_          string `json:"UserName"`
+	Password_          string `json:"Password"`
+	ClientCertificate_ []byte `json:"ClientCertificate"`
+	ClientKey_         []byte `json:"ClientKey"`
+}
+
+func (c *Credentials) Clone() *Credentials {
+	if c.IsEmpty() {
+		return nil
+	}
+	ret := &Credentials{}
+	ret.UserName_ = c.UserName_
+	ret.Password_ = c.Password_
+	ret.ClientCertificate_ = DeepCopyByteArray(c.ClientCertificate_)
+	ret.ClientKey_ = DeepCopyByteArray(c.ClientKey_)
+	return ret
+}
+
+func (c *Credentials) IsEmpty() bool {
+	return c == nil
+}
+
+func (c *Credentials) ToMap() map[string]interface{} {
+	if c.IsEmpty() {
+		return nil
+	}
+	ret := map[string]interface{}{}
+	if len(c.UserName_) > 0 {
+		ret[RemoteClusterUserName] = c.UserName_
+	}
+	if len(c.ClientCertificate_) > 0 {
+		ret[RemoteClusterClientCertificate] = string(c.ClientCertificate_)
+	}
+	return ret
+}
+
+func (c *Credentials) IsSame(other *Credentials) bool {
+	switch {
+	case c == nil:
+		return other == nil
+	case other == nil:
+		return false
+	default:
+		return c.UserName_ == other.UserName_ && c.Password_ == other.Password_ &&
+			bytes.Equal(c.ClientCertificate_, other.ClientCertificate_) &&
+			bytes.Equal(c.ClientKey_, other.ClientKey_)
+	}
+}
+
+func (c *Credentials) Redact() *Credentials {
+	if c != nil {
+		if len(c.UserName_) > 0 && !IsStringRedacted(c.UserName_) {
+			c.UserName_ = TagUD(c.UserName_)
+		}
+		if len(c.Password_) > 0 && !IsStringRedacted(c.Password_) {
+			c.Password_ = TagUD(c.Password_)
+		}
+		if len(c.ClientCertificate_) > 0 && !IsByteSliceRedacted(c.ClientCertificate_) {
+			c.ClientCertificate_ = TagUDBytes(c.ClientCertificate_)
+		}
+		if len(c.ClientKey_) > 0 && !IsByteSliceRedacted(c.ClientKey_) {
+			c.ClientKey_ = TagUDBytes(c.ClientKey_)
+		}
+	}
+	return c
+}
+
+// GrpcOptions encapsulates the options needed to create a gRPC connection.
+type GrpcOptions struct {
+	// ConnStr is the connection string for the gRPC server.
+	// It should be in the format "host:port".
+	ConnStr string
+	// Creds are the credentials used for authentication.
+	Creds Credentials
+	// CaCert is the CA certificate used for TLS verification.
+	CaCert []byte
+	// UseTLS indicates whether to use TLS for the connection.
+	UseTLS bool
+}
+
+// NewGrpcOptions creates a new GrpcOptions instance.
+func NewGrpcOptions(connStr string, creds Credentials, caCert []byte, useTLS bool) (*GrpcOptions, error) {
+	if _, _, err := net.SplitHostPort(connStr); err != nil {
+		return nil, err
+	}
+	return &GrpcOptions{
+		ConnStr: connStr,
+		Creds:   creds,
+		CaCert:  caCert,
+		UseTLS:  useTLS,
+	}, nil
+}
+
+// NewGrpcOptionsSecure creates a new GrpcOptions instance with TLS enabled.
+func NewGrpcOptionsSecure(connStr string, creds Credentials, caCert []byte) (*GrpcOptions, error) {
+	return NewGrpcOptions(connStr, creds, caCert, true)
+}
+
+// NewGrpcOptionsInSecure creates a new GrpcOptions instance with TLS disabled.
+func NewGrpcOptionsInSecure(connStr string, creds Credentials, caCert []byte) (*GrpcOptions, error) {
+	return NewGrpcOptions(connStr, creds, caCert, false)
 }

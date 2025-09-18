@@ -699,7 +699,7 @@ func validateRemoteClusterAuthParameters(userName, password, secureType string, 
 	}
 }
 
-func DecodeRemoteClusterStagingRequest(request *http.Request, remoteClusterName string) (stagedCredentials *metadata.Credentials, errorsMap map[string]error, err error) {
+func DecodeRemoteClusterStagingRequest(request *http.Request, remoteClusterName string) (stagedCredentials *base.Credentials, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var userName, password string
 	var clientCertificate, clientKey []byte
@@ -747,7 +747,7 @@ func DecodeRemoteClusterStagingRequest(request *http.Request, remoteClusterName 
 		return
 	}
 
-	stagedCredentials = &metadata.Credentials{
+	stagedCredentials = &base.Credentials{
 		UserName_:          userName,
 		Password_:          password,
 		ClientCertificate_: clientCertificate,

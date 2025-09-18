@@ -392,7 +392,7 @@ const (
 	PlainTextContentType      = "text/plain"
 	PrometheusTextContentType = "; version=0.0.4"
 	ContentLength             = "Content-Length"
-	UserAgent                 = "User-Agent"
+	UserAgentKey              = "User-Agent"
 )
 
 // constant for replication tasklist status
@@ -691,14 +691,17 @@ func NewServerVersionFromString(str string) (ServerVersion, error) {
 }
 
 // User agent for REST calls.
-var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
-var GoxdcrUserAgent = ""
+// CngUserAgentSuffix is the user agent suffix for Protostellar (CNG) clusters.
+// Note: Ideally a suffix like (grpc/APIVersion) would be preferred, but Protostellar does not define an RPC API version for Phase-1 of the CNG project.
+var CngUserAgentSuffix = " (grpc)"
+var UserAgentPrefix = "couchbase-goxdcr"
+var UserAgent = ""
 
 // Refer https://github.com/couchbase/kv_engine/blob/977c08f26f9826a8b0e21dd9c1c20a7b2be26d3a/docs/BinaryProtocol.md#0x1f-helo
 // HELO user agent name ("a") will be truncated only upto the 32nd byte by kv_engine.
 // So use a short name with a server version suffix.
-var GoxdcrHELOUserAgentPrefix = "goxdcr"
-var GoxdcrHELOUserAgent = ""
+var HELOUserAgentPrefix = "goxdcr"
+var HELOUserAgent = ""
 var HELOUserAgentNameMaxLen int = 32
 var HELOConnIdMaxLen int = 33
 
@@ -713,13 +716,13 @@ func ComposeHELOMsgKey(connectionId string) string {
 		UserAgentName string `json:"a"`
 		ConnectionId  string `json:"i"`
 	}{
-		UserAgentName: GoxdcrHELOUserAgent,
+		UserAgentName: HELOUserAgent,
 		ConnectionId:  connectionId,
 	})
 	if err != nil {
 		// non-JSON objects HELO message keys are also fine, but hinders debuggability
 		// on the kv_engine side.
-		return GoxdcrHELOUserAgent
+		return HELOUserAgent
 	}
 
 	return string(key)
@@ -806,7 +809,7 @@ const (
 
 var HttpRedactKeys = []string{HttpReqUserKey, AuthorizationKey, CBOnBehalfOfKey}
 
-const AuthorizationKeyRedactPrefix = "Basic "
+const BasicAuthorizationKey = "Basic "
 
 // retry interval for setDerivedObj op
 var RetryIntervalSetDerivedObj = 100 * time.Millisecond
@@ -1280,18 +1283,18 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
 	RefreshRemoteClusterRefInterval = refreshRemoteClusterRefInterval
 	if len(clusterVersion) > 0 {
-		GoxdcrUserAgent = GoxdcrUserAgentPrefix + KeyPartsDelimiter + clusterVersion
+		UserAgent = UserAgentPrefix + KeyPartsDelimiter + clusterVersion
 	} else {
-		GoxdcrUserAgent = GoxdcrUserAgentPrefix
+		UserAgent = UserAgentPrefix
 	}
 
 	if len(buildVersion) > 0 {
-		GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix + KeyPartsDelimiter + buildVersion
-		if len(GoxdcrHELOUserAgent) > HELOUserAgentNameMaxLen {
-			GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix
+		HELOUserAgent = HELOUserAgentPrefix + KeyPartsDelimiter + buildVersion
+		if len(HELOUserAgent) > HELOUserAgentNameMaxLen {
+			HELOUserAgent = HELOUserAgentPrefix
 		}
 	} else {
-		GoxdcrHELOUserAgent = GoxdcrHELOUserAgentPrefix
+		HELOUserAgent = HELOUserAgentPrefix
 	}
 
 	CapiMaxRetryBatchUpdateDocs = capiMaxRetryBatchUpdateDocs

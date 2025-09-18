@@ -37,6 +37,7 @@ require (
 	github.com/couchbase/gocb/v2 v2.9.4
 	github.com/couchbase/gocbcore/v9 v9.1.11
 	github.com/couchbase/gomemcached v0.3.3
+	github.com/couchbase/goprotostellar v1.0.3-0.20250919201325-19d1f4819cdb
 	github.com/couchbase/goutils v0.1.2
 	github.com/couchbase/tools-common/http v1.0.7
 	github.com/couchbaselabs/gojsonsm v1.0.1
@@ -47,6 +48,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
 	github.com/stretchr/testify v1.10.0
+	google.golang.org/grpc v1.74.2
 )
 
 require (
@@ -60,11 +62,9 @@ require (
 	github.com/couchbase/regulator v0.0.0-00010101000000-000000000000 // indirect
 	github.com/couchbase/tools-common/errors v1.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.23.0 // indirect
@@ -74,8 +74,11 @@ require (
 	github.com/santhosh-tekuri/jsonschema v1.2.4 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	golang.org/x/crypto v0.38.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
-	google.golang.org/protobuf v1.36.6 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250811230008-5f3141c8851a // indirect
+	google.golang.org/protobuf v1.36.7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -1263,8 +1263,8 @@ func CloneAndTagHttpRequest(r *http.Request) *http.Request {
 					var redactedV = fmt.Sprintf("%v%v%v", UdTagBegin, v, UdTagEnd)
 					// Special case handling - this is a encoded password
 					// Authorization:[Basic <abcdef123456...>]
-					if k == AuthorizationKey && strings.HasPrefix(v, AuthorizationKeyRedactPrefix) {
-						redactedV = fmt.Sprintf("%v%v", AuthorizationKeyRedactPrefix, "xxxxx")
+					if k == AuthorizationKey && strings.HasPrefix(v, BasicAuthorizationKey) {
+						redactedV = fmt.Sprintf("%v%v", BasicAuthorizationKey, "xxxxx")
 					}
 					vv2 = append(vv2, redactedV)
 				}

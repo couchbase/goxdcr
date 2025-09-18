@@ -2810,7 +2810,7 @@ func (u *Utilities) ConstructHttpRequest(
 	}
 	req.Header.Set(base.ContentType, contentType)
 
-	req.Header.Set(base.UserAgent, base.GoxdcrUserAgent)
+	req.Header.Set(base.UserAgentKey, base.UserAgent)
 
 	switch userAuthMode {
 	case base.UserAuthModeLocal:

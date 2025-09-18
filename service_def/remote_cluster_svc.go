@@ -113,7 +113,7 @@ type RemoteClusterSvc interface {
 	SetReplReader(reader ReplicationSpecReader)
 
 	// set staged credentials
-	SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error)
+	SetStagedCredentials(refName string, stagedCredentials *base.Credentials) (*metadata.RemoteClusterReference, error)
 }
 
 type ClusterHeartbeatAPI interface {

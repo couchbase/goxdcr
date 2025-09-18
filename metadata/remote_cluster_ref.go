@@ -90,7 +90,7 @@ type RemoteClusterReference struct {
 	Name_     string `json:"Name"`
 	HostName_ string `json:"HostName"`
 	// Primary credentials
-	Credentials
+	base.Credentials
 
 	DemandEncryption_ bool   `json:"DemandEncryption"`
 	EncryptionType_   string `json:"EncryptionType"`
@@ -140,78 +140,7 @@ type RemoteClusterReference struct {
 
 	// If provided, used when the primary credentials start to fail because of unauthorised errors
 	// Note that staging is not allowed in mixed mode clusters
-	StagedCredentials *Credentials `json:"StagedCredentials,omitempty"`
-}
-
-type Credentials struct {
-	UserName_          string `json:"UserName"`
-	Password_          string `json:"Password"`
-	ClientCertificate_ []byte `json:"ClientCertificate"`
-	ClientKey_         []byte `json:"ClientKey"`
-}
-
-func (c *Credentials) Clone() *Credentials {
-	if c.IsEmpty() {
-		return nil
-	}
-	ret := &Credentials{}
-	ret.UserName_ = c.UserName_
-	ret.Password_ = c.Password_
-	ret.ClientCertificate_ = base.DeepCopyByteArray(c.ClientCertificate_)
-	ret.ClientKey_ = base.DeepCopyByteArray(c.ClientKey_)
-	return ret
-}
-
-func (c *Credentials) IsEmpty() bool {
-	if c == nil {
-		return true
-	}
-	return false
-}
-
-func (c *Credentials) ToMap() map[string]interface{} {
-	if c.IsEmpty() {
-		return nil
-	}
-	ret := map[string]interface{}{}
-	if len(c.UserName_) > 0 {
-		ret[base.RemoteClusterUserName] = c.UserName_
-	}
-	if len(c.ClientCertificate_) > 0 {
-		ret[base.RemoteClusterClientCertificate] = string(c.ClientCertificate_)
-	}
-	return ret
-}
-
-func (c *Credentials) IsSame(other *Credentials) bool {
-	switch {
-	case c == nil:
-		return other == nil
-	case other == nil:
-		return false
-	default:
-		return c.UserName_ == other.UserName_ && c.Password_ == other.Password_ &&
-			bytes.Equal(c.ClientCertificate_, other.ClientCertificate_) &&
-			bytes.Equal(c.ClientKey_, other.ClientKey_)
-	}
-}
-
-func (c *Credentials) Redact() *Credentials {
-	if c != nil {
-		if len(c.UserName_) > 0 && !base.IsStringRedacted(c.UserName_) {
-			c.UserName_ = base.TagUD(c.UserName_)
-		}
-		if len(c.Password_) > 0 && !base.IsStringRedacted(c.Password_) {
-			c.Password_ = base.TagUD(c.Password_)
-		}
-		if len(c.ClientCertificate_) > 0 && !base.IsByteSliceRedacted(c.ClientCertificate_) {
-			c.ClientCertificate_ = base.TagUDBytes(c.ClientCertificate_)
-		}
-		if len(c.ClientKey_) > 0 && !base.IsByteSliceRedacted(c.ClientKey_) {
-			c.ClientKey_ = base.TagUDBytes(c.ClientKey_)
-		}
-	}
-	return c
+	StagedCredentials *base.Credentials `json:"StagedCredentials,omitempty"`
 }
 
 type ConnErr struct {
@@ -432,7 +361,7 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password, hostnam
 		Uuid_:     uuid,
 		Name_:     name,
 		HostName_: hostName,
-		Credentials: Credentials{
+		Credentials: base.Credentials{
 			UserName_:          userName,
 			Password_:          password,
 			ClientCertificate_: clientCertificate,
@@ -781,7 +710,7 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		Name_:          ref.Name_,
 		HostName_:      ref.HostName_,
 		HttpsHostName_: ref.HttpsHostName_,
-		Credentials: Credentials{
+		Credentials: base.Credentials{
 			UserName_:          ref.UserName_,
 			Password_:          ref.Password_,
 			ClientCertificate_: base.DeepCopyByteArray(ref.ClientCertificate_),
@@ -1109,7 +1038,7 @@ func (ref *RemoteClusterReference) HasStagedCreds() bool {
 	return !ref.StagedCredentials.IsEmpty()
 }
 
-func (ref *RemoteClusterReference) SetStagingInfo(creds *Credentials) {
+func (ref *RemoteClusterReference) SetStagingInfo(creds *base.Credentials) {
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
 

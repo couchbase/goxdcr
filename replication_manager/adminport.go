@@ -472,7 +472,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		justValidate         bool
 		remoteClusterRef     *metadata.RemoteClusterReference
 		errorsMap            map[string]error
-		stagedCredentials    *metadata.Credentials
+		stagedCredentials    *base.Credentials
 		setErr               error
 		remoteClusterService = RemoteClusterService()
 	)

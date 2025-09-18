@@ -2844,7 +2844,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 // SetStagedCredentials sets the provided staged credentials on the given
 // remote cluster reference and persists the update to metaKV.
 // Returns the updated reference, an error denoting if the operation failed.
-func (service *RemoteClusterService) SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error) {
+func (service *RemoteClusterService) SetStagedCredentials(refName string, stagedCredentials *base.Credentials) (*metadata.RemoteClusterReference, error) {
 	remoteClusterRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch remoteClusterReference %v. err=%v", refName, err)

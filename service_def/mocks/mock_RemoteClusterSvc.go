@@ -1307,7 +1307,7 @@ func (_c *RemoteClusterSvc_SetReplReader_Call) RunAndReturn(run func(service_def
 }
 
 // SetStagedCredentials provides a mock function with given fields: refName, stagedCredentials
-func (_m *RemoteClusterSvc) SetStagedCredentials(refName string, stagedCredentials *metadata.Credentials) (*metadata.RemoteClusterReference, error) {
+func (_m *RemoteClusterSvc) SetStagedCredentials(refName string, stagedCredentials *base.Credentials) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refName, stagedCredentials)
 
 	if len(ret) == 0 {
@@ -1316,10 +1316,10 @@ func (_m *RemoteClusterSvc) SetStagedCredentials(refName string, stagedCredentia
 
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.Credentials) (*metadata.RemoteClusterReference, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, *base.Credentials) (*metadata.RemoteClusterReference, error)); ok {
 		return rf(refName, stagedCredentials)
 	}
-	if rf, ok := ret.Get(0).(func(string, *metadata.Credentials) *metadata.RemoteClusterReference); ok {
+	if rf, ok := ret.Get(0).(func(string, *base.Credentials) *metadata.RemoteClusterReference); ok {
 		r0 = rf(refName, stagedCredentials)
 	} else {
 		if ret.Get(0) != nil {
@@ -1327,7 +1327,7 @@ func (_m *RemoteClusterSvc) SetStagedCredentials(refName string, stagedCredentia
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, *metadata.Credentials) error); ok {
+	if rf, ok := ret.Get(1).(func(string, *base.Credentials) error); ok {
 		r1 = rf(refName, stagedCredentials)
 	} else {
 		r1 = ret.Error(1)
@@ -1343,14 +1343,14 @@ type RemoteClusterSvc_SetStagedCredentials_Call struct {
 
 // SetStagedCredentials is a helper method to define mock.On call
 //   - refName string
-//   - stagedCredentials *metadata.Credentials
+//   - stagedCredentials *base.Credentials
 func (_e *RemoteClusterSvc_Expecter) SetStagedCredentials(refName interface{}, stagedCredentials interface{}) *RemoteClusterSvc_SetStagedCredentials_Call {
 	return &RemoteClusterSvc_SetStagedCredentials_Call{Call: _e.mock.On("SetStagedCredentials", refName, stagedCredentials)}
 }
 
-func (_c *RemoteClusterSvc_SetStagedCredentials_Call) Run(run func(refName string, stagedCredentials *metadata.Credentials)) *RemoteClusterSvc_SetStagedCredentials_Call {
+func (_c *RemoteClusterSvc_SetStagedCredentials_Call) Run(run func(refName string, stagedCredentials *base.Credentials)) *RemoteClusterSvc_SetStagedCredentials_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*metadata.Credentials))
+		run(args[0].(string), args[1].(*base.Credentials))
 	})
 	return _c
 }
@@ -1360,7 +1360,7 @@ func (_c *RemoteClusterSvc_SetStagedCredentials_Call) Return(_a0 *metadata.Remot
 	return _c
 }
 
-func (_c *RemoteClusterSvc_SetStagedCredentials_Call) RunAndReturn(run func(string, *metadata.Credentials) (*metadata.RemoteClusterReference, error)) *RemoteClusterSvc_SetStagedCredentials_Call {
+func (_c *RemoteClusterSvc_SetStagedCredentials_Call) RunAndReturn(run func(string, *base.Credentials) (*metadata.RemoteClusterReference, error)) *RemoteClusterSvc_SetStagedCredentials_Call {
 	_c.Call.Return(run)
 	return _c
 }
