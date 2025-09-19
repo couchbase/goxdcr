@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -48,6 +49,83 @@ const (
 	HostnameMode_External string = "external" // used by K8 operator/DBAS
 	HostnameMode_Internal string = "default"  // To be consistent as goCBv2
 )
+
+// RemoteType denotes the target type for XDCR.
+type RemoteType uint8
+
+const (
+	// Auto: XDCR determines the RemoteType based on the hostname provied,
+	// for example, if the hostname is a connection string prefixed with "couchbases2://", the target is CNG.
+	RemoteTypeAuto RemoteType = iota
+	// CbCluster: denotes the target is a couchbase cluster
+	RemoteTypeCbCluster
+	// CloudNativeGateway: denotes the target is CNG
+	RemoteTypeCng
+)
+
+// string constants denoting remoteType
+const (
+	RemoteTypeAutoStr      = "auto"
+	RemoteTypeCbClusterStr = "cbcluster"
+	RemoteTypeCngStr       = "cng"
+)
+
+func (rt *RemoteType) String() (string, error) {
+	if rt == nil {
+		return "", errors.New("received nil RemoteType pointer")
+	}
+	switch *rt {
+	case RemoteTypeAuto:
+		return RemoteTypeAutoStr, nil
+	case RemoteTypeCbCluster:
+		return RemoteTypeCbClusterStr, nil
+	case RemoteTypeCng:
+		return RemoteTypeCngStr, nil
+	default:
+		// return error incase of invalid remoteType
+		return "", fmt.Errorf("invalid remoteType %v", rt)
+	}
+}
+
+// ConvertRemoteTypeIfAuto deduces and sets a concrete RemoteType when the input(rt) is RemoteTypeAuto.
+// It analyzes the hostname to determine if it's a plain hostname (CbCluster) or a CNG URL (Cng).
+// Returns a non-nil error if deduction fails (e.g., unsupported URL format).
+func (rt *RemoteType) ConvertRemoteTypeIfAuto(hostName string) error {
+	if rt == nil {
+		return fmt.Errorf("received nil RemoteType pointer")
+	}
+
+	if *rt != RemoteTypeAuto {
+		// No conversion needed if not Auto.
+		return nil
+	}
+
+	if !base.IsURL(hostName) {
+		*rt = RemoteTypeCbCluster
+		return nil
+	}
+
+	if base.IsCngURL(hostName) {
+		*rt = RemoteTypeCng
+		return nil
+	}
+
+	return fmt.Errorf("failed to deduce remote type; provide a plain hostname (FQDN or IP address) for Couchbase Cluster or prefix with %q for CNG", base.CouchbaseCngUri)
+}
+
+func ParseRemoteType(rtStr string) (RemoteType, error) {
+	switch strings.ToLower(rtStr) {
+	case RemoteTypeAutoStr:
+		return RemoteTypeAuto, nil
+	case RemoteTypeCbClusterStr:
+		return RemoteTypeCbCluster, nil
+	case RemoteTypeCngStr:
+		return RemoteTypeCng, nil
+	default:
+		// any other string is considered an invalid or unrecognized remoteType value
+		return 0, fmt.Errorf("invalid %s remoteType. Valid values are %v", rtStr, []string{RemoteTypeAutoStr, RemoteTypeCbClusterStr, RemoteTypeCngStr})
+	}
+}
 
 // As a way to provide user a seemless experience to migrate data from on-prem
 // to Capella, this trusted root CA for signing capella clusters is provided here
@@ -141,6 +219,9 @@ type RemoteClusterReference struct {
 	// If provided, used when the primary credentials start to fail because of unauthorised errors
 	// Note that staging is not allowed in mixed mode clusters
 	StagedCredentials *base.Credentials `json:"StagedCredentials,omitempty"`
+
+	// RemoteType indicates the target type for XDCR
+	RemoteType RemoteType `json:"RemoteType"`
 }
 
 type ConnErr struct {
@@ -241,6 +322,18 @@ func (ref *RemoteClusterReference) GetRestrictHostnameReplace() bool {
 
 func (ref *RemoteClusterReference) RestrictHostnameReplaceAtRefresh() bool {
 	return !ref.IsDnsSRV() && ref.GetRestrictHostnameReplace()
+}
+
+func (ref *RemoteClusterReference) SetRemoteType(remoteType RemoteType) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	ref.RemoteType = remoteType
+}
+
+func (ref *RemoteClusterReference) GetRemoteType() RemoteType {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.RemoteType
 }
 
 type HostNameSrvType int
@@ -481,6 +574,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.SecureTypeString()
 	outputMap[base.RemoteClusterHostnameMode] = ref.HostnameMode()
+	outputMap[base.RemoteType], _ = ref.RemoteType.String()
 	// To be deprecated
 	if ref.IsEncryptionEnabled() {
 		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption_
@@ -523,7 +617,7 @@ func (ref *RemoteClusterReference) IsSame(ref2 *RemoteClusterReference) bool {
 		defer ref2.mutex.RUnlock()
 		return reflect.DeepEqual(ref.revision, ref2.revision) && ref.HttpsHostName_ == ref2.HttpsHostName_ &&
 			ref.ActiveHostName_ == ref2.ActiveHostName_ && ref.ActiveHttpsHostName_ == ref2.ActiveHttpsHostName_ &&
-			ref.hostnameSRVType == ref2.hostnameSRVType && ref.srvEntries.SameAs(ref2.srvEntries)
+			ref.hostnameSRVType == ref2.hostnameSRVType && ref.srvEntries.SameAs(ref2.srvEntries) && ref.RemoteType == ref2.RemoteType
 	}
 }
 
@@ -661,6 +755,7 @@ func (ref *RemoteClusterReference) loadNonActivesFromNoLock(inRef *RemoteCluster
 	ref.revision = inRef.revision
 	// deep copy staged credentials
 	ref.StagedCredentials = inRef.StagedCredentials.Clone()
+	ref.RemoteType = inRef.RemoteType
 }
 
 func (ref *RemoteClusterReference) Clone() *RemoteClusterReference {
@@ -730,6 +825,7 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		connectivityErrors:      ref.connectivityErrors, // shallow copy to ensure ClearConnErrs() works
 		RestrictHostnameReplace: ref.GetRestrictHostnameReplaceNoLock(),
 		StagedCredentials:       ref.StagedCredentials.Clone(),
+		RemoteType:              ref.RemoteType,
 	}
 }
 

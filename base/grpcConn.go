@@ -162,8 +162,9 @@ func (c *CngConn) Client() internal_xdcr_v1.XdcrServiceClient {
 	return c.client
 }
 
-// NewCngConn creates and returns a gRPC client for the protostellar defined XdcrService.
-func NewCngConn(grpcOptions GrpcOptions, dialOptions ...grpc.DialOption) (*CngConn, error) {
+// NewCngConn establishes a gRPC connection using the provided GrpcOptions and dial options,
+// and returns a CngConn that wraps both the connection and the protostellar-defined XDCR client.
+func NewCngConn(grpcOptions *GrpcOptions, dialOptions ...grpc.DialOption) (*CngConn, error) {
 	// Configure per-RPC credentials.
 	grpcCreds, err := NewGrpcCredentials(grpcOptions.Creds, grpcOptions.UseTLS)
 	if err != nil {

@@ -3,14 +3,18 @@
 package mocks
 
 import (
-	couchbase "github.com/couchbase/go-couchbase"
 	base "github.com/couchbase/goxdcr/v8/base"
+	codes "google.golang.org/grpc/codes"
+
+	couchbase "github.com/couchbase/go-couchbase"
 
 	expvar "expvar"
 
 	gomemcached "github.com/couchbase/gomemcached"
 
 	http "net/http"
+
+	internal_xdcr_v1 "github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 
 	log "github.com/couchbase/goxdcr/v8/log"
 
@@ -538,6 +542,71 @@ func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) Return(hasTxn
 }
 
 func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) RunAndReturn(run func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) (bool, bool, []byte, int, error, string, int64, []byte)) *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CngGetClusterInfo provides a mock function with given fields: grpcOpts
+func (_m *UtilsIface) CngGetClusterInfo(grpcOpts *base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error) {
+	ret := _m.Called(grpcOpts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngGetClusterInfo")
+	}
+
+	var r0 *internal_xdcr_v1.GetClusterInfoResponse
+	var r1 codes.Code
+	var r2 error
+	if rf, ok := ret.Get(0).(func(*base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)); ok {
+		return rf(grpcOpts)
+	}
+	if rf, ok := ret.Get(0).(func(*base.GrpcOptions) *internal_xdcr_v1.GetClusterInfoResponse); ok {
+		r0 = rf(grpcOpts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internal_xdcr_v1.GetClusterInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*base.GrpcOptions) codes.Code); ok {
+		r1 = rf(grpcOpts)
+	} else {
+		r1 = ret.Get(1).(codes.Code)
+	}
+
+	if rf, ok := ret.Get(2).(func(*base.GrpcOptions) error); ok {
+		r2 = rf(grpcOpts)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// UtilsIface_CngGetClusterInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetClusterInfo'
+type UtilsIface_CngGetClusterInfo_Call struct {
+	*mock.Call
+}
+
+// CngGetClusterInfo is a helper method to define mock.On call
+//   - grpcOpts *base.GrpcOptions
+func (_e *UtilsIface_Expecter) CngGetClusterInfo(grpcOpts interface{}) *UtilsIface_CngGetClusterInfo_Call {
+	return &UtilsIface_CngGetClusterInfo_Call{Call: _e.mock.On("CngGetClusterInfo", grpcOpts)}
+}
+
+func (_c *UtilsIface_CngGetClusterInfo_Call) Run(run func(grpcOpts *base.GrpcOptions)) *UtilsIface_CngGetClusterInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*base.GrpcOptions))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngGetClusterInfo_Call) Return(_a0 *internal_xdcr_v1.GetClusterInfoResponse, _a1 codes.Code, _a2 error) *UtilsIface_CngGetClusterInfo_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *UtilsIface_CngGetClusterInfo_Call) RunAndReturn(run func(*base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)) *UtilsIface_CngGetClusterInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

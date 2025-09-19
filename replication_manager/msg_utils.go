@@ -519,8 +519,9 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 	errorsMap = make(map[string]error)
 	var err1 error
 	var demandEncryption, restrictHostnameReplace bool
-	var name, hostName, userName, password, secureType, encryptionType, hostnameMode string
+	var name, hostName, userName, password, secureType, encryptionType, hostnameMode, remoteTypeStr, hostAddr string
 	var certificate, clientCertificate, clientKey []byte
+	var remoteType metadata.RemoteType
 
 	if err1 = request.ParseForm(); err1 != nil {
 		errorsMap[base.PlaceHolderFieldKey] = ErrorParsingForm
@@ -562,9 +563,26 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 			hostnameMode = getStringFromValArr(valArr)
 		case base.RestrictHostnameReplace:
 			restrictHostnameReplace = getRestrictHostnameReplaceFromValArr(valArr)
+		case base.RemoteType:
+			remoteTypeStr = getStringFromValArr(valArr)
 		default:
 			// ignore other parameters
 		}
+	}
+
+	if len(remoteTypeStr) > 0 {
+		remoteType, err1 = metadata.ParseRemoteType(remoteTypeStr)
+		if err1 != nil {
+			errorsMap[base.ErrKeyInvalidRemoteType] = err1
+			return
+		}
+	}
+
+	// if RemoteType is auto, deduce it to concrete type
+	err1 = remoteType.ConvertRemoteTypeIfAuto(hostName)
+	if err1 != nil {
+		errorsMap[base.RemoteClusterHostName] = err1
+		return
 	}
 
 	if len(secureType) > 0 {
@@ -593,11 +611,19 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 		}
 	}
 
-	validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode, certificate, clientCertificate, clientKey, errorsMap)
+	validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode, certificate, clientCertificate, clientKey, remoteType, errorsMap)
 
-	hostAddr, err1 := base.ValidateHostAddr(hostName)
-	if err1 != nil {
-		errorsMap[base.RemoteClusterHostName] = err1
+	switch remoteType {
+	case metadata.RemoteTypeCbCluster:
+		hostAddr, err1 = base.ValidateHostAddrForCbCluster(hostName)
+		if err1 != nil {
+			errorsMap[base.RemoteClusterHostName] = err1
+		}
+	case metadata.RemoteTypeCng:
+		hostAddr, err1 = base.ValidateHostAddrForCng(hostName)
+	default:
+		// should never reach here
+		panic("coding bug")
 	}
 
 	if len(errorsMap) > 0 {
@@ -616,11 +642,12 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 	}
 
 	remoteClusterRef.SetRestrictHostnameReplace(restrictHostnameReplace)
+	remoteClusterRef.SetRemoteType(remoteType)
 
 	return
 }
 
-func validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode string, certificate, clientCertificate, clientKey []byte, errorsMap map[string]error) {
+func validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode string, certificate, clientCertificate, clientKey []byte, remoteType metadata.RemoteType, errorsMap map[string]error) {
 	// check required parameters
 	if len(name) == 0 {
 		errorsMap[base.RemoteClusterName] = base.MissingParameterError("cluster name")
@@ -628,6 +655,10 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 
 	if len(hostName) == 0 {
 		errorsMap[base.RemoteClusterHostName] = base.MissingParameterError("hostname (ip)")
+	}
+
+	if remoteType == metadata.RemoteTypeCng && secureType != base.SecureTypeFull {
+		errorsMap[base.RemoteClusterSecureType] = errors.New("secureType must be full when target is CNG")
 	}
 
 	if secureType == base.SecureTypeFull && len(certificate) == 0 && !metadata.IsCapellaHostname(hostName) {

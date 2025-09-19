@@ -21,10 +21,12 @@ import (
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"google.golang.org/grpc/codes"
 )
 
 type ExponentialOpFunc func() error
@@ -47,9 +49,13 @@ func (h *HELOFeatures) String() string {
 		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections, h.DataType)
 }
 
+type CngUtils interface {
+	CngGetClusterInfo(grpcOpts *base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)
+}
+
 type UtilsIface interface {
 	filter.FilterUtils
-
+	CngUtils
 	// Please keep the interface alphabetically ordered
 	/**
 	 * ------------------------

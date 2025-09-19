@@ -1513,12 +1513,12 @@ func (_c *RemoteClusterSvc_ValidateAddRemoteCluster_Call) RunAndReturn(run func(
 	return _c
 }
 
-// ValidateRemoteCluster provides a mock function with given fields: ref
-func (_m *RemoteClusterSvc) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
+// ValidateRemote provides a mock function with given fields: ref
+func (_m *RemoteClusterSvc) ValidateRemote(ref *metadata.RemoteClusterReference) error {
 	ret := _m.Called(ref)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ValidateRemoteCluster")
+		panic("no return value specified for ValidateRemote")
 	}
 
 	var r0 error
@@ -1531,30 +1531,30 @@ func (_m *RemoteClusterSvc) ValidateRemoteCluster(ref *metadata.RemoteClusterRef
 	return r0
 }
 
-// RemoteClusterSvc_ValidateRemoteCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateRemoteCluster'
-type RemoteClusterSvc_ValidateRemoteCluster_Call struct {
+// RemoteClusterSvc_ValidateRemote_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateRemote'
+type RemoteClusterSvc_ValidateRemote_Call struct {
 	*mock.Call
 }
 
-// ValidateRemoteCluster is a helper method to define mock.On call
+// ValidateRemote is a helper method to define mock.On call
 //   - ref *metadata.RemoteClusterReference
-func (_e *RemoteClusterSvc_Expecter) ValidateRemoteCluster(ref interface{}) *RemoteClusterSvc_ValidateRemoteCluster_Call {
-	return &RemoteClusterSvc_ValidateRemoteCluster_Call{Call: _e.mock.On("ValidateRemoteCluster", ref)}
+func (_e *RemoteClusterSvc_Expecter) ValidateRemote(ref interface{}) *RemoteClusterSvc_ValidateRemote_Call {
+	return &RemoteClusterSvc_ValidateRemote_Call{Call: _e.mock.On("ValidateRemote", ref)}
 }
 
-func (_c *RemoteClusterSvc_ValidateRemoteCluster_Call) Run(run func(ref *metadata.RemoteClusterReference)) *RemoteClusterSvc_ValidateRemoteCluster_Call {
+func (_c *RemoteClusterSvc_ValidateRemote_Call) Run(run func(ref *metadata.RemoteClusterReference)) *RemoteClusterSvc_ValidateRemote_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*metadata.RemoteClusterReference))
 	})
 	return _c
 }
 
-func (_c *RemoteClusterSvc_ValidateRemoteCluster_Call) Return(_a0 error) *RemoteClusterSvc_ValidateRemoteCluster_Call {
+func (_c *RemoteClusterSvc_ValidateRemote_Call) Return(_a0 error) *RemoteClusterSvc_ValidateRemote_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *RemoteClusterSvc_ValidateRemoteCluster_Call) RunAndReturn(run func(*metadata.RemoteClusterReference) error) *RemoteClusterSvc_ValidateRemoteCluster_Call {
+func (_c *RemoteClusterSvc_ValidateRemote_Call) RunAndReturn(run func(*metadata.RemoteClusterReference) error) *RemoteClusterSvc_ValidateRemote_Call {
 	_c.Call.Return(run)
 	return _c
 }

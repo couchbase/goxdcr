@@ -845,21 +845,16 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 	}
 }
 
-// validate host address [provided by user at remote cluster reference creation time]
-func ValidateHostAddr(hostAddr string) (string, error) {
-	// Make sure users do not use SDK URI until XDCR can support full CCCP bootstrap
-	// TODO - MB-41083
-	if strings.HasPrefix(hostAddr, CouchbaseUri) || strings.HasPrefix(hostAddr, CouchbaseSecureUri) {
-		return "", ErrorSdkUriNotSupported
-	}
-
+// normalizeHostAddr validates and normalizes a host address by ensuring
+// a port is present (or assigning a default), and checking IPv6 formatting.
+func normalizeHostAddr(hostAddr string, defaultPort uint16) (string, error) {
 	// validate port number
 	_, err := GetPortNumber(hostAddr)
 	if err != nil {
 		if err == ErrorNoPortNumber {
 			// this could happen if host address provided by user doesn't contain port number
-			// append default port number 8091
-			hostAddr = GetHostAddr(hostAddr, DefaultAdminPort)
+			// append default port number
+			hostAddr = GetHostAddr(hostAddr, defaultPort)
 		} else {
 			return "", err
 		}
@@ -873,9 +868,36 @@ func ValidateHostAddr(hostAddr string) (string, error) {
 			return "", errors.New("ipv6 address needs to be enclosed in square brackets")
 		}
 	}
-
 	return hostAddr, nil
+}
 
+// validate host address [provided by user at remote cluster reference creation time] for the target couchbase cluster
+func ValidateHostAddrForCbCluster(hostAddr string) (string, error) {
+	// Make sure users do not use SDK URI until XDCR can support full CCCP bootstrap
+	// TODO - MB-41083
+	if strings.HasPrefix(hostAddr, CouchbaseUri) || strings.HasPrefix(hostAddr, CouchbaseSecureUri) {
+		return "", ErrorSdkUriNotSupported
+	}
+
+	if IsURL(hostAddr) {
+		return "", fmt.Errorf("connection URIs (e.g., couchbase://, http://) are not supported. Please provide only a plain hostname or IP address (without any scheme or prefix)")
+	}
+
+	return normalizeHostAddr(hostAddr, DefaultAdminPort)
+
+}
+
+// validate host address [provided by user at remote cluster reference creation time] for CNG
+func ValidateHostAddrForCng(hostAddr string) (string, error) {
+	// only connection URIs prefixed with "couchbase2://" are considered valid
+	if IsURL(hostAddr) && !IsCngURL(hostAddr) {
+		return "", fmt.Errorf("the only allowed scheme or prefix for cng hostnames is %q. Please rectify the hostname", CouchbaseCngUri)
+	}
+	// hostAddr may or may not have the "couchbase2://" prefix.
+	// Always apply TrimPrefix to remove it if present.
+	hostAddr = strings.TrimPrefix(hostAddr, CouchbaseCngUri)
+
+	return normalizeHostAddr(hostAddr, DefaultCngDataPort)
 }
 
 func IsIpAddressEnclosedInBrackets(hostName string) bool {
@@ -2696,4 +2718,14 @@ func FindLessThan(list []uint64, input uint64) (uint64, bool) {
 
 	// no elements in list are less than the input.
 	return 0, false
+}
+
+// isURL checks if the hostname provided is a URL
+func IsURL(hostname string) bool {
+	return strings.Contains(hostname, UrlProtocolDelimiter)
+}
+
+// isCngURL checks if the hostname provided is a cng URL
+func IsCngURL(hostname string) bool {
+	return strings.HasPrefix(hostname, CouchbaseCngUri)
 }

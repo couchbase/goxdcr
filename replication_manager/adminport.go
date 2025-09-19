@@ -500,14 +500,6 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		}
 		setErr = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
 	case true:
-		clusterCompat, err := adminport.xdcrCompTopologySvc.MyClusterCompatibility()
-		if err != nil {
-			logger_ap.Errorf("failed to fetch cluster compatibility while verifing if staging is allowed. err=%v", err)
-			return EncodeRemoteClusterErrorIntoResponse(fmt.Errorf("failed to verify cluster compatibility for staging: %w", err))
-		}
-		if !base.IsClusterCompatible(clusterCompat, base.VersionForSeamlessCredsChangeSupport) {
-			return EncodeRemoteClusterErrorIntoResponse(base.ErrorSeamlessCredsChangeMixedModeUnsupported)
-		}
 		stagedCredentials, errorsMap, err = DecodeRemoteClusterStagingRequest(request, remoteClusterName)
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)

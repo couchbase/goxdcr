@@ -2845,6 +2845,16 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 // remote cluster reference and persists the update to metaKV.
 // Returns the updated reference, an error denoting if the operation failed.
 func (service *RemoteClusterService) SetStagedCredentials(refName string, stagedCredentials *base.Credentials) (*metadata.RemoteClusterReference, error) {
+	// do a cluster compatibility check to see if staging is allowed
+	clusterCompat, err := service.xdcr_topology_svc.MyClusterCompatibility()
+	if err != nil {
+		service.logger.Errorf("failed to fetch cluster compatibility while verifying if staging is allowed. err=%v", err)
+		return nil, fmt.Errorf("failed to verify cluster compatibility for staging: %w", err)
+	}
+	if !base.IsClusterCompatible(clusterCompat, base.VersionForSeamlessCredsChangeSupport) {
+		return nil, base.ErrorSeamlessCredsChangeMixedModeUnsupported
+	}
+
 	remoteClusterRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch remoteClusterReference %v. err=%v", refName, err)
@@ -2927,6 +2937,18 @@ func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.Remo
 }
 
 func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
+	if ref.GetRemoteType() == metadata.RemoteTypeCng {
+		// do a cluster compatibility check to see if cng reference creation is allowed
+		clusterCompat, err := service.xdcr_topology_svc.MyClusterCompatibility()
+		if err != nil {
+			service.logger.Errorf("failed to fetch cluster compatibility while verifying if cng reference creation is allowed. err=%v", err)
+			return fmt.Errorf("failed to verify cluster compatibility for cng reference creation: %w", err)
+		}
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForCngSupportPhase1) {
+			return base.ErrorCngUnsupported
+		}
+	}
+
 	oldRef, _ := service.RemoteClusterByRefName(ref.Name(), false)
 
 	if oldRef != nil {
@@ -2935,7 +2957,7 @@ func (service *RemoteClusterService) validateAddRemoteCluster(ref *metadata.Remo
 
 	// skip connectivity validation if so specified, e.g., when called from migration service
 	if !skipConnectivityValidation {
-		err := service.validateRemoteCluster(ref, true)
+		err := service.validateRemote(ref, true)
 		if err != nil {
 			return err
 		}
@@ -2957,12 +2979,24 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 }
 
 func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName string, ref *metadata.RemoteClusterReference) (*RemoteClusterAgent, error) {
+	if ref.GetRemoteType() == metadata.RemoteTypeCng {
+		// do a cluster compatibility check to see if a CNG reference is allowed
+		clusterCompat, err := service.xdcr_topology_svc.MyClusterCompatibility()
+		if err != nil {
+			service.logger.Errorf("failed to fetch cluster compatibility while verifying if cng reference is allowed. err=%v", err)
+			return nil, fmt.Errorf("failed to verify cluster compatibility for cng reference: %w", err)
+		}
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForCngSupportPhase1) {
+			return nil, base.ErrorCngUnsupported
+		}
+	}
+
 	oldRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
 		return agent, err
 	}
 
-	err = service.validateRemoteCluster(ref, true)
+	err = service.validateRemote(ref, true)
 	if err != nil {
 		return agent, err
 	}
@@ -2974,10 +3008,70 @@ func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName s
 	return agent, nil
 }
 
-// validate remote cluster info
-func (service *RemoteClusterService) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
-	// do not update ref when we are merely validating existing remote cluster ref
-	return service.validateRemoteCluster(ref, false /*updateRef*/)
+// ValidateRemote validates the remote cluster reference without updating it
+func (service *RemoteClusterService) ValidateRemote(ref *metadata.RemoteClusterReference) error {
+	return service.validateRemote(ref, false)
+}
+
+// validate remote cluster
+func (service *RemoteClusterService) validateRemote(ref *metadata.RemoteClusterReference, updateRef bool) error {
+	switch ref.RemoteType {
+	case metadata.RemoteTypeCbCluster:
+		return service.validateRemoteCluster(ref, updateRef)
+	case metadata.RemoteTypeCng:
+		return service.validateRemoteCng(ref, updateRef)
+	default:
+		// should never happen
+		return fmt.Errorf("unknown remote type %v", ref.RemoteType)
+	}
+}
+
+func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClusterReference, updateRef bool) error {
+	// Only enterprise cluster are allowed to have a CNG reference
+	// Check if `this` node is a part of enterprise cluster
+	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
+	if err != nil {
+		return err
+	}
+
+	if !isEnterprise {
+		return wrapAsInvalidRemoteClusterError("CNG remote references are only supported in enterprise edition when the entire cluster is running at least 8.1 version of Couchbase Server")
+	}
+	// A CNG reference is created only when encryptionType is Full.
+	// Since this validation is already enforced at the REST layer, no additional check is needed here.
+
+	// validate certificates
+	err = service.validateCertificates(ref)
+	if err != nil {
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	// CNG currently does not support SRV records; bootstrapping via SRV should be added once CNG starts supporting it.
+	if updateRef {
+		setHostNamesAndSecuritySettingsForCngTargets(service.logger, ref)
+	}
+
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	grpcOpts, err := base.NewGrpcOptionsSecure(connStr, *ref.Credentials.Clone(), base.DeepCopyByteArray(ref.Certificates()))
+	if err != nil {
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	clusterInfo, statusCode, err := service.utils.CngGetClusterInfo(grpcOpts)
+	if err != nil {
+		service.logger.Errorf("RemoteRef %v: CngGetClusterInfo on %s failed with err=%v statusCode=%v", ref.Name(), connStr, err, statusCode)
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+
+	if updateRef {
+		ref.SetUuid(clusterInfo.GetClusterUuid())
+	}
+
+	return nil
 }
 
 // validate remote cluster info
@@ -3301,6 +3395,19 @@ func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.Utils
 	logger.Infof("Set refHttpHostName=%v, refHttpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
 
 	return nil
+}
+
+// setHostNamesAndSecuritySettingsForCngTargets sets the hostnames and security settings for CNG targets
+// For CNG targets, since only secure connections are allowed, the hostname and httpsHostname are the same
+// SANInCertificate is always true, and HttpAuthMech is always HTTPS
+func setHostNamesAndSecuritySettingsForCngTargets(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) {
+	hostname := ref.HostName()
+	ref.SetActiveHostName(hostname)
+	ref.SetHttpsHostName(hostname)
+	ref.SetActiveHttpsHostName(hostname)
+	ref.SetSANInCertificate(true)
+	ref.SetHttpAuthMech(base.HttpAuthMechHttps)
+	logger.Infof("hostname and security settings for CNG remote reference %v have been set. Hostname: %v SANInCertificate: %v HttpAuthMech: %v", ref.Id(), hostname, ref.SANInCertificate(), ref.HttpAuthMech())
 }
 
 // For full encryption mode, uses can either enter hostname:<nonSecurePort> or hostname:<securePort>

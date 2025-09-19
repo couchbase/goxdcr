@@ -34,7 +34,7 @@ type RemoteClusterSvc interface {
 	AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error
 	ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
 	SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error
-	ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error
+	ValidateRemote(ref *metadata.RemoteClusterReference) error
 	DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error)
 	// Gets a map of cloned remote cluster references, with unique ID being the key
 	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)

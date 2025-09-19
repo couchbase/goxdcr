@@ -588,7 +588,7 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 		return err
 	}
 
-	err = pipelineMgr.remote_cluster_svc.ValidateRemoteCluster(targetClusterRef)
+	err = pipelineMgr.remote_cluster_svc.ValidateRemote(targetClusterRef)
 	if err != nil {
 		pipelineMgr.logger.Errorf("Error validating remote cluster with uuid %v for pipeline %v. err=%v\n", spec.TargetClusterUUID, topic, err)
 		return err

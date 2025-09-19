@@ -41,6 +41,7 @@ var IpFamilyAddressNotFoundMessageFmt = "Cannot find address in the ip family fo
 
 var DefaultAdminPort uint16 = 8091
 var DefaultAdminPortSSL uint16 = 18091
+var DefaultCngDataPort uint16 = 18098
 
 const RESTInvalidPath = "Invalid path"
 const RESTHttpReq = "in http request"
@@ -299,11 +300,15 @@ const (
 var ParseIntBase = 10
 var ParseIntBitSize = 64
 
+const UrlProtocolDelimiter = "://"
+
 const CouchbaseDnsServiceName = "couchbase"
 const CouchbaseSecureDnsServiceName = "couchbases"
+const CouchbaseCngServiceName = "couchbase2"
 
-var CouchbaseUri = fmt.Sprintf("%v://", CouchbaseDnsServiceName)
-var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
+var CouchbaseUri = fmt.Sprintf("%s%s", CouchbaseDnsServiceName, UrlProtocolDelimiter)
+var CouchbaseSecureUri = fmt.Sprintf("%s%s", CouchbaseSecureDnsServiceName, UrlProtocolDelimiter)
+var CouchbaseCngUri = fmt.Sprintf("%s%s", CouchbaseCngServiceName, UrlProtocolDelimiter)
 
 var CapellaHostnameSuffix = ".cloud.couchbase.com"
 
@@ -348,8 +353,14 @@ const (
 	RedactRequested                = "redactRequested"
 	RestrictHostnameReplace        = "restrictHostnameReplace"
 	StageCredentials               = "stage"
+	RemoteType                     = "remoteType"
+)
+
+// error keys used for validating parameters in REST requests for remote cluster references
+const (
 	ErrKeyInvalidClientCert        = "InvalidClientCertKeyPair"
 	ErrKeyInvalidStagingParameters = "InvalidStagingParameters"
+	ErrKeyInvalidRemoteType        = "InvalidRemoteType"
 )
 
 // secure type for remote cluster reference
@@ -647,6 +658,7 @@ var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
 var VersionForSeamlessCredsChangeSupport = ServerVersion{8, 1, 0}
+var VersionForCngSupportPhase1 = ServerVersion{8, 1, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
