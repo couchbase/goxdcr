@@ -2191,6 +2191,7 @@ function validatePrometheusStatsIs0 {
 
 	if (($count > 0)); then
 		echo "Stat $prometheusStatsName shows $count"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
