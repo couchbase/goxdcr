@@ -1946,9 +1946,9 @@ func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequ
 
 // The default resource manager token distribution ratio:
 // 89 for high priority replications,
-// 9 for low priority replications,
+// 8 for low priority replications,
 // 3 for all the conflict loggers in the system.
-var RMTokenDistributionStr string = "89:9:3"
+var RMTokenDistributionStr string = "89:8:3"
 
 // RMTokenDistributionPartsCount is the number of parts in a token distribution string
 // The reason this is not derived from RMTokenDistribution is because it self
