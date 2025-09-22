@@ -726,7 +726,16 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 				bucketName, bucketUUID, vbCount, err)
 		}
 
+		// !!! Warning !!!
+		// Any error handling here must ensure that connection is released back
+		// to the pool. defer() cannot be used here because of the loop.
+		// Ideally error handling should be done in a separate function so that
+		// defer() can be used safely. But it will pull with itself many other
+		// aspects which will need to be refactored which will make it a substantial
+		// change.
+
 		if err == baseclog.ErrScopeColNotFound {
+			l.connPool.Put(bucketUUID, conn, false)
 			err = baseclog.ErrRules
 			return
 		}
