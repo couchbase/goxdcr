@@ -1113,6 +1113,15 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (metad
 		if err != nil {
 			errorsMap[key] = err
 		} else {
+			switch key {
+			case metadata.RMTokenDistributionStrKey:
+				_, err = base.ParseRMTokenDistStr(valArr[0])
+				if err != nil {
+					errorsMap[key] = err
+					continue
+				}
+			}
+
 			settings[key] = convertedValue
 		}
 	}
