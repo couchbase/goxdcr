@@ -1472,8 +1472,9 @@ function dumpDebugInfoBeforeExit {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		mkdir -p "testOutput"
 		testOutputDir=$(realpath "testOutput")
-		getGoroutinesStack "$clusterName" >${testOutputDir}/$clusterName.pprof.log
-		getGoHeap "$clusterName" >${testOutputDir}/$clusterName.hprof.log
+		getGoroutinesStack "$clusterName" >${testOutputDir}/node${clusterName}_pprof.log
+		getGoHeap "$clusterName" >${testOutputDir}/node${clusterName}_hprof.log
+		getPrometheusStats "$clusterName" >${testOutputDir}/node${clusterName}_xdcrPrometheus.log
 		getInternalNodeXdcrLog "$clusterName" >${testOutputDir}/node${clusterName}_xdcrLog.log
 		getInternalNodeMemcachedLog "$clusterName" >${testOutputDir}/node${clusterName}_memcachedLog.log
 		getInternalNodeNsServerInfoLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_info.log
@@ -2190,7 +2191,7 @@ function validatePrometheusStatsIs0 {
 	count=$(echo "$count" | sed 's/[^0-9]//g')
 
 	if (($count > 0)); then
-		echo "Stat $prometheusStatsName shows $count"
+		echo "Node $node source $sourceBucket target $targetBucket Stat $prometheusStatsName shows $count"
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi
