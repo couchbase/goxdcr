@@ -1,0 +1,96 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+# CNG to data port mappings
+CNG_NODE_PORT_MAP=(["N1"]=18098)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["type"]=grpc)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collectionArr=("col1" "col2")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running simple unidirectional grpc test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
+	sleep 10
+	testIdleXdcrCPU
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "Setting up certs for CNG"
+	setupCNGCerts "N1"
+
+	echo "Starting CNG"
+	cngPid=$(setupCNG "$cngPath" "N1" "${CLUSTER_NAME_PORT_MAP["C2"]}") || {
+		echo "ERROR: setupCNG failed"
+		exit 1
+	}
+	echo "CNG PID: $cngPid"
+	echo "Sleeping 10 sec for CNG to start"
+	sleep 10
+
+	echo "Creating a CNG reference on C1 pointing to CNG instance connected to cluster C2"
+	createSecureCNGReference "C1" "N1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+
+	runDataLoad
+
+	echo "Waiting 10 seconds before checking item count"
+	sleep 10
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	checkUnidirectionalChangesLeft
+
+	grepForPanics
+
+	echo "Stopping CNG connected to C2"
+	cleanupCNG $cngPid
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

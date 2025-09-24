@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# CNG-related globals
+declare -A CNG_DEPENDENCY_MAP
+declare -A CNG_ROOT_CERTIFICATE_MAP
+declare -A CNG_ROOT_CERTIFICATE_LOCATION
+declare -A CNG_ROOT_KEY_LOCATION
+declare -A CNG_NODE_CERT_LOCATION_MAP
+declare -A CNG_NODE_KEY_LOCATION_MAP
+declare -A CNG_NODE_PORT_MAP
+
+CNG_CB_PORT="9001" # by default attached to server running on 9001
+CNG_CB_PASS="wewewe"         # default password
+CNG_PATH="/tmp/cng"          # default path for all CNG-related files
+
+# setupCNG <cngRepoPath> <cngNodeName> [cbPort] [cbPass] [userName]
+# Launches the CNG gateway using the certificate/key
+# previously generated via setupCNGNodeCertificates.
+function setupCNG {
+	local cngRepoPath="$1"
+	local cngNodeName="$2"
+	local cbPort="${3:-$CNG_CB_PORT}"
+	local cbPass="${4:-$CNG_CB_PASS}"
+	local userName="${5:-}"
+	local mapKey="$cngNodeName"
+	if [[ -n "$userName" ]]; then
+		mapKey="${cngNodeName}_${userName}"
+	fi
+
+	if [[ -z "$cngRepoPath" || -z "$cngNodeName" ]]; then
+		echo "ERRO: setupCNG requires <cngRepoPath> and <cngNodeName>" >&2
+		return 1
+	fi
+	if [[ ! -d "$cngRepoPath" ]]; then
+		echo "ERRO: Provided cngRepoPath '$cngRepoPath' not found" >&2
+		return 1
+	fi
+
+	local certPath="${CNG_NODE_CERT_LOCATION_MAP[$mapKey]:-}"
+	local keyPath="${CNG_NODE_KEY_LOCATION_MAP[$mapKey]:-}"
+	if [[ -z "$certPath" || -z "$keyPath" ]]; then
+		echo "ERRO: Certificate or key path not found in maps for '$mapKey'. Did you run setupCNGNodeCertificates?" >&2
+		return 1
+	fi
+	if [[ ! -f "$certPath" ]]; then
+		echo "ERRO: Certificate file missing: $certPath" >&2
+		return 1
+	fi
+	if [[ ! -f "$keyPath" ]]; then
+		echo "ERRO: Key file missing: $keyPath" >&2
+		return 1
+	fi
+
+	# Create node directory and log file if not already done
+	local nodeDir="$CNG_PATH/$cngNodeName"
+	mkdir -p "$nodeDir"
+	local logFile="$CNG_PATH/$cngNodeName/cng.log"
+
+	pushd "$cngRepoPath" >/dev/null || {
+		echo "ERRO: Failed to cd to repo path" >&2
+		return 1
+	}
+
+	# Location of gateway binary
+	local gatewayBin="$CNG_PATH/gateway"
+
+	# Build the binary if it does not exist or if any source file was modified
+	local rebuild=0
+	if [[ ! -x "$gatewayBin" ]]; then
+		rebuild=1
+	else
+		# Check if any file in the repo is newer than the binary
+		local newerFile
+		newerFile=$(find . -type f ! -path "./.git/*" -newer "$gatewayBin" | head -n 1 || true)
+		if [[ -n "$newerFile" ]]; then
+			rebuild=1
+		fi
+	fi
+
+	if ((rebuild == 1)); then
+		echo "INFO: Building gateway binary at $gatewayBin" >&2
+		go build -o "$gatewayBin" ./cmd/gateway 2>>"$logFile"
+		if (($? != 0)) || [[ ! -x "$gatewayBin" ]]; then
+			echo "ERRO: Failed to build gateway binary" >&2
+			popd
+			return 1
+		fi
+	fi
+
+	cbHost="127.0.0.1:$cbPort"
+
+	# Run gateway binary in background
+	"$gatewayBin" \
+		--cb-host="${cbHost}" \
+		--grpc-cert "${certPath}" \
+		--grpc-key "${keyPath}" \
+		--cb-pass "${cbPass}" \
+		--debug \
+		--log-level=debug >>"$logFile" 2>&1 &
+	local pid=$!
+
+	popd >/dev/null || true
+
+	if [[ -n "$pid" ]]; then
+		echo "$pid"
+		return 0
+	else
+		echo "ERRO: Unable to determine CNG gateway PID" >&2
+		return 1
+	fi
+}
+
+function cleanupCNG {
+	local pid="$1"
+	echo "INFO: stopping CNG (pid $pid)"
+	if !kill -0 "$pid" 2>/dev/null; then
+		echo "INFO: CNG process $pid not running"
+		return 0
+	fi
+	kill "$pid" 2>/dev/null || true
+	# Give it a moment to exit gracefully
+	sleep 3
+
+	if kill -0 "$pid" 2>/dev/null; then
+		# if the process still exists force kill it
+		echo "INFO: Force killing CNG (pid $pid)"
+		kill -9 "$pid" 2>/dev/null || true
+	fi
+	echo "INFO: CNG process $pid stopped"
+	return 0
+}
+
+function clearCngLogs() {
+	find "$CNG_PATH" -type f -name "cng.log" | while read -r logFile; do
+		echo "" >"$logFile"
+	done
+}
+
+function createSecureCNGReference {
+	local source=$1
+	local target=$2
+	local userName=${3:-}
+	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local targetPort=${CNG_NODE_PORT_MAP[$target]:-}
+	local targetHost="127.0.0.1"
+	local remoteRefName="CNG_$target"
+	local hostName="couchbase2://$targetHost:18098"
+
+	local caCertMapKey="$target"
+	if [[ -n "$userName" ]]; then
+		caCertMapKey="${target}_${userName}"
+	fi
+
+	caCert="${CNG_ROOT_CERTIFICATE_MAP[$caCertMapKey]}"
+
+	echo "Creating SECURE remote cluster reference from $source to $target"
+	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}""
+
+	echo ""
+
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}"
+
+}
