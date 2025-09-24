@@ -22,6 +22,11 @@ if (($? != 0)); then
 	exit $?
 fi
 
+. ./cngProvision.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
 . ./testLibrary.shlib
 if (($? != 0)); then
 	exit $?
@@ -39,7 +44,7 @@ fi
 
 function man() {
 	echo "Usage: "
-	echo "$0 [--help] [--run=<testcaseNo>] [--from=<testcaseNo>] [--mobile] [--cr=(lww | seqno)] [--override]"
+	echo "$0 [--help] [--run=<testcaseNo>] [--from=<testcaseNo>] [--mobile] [--cr=(lww | seqno)] [--override] [--cngPath=<path>]"
 	echo "Note: "
 	echo "$0                : Runs ALL the intended testcases."
 	echo "Options:"
@@ -54,6 +59,7 @@ function man() {
 	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>        : Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
 	echo "-s <path/to/mobileImportSimBin> "
 	echo "OR --mobileImportSimDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
+	echo "-g <path/to/cng/root> OR --cngPath=<path>         : Enable CNG mode by pointing to the CNG repo root/path. Sets cngMode=1 and cngPath=<path>."
 }
 
 # variables
@@ -72,6 +78,8 @@ differBin=""
 differSh=""
 mutationDir=""
 mutationDiffResults=""
+cngPath=""
+cngMode=0
 tests=$(ls ${testCasesDirectory:-} | sort)
 testsToRun=$tests
 
@@ -79,7 +87,7 @@ OVERRIDE_MOBILE=0
 OVERRIDE_CRMODE=""
 OVERRIDE_ECCV=0
 
-optspec="homf:r:c:x:-:s:"
+optspec="homf:r:c:x:-:s:g:"
 while getopts "$optspec" optchar; do
 	case "${optchar}" in
 	-)
@@ -107,6 +115,10 @@ while getopts "$optspec" optchar; do
 			;;
 		mobileImportSimDir=*)
 			mobileImportSimDir=${OPTARG#*=}
+			;;
+		cngPath=*)
+			cngPath=${OPTARG#*=}
+			cngMode=1
 			;;
 		help)
 			man $0
@@ -143,6 +155,10 @@ while getopts "$optspec" optchar; do
 	s)
 		mobileImportSimDir=${OPTARG}
 		;;
+	g)
+		cngPath=${OPTARG}
+		cngMode=1
+		;;
 	h)
 		man $0
 		exit 0
@@ -154,6 +170,18 @@ while getopts "$optspec" optchar; do
 		;;
 	esac
 done
+
+if ((cngMode == 1)); then
+	if [[ -z "$cngPath" ]]; then
+		echo "ERRO: cngPath must be provided when enabling CNG mode"
+		exit 1
+	fi
+	if [[ ! -d "$cngPath" ]]; then
+		echo "ERRO: Provided cngPath '$cngPath' is not a directory or does not exist"
+		exit 1
+	fi
+	echo "INFO: CNG mode enabled. cngPath=$cngPath"
+fi
 
 if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestcases" ] && [ "${testCasesDirectory:-}" != "vagrantTestCases" ]; then
 	echo "ERRO: Cannot use -x OR --xdcrDifferDir when it not xdcr differ testcases."

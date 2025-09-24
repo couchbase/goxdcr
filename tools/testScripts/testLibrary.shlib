@@ -2676,3 +2676,155 @@ function vagrantGetPprof {
 
 	${VSSH[$idx]} "curl -s http://localhost:9998/debug/pprof/$pprofType?debug=1"
 }
+
+function setupCNGCertificateAuthority {
+	local cngNodeName="$1"
+	local dependentCngNodeName
+	local userName=${2:-}
+
+	# Construct keys based on whether userName is set
+	local caFileName="cng_ca"
+	local cngMapKey="$cngNodeName"
+	local CN="Couchbase CNG Root CA"
+	if [[ -n "$userName" ]]; then
+		caFileName="${caFileName}_${userName}"
+		cngMapKey="${cngNodeName}_${userName}"
+		CN="${CN}_${userName}"
+	fi
+
+	pushd $CNG_PATH
+
+	# Create a private key for the cluster (CNG)
+	openssl genrsa -out "./${caFileName}.key" 2048
+
+	# Create the self-signed certificate with CNG specific CN
+	openssl req -new -x509 -days 3650 -sha256 -key "./${caFileName}.key" -out "./${caFileName}.pem" \
+		-subj "/CN=${CN}" -addext "basicConstraints=CA:TRUE"
+
+	CNG_ROOT_CERTIFICATE_MAP["$cngMapKey"]=$(cat "${caFileName}.pem")
+	CNG_ROOT_CERTIFICATE_LOCATION["$cngMapKey"]="$(PWD)/${caFileName}.pem"
+	CNG_ROOT_KEY_LOCATION["$cngMapKey"]="$(PWD)/${caFileName}.key"
+
+	# Propagate to dependent nodes
+	for dependentCngNodeName in $(echo ${!CNG_DEPENDENCY_MAP[@]}); do
+		if [[ "${CNG_DEPENDENCY_MAP["$dependentCngNodeName"]}" == "$cngNodeName" ]]; then
+			local dependentCngNodeMapKey="$dependentCngNodeName"
+			if [[ -n "$userName" ]]; then
+				dependentCngNodeMapKey="${dependentCngNodeName}_${userName}"
+			fi
+			CNG_ROOT_CERTIFICATE_MAP["$dependentCngNodeMapKey"]=$(cat "${caFileName}.pem")
+			CNG_ROOT_CERTIFICATE_LOCATION["$dependentCngNodeMapKey"]="$(PWD)/${caFileName}.pem"
+			CNG_ROOT_KEY_LOCATION["$dependentCngNodeMapKey"]="$(PWD)/${caFileName}.key"
+		fi
+	done
+
+	popd
+}
+
+# setupCNGNodeCertificates <cngNodeName> [userName]
+# Generates a node key/cert pair signed by the CNG Root CA for the given CNG node.
+# CN: "CNG Node Cert"
+# SAN: 127.0.0.1
+function setupCNGNodeCertificates {
+	local cngNodeName="$1"
+	local userName="${2:-}"
+	local cngMapKey="$cngNodeName"
+	if [[ -n "$userName" ]]; then
+		cngMapKey="${cngNodeName}_${userName}"
+	fi
+
+	if [[ -z "${CNG_ROOT_CERTIFICATE_LOCATION[$cngMapKey]:-}" ]] || [[ -z "${CNG_ROOT_KEY_LOCATION[$cngMapKey]:-}" ]]; then
+		echo "ERRO: CNG root CA not initialized for $cngMapKey. Run setupCNGCertificateAuthority first." >&2
+		return 1
+	fi
+
+	# If a node cert and key already exist, skip regeneration
+	if [[ -n "${CNG_NODE_CERT_LOCATION_MAP[$cngMapKey]:-}" ]] &&
+		[[ -n "${CNG_NODE_KEY_LOCATION_MAP[$cngMapKey]:-}" ]] &&
+		[[ -f "${CNG_NODE_CERT_LOCATION_MAP[$cngMapKey]}" ]] &&
+		[[ -f "${CNG_NODE_KEY_LOCATION_MAP[$cngMapKey]}" ]]; then
+		echo "INFO: CNG node certificate already exists for $cngMapKey: ${CNG_NODE_CERT_LOCATION_MAP[$cngMapKey]}"
+		return 0
+	fi
+
+	local workDir="$CNG_PATH/${cngNodeName}"
+	mkdir -p "$workDir" || return 1
+	cd "$workDir" || return 1
+	mkdir -p public private requests || return 1
+
+	# Generate key
+	openssl genrsa -out private/cng_node.key 2048 >/dev/null 2>&1 || {
+		echo "ERRO: Failed generating node key"
+		return 1
+	}
+
+	# CSR with fixed CN
+	openssl req -new -key private/cng_node.key -out requests/cng_node.csr -subj "/CN=CNG Node Cert" >/dev/null 2>&1 || {
+		echo "ERRO: Failed generating node CSR"
+		return 1
+	}
+
+	# Extensions file with SAN 127.0.0.1 only
+	cat >cng_node.ext <<EOF
+basicConstraints=CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage=serverAuth
+keyUsage = digitalSignature,keyEncipherment
+subjectAltName = IP:127.0.0.1
+EOF
+
+	openssl x509 \
+		-CA "${CNG_ROOT_CERTIFICATE_LOCATION[$cngMapKey]}" \
+		-CAkey "${CNG_ROOT_KEY_LOCATION[$cngMapKey]}" \
+		-CAcreateserial -days 365 -req \
+		-in requests/cng_node.csr \
+		-out public/cng_node.pem \
+		-extfile cng_node.ext >/dev/null 2>&1 || {
+		echo "ERRO: Failed signing CNG node certificate"
+		return 1
+	}
+
+	CNG_NODE_CERT_LOCATION_MAP["$cngMapKey"]="$workDir/public/cng_node.pem"
+	CNG_NODE_KEY_LOCATION_MAP["$cngMapKey"]="$workDir/private/cng_node.key"
+
+	echo "INFO: Created CNG node certificate for $cngMapKey: ${CNG_NODE_CERT_LOCATION_MAP[$cngMapKey]}"
+	return 0
+}
+
+# setupCNGCerts <cngNodeName> [userName]
+# creates CA (if not already created) and generates a node certificate.
+function setupCNGCerts {
+	local cngNodeName="$1"
+	local userName="${2:-}"
+	local cngMapKey="$cngNodeName"
+	if [[ -n "$userName" ]]; then
+		cngMapKey="${cngNodeName}_${userName}"
+	fi
+
+	# Prepare CA working directory (mirrors setupCNGCertificateAuthority expectation)
+	local caDir="$CNG_PATH"
+	mkdir -p "$caDir" || return 1
+
+	# If CA not yet in maps, create it
+	if [[ -z "${CNG_ROOT_CERTIFICATE_LOCATION[$cngMapKey]:-}" ]] || [[ -z "${CNG_ROOT_KEY_LOCATION[$cngMapKey]:-}" ]]; then
+		pushd $CNG_PATH
+		setupCNGCertificateAuthority "$cngNodeName" "$userName" || {
+			echo "ERRO: Failed creating CNG root CA" >&2
+			popd >/dev/null
+			return 1
+		}
+		popd
+	else
+		echo "INFO: CNG root CA already exists for $cngMapKey"
+	fi
+
+	# Generate node certificate
+	setupCNGNodeCertificates "$cngNodeName" "$userName" || {
+		echo "ERRO: Failed creating CNG node certificate" >&2
+		return 1
+	}
+
+	echo "INFO: Completed CNG cert setup for $cngMapKey"
+	return 0
+}
