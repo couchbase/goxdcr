@@ -289,31 +289,6 @@ func (c *ConnectivityHelper) isRemoteClusterHeartbeatHealthyNoLock() bool {
 	return true
 }
 
-/**
- * A RemoteClusterAgent is responsible for handling all operations related to a specific RemoteClusterReference.
- * RemoteClusterService's job is to wrap around them and provide APIs to other components that require info
- * or operation regarding a specific Remote Cluster Reference.
- */
-type RemoteClusterAgentIface interface {
-	/* Modifier ops */
-	Start(newRef *metadata.RemoteClusterReference) error
-	Stop()
-	// This call will set the RemoteClusterAgent's internal reference with new information from newRef
-	UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error
-	// This call will queue the update and run it in the background without needing to wait for success
-	UpdateReferenceFromAsync(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error
-	DeleteReference(delFromMetaKv bool) (*metadata.RemoteClusterReference, error)
-	Refresh() error
-
-	/* Getter ops */
-	// To be used for RemoteClusterService for any caller requesting a copy of the RC Reference
-	GetReferenceClone() *metadata.RemoteClusterReference
-	GetReferenceAndStatusClone() *metadata.RemoteClusterReference
-	GetConnectionStringForCAPIRemoteCluster() string
-	UsesAlternateAddress() (bool, error)
-	GetCapability() (metadata.Capability, error)
-}
-
 type RemoteClusterAgent struct {
 	*component.RemoteMemcachedComponent
 
@@ -426,6 +401,8 @@ type RemoteClusterAgent struct {
 	specsReader    service_def.ReplicationSpecReader
 }
 
+var _ RemoteAgentIface = &RemoteClusterAgent{}
+
 const (
 	refreshRPCNotInit  = 0
 	refreshRPCUnderway = 1
@@ -442,6 +419,17 @@ func (agent *RemoteClusterAgent) Id() string {
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
 	return agent.reference.Id()
+}
+func (agent *RemoteClusterAgent) Name() string {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	return agent.reference.Name()
+}
+
+func (agent *RemoteClusterAgent) Uuid() string {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	return agent.reference.Uuid()
 }
 
 func (agent *RemoteClusterAgent) SetBootstrap() {
@@ -462,10 +450,29 @@ func (agent *RemoteClusterAgent) ClearBootstrap() {
 	agent.bootstrap = false
 }
 
-func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterReference {
+func (agent *RemoteClusterAgent) GetReferenceClone(refresh bool) (*metadata.RemoteClusterReference, error) {
+	var err error
+	var refId string = agent.reference.Id()
+	if refresh {
+		err = agent.Refresh()
+		if err != nil {
+			if err == BootStrapNodeHasMovedError {
+				agent.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refId))
+				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(refId))
+			} else if IsRefreshError(err) {
+				return nil, RefreshNotEnabledYet
+			} else {
+				agent.logger.Warnf(getRefreshErrorMsg(refId, err))
+				// Non-init related refresh error is ignorable
+				err = nil
+			}
+		}
+	} else {
+		err = agent.getErrIfNotInit()
+	}
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
-	return agent.reference.Clone()
+	return agent.reference.Clone(), err
 }
 
 func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
@@ -562,7 +569,7 @@ func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (stri
 	return toBeSortedList[0], nil
 }
 
-func (agent *RemoteClusterAgent) clearAddressModeAccounting() {
+func (agent *RemoteClusterAgent) ClearAddressModeAccounting() {
 	agent.refMtx.Lock()
 	defer agent.refMtx.Unlock()
 
@@ -2207,13 +2214,13 @@ func (agent *RemoteClusterAgent) writeToMetaKV() error {
 	return err
 }
 
-func (agent *RemoteClusterAgent) setMetadataChangeCb(newCb base.MetadataChangeHandlerCallback) {
+func (agent *RemoteClusterAgent) SetMetadataChangeHandlerCallback(newCb base.MetadataChangeHandlerCallback) {
 	agent.metadataChangeCbMtx.Lock()
 	defer agent.metadataChangeCbMtx.Unlock()
 	agent.metadataChangeCallback = newCb
 }
 
-func (agent *RemoteClusterAgent) getBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error) {
+func (agent *RemoteClusterAgent) GetBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error) {
 	agent.bucketMtx.RLock()
 	defer agent.bucketMtx.RUnlock()
 
@@ -2225,7 +2232,7 @@ func (agent *RemoteClusterAgent) getBucketInfoGetter(bucketName string) (service
 	return getter.bucketInfoGetter, nil
 }
 
-func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error) {
+func (agent *RemoteClusterAgent) GetMaxCasGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error) {
 	agent.bucketMtx.RLock()
 	defer agent.bucketMtx.RUnlock()
 
@@ -2489,9 +2496,9 @@ type RemoteClusterService struct {
 	utils                    utilities.UtilsIface
 	// agent related members
 	// a hashmap with key == refId. Rest are dynamically populated for O(1) lookups
-	agentMap             map[string]*RemoteClusterAgent
-	agentCacheRefNameMap map[string]*RemoteClusterAgent
-	agentCacheUuidMap    map[string]*RemoteClusterAgent
+	agentMap             map[string]RemoteAgentIface
+	agentCacheRefNameMap map[string]RemoteAgentIface
+	agentCacheUuidMap    map[string]RemoteAgentIface
 	agentMutex           sync.RWMutex
 
 	// When adding or setting a remote cluster reference, the metakv callback will be called even though
@@ -2522,9 +2529,9 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		logger:               logger,
 		httpsAddrMap:         make(map[string]string),
 		utils:                utilsIn,
-		agentMap:             make(map[string]*RemoteClusterAgent),
-		agentCacheRefNameMap: make(map[string]*RemoteClusterAgent),
-		agentCacheUuidMap:    make(map[string]*RemoteClusterAgent),
+		agentMap:             make(map[string]RemoteAgentIface),
+		agentCacheRefNameMap: make(map[string]RemoteAgentIface),
+		agentCacheUuidMap:    make(map[string]RemoteAgentIface),
 		metakvCbAddMap:       make(map[string]bool),
 		metakvCbSetMap:       make(map[string]bool),
 		metakvCbDelMap:       make(map[string]bool),
@@ -2575,7 +2582,7 @@ func (service *RemoteClusterService) SetMetadataChangeHandlerCallback(call_back 
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	for _, agent := range service.agentMap {
-		agent.setMetadataChangeCb(service.metadata_change_callback)
+		agent.SetMetadataChangeHandlerCallback(service.metadata_change_callback)
 	}
 }
 
@@ -2587,7 +2594,7 @@ func (service *RemoteClusterService) SetHeartbeatSenderAPI(api service_def.Clust
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	for _, agent := range service.agentMap {
-		agent.setHeartbeatApi(api)
+		agent.SetHeartbeatApi(api)
 	}
 }
 
@@ -2605,7 +2612,7 @@ func (service *RemoteClusterService) SetReplReader(reader service_def.Replicatio
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	for _, agent := range service.agentMap {
-		agent.setReplReader(reader)
+		agent.SetReplReader(reader)
 	}
 }
 
@@ -2625,7 +2632,7 @@ func getBootStrapNodeHasMovedErrorMsg(reference string) string {
 }
 
 func getUnknownCluster(customType string, customStr string) error {
-	return errors.New(fmt.Sprintf("%v : %v - %v", UnknownRemoteClusterErrorMessage, customType, customStr))
+	return fmt.Errorf("%v : %v - %v", UnknownRemoteClusterErrorMessage, customType, customStr)
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
@@ -2637,26 +2644,7 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	}
 	service.agentMutex.RUnlock()
 
-	var err error
-	if refresh {
-		err = agent.Refresh()
-		if err != nil {
-			if err == BootStrapNodeHasMovedError {
-				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refId))
-				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(refId))
-			} else if IsRefreshError(err) {
-				return nil, RefreshNotEnabledYet
-			} else {
-				service.logger.Warnf(getRefreshErrorMsg(refId, err))
-				// Non-init related refresh error is ignorable
-				err = nil
-			}
-		}
-	} else {
-		err = agent.getErrIfNotInit()
-	}
-
-	return agent.GetReferenceClone(), err
+	return agent.GetReferenceClone(refresh)
 }
 
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
@@ -2666,7 +2654,7 @@ func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refr
 	return ref, err
 }
 
-func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName string, refresh bool) (*metadata.RemoteClusterReference, *RemoteClusterAgent, error) {
+func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName string, refresh bool) (*metadata.RemoteClusterReference, RemoteAgentIface, error) {
 	diagThreshold := base.DiagInternalThreshold
 	if refresh {
 		diagThreshold = base.DiagNetworkThreshold
@@ -2682,26 +2670,8 @@ func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName str
 	}
 	service.agentMutex.RUnlock()
 
-	var err error
-	if refresh {
-		err = agent.Refresh()
-		if err != nil {
-			if err == BootStrapNodeHasMovedError {
-				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refName))
-				return nil, agent, errors.New(getBootStrapNodeHasMovedErrorMsg(refName))
-			} else if IsRefreshError(err) {
-				return nil, agent, RefreshNotEnabledYet
-			} else {
-				service.logger.Warnf(getRefreshErrorMsg(refName, err))
-				// Non-init related refresh error is ignorable
-				err = nil
-			}
-		}
-	} else {
-		err = agent.getErrIfNotInit()
-	}
-
-	return agent.GetReferenceClone(), agent, err
+	ref, err := agent.GetReferenceClone(refresh)
+	return ref, agent, err
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
@@ -2713,26 +2683,7 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 	}
 	service.agentMutex.RUnlock()
 
-	var err error
-	if refresh {
-		err = agent.Refresh()
-		if err != nil {
-			if err == BootStrapNodeHasMovedError {
-				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(uuid))
-				return nil, errors.New(getBootStrapNodeHasMovedErrorMsg(uuid))
-			} else if IsRefreshError(err) {
-				return nil, RefreshNotEnabledYet
-			} else {
-				service.logger.Warnf(getRefreshErrorMsg(uuid, err))
-				// Non-init related refresh error is ignorable
-				err = nil
-			}
-		}
-	} else {
-		err = agent.getErrIfNotInit()
-	}
-
-	return agent.GetReferenceClone(), err
+	return agent.GetReferenceClone(refresh)
 }
 
 func (service *RemoteClusterService) performAdminTask(task func(*error, chan bool, *uint32)) error {
@@ -2794,7 +2745,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 		stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("setRemoteCluster(%v, [%v])", refName, newRef.CloneAndRedact()), base.DiagNetworkThreshold)
 		defer stopFunc()
 
-		var agent *RemoteClusterAgent
+		var agent RemoteAgentIface
 		agent, *errPtr = service.validateSetRemoteClusterWithAgent(refName, newRef)
 		if *errPtr != nil {
 			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
@@ -2811,7 +2762,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 			return
 		} else {
 			// In case things change and need to update maps
-			oldRef := agent.reference.Clone()
+			oldRef, _ := agent.GetReferenceClone(false)
 
 			service.registerSet(newRef.Name())
 			*errPtr = agent.UpdateReferenceFrom(newRef, true)
@@ -2981,7 +2932,7 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 	return err
 }
 
-func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName string, ref *metadata.RemoteClusterReference) (*RemoteClusterAgent, error) {
+func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName string, ref *metadata.RemoteClusterReference) (RemoteAgentIface, error) {
 	if ref.GetRemoteType() == metadata.RemoteTypeCng {
 		// do a cluster compatibility check to see if a CNG reference is allowed
 		clusterCompat, err := service.xdcr_topology_svc.MyClusterCompatibility()
@@ -3659,7 +3610,7 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 }
 
 // Should return as soon as metakv is updated (if needed)
-func (service *RemoteClusterService) delRemoteAgent(agent *RemoteClusterAgent, delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
+func (service *RemoteClusterService) delRemoteAgent(agent RemoteAgentIface, delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
 	if agent == nil {
 		return nil, errors.New("Nil agent provided")
 	}
@@ -3685,7 +3636,7 @@ func (service *RemoteClusterService) delRemoteClusterAgent(refName string, delFr
 
 	service.agentMutex.RLock()
 	agent := service.agentCacheRefNameMap[refName]
-	refId := agent.reference.Id()
+	refId := agent.Id()
 	service.agentMutex.RUnlock()
 	service.registerDel(refId)
 	if agent == nil {
@@ -3717,7 +3668,7 @@ func (service *RemoteClusterService) delRemoteClusterAgentById(id string, delFro
  * If updateFromRef is set, then it'll update the agent's data with the incoming reference
  * Returns the agent pointer and a boolean that is true if the agent already existed.
  */
-func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClusterReference, userInitiated, updateFromRef bool) (*RemoteClusterAgent, bool, error) {
+func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClusterReference, userInitiated, updateFromRef bool) (RemoteAgentIface, bool, error) {
 	var err error
 	if ref == nil {
 		return nil, false, base.ErrorResourceDoesNotExist
@@ -3728,7 +3679,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 
 	service.agentMutex.RLock()
 	if agent, ok := service.agentMap[ref.Id()]; ok {
-		agentRef := agent.GetReferenceClone()
+		agentRef, _ := agent.GetReferenceClone(false)
 		service.agentMutex.RUnlock()
 		if updateFromRef {
 			// Before updating agent's ref, update agent maps if needed so all nodes have up to data maps.
@@ -4034,7 +3985,7 @@ func populateRefreshSuccessMsg(origRef *metadata.RemoteClusterReference, newRef 
 		origRef, newRef, newList)
 }
 
-func (service *RemoteClusterService) addAgentToAgentMapNoLock(ref *metadata.RemoteClusterReference, newAgent *RemoteClusterAgent) {
+func (service *RemoteClusterService) addAgentToAgentMapNoLock(ref *metadata.RemoteClusterReference, newAgent RemoteAgentIface) {
 	service.agentMap[ref.Id()] = newAgent
 	service.agentCacheRefNameMap[ref.Name()] = newAgent
 	service.agentCacheUuidMap[ref.Uuid()] = newAgent
@@ -4049,7 +4000,7 @@ func (service *RemoteClusterService) deleteAgentFromMaps(clonedCopy *metadata.Re
 }
 
 // If agentMaps are updated, return true
-func (service *RemoteClusterService) checkAndUpdateAgentMaps(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, agent *RemoteClusterAgent) bool {
+func (service *RemoteClusterService) checkAndUpdateAgentMaps(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, agent RemoteAgentIface) bool {
 	var retVal bool
 	// UUID and ID both cannot change
 	oldRefName := oldRef.Name()
@@ -4088,8 +4039,9 @@ func (service *RemoteClusterService) GetRefListForRestartAndClearState() (list [
 
 	for _, agent := range service.agentMap {
 		if agent.ConfigurationHasChanged() {
-			list = append(list, agent.GetReferenceClone())
-			agent.clearAddressModeAccounting()
+			ref, _ := agent.GetReferenceClone(false)
+			list = append(list, ref)
+			agent.ClearAddressModeAccounting()
 		}
 	}
 	return
@@ -4101,7 +4053,8 @@ func (service *RemoteClusterService) GetRefListForFirstTimeBadAuths() (list []*m
 
 	for _, agent := range service.agentMap {
 		if agent.GetUnreportedAuthError() {
-			list = append(list, agent.GetReferenceClone())
+			ref, _ := agent.GetReferenceClone(false)
+			list = append(list, ref)
 		}
 	}
 	return
@@ -4145,10 +4098,10 @@ func (service *RemoteClusterService) agentCacheMapsAreSynced() bool {
 	}
 
 	for _, agent := range service.agentMap {
-		if service.agentCacheRefNameMap[agent.reference.Name()] != agent {
+		if service.agentCacheRefNameMap[agent.Name()] != agent {
 			return false
 		}
-		if service.agentCacheUuidMap[agent.reference.Uuid()] != agent {
+		if service.agentCacheUuidMap[agent.Uuid()] != agent {
 			return false
 		}
 	}
@@ -4156,23 +4109,37 @@ func (service *RemoteClusterService) agentCacheMapsAreSynced() bool {
 	return true
 }
 
+// updateUtilities is only used by unit tests
 func (service *RemoteClusterService) updateUtilities(utilsIn utilities.UtilsIface) {
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 
 	service.utils = utilsIn
 	for _, agent := range service.agentMap {
-		agent.utils = utilsIn
+		switch a := agent.(type) {
+		case *RemoteClusterAgent:
+			a.utils = utilsIn
+		//case *RemoteCngAgent:
+		default:
+			service.logger.Fatalf("unexpected agent type encountered type=%T agentID=%v", a, a.Id())
+		}
 	}
 }
 
+// updateMetaSvc is only used by unit tests
 func (service *RemoteClusterService) updateMetaSvc(metaSvc service_def.MetadataSvc) {
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 
 	service.metakv_svc = metaSvc
 	for _, agent := range service.agentMap {
-		agent.metakvSvc = metaSvc
+		switch a := agent.(type) {
+		case *RemoteClusterAgent:
+			a.metakvSvc = metaSvc
+		//case *RemoteCngAgent:
+		default:
+			service.logger.Fatalf("unexpected agent type encountered type=%T agentID=%v", a, a.Id())
+		}
 	}
 }
 
@@ -4182,10 +4149,17 @@ func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, 
 	service.agentMutex.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("Unable to find remote cluster agent given cluster UUID: %v\n", uuid)
+		return nil, fmt.Errorf("unable to find remote cluster agent given cluster UUID: %v", uuid)
 	}
-
-	return agent.GetManifest(bucketName, forceRefresh, restAPIQuery)
+	switch a := agent.(type) {
+	case RemoteClusterAgentDataProvider:
+		return a.GetManifest(bucketName, forceRefresh, restAPIQuery)
+	case RemoteCngAgentDataProvider:
+		return a.GetManifest(bucketName, restAPIQuery)
+	default:
+		// agent implements neither interface
+		return nil, fmt.Errorf("unexpected agent type encountered type=%T agentID=%v", agent, agent.Id())
+	}
 }
 
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
@@ -4212,7 +4186,7 @@ func (service *RemoteClusterService) UnRequestRemoteMonitoring(spec *metadata.Re
 	return agent.UnRegisterBucketRefresh(spec.TargetBucketName)
 }
 
-func (service *RemoteClusterService) getAgentByReplSpec(spec *metadata.ReplicationSpecification) (*RemoteClusterAgent, error) {
+func (service *RemoteClusterService) getAgentByReplSpec(spec *metadata.ReplicationSpecification) (RemoteAgentIface, error) {
 	service.agentMutex.RLock()
 	agent := service.agentCacheUuidMap[spec.TargetClusterUUID]
 	defer service.agentMutex.RUnlock()
@@ -4227,7 +4201,12 @@ func (service *RemoteClusterService) waitForRefreshEnabled(ref *metadata.RemoteC
 	agent := service.agentMap[ref.Id()]
 	service.agentMutex.RUnlock()
 
-	agent.waitForRefreshEnabled()
+	if agent == nil {
+		return
+	}
+	for !agent.InitDone() {
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (agent *RemoteClusterAgent) waitForRefreshEnabled() {
@@ -4374,8 +4353,13 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 				// check again later
 				continue
 			}
+			if !agent.InitDone() {
+				agent.logger.Debugf("agent is not initialized yet, skipping heartbeat")
+				continue
+			}
 
-			hbMetadata, err := agent.generateHeartbeatMetadata(agent.GetReferenceClone())
+			clonedRef, _ := agent.GetReferenceClone(false)
+			hbMetadata, err := agent.generateHeartbeatMetadata(clonedRef)
 			if err != nil {
 				agent.logger.Warnf("failed to generate heartbeat metadata for cluster %v due to: %v", agent.reference.Uuid(), err)
 				continue
@@ -4398,8 +4382,12 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 				// check again later
 				continue
 			}
-
-			hbMetadata, err := agent.generateHeartbeatMetadata(agent.GetReferenceClone())
+			if !agent.InitDone() {
+				agent.logger.Debugf("agent is not initialized yet, skipping heartbeat")
+				continue
+			}
+			clonedRef, _ := agent.GetReferenceClone(false)
+			hbMetadata, err := agent.generateHeartbeatMetadata(clonedRef)
 			if err != nil {
 				agent.logger.Warnf("failed to generate heartbeat metadata for cluster %v due to: %v", agent.reference.Uuid(), err)
 				continue
@@ -4431,13 +4419,13 @@ func (agent *RemoteClusterAgent) heartbeatPreCheck() bool {
 	return true
 }
 
-func (agent *RemoteClusterAgent) setHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
+func (agent *RemoteClusterAgent) SetHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
 	agent.heartbeatAPIMtx.Lock()
 	defer agent.heartbeatAPIMtx.Unlock()
 	agent.heartbeatAPI = api
 }
 
-func (agent *RemoteClusterAgent) setReplReader(reader service_def.ReplicationSpecReader) {
+func (agent *RemoteClusterAgent) SetReplReader(reader service_def.ReplicationSpecReader) {
 	agent.specsReaderMtx.Lock()
 	defer agent.specsReaderMtx.Unlock()
 
@@ -4445,7 +4433,7 @@ func (agent *RemoteClusterAgent) setReplReader(reader service_def.ReplicationSpe
 }
 
 func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata) {
-	clonedRef := agent.GetReferenceClone()
+	clonedRef, _ := agent.GetReferenceClone(false)
 	err := agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, hbMetadata)
 	if err != nil {
 		agent.logger.Warnf("sending heartbeat to %v has err %v", clonedRef.Name(), err)
@@ -4504,6 +4492,10 @@ func (agent *RemoteClusterAgent) generateHeartbeatMetadata(clonedRef *metadata.R
 	return hbMetadata, nil
 }
 
+func (agent *RemoteClusterAgent) GetConnectivityStatus() metadata.ConnectivityStatus {
+	return agent.connectivityHelper.GetOverallStatus()
+}
+
 func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {
 	if ref == nil {
 		return metadata.ConnError, base.ErrorInvalidInput
@@ -4517,9 +4509,11 @@ func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteC
 	}
 	service.agentMutex.RUnlock()
 
-	return agent.connectivityHelper.GetOverallStatus(), nil
+	return agent.GetConnectivityStatus(), nil
 }
 
+// GetBucketInfoGetter is consumed by the bucket topology service's remote watcher to fetch the bucket info
+// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentDataProvider
 func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.BucketInfoGetter, error) {
 	if ref == nil {
 		return nil, base.ErrorInvalidInput
@@ -4533,9 +4527,14 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 	}
 	service.agentMutex.RUnlock()
 
-	return agent.getBucketInfoGetter(bucketName)
+	if agentDataProvider, ok := agent.(RemoteClusterAgentDataProvider); ok {
+		return agentDataProvider.GetBucketInfoGetter(bucketName)
+	}
+	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
 }
 
+// GetMaxVBStatsGetter is consumed by the bucket topology service's remote watcher to fetch the max cas
+// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentDataProvider
 func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
 	if ref == nil {
 		return nil, base.ErrorInvalidInput
@@ -4549,7 +4548,10 @@ func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClu
 	}
 	service.agentMutex.RUnlock()
 
-	return agent.getMaxCasStatsGetter(bucketName)
+	if agentDataProvider, ok := agent.(RemoteClusterAgentDataProvider); ok {
+		return agentDataProvider.GetMaxCasGetter(bucketName)
+	}
+	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
 }
 
 func (service *RemoteClusterService) SetBucketTopologySvc(svc service_def.BucketTopologySvc) {
