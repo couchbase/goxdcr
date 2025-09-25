@@ -16,8 +16,6 @@ type RemoteAgentLifeCycle interface {
 	Stop()
 	// InitDone indicates whether the remote agent has been fully initialized
 	InitDone() bool
-	// IsStopped indicates whether the remote agent has been stopped
-	IsStopped() bool
 	// UpdateReferenceFrom updates the remote agent with the new reference synchronously
 	UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error
 	// UpdateReferenceFromAsync updates the remote agent with the new reference asynchronously
@@ -54,6 +52,8 @@ type RemoteAgentClusterStatus interface {
 	GetConnectivityStatus() metadata.ConnectivityStatus
 	// GetUnreportedAuthError indicates if there's an unreported authentication error.
 	GetUnreportedAuthError() bool
+	// ResetConfigChangeState resets the remote configuration change state.
+	ResetConfigChangeState()
 }
 
 // AgentMetadata defines methods for accessing the remote agent's fields.
@@ -76,8 +76,6 @@ type RemoteAgentMetadata interface {
 	IsSame(ref *metadata.RemoteClusterReference) bool
 	// UsesAlternateAddress indicates whether the address preference set is external.
 	UsesAlternateAddress() (bool, error)
-	// ClearAddressModeAccounting clears the address mode accounting data.
-	ClearAddressModeAccounting()
 }
 
 // ClusterAgentDataProvider defines methods that fetch data from the remote cluster.

@@ -11,14 +11,15 @@ package metadata_svc
 
 import (
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/cbauth/metakv"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"strings"
-	"sync"
-	"time"
 )
 
 type MetaKVMetadataSvc struct {
@@ -35,9 +36,9 @@ func NewMetaKVMetadataSvc(logger_ctx *log.LoggerContext, utilsIn utilities.Utils
 	}, nil
 }
 
-//Wrap metakv.Get with retries
-//if the key is not found in metakv, return nil, nil, service_def.MetadataNotFoundErr
-//if metakv operation failed after max number of retries, return nil, nil, ErrorFailedAfterRetry
+// Wrap metakv.Get with retries
+// if the key is not found in metakv, return nil, nil, service_def.MetadataNotFoundErr
+// if metakv operation failed after max number of retries, return nil, nil, ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) {
 	var value []byte
 	var rev interface{}
@@ -86,9 +87,9 @@ func (meta_svc *MetaKVMetadataSvc) AddSensitive(key string, value []byte) error 
 	return meta_svc.add(key, value, true)
 }
 
-//Wrap metakv.Add with retries
-//if the key is already exist in metakv, return service_def.ErrorKeyAlreadyExist
-//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
+// Wrap metakv.Add with retries
+// if the key is already exist in metakv, return service_def.ErrorKeyAlreadyExist
+// if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool) error {
 	var err error
 	var redactedValue []byte
@@ -172,9 +173,9 @@ func (meta_svc *MetaKVMetadataSvc) SetSensitive(key string, value []byte, rev in
 	return meta_svc.set(key, value, rev, true)
 }
 
-//Wrap metakv.Set with retries
-//if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
-//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
+// Wrap metakv.Set with retries
+// if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
+// if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}, sensitive bool) error {
 	var err error
 	var redactedValue []byte
@@ -223,9 +224,9 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 	return err
 }
 
-//Wrap metakv.Del with retries
-//if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
-//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
+// Wrap metakv.Del with retries
+// if the rev provided doesn't match with the rev metakv has, return service_def.ErrorRevisionMismatch
+// if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
 	if meta_svc.readOnly {
 		return nil
@@ -267,8 +268,8 @@ func (meta_svc *MetaKVMetadataSvc) DelWithCatalog(catalogKey, key string, rev in
 	return meta_svc.Del(key, rev)
 }
 
-//Wrap metakv.RecursiveDelete with retries
-//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
+// Wrap metakv.RecursiveDelete with retries
+// if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	if meta_svc.readOnly {
 		return nil
@@ -296,8 +297,8 @@ func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	return expOpErr
 }
 
-//Wrap metakv.ListAllChildren with retries
-//if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
+// Wrap metakv.ListAllChildren with retries
+// if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
 	var entries = make([]*service_def.MetadataEntry, 0)
 

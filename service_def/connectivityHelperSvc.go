@@ -21,4 +21,5 @@ type ConnectivityHelperSvc interface {
 	MarkIpFamilyError(bool)
 	MarkEncryptionError(val bool)
 	String() string
+	GetNodeStatus(nodeName string) metadata.ConnectivityStatus
 }

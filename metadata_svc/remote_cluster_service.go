@@ -71,6 +71,14 @@ func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
 }
 
+type RemoteCngAgentFactory func(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, logger *log.CommonLogger) RemoteAgentIface
+
+var NewRemoteCngAgent RemoteCngAgentFactory
+
+func RegisterRemoteCngAgentFactory(factory RemoteCngAgentFactory) {
+	NewRemoteCngAgent = factory
+}
+
 // Whether or not to use internal or external (alternate) addressing for communications
 type AddressType int
 
@@ -101,11 +109,14 @@ func (a *AddressType) Set(external bool) {
 	}
 }
 
-type ReportAuthErrType int
+// AuthErrReportStatus indicates whether an authentication error has been reported or not
+type AuthErrReportStatus int
 
 const (
-	ReportAuthNoErr    ReportAuthErrType = iota
-	ReportAuthReported ReportAuthErrType = iota
+	// AuthErrNotReported indicates that the auth error has not been reported yet.
+	AuthErrNotReported AuthErrReportStatus = iota
+	// AuthErrReported indicates that the auth error has been reported.
+	AuthErrReported
 )
 
 func NewConnectivityHelper(refreshInterval time.Duration) *ConnectivityHelper {
@@ -239,6 +250,15 @@ func (c *ConnectivityHelper) GetOverallStatus() metadata.ConnectivityStatus {
 	}
 }
 
+func (c *ConnectivityHelper) GetNodeStatus(nodeName string) metadata.ConnectivityStatus {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	if _, exists := c.nodeStatus[nodeName]; !exists {
+		return metadata.ConnIniting
+	}
+	return c.nodeStatus[nodeName]
+}
+
 var heartbeatCleanupInterval = 5
 
 func (c *ConnectivityHelper) MarkNodeHeartbeatStatus(nodeName string, heartbeatMap map[string]base.HeartbeatStatus) {
@@ -309,7 +329,7 @@ type RemoteClusterAgent struct {
 	pendingAddressPrefCnt    int
 	// Various config flags used during replication to ensure a healthy remote cluster ref
 	configurationChanged bool
-	needToReportAuthErr  ReportAuthErrType
+	needToReportAuthErr  AuthErrReportStatus
 
 	// As the remote cluster is upgraded, certain features will automatically become enabled
 	currentCapability metadata.Capability
@@ -336,7 +356,7 @@ type RemoteClusterAgent struct {
 	// Refresh() operation needs synchronization primatives in case abort is needed
 	refreshMtx        sync.Mutex
 	refreshCv         *sync.Cond
-	refreshAbortState int
+	refreshAbortState RefreshAbortState
 	// As part of refresh() it launches a bg task to do the RPC
 	refreshRPCState int
 	// The opaque is to prevent a stale refresh RPC from modifying the state
@@ -409,10 +429,12 @@ const (
 	refreshRPCDone     = 2
 )
 
+type RefreshAbortState uint8
+
 const (
-	refreshAbortNotRequested = 0
-	refreshAbortRequested    = 1
-	refreshAbortAcknowledged = 2
+	RefreshAbortNotRequested RefreshAbortState = iota
+	RefreshAbortRequested
+	RefreshAbortAcknowledged
 )
 
 func (agent *RemoteClusterAgent) Id() string {
@@ -535,16 +557,16 @@ func (agent *RemoteClusterAgent) GetUnreportedAuthError() bool {
 
 	if currentStatus == metadata.ConnValid {
 		// connection is valid, reset the status regardless of situation
-		if agentStatus == ReportAuthReported {
+		if agentStatus == AuthErrReported {
 			agent.refMtx.Lock()
-			agent.needToReportAuthErr = ReportAuthNoErr
+			agent.needToReportAuthErr = AuthErrNotReported
 			agent.refMtx.Unlock()
 		}
 		return false
-	} else if currentStatus == metadata.ConnAuthErr && agentStatus == ReportAuthNoErr {
+	} else if currentStatus == metadata.ConnAuthErr && agentStatus == AuthErrNotReported {
 		// This agent hasn't reported auth error before, this will be the first time
 		agent.refMtx.Lock()
-		agent.needToReportAuthErr = ReportAuthReported
+		agent.needToReportAuthErr = AuthErrReported
 		agent.refMtx.Unlock()
 		return true
 	}
@@ -569,7 +591,7 @@ func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (stri
 	return toBeSortedList[0], nil
 }
 
-func (agent *RemoteClusterAgent) ClearAddressModeAccounting() {
+func (agent *RemoteClusterAgent) ResetConfigChangeState() {
 	agent.refMtx.Lock()
 	defer agent.refMtx.Unlock()
 
@@ -620,13 +642,13 @@ func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, res
 	agent.refreshMtx.Lock()
 	if rctx != nil {
 		switch agent.refreshAbortState {
-		case refreshAbortNotRequested:
+		case RefreshAbortNotRequested:
 			break
-		case refreshAbortRequested:
+		case RefreshAbortRequested:
 			// too late
 			defer agent.refreshCv.Broadcast()
-			agent.refreshAbortState = refreshAbortAcknowledged
-		case refreshAbortAcknowledged:
+			agent.refreshAbortState = RefreshAbortAcknowledged
+		case RefreshAbortAcknowledged:
 			// too late anyway
 			break
 		}
@@ -909,14 +931,14 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	rctx.agent.refreshMtx.Lock()
 	// Before launching bg go-routine, check for abort signals
 	switch rctx.agent.refreshAbortState {
-	case refreshAbortRequested:
-		rctx.agent.refreshAbortState = refreshAbortAcknowledged
+	case RefreshAbortRequested:
+		rctx.agent.refreshAbortState = RefreshAbortAcknowledged
 		defer rctx.agent.refreshCv.Broadcast()
 		err = RefreshAborted
-	case refreshAbortAcknowledged:
+	case RefreshAbortAcknowledged:
 		// Don't launch the goroutine
 		err = RefreshAborted
-	case refreshAbortNotRequested:
+	case RefreshAbortNotRequested:
 		rctx.agent.refreshRPCState = refreshRPCUnderway
 		// Assign a new ID for the background task
 		rctx.agent.refreshRPCOpaque++
@@ -924,11 +946,11 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		for {
 			rctx.agent.refreshCv.Wait()
 			// When this wakes up, can be potential spurious wakeup, RPC Done, or abort
-			if rctx.agent.refreshAbortState == refreshAbortRequested || rctx.agent.refreshAbortState == refreshAbortAcknowledged {
+			if rctx.agent.refreshAbortState == RefreshAbortRequested || rctx.agent.refreshAbortState == RefreshAbortAcknowledged {
 				// Revoke permission from the background RPC function
 				rctx.agent.refreshRPCOpaque++
 				err = RefreshAborted
-				if rctx.agent.refreshAbortState == refreshAbortRequested {
+				if rctx.agent.refreshAbortState == RefreshAbortRequested {
 					defer rctx.agent.refreshCv.Broadcast()
 				}
 				break
@@ -1198,11 +1220,11 @@ func (agent *RemoteClusterAgent) AbortAnyOngoingRefresh() (needToReEnable bool) 
 		needToReEnable = true
 	}
 	if agent.refreshActive > 0 {
-		if agent.refreshAbortState == refreshAbortNotRequested {
+		if agent.refreshAbortState == RefreshAbortNotRequested {
 			// The first call should set the state
-			agent.refreshAbortState = refreshAbortRequested
+			agent.refreshAbortState = RefreshAbortRequested
 		}
-		for agent.refreshAbortState != refreshAbortAcknowledged {
+		for agent.refreshAbortState != RefreshAbortAcknowledged {
 			agent.refreshCv.Wait()
 		}
 	}
@@ -1213,20 +1235,20 @@ func (agent *RemoteClusterAgent) ReenableRefresh() {
 	agent.refreshMtx.Lock()
 	defer agent.refreshMtx.Unlock()
 	agent.temporaryDisableRefresh = false
-	agent.refreshAbortState = refreshAbortNotRequested
+	agent.refreshAbortState = RefreshAbortNotRequested
 }
 
 func (rctx *refreshContext) checkIfAbortRequested() error {
 	rctx.agent.refreshMtx.Lock()
 	defer rctx.agent.refreshMtx.Unlock()
 	switch rctx.agent.refreshAbortState {
-	case refreshAbortNotRequested:
+	case RefreshAbortNotRequested:
 		return nil
-	case refreshAbortRequested:
-		rctx.agent.refreshAbortState = refreshAbortAcknowledged
+	case RefreshAbortRequested:
+		rctx.agent.refreshAbortState = RefreshAbortAcknowledged
 		defer rctx.agent.refreshCv.Broadcast()
 		return RefreshAborted
-	case refreshAbortAcknowledged:
+	case RefreshAbortAcknowledged:
 		return RefreshAborted
 	}
 	return fmt.Errorf("Not implemented")
@@ -1423,10 +1445,6 @@ func (agent *RemoteClusterAgent) stopAllGoRoutines() {
 
 	// Wait for all go routines to stop before clean up
 	agent.agentWaitGrp.Wait()
-}
-
-func (agent *RemoteClusterAgent) IsStopped() bool {
-	return atomic.LoadUint32(&agent.stopped) > 0
 }
 
 // Once it's been Stopped, an agent *must* be deleted and not reused due to the stopOnce here
@@ -1771,7 +1789,7 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 					continue
 				}
 
-				ref, err := constructRemoteClusterReference(refBytes, rev, false)
+				ref, err := ConstructRemoteClusterReference(refBytes, rev, false)
 				if err != nil {
 					agent.logger.Warnf("Failed to construct cluster reference from metakv, err=%v", err)
 					continue
@@ -1900,7 +1918,7 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKV() error {
 	}
 
 	if err == nil {
-		refInMetaKv, err := constructRemoteClusterReference(value, rev, true)
+		refInMetaKv, err := ConstructRemoteClusterReference(value, rev, true)
 		if err != nil {
 			return err
 		}
@@ -2557,7 +2575,7 @@ func (service *RemoteClusterService) loadFromMetaKV() error {
 
 	var ref *metadata.RemoteClusterReference
 	for _, KVentry := range KVsFromMetaKV {
-		ref, err = constructRemoteClusterReference(KVentry.Value, KVentry.Rev, false)
+		ref, err = ConstructRemoteClusterReference(KVentry.Value, KVentry.Rev, false)
 
 		if ref.Uuid() == "" || ref.Name() == "" || ref.Id() == "" {
 			service.logger.Warnf("Loading from metakv showed potentially problematic reference %v", ref.String())
@@ -3699,7 +3717,17 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 			return agent, true, err
 		} else {
 			// empty for now - create a new agent and attempt to start it
-			newAgent := service.NewRemoteClusterAgent()
+			var newAgent RemoteAgentIface
+			// Depending on the type of remote cluster, create the appropriate agent
+			switch ref.GetRemoteType() {
+			case metadata.RemoteTypeCbCluster:
+				newAgent = service.NewRemoteClusterAgent()
+			case metadata.RemoteTypeCng:
+				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.logger)
+			default:
+				// should never happen
+				return nil, false, fmt.Errorf("unknown remoteType %v for reference %v", ref.GetRemoteType(), ref.Name())
+			}
 			service.addAgentToAgentMapNoLock(ref, newAgent)
 			service.agentMutex.Unlock()
 
@@ -3830,7 +3858,7 @@ func (service *RemoteClusterService) checkIfDeletingIsActive(refId string) bool 
 	return exists
 }
 
-func constructRemoteClusterReference(value []byte, rev interface{}, skipPopulateDnsSrv bool) (*metadata.RemoteClusterReference, error) {
+func ConstructRemoteClusterReference(value []byte, rev interface{}, skipPopulateDnsSrv bool) (*metadata.RemoteClusterReference, error) {
 	ref := &metadata.RemoteClusterReference{}
 	err := ref.Unmarshal(value)
 	if err != nil {
@@ -3908,7 +3936,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	var newRef *metadata.RemoteClusterReference
 	var err error
 	if len(value) != 0 {
-		newRef, err = constructRemoteClusterReference(value, rev, false)
+		newRef, err = ConstructRemoteClusterReference(value, rev, false)
 		if err != nil {
 			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", base.TagUDBytes(value), err)
 			return err
@@ -4041,7 +4069,7 @@ func (service *RemoteClusterService) GetRefListForRestartAndClearState() (list [
 		if agent.ConfigurationHasChanged() {
 			ref, _ := agent.GetReferenceClone(false)
 			list = append(list, ref)
-			agent.ClearAddressModeAccounting()
+			agent.ResetConfigChangeState()
 		}
 	}
 	return

@@ -2010,3 +2010,6 @@ const PipelineReinitHash = "pipelineReinitHash"
 const Backfill = "backfill"
 
 const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
+
+// MaxAllowedRCDegradedCyclesForCng denotes the threshold number of consecutive refresh cycles RC can remain degraded before reporting RC_ERROR.
+const MaxAllowedRCDegradedCyclesForCng = 6
