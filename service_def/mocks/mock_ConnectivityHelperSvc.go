@@ -22,6 +22,52 @@ func (_m *ConnectivityHelperSvc) EXPECT() *ConnectivityHelperSvc_Expecter {
 	return &ConnectivityHelperSvc_Expecter{mock: &_m.Mock}
 }
 
+// GetNodeStatus provides a mock function with given fields: nodeName
+func (_m *ConnectivityHelperSvc) GetNodeStatus(nodeName string) metadata.ConnectivityStatus {
+	ret := _m.Called(nodeName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeStatus")
+	}
+
+	var r0 metadata.ConnectivityStatus
+	if rf, ok := ret.Get(0).(func(string) metadata.ConnectivityStatus); ok {
+		r0 = rf(nodeName)
+	} else {
+		r0 = ret.Get(0).(metadata.ConnectivityStatus)
+	}
+
+	return r0
+}
+
+// ConnectivityHelperSvc_GetNodeStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeStatus'
+type ConnectivityHelperSvc_GetNodeStatus_Call struct {
+	*mock.Call
+}
+
+// GetNodeStatus is a helper method to define mock.On call
+//   - nodeName string
+func (_e *ConnectivityHelperSvc_Expecter) GetNodeStatus(nodeName interface{}) *ConnectivityHelperSvc_GetNodeStatus_Call {
+	return &ConnectivityHelperSvc_GetNodeStatus_Call{Call: _e.mock.On("GetNodeStatus", nodeName)}
+}
+
+func (_c *ConnectivityHelperSvc_GetNodeStatus_Call) Run(run func(nodeName string)) *ConnectivityHelperSvc_GetNodeStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *ConnectivityHelperSvc_GetNodeStatus_Call) Return(_a0 metadata.ConnectivityStatus) *ConnectivityHelperSvc_GetNodeStatus_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ConnectivityHelperSvc_GetNodeStatus_Call) RunAndReturn(run func(string) metadata.ConnectivityStatus) *ConnectivityHelperSvc_GetNodeStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetOverallStatus provides a mock function with no fields
 func (_m *ConnectivityHelperSvc) GetOverallStatus() metadata.ConnectivityStatus {
 	ret := _m.Called()

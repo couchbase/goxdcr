@@ -25,6 +25,7 @@ import (
 	base "github.com/couchbase/goxdcr/v8/base"
 	log "github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	_ "github.com/couchbase/goxdcr/v8/metadata_svc/cngAgent" // Import for init() function registration
 	rm "github.com/couchbase/goxdcr/v8/replication_manager"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/service_impl"

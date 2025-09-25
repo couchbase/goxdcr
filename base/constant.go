@@ -2013,6 +2013,9 @@ const Backfill = "backfill"
 
 const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
 
+// MaxAllowedRCDegradedCyclesForCng denotes the threshold number of consecutive refresh cycles RC can remain degraded before reporting RC_ERROR.
+const MaxAllowedRCDegradedCyclesForCng = 6
+
 /**
 * In order for DCP flow control to work correctly, the number of mutations in DCP buffer
 * should be no larger than the size of the DCP data channel. This way we can ensure
