@@ -130,10 +130,8 @@ function vagrantRemoveSGW {
 
 # If VPN is not set up, this should catch it
 function checkBuildServerAccessibility {
-	wget -q latestbuilds.service.couchbase.com/builds/ -O "/tmp/index.html" &
-	sleep 3
-	local jobsCnt=$(jobs -l | grep -c "Running")
-	if (($jobsCnt > 0)); then
+	curl -s --head latestbuilds.service.couchbase.com >/dev/null 2>&1
+	if (($? > 0)); then
 		killAllBgJobs
 		echo "VPN to Couchbase is not set up"
 		exit 1
