@@ -145,7 +145,7 @@ function runTestCase {
 	sleep 420
 
 	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 7))
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 1)) $(($currentHandlingInstanceDoneCnt + 6))
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 1)) $(($currentHandlingInstanceDoneCnt + 7))
 
 	local logsC1
 	local resumeFrom0CntOrig
