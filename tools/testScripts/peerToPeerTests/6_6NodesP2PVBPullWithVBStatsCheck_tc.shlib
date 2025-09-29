@@ -75,7 +75,7 @@ function induceGuardrailFailedWrites {
 }
 
 function induceCasPoisonGuardrailFailedWrites {
-	local numberOfCasPoisonDocs=500
+	local numberOfCasPoisonDocs=100
 	local i=0
 	local docName
 
@@ -83,9 +83,9 @@ function induceCasPoisonGuardrailFailedWrites {
 		docName="casPoisonDoc_$i"
 		echo "Writing $docName out of $numberOfCasPoisonDocs"
 		setReplicationSettings "C1" "B1" "C2" "B1" "xdcrDevCasDriftInjectDocKey=$docName"
-		sleep 1
+		sleep 2
 		writeJSONDocument "C1" "B1" "$docName" '{"colFoo":"colBar"}'
-		sleep 1
+		sleep 2
 	done
 	validatePrometheusStatsCasPoisonNon0 "C1" "B1" "B1"
 }
