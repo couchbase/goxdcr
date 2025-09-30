@@ -184,7 +184,7 @@ function testReplicationWithConflictLogging {
 	enableMobileImportSimIfPresent "C2" "B2"
 	enableMobileImportSimIfPresent "C3" "B3"
 
-	sleepTime=60
+	sleepTime=180
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
 
