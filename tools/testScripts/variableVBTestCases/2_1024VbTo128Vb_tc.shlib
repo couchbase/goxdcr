@@ -101,8 +101,9 @@ function runTestCase {
 
 	# Kill source goxdcr
 	killGoXdcr "C1"
-	echo "Sleeping 15 seconds for goxdcr to reboot"
-	sleep 15
+	sleepTime=20
+	echo "Sleeping $sleepTime seconds for goxdcr to reboot"
+	sleep $sleepTime
 	checkUnidirectionalChangesLeft
 	grepForPanics
 
@@ -111,7 +112,8 @@ function runTestCase {
 	runDataLoad
 	# Changes left should go to 0
 	checkUnidirectionalChangesLeft
-	sleep 10
+
+	sleep $sleepTime
 	if (($(getDocsProcessed "C1" "B1" "C2" "B2") == $oldDocsProcessed)); then
 		echo "Data processed should not be the same after run"
 		exit 1
