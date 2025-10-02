@@ -2304,12 +2304,9 @@ function runCbcPillowFight {
 	fi
 
 	local cbcPillowfight
-	cbcPillowfight=$(locate cbc-pillowfight | grep install | grep bin | head -n 1)
+	cbcPillowfight=$(findFileTraverseUp "./install/bin" "cbc-pillowfight")
 	if [[ -z "${cbcPillowfight:-}" ]]; then
-		cbcPillowfight=$(mdfind cbc-pillowfight | grep install | grep bin | head -n 1)
-	fi
-	if [[ -z "${cbcPillowfight:-}" ]]; then
-		echo "Error: cannot locate cbc-pillowfight"
+		echo "Error: cannot find cbc-pillowfight"
 		return 1
 	fi
 
@@ -2339,10 +2336,7 @@ function runCbepctl {
 	fi
 
 	local cbepctl
-	cbepctl=$(locate cbepctl | grep install | grep bin | head -n 1)
-	if [[ -z "${cbepctl:-}" ]]; then
-		cbepctl=$(mdfind cbepctl | grep install | grep bin | head -n 1)
-	fi
+	cbepctl=$(findFileTraverseUp "./install/bin" "cbepctl")
 	if [[ -z "${cbepctl:-}" ]]; then
 		echo "Error: cannot locate cbepctl"
 		return 1

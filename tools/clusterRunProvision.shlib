@@ -1837,29 +1837,46 @@ function cleanupBucketReplications {
 	[[ $(type -t waitForBgJobs) == function ]] && waitForBgJobs
 }
 
-function findCbDocLoader {
-	if [[ ! -z "${CBDOCLOADER:-}" ]]; then
-		echo "$CBDOCLOADER"
-		return 0
+function findFileTraverseUp {
+	local path=$(pwd)
+	local dirForFileToFind="$1"
+	local fileToFind="$2"
+	local fileAbsPath
+
+	# Ascend directories until we find dirForFileToFind or hit root
+	local -i found=0
+	while true; do
+		if [[ -d "$dirForFileToFind" ]]; then
+			found=1
+			break
+		fi
+		if [[ "$PWD" == "/" ]]; then
+			break
+		fi
+		cd .. || break
+	done
+
+	if ((found == 0)); then
+		echo "Error: cannot locate directory: $dirForFileToFind" >&2
+		exit 1
 	fi
 
-	which locate >/dev/null 2>&1
-	if (($? != 0)); then
-		return $?
+	if [[ ! -f "$dirForFileToFind/${fileToFind}" ]]; then
+		echo "Error: cannot locate $fileToFind at $dirForFileToFind/${fileToFind}" >&2
+		exit 1
 	fi
-	# Just pick one
-	docloader=$(locate cbdocloader | grep install | grep bin | head -n 1)
-	if (($? != 0)); then
-		echo ""
-		return 1
-	fi
-	if [[ -z "${CBDOCLOADER:-}" ]]; then
-		# set it in case needed it in future
-		export CBDOCLOADER=$docloader
-	fi
-	echo "$docloader"
-	return 0
 
+	fileAbsPath="$(cd "$dirForFileToFind" && pwd)/${fileToFind}"
+
+	# Restore original working directory
+	cd "$path" || true
+
+	if [[ -z "${fileAbsPath:-}" ]]; then
+		echo "Error: cannot locate $fileToFind" >&2
+		exit 1
+	fi
+
+	echo "$fileAbsPath"
 }
 
 function findCbimport {
@@ -1869,36 +1886,10 @@ function findCbimport {
 	fi
 
 	local cbimport
-	local command=locate
-
-	# need to have locate or mdfind
-	which locate >/dev/null 2>&1
+	cbimport=$(findFileTraverseUp "./install/bin" "cbimport")
 	if (($? != 0)); then
-		# locate is not present, use mdfind
-		which mdfind >/dev/null 2>&1
-		if (($? != 0)); then
-			# mdfind also not present
-			echo "locate or mdfind not found"
-			return $?
-		fi
-
-		# use mdfind instead of locate
-		command=mdfind
-	fi
-
-	cbimport=$($command cbimport | grep install | grep bin | head -n 1)
-	if (($? != 0)); then
-		echo ""
-		return 1
-	fi
-
-	# there may be cases where locate database isn't updated yet, try using mdfind
-	if [[ -z "${cbimport:-}" && "$command" == "locate" ]]; then
-		cbimport=$(mdfind cbimport | grep install | grep bin | head -n 1)
-		if (($? != 0)); then
-			echo ""
-			return 1
-		fi
+		echo "Error: cannot find cbimport"
+		exit $?
 	fi
 	echo "$cbimport"
 
@@ -1907,42 +1898,6 @@ function findCbimport {
 		export CBIMPORT=$cbimport
 	fi
 	return 0
-}
-
-#Input
-# 1 - cluster name
-# 2 - bucket name
-# 3 - file name
-# cbdocloader is deprecated. Use runCbimport instead
-function runDocLoader {
-	local clusterName=$1
-	local bucketName=$2
-	local fileName=$3
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]]; then
-		echo "Invalid input"
-		return 1
-	fi
-	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-
-	docLoader=$(findCbDocLoader)
-	if (($? != 0)); then
-		echo "Could not find docLoader"
-		return 1
-	fi
-
-	getPropertiesFromBucketNamePropertyMap "$bucketName"
-	local ramQuota=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
-	if [[ -z "$ramQuota" ]]; then
-		echo "Missing ramQuota for $bucketName"
-		return 1
-	fi
-
-	local retCode=1
-	while (($retCode > 0)); do
-		Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
-		$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
-		retCode=$?
-	done
 }
 
 #Input
@@ -1967,8 +1922,9 @@ function runCbimport {
 
 	local retCode=1
 	while (($retCode > 0)); do
-		Echo "Executing cbimport on bucket $bucketName for file $fileName..."
-		$cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d $fileName
+		echo "Executing cbimport on bucket $bucketName for file $fileName..."
+		echo $cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d "file://$fileName"
+		$cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d "file://$fileName"
 		retCode=$?
 	done
 }
