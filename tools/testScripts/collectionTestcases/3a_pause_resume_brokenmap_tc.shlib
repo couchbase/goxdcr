@@ -123,11 +123,13 @@ function runTestCase {
 	checkUnidirectionalChangesLeft
 	if (($(getDocsProcessed "C1" "B1" "C2" "B2") == $oldDocsProcessed)); then
 		echo "Data processed should not be the same after run"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	if (($(getDataReplicated "C1" "B1" "C2" "B2") != $oldDataReplicated)); then
 		# Because broken mapping should have persisted
 		echo "Data replicated should be the same after run"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	grepForPanics
