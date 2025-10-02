@@ -232,6 +232,13 @@ if [[ -z "$testCaseNumber" ]]; then
 			continue
 		fi
 
+		if [[ -d "$testcase" ]]; then
+			# skip directories
+			echo ""
+			echo "WARN: Skipping directory - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
 		if [[ "$testcase" =~ _idle ]]; then
 			# test cases with _idle in the filename means they take too long for the whole suite
 			# and should be run on an individual basis only
