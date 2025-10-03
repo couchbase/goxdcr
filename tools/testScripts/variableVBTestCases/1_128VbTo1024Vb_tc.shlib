@@ -100,9 +100,10 @@ function runTestCase {
 	checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
 
 	# Kill source goxdcr
+	local sleepTime=30
 	killGoXdcr "C1"
-	echo "Sleeping 15 seconds for goxdcr to reboot"
-	sleep 15
+	echo "Sleeping $sleepTime seconds for goxdcr to reboot"
+	sleep $sleepTime
 	checkUnidirectionalChangesLeft
 	grepForPanics
 

@@ -101,7 +101,7 @@ function runTestCase {
 
 	# Kill source goxdcr
 	killGoXdcr "C1"
-	sleepTime=20
+	sleepTime=30
 	echo "Sleeping $sleepTime seconds for goxdcr to reboot"
 	sleep $sleepTime
 	checkUnidirectionalChangesLeft
