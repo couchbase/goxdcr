@@ -1086,8 +1086,8 @@ function createBucket {
 		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi
 
-	echo "Indexing scopes and collection cache from manifest..."
 	manifestOutput=$(getManifest $clusterName $bucketName)
+	echo "Indexing manifest: $clusterName $bucketName has manifest checksum : $manifestOutput"
 	populateManifestMaps "$manifestOutput"
 }
 
