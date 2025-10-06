@@ -44,7 +44,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIfac
 	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securityMock, backfillMgr
 }
 
-func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, subscribeErr error, bucketSvc *service_def.BucketTopologySvc, ckptSvc *service_def.CheckpointsService, backfillReplSvc *service_def.BackfillReplSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, securitySvc *service_def.SecuritySvc) {
+func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, subscribeErr error, bucketSvc *service_def.BucketTopologySvc, ckptSvc *service_def.CheckpointsService, backfillReplSvc *service_def.BackfillReplSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, securitySvc *service_def.SecuritySvc, isKvNode bool) {
 	utilsMock.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsReal.ExponentialBackoffExecutor(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc))
 	}).Return(nil)
@@ -58,6 +58,7 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 
 	xdcrComp.On("PeerNodesAdminAddrs").Return(peerNodes, nil)
 	xdcrComp.On("MyHostAddr").Return(myAddr, nil)
+	xdcrComp.On("IsKVNode").Return(isKvNode, nil)
 
 	retMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specList {
@@ -90,7 +91,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 
 	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, backfillMgr := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc)
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, true)
 
 	dummyMerger := func(string, string, interface{}) error { return nil }
 	getBackfillMgr := func() service_def_real.BackfillMgrIface {
@@ -233,7 +234,7 @@ func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 
 	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, backfillMgr := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc)
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, true)
 
 	dummyMerger := func(string, string, interface{}) error { return nil }
 	getBackfillMgr := func() service_def_real.BackfillMgrIface {

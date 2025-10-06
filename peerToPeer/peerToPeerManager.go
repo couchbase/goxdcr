@@ -698,7 +698,7 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 
 func (p *P2PManagerImpl) initReplicator() {
 	defer close(p.replicatorInitCh)
-	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.utils, p.colManifestSvc, p.replSpecSvc, p.sendPeriodicPushRequest)
+	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.utils, p.colManifestSvc, p.replSpecSvc, p.sendPeriodicPushRequest, p.xdcrCompSvc)
 	p.replicator.Start()
 }
 
