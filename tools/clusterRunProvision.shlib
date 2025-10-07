@@ -2356,8 +2356,9 @@ function getCollectionIdFromManifestCache {
 
 	# Look up scope checksum
 	local combinedKey="${manifestCksum},${scopeName}"
-	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]}"
+	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]:-}"
 	if [[ -z "$scopeCksum" ]]; then
+		echo "key $combinedKey not found in MANIFEST_CKSUM_SCOPE_MAP" >&2
 		echo ""
 		return 1
 	fi

@@ -43,9 +43,7 @@ declare -A MobileBucketReplProperties=(["replicationType"]="continuous" ["checkp
 # Test cases assume vagrant up has already been called
 
 function runDataLoad {
-	runCbWorkloadGenBucket "C1" "B1" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "col_" &
-	waitForBgJobs
+	runCbWorkloadGenBucket "C1" "B1"
 }
 
 function setupSGW {
