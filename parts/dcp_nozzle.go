@@ -30,11 +30,6 @@ import (
 )
 
 const (
-	// Developer injection section
-	DCP_DEV_MAIN_ROLLBACK_VB     = base.DevMainPipelineRollbackTo0VB
-	DCP_DEV_BACKFILL_ROLLBACK_VB = base.DevBackfillRollbackTo0VB
-	// end developer injection section
-
 	// start settings key name
 	DCP_VBTimestamp           = "VBTimestamps"
 	DCP_VBTimestampUpdater    = "VBTimestampUpdater"
@@ -278,6 +273,10 @@ type DcpNozzleIface interface {
 	Logger() *log.CommonLogger
 }
 
+type DcpNozzleInjector interface {
+	Init(dcp *DcpNozzle, settings metadata.ReplicationSettingsMap)
+}
+
 /*
 ***********************************
 /* struct DcpNozzle
@@ -285,6 +284,7 @@ type DcpNozzleIface interface {
 */
 type DcpNozzle struct {
 	AbstractPart
+	DcpNozzleInjector
 
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
@@ -408,6 +408,7 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
 
 	dcp := &DcpNozzle{
+		DcpNozzleInjector:              NewDcpNozzleInjector(),
 		sourceBucketName:               sourceBucketName,
 		targetBucketName:               targetBucketName,
 		vbnosLock:                      sync.RWMutex{},
@@ -682,7 +683,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		dcp.enablePurgeRollback = val
 	}
 
-	dcp.initializeDevInjections(settings)
+	dcp.DcpNozzleInjector.Init(dcp, settings)
 
 	dcp.initializeUprHandshakeHelpers()
 
@@ -2217,22 +2218,6 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 		}
 	}
 	return nil
-}
-
-func (dcp *DcpNozzle) initializeDevInjections(settings metadata.ReplicationSettingsMap) {
-	if val, ok := settings[DCP_DEV_MAIN_ROLLBACK_VB]; ok {
-		intVal, ok2 := val.(int)
-		if ok2 && intVal >= 0 {
-			dcp.devInjectionMainRollbackVb = intVal
-		}
-	}
-
-	if val, ok := settings[DCP_DEV_BACKFILL_ROLLBACK_VB]; ok {
-		intVal, ok2 := val.(int)
-		if ok2 && intVal >= 0 {
-			dcp.devInjectionBackfillRollbackVb = intVal
-		}
-	}
 }
 
 func (dcp *DcpNozzle) sendStreamCloseIfNecessary(vbno uint16) {

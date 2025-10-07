@@ -28,6 +28,10 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
+type BackfillMgrInjector interface {
+	InjectVbsTaskDoneNotifierDelay(spec *metadata.ReplicationSpecification, b *BackfillMgr)
+}
+
 // Checkpoint manager can only persist a manifest if and only if any broken maps have already been
 // raised and cause backfills to occur.
 // The backfill's manager's secondary job is to cover backfill situations that the broken map couldn't detect.
@@ -45,6 +49,8 @@ import (
 // Later, manifest changed to 7, and the target collection c1 of remains 8, it's a no-op.
 // If the manifest changed to 9, and the target collection c1 changed to 12, and no brokenmap event raised, it is case (3) above.
 type BackfillMgr struct {
+	BackfillMgrInjector
+
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	replSpecSvc            service_def.ReplicationSpecSvc
 	backfillReplSvc        service_def.BackfillReplSvc
@@ -265,6 +271,7 @@ type BackfillRetryRequest struct {
 
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc, utils utils.UtilsIface) *BackfillMgr {
 	backfillMgr := &BackfillMgr{
+		BackfillMgrInjector:               NewBackfillMgrInjector(),
 		collectionsManifestSvc:            collectionsManifestSvc,
 		replSpecSvc:                       replSpecSvc,
 		backfillReplSvc:                   backfillReplSvc,
@@ -860,9 +867,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 			}
 		}
 
-		if newSpec.Settings.GetBoolSettingValue(metadata.DevBackfillMgrVbsTasksDoneNotifierDelay) {
-			atomic.StoreUint32(&b.debugVbsTaskDoneNotifierHang, 1)
-		}
+		b.BackfillMgrInjector.InjectVbsTaskDoneNotifierDelay(newSpec, b)
 		// metakv_change_listener will call GetExplicitMappingChangeHandler if needed
 	}
 	return err

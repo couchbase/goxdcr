@@ -73,6 +73,8 @@ type ConflictLoggerCtor func(pipeline common.Pipeline, loggerCtx *log.LoggerCont
 // once incoming nozzle is open, it will propel the data through all
 // processing steps.
 type GenericPipeline struct {
+	PipelineInjector
+
 	//name of the pipeline
 	topic     string
 	fullTopic string
@@ -571,13 +573,7 @@ func (genericPipeline *GenericPipeline) preCheckCasCheck(spec *metadata.Replicat
 		return errMap
 	}
 
-	devInjectionVB := spec.Settings.GetDevPreCheckVBPoison()
-	if devInjectionVB >= 0 {
-		if _, exists := localMaxCasMap[uint16(devInjectionVB)]; exists {
-			// year 2033
-			localMaxCasMap[uint16(devInjectionVB)] = 2017616266604601370
-		}
-	}
+	genericPipeline.PipelineInjector.InjectDevPreCheckVBPoison(spec.Settings, &localMaxCasMap)
 
 	if len(remoteMinCasMap) < len(localMaxCasMap) {
 		errMap[PreCheckCasCheck] = fmt.Errorf("Remote cluster vb cas map only has %v elements whereas locally there are %v", len(localMaxCasMap), len(localMaxCasMap))
@@ -919,14 +915,16 @@ func NewGenericPipeline(t string,
 	targets map[string]common.Nozzle,
 	spec *metadata.ReplicationSpecification,
 	uilog_svc service_def.UILogSvc) *GenericPipeline {
-	pipeline := &GenericPipeline{topic: t,
-		sources:       sources,
-		targets:       targets,
-		spec:          spec,
-		logger:        log.NewLogger("GenericPipeline", nil),
-		instance_id:   time.Now().Nanosecond(),
-		state:         common.Pipeline_Initial,
-		settings_lock: &sync.RWMutex{}}
+	pipeline := &GenericPipeline{
+		PipelineInjector: NewPipelineInjector(),
+		topic:            t,
+		sources:          sources,
+		targets:          targets,
+		spec:             spec,
+		logger:           log.NewLogger("GenericPipeline", nil),
+		instance_id:      time.Now().Nanosecond(),
+		state:            common.Pipeline_Initial,
+		settings_lock:    &sync.RWMutex{}}
 	pipeline.initialize()
 	return pipeline
 }
@@ -937,7 +935,9 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
 	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
 	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error, conflictLoggerCtor ConflictLoggerCtor) (*GenericPipeline, error) {
-	pipeline := &GenericPipeline{topic: t,
+	pipeline := &GenericPipeline{
+		PipelineInjector:                   NewPipelineInjector(),
+		topic:                              t,
 		sources:                            sources,
 		targets:                            targets,
 		spec:                               spec,

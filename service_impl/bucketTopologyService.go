@@ -430,7 +430,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 
 func (b *BucketTopologyService) getRemoteMaxCasUpdater(spec *metadata.ReplicationSpecification, maxCasGetter service_def.MaxVBCasStatsGetter, watcher *BucketTopologySvcWatcher) func() error {
 	maxCasGetterFunc := func() error {
-		if spec.Settings.GetDevPreCheckMaxCasErrorInjection() { //By default it is set false
+		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) { //By default it is set false
 			return fmt.Errorf("in getRemoteMaxCasUpdater: dev error injection")
 		}
 		maxCasMap, err := maxCasGetter()
@@ -846,7 +846,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 
 func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	updateFunc := func() error {
-		if spec.Settings.GetDevPreCheckMaxCasErrorInjection() { //by default it is set to false
+		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) { //by default it is set to false
 			return fmt.Errorf("in getLocalMaxCasUpdater: dev error injection")
 		}
 		watcher.latestCacheMtx.RLock()

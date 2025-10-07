@@ -121,7 +121,7 @@ func (repl_settings_svc *ReplicationSettingsSvc) setDefaultReplicationSettings(s
 }
 
 func (repl_settings_svc *ReplicationSettingsSvc) constructReplicationSettingsObject(value []byte, rev interface{}) (*metadata.ReplicationSettings, error) {
-	settings := &metadata.ReplicationSettings{}
+	settings := metadata.NewEmptyReplicationSettings()
 	err := json.Unmarshal(value, settings)
 	if err != nil {
 		return nil, err

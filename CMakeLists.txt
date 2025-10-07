@@ -39,21 +39,21 @@ IF (DEFINED FORESTDB_TARGET)
   SET (_forestdb_dep DEPENDS ${FORESTDB_TARGET})
 ENDIF (DEFINED FORESTDB_TARGET)
 
-# IF wanted to run unit test during build, uncomment below
-#add_custom_command(
-#  OUTPUT goxdcr_unit_tests
-#  COMMAND ${PROJECT_SOURCE_DIR}/run_unit_tests.sh ${PROJECT_SOURCE_DIR} > goxdcr_unit_tests.log
-#)
-
-#add_custom_target(run ALL
-#  DEPENDS goxdcr_unit_tests
-#)
+# To compile with injection, run at the top level:
+# make clean; make -j12 EXTRA_CMAKE_OPTIONS=-DXDCR_INJECTION_FRAMEWORK=ON
+OPTION (XDCR_INJECTION_FRAMEWORK "Include developer injection framework" OFF)
 
 SET (LDFLAGS)
 
 IF (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building EE edition of XDCR")
-   SET (xdcrGoTags "pcre enterprise")
+   IF (XDCR_INJECTION_FRAMEWORK)
+      MESSAGE(STATUS "XDCR with injection framework turned on")
+      SET (xdcrGoTags "pcre enterprise dev")
+   ELSE (XDCR_INJECTION_FRAMEWORK)
+      MESSAGE(STATUS "XDCR with injection framework turned off")
+      SET (xdcrGoTags "pcre enterprise")
+   ENDIF (XDCR_INJECTION_FRAMEWORK)
    SET (NEWEVAL_DIR ../eventing-ee/evaluator)
    SET(_eval_no_default_path NO_DEFAULT_PATH)
 ELSE (BUILD_ENTERPRISE)
@@ -83,6 +83,7 @@ foreach (unitTestModule backfill_manager base base/conflictlog base/filter confl
   GoTest (TARGET goxdcr-go-test-${unitTestModule}
   PACKAGE github.com/couchbase/goxdcr/v8/${unitTestModule}
   GOARGS -short
+  GOTAGS dev
   GOVERSION SUPPORTED_NEWER)
 
   # Set working directory to go.mod file location

@@ -1536,7 +1536,7 @@ func generateMergeCkptArgs() *MergeCkptArgs {
 }
 
 func setupSpecSettings(replicationSpec *metadata.ReplicationSpecification) {
-	specSetting := &metadata.ReplicationSettings{}
+	specSetting := metadata.NewEmptyReplicationSettings()
 	specSetting.Settings = metadata.EmptySettings(func() map[string]*metadata.SettingsConfig {
 		configMap := make(map[string]*metadata.SettingsConfig)
 		configMap["CollectionsMgtMulti"] = metadata.CollectionsMgtConfig

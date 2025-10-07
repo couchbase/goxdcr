@@ -114,9 +114,9 @@ for directory in ${DIRS_WITH_UT[@]}; do
 	cd ${ROOT_DIR}/${directory}
 	fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 	if [[ -z "$runAllTests" ]]; then
-		go test -timeout 100s -short >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
+		go test -tags=dev -timeout 100s -short >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	else
-		go test -timeout 100s >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
+		go test -tags=dev -timeout 100s >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	fi
 	lastPid="$!"
 	echo "INFO: Test $directory with background PID $lastPid"
@@ -133,9 +133,9 @@ for directory in ${DIRS_WITH_UT[@]}; do
 	if [[ "$pcreTestsFound" == "true" ]] && [[ ! -z "$runAllTests" ]]; then
 		fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 		if [[ -z "$runAllTests" ]]; then
-			go test -short -tags=pcre >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
+			go test -short -tags=pcre,dev >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
 		else
-			go test -tags=pcre >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
+			go test -tags=pcre,dev >$testOutputDir/${fileFriendlyFileName}_pcre.out 2>&1 &
 		fi
 		lastPid2="$!"
 		echo "INFO: Test $directory PCRE tests with background PID $lastPid2"

@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -14,9 +15,10 @@ package metadata
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func setupBoilerPlate() *ReplicationSettings {
@@ -100,7 +102,9 @@ func TestViewOldFilterAsNew(t *testing.T) {
 func TestUpgradeCompressionType(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestUpgradeCompressionType =================")
-	settings := ReplicationSettings{}
+	settings := ReplicationSettings{
+		replicationSettingsInjections: NewReplicationSettingInjections(),
+	}
 	settings.Settings = nil // to simulate upgrade
 
 	assert.Equal(0, settings.CompressionType)

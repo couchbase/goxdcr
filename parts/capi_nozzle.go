@@ -116,6 +116,7 @@ type capiConfig struct {
 func newCapiConfig(logger *log.CommonLogger) capiConfig {
 	return capiConfig{
 		baseConfig: baseConfig{maxCount: -1,
+			baseConfigInjector:  NewBaseConfigInjector(), // no-op, since capi is deprecated
 			maxSize:             -1,
 			maxRetry:            base.CapiMaxRetryBatchUpdateDocs,
 			writeTimeout:        base.CapiWriteTimeout,
