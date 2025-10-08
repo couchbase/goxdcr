@@ -141,30 +141,6 @@ function runOneRebalanceCycle {
 	echo "============================================================================"
 }
 
-function runReplicationResume {
-	local logs
-	logs=$(getInternalNodeXdcrLog "C1")
-	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
-	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
-
-	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
-
-	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
-	logs=$(getInternalNodeXdcrLog "C1")
-	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" $(($curCkptsFoundDocsCnt + 2)) $(($curCkptsFoundDocsCnt + 3))
-	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
-	if (($foundDocCount == 0)); then
-		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
-
-	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCnt + 1)) $(($curCkptRetrievedCnt + 2))
-	grepForPanics
-}
-
 function runTestCase {
 	echo "============================================================================"
 	echo "Running P2P Setup with security"
@@ -176,7 +152,6 @@ function runTestCase {
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
 	# replicationResume doesn't work because port 9000 is shut off when strict mode is on
-	#runReplicationResume
 
 	grepForPanics
 
