@@ -34,16 +34,18 @@ type ReplicaReplicator interface {
 }
 
 type ReplicaReplicatorImpl struct {
-	bucketTopologySvc  service_def.BucketTopologySvc
-	ckptSvc            service_def.CheckpointsService
-	backfillReplSvc    service_def.BackfillReplSvc
-	colManifestSvc     service_def.CollectionsManifestSvc
-	replicationSpecSvc service_def.ReplicationSpecSvc
+	bucketTopologySvc   service_def.BucketTopologySvc
+	ckptSvc             service_def.CheckpointsService
+	backfillReplSvc     service_def.BackfillReplSvc
+	colManifestSvc      service_def.CollectionsManifestSvc
+	replicationSpecSvc  service_def.ReplicationSpecSvc
+	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 
 	utils          utilities.UtilsIface
 	reverseMapPool *utilities.KvVbMapPool
 
-	unitTest bool
+	unitTest             bool
+	unitTestInitDelaySec int
 
 	startOnce      sync.Once
 	finCh          chan bool
@@ -63,22 +65,23 @@ type ReplicaReplicatorImpl struct {
 
 const moduleName = "ReplicaReplicator"
 
-func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx *log.LoggerContext, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, replicationSpecSvc service_def.ReplicationSpecSvc, sendReqsFunc func(reqs PeersVBPeriodicReplicateReqs) error) *ReplicaReplicatorImpl {
+func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx *log.LoggerContext, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, replicationSpecSvc service_def.ReplicationSpecSvc, sendReqsFunc func(reqs PeersVBPeriodicReplicateReqs) error, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *ReplicaReplicatorImpl {
 	return &ReplicaReplicatorImpl{
-		bucketTopologySvc:  bucketTopologySvc,
-		logger:             log.NewLogger(moduleName, loggerCtx),
-		agentMap:           map[string]*ReplicatorAgentImpl{},
-		replicaCache:       NewReplicaCache(bucketTopologySvc, loggerCtx),
-		ckptSvc:            ckptSvc,
-		backfillReplSvc:    backfillReplSvc,
-		replicationSpecSvc: replicationSpecSvc,
-		utils:              utils,
-		colManifestSvc:     collectionsManifestSvc,
-		finCh:              make(chan bool),
-		tickerReloadCh:     make(chan replicatorReloadPair, 50 /* not likely but give it a buffer */),
-		minInterval:        time.Duration(metadata.ReplicateCkptIntervalConfig.MaxValue) * time.Minute,
-		sendReqFunc:        sendReqsFunc,
-		reverseMapPool:     utilities.NewKvVbMapPool(),
+		bucketTopologySvc:   bucketTopologySvc,
+		logger:              log.NewLogger(moduleName, loggerCtx),
+		agentMap:            map[string]*ReplicatorAgentImpl{},
+		replicaCache:        NewReplicaCache(bucketTopologySvc, loggerCtx),
+		ckptSvc:             ckptSvc,
+		backfillReplSvc:     backfillReplSvc,
+		replicationSpecSvc:  replicationSpecSvc,
+		utils:               utils,
+		colManifestSvc:      collectionsManifestSvc,
+		finCh:               make(chan bool),
+		tickerReloadCh:      make(chan replicatorReloadPair, 50 /* not likely but give it a buffer */),
+		minInterval:         time.Duration(metadata.ReplicateCkptIntervalConfig.MaxValue) * time.Minute,
+		sendReqFunc:         sendReqsFunc,
+		reverseMapPool:      utilities.NewKvVbMapPool(),
+		xdcrCompTopologySvc: xdcrCompTopologySvc,
 	}
 }
 
@@ -95,9 +98,12 @@ func (r *ReplicaReplicatorImpl) HandleSpecCreation(newSpec *metadata.Replication
 	randSecInt := rand.Int() % 60 // Random sec to add up to 60 seconds
 	if r.unitTest {
 		randSecInt = 0
+		if r.unitTestInitDelaySec > 0 {
+			randSecInt = r.unitTestInitDelaySec
+		}
 	}
 	agent := NewReplicatorAgent(newSpec, r.logger, r.utils, r.ckptSvc, r.backfillReplSvc, r.colManifestSvc, randSecInt,
-		r.replicationSpecSvc, newSpec.InternalId, r.bucketTopologySvc)
+		r.replicationSpecSvc, newSpec.InternalId, r.bucketTopologySvc, r.xdcrCompTopologySvc)
 	r.agentMapMtx.Lock()
 	r.agentMap[newSpec.Id] = agent
 	r.agentMapMtx.Unlock()
@@ -376,6 +382,7 @@ type ReplicatorAgent interface {
 	SetUpdatedSpecAsync(spec *metadata.ReplicationSpecification, cbFunc func())
 	GetAndClearInfoToReplicate() (*metadata.ReplicationSpecification, *VBPeriodicReplicateReq, error)
 	RequestImmediateDataGather() error
+	IsRunning() bool
 }
 
 type ReplicatorAgentImpl struct {
@@ -385,11 +392,12 @@ type ReplicatorAgentImpl struct {
 	utils     utilities.UtilsIface
 	isRunning uint32
 
-	ckptSvc           service_def.CheckpointsService
-	backfillReplSvc   service_def.BackfillReplSvc
-	colManifestSvc    service_def.CollectionsManifestSvc
-	replSpecSvc       service_def.ReplicationSpecSvc
-	bucketTopologySvc service_def.BucketTopologySvc
+	ckptSvc             service_def.CheckpointsService
+	backfillReplSvc     service_def.BackfillReplSvc
+	colManifestSvc      service_def.CollectionsManifestSvc
+	replSpecSvc         service_def.ReplicationSpecSvc
+	bucketTopologySvc   service_def.BucketTopologySvc
+	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 
 	spec          *metadata.ReplicationSpecification
 	specId        string
@@ -397,9 +405,10 @@ type ReplicatorAgentImpl struct {
 	internalId    string
 	bucketSvcId   string
 
-	finCh            chan bool
-	reloadCh         chan agentReloadPair
-	immediateFetchCh chan chan error
+	finCh               chan bool
+	reloadCh            chan agentReloadPair
+	currentTimeInterval time.Duration
+	immediateFetchCh    chan chan error
 
 	latestInfoMtx sync.Mutex
 	latestInfo    *VBPeriodicReplicateReq
@@ -418,7 +427,7 @@ type agentReloadPair struct {
 
 var agentSubscriberCounter uint32
 
-func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc, internalId string, bucketTopologySvc service_def.BucketTopologySvc) *ReplicatorAgentImpl {
+func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc, internalId string, bucketTopologySvc service_def.BucketTopologySvc, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *ReplicatorAgentImpl {
 	return &ReplicatorAgentImpl{
 		logger:                 logger,
 		spec:                   spec,
@@ -437,6 +446,7 @@ func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.Com
 		sourceBucketTopologyCh: make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
 		bucketTopologySvc:      bucketTopologySvc,
 		immediateFetchCh:       make(chan chan error),
+		xdcrCompTopologySvc:    xdcrCompTopologySvc,
 	}
 }
 
@@ -449,7 +459,15 @@ func (a *ReplicatorAgentImpl) Stop() {
 }
 
 func (a *ReplicatorAgentImpl) SetUpdatedSpecAsync(spec *metadata.ReplicationSpecification, cbFunc func()) {
-	if atomic.LoadUint32(&a.isRunning) == 0 {
+	// If it is not a KV node, do nothing
+	isKvNode, kvNodeErr := a.xdcrCompTopologySvc.IsKVNode()
+	if kvNodeErr != nil {
+		// Unable to determine node type - should not happen, very unlikely
+		a.logger.Errorf("Unable to determine node type - %v", kvNodeErr)
+	}
+
+	if kvNodeErr == nil && !isKvNode {
+		a.logger.Infof("Not a KV node - not changing spec setting for %v", a.specId)
 		return
 	}
 
@@ -486,6 +504,17 @@ func (a *ReplicatorAgentImpl) ReplicationIsPaused() bool {
 }
 
 func (a *ReplicatorAgentImpl) run() {
+	isKvNode, kvNodeErr := a.xdcrCompTopologySvc.IsKVNode()
+	if kvNodeErr != nil {
+		// Unable to determine node type - should not happen, very unlikely
+		// This could lead to stuck go-routines that resurfaces due to MB-55035
+		a.logger.Errorf("Unable to determine node type - %v", kvNodeErr)
+	}
+	if kvNodeErr == nil && !isKvNode {
+		a.logger.Infof("Not a KV node - not running replicator agent for %v", a.specId)
+		return
+	}
+
 	if a.initDelay.Seconds() > 0 {
 		base.WaitForTimeoutOrFinishSignal(a.initDelay, a.finCh)
 	}
@@ -498,6 +527,7 @@ func (a *ReplicatorAgentImpl) run() {
 		a.logger.Errorf("Unable to get replication interval %v - %v", a.specId, err)
 		return
 	}
+	a.currentTimeInterval = interval
 	a.sourceBucketTopologyCh, err = a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.spec, a.bucketSvcId)
 	if err != nil {
 		if !base.BypassUIErrorCodes(err.Error()) {
@@ -525,6 +555,7 @@ func (a *ReplicatorAgentImpl) run() {
 			a.latestVBs = kv_vb_map.GetSortedVBList()
 			a.latestCachedSourceNotificationMtx.Unlock()
 		case timeAndCb := <-a.reloadCh:
+			a.currentTimeInterval = timeAndCb.newTimeInterval
 			ticker.Reset(timeAndCb.newTimeInterval)
 			timeAndCb.callbackFunc()
 		case <-ticker.C:
@@ -726,4 +757,8 @@ func (a *ReplicatorAgentImpl) RequestImmediateDataGather() error {
 	case <-a.finCh:
 		return replicatorStopErr
 	}
+}
+
+func (a *ReplicatorAgentImpl) IsRunning() bool {
+	return atomic.LoadUint32(&a.isRunning) == 1
 }
