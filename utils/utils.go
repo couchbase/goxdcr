@@ -1848,9 +1848,9 @@ func (u *Utilities) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{
 
 		hostAddr, err = u.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, false /*isHttps*/, logger, useExternal)
 		if err != nil {
-			errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfoMap)
-			logger.Error(errMsg)
-			return nil, errors.New(errMsg)
+			err := fmt.Errorf("cannot get hostname from node info %v. err=%w", nodeInfoMap, err)
+			logger.Error(err.Error())
+			return nil, err
 		}
 
 		if needHttps {
@@ -1961,9 +1961,9 @@ func (u *Utilities) GetHostAddrFromNodeInfo(connStr string, nodeInfo map[string]
 	// Get internal node information. If found, it already validated that the hostAddr can be mapped to IP if required
 	hostAddr, err := u.getAdminHostAddrFromNodeInfo(connStr, nodeInfo, logger)
 	if err != nil {
-		errMsg := fmt.Sprintf("cannot get hostname from node info %v. err=%v", nodeInfo, err)
-		logger.Error(errMsg)
-		return "", errors.New(errMsg)
+		err = fmt.Errorf("cannot get admin hostname from node info %v. err=%w", nodeInfo, err)
+		logger.Error(err.Error())
+		return "", err
 	}
 
 	if isHttps {
