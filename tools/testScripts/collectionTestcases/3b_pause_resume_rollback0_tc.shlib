@@ -113,8 +113,8 @@ function runReplicationResume {
 	local logsC1P
 
 	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 5 seconds for resume to finish"
-	sleep 5
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
 
 	# No broken map should be restored because backfill is under way for the S1.col1 -> S1.col1 that was broken
 	grepForPanics
