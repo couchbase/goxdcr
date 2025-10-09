@@ -2990,7 +2990,18 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	return nil
 }
 
-func getUserIntentFromNodeList(_logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
+// getUserIntent will return whether the target reference is intended to be considered 'internal' or 'external'.
+func getUserIntent(logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
+	if ref.HostnameMode() != metadata.HostnameMode_None {
+		// Honour the user specified override setting.
+		return ref.HostnameMode() == metadata.HostnameMode_External, nil
+	}
+
+	// If the user hasn't specified the intent, we will now deduce based on the nodeList.
+	return getUserIntentFromNodeList(logger, utils, ref, nodeList)
+}
+
+func getUserIntentFromNodeList(_ *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
 	checkHostName := base.GetHostName(ref.HostName())
 	checkPortNo, checkPortErr := base.GetPortNumber(ref.HostName())
 
@@ -3132,7 +3143,7 @@ func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.Utils
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	useExternal, err := getUserIntentFromNodeList(logger, utils, ref, nodeList)
+	useExternal, err := getUserIntent(logger, utils, ref, nodeList)
 	if err != nil {
 		err = fmt.Errorf("Can't get user intent from node list, err=%v", err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
