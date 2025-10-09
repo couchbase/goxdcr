@@ -123,7 +123,7 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $(($numDocs + $CBWORKLOAD_COLLECTION_NUM_ITEMS))
 	checkItemCnt "C2" "B2" $(($numDocs + $CBWORKLOAD_COLLECTION_NUM_ITEMS))
 
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
 	validateInternalLogWithInstance "C1" "$BACKFILL_KILLED" 0
 
 	grepForPanics

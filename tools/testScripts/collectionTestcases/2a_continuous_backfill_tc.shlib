@@ -113,7 +113,7 @@ function deleteAndRecreateBackfillMultiples {
 
 		echo "Waiting 15 seconds to check broken repair message"
 		sleep 15
-		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt))
+		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt)) $(($currentRepairedInstanceCnt + 1))
 
 		echo "RECREATING COLLECTION $(date)"
 		createCollection "C2" "B2" "S1" "col1"
@@ -135,7 +135,7 @@ function deleteAndRecreateBackfillMultiples {
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15
 		# Main pipeline should show repaired message
-		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
+		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 4))
 		grepForPanics
 	done
 }

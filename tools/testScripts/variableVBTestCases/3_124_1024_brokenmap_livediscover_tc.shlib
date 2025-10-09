@@ -230,7 +230,7 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	# Before running I/O, ckptMgr will raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
 
 	# Sometimes racey detection will detect collection manifest changes mid flight and raise more than one backfill
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
@@ -241,7 +241,7 @@ function runTestCase {
 
 	runDataLoad
 	# After running I/O, router should raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 4))
 	validateBrokenMapDoesNotExist "C1"
 
 	# Under normal I/O load, these should happen closely together
