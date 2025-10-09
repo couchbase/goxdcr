@@ -215,6 +215,8 @@ function runTestCase {
 		exit $?
 	fi
 
+	sleep 20
+
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"
 	done

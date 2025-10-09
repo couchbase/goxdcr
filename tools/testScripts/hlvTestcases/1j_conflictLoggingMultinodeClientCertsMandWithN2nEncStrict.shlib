@@ -111,9 +111,7 @@ function runOneReplicationCycleAndPause {
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	sleep 5
-
-	sleep 5
+	sleep 15
 	setupCertsForTesting
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		setMandatoryClientCert "$clusterName"

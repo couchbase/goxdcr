@@ -172,6 +172,8 @@ function runTestCase {
 		exit $?
 	fi
 
+	sleep 20
+
 	setupXdcrInboundUser "C1" "xdcrUser1" "xdcrPassword1"
 	setupXdcrInboundUser "C2" "xdcrUser2" "xdcrPassword2"
 	setupXdcrInboundUser "C3" "xdcrUser3" "xdcrPassword3"

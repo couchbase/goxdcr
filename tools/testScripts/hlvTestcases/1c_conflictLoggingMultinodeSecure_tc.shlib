@@ -110,9 +110,8 @@ function runOneReplicationCycleAndPause {
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	sleep 5
+	sleep 20
 
-	sleep 5
 	setupCertsForTesting
 
 	echo "ignore client certs/key for this test"

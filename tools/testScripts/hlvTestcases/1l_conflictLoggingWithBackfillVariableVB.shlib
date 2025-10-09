@@ -250,7 +250,7 @@ function runTestCase {
 		exit $?
 	fi
 
-	sleep 10
+	sleep 20
 
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C1" "C3"

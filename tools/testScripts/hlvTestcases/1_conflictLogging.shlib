@@ -167,12 +167,13 @@ function runTestCase {
 	if (($? != 0)); then
 		exit $?
 	fi
+
 	setupTopologies
 	if (($? != 0)); then
 		exit $?
 	fi
 
-	sleep 10
+	sleep 20
 
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C1" "C3"

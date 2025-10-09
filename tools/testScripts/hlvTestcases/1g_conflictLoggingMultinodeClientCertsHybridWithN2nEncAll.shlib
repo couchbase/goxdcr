@@ -90,6 +90,9 @@ function runOneReplicationCycleAndPause {
 	if (($? != 0)); then
 		exit $?
 	fi
+
+	sleep 14
+
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 	sleep 5
