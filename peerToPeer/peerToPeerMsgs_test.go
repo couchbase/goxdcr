@@ -24,7 +24,7 @@ import (
 )
 
 func getManifest() metadata.CollectionsManifest {
-	file := "../metadata/testData/provisionedManifest.json"
+	file := "../metadata/testdata/provisionedManifest.json"
 	data, err := ioutil.ReadFile(file)
 	if err != nil {
 		panic(err)

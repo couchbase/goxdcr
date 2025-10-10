@@ -111,10 +111,16 @@ type RouterIface interface {
 	RouteCollection(data interface{}, partId string, origUprEvent *base.WrappedUprEvent) error
 }
 
+type RouterInjector interface {
+	Inject(router *Router, settings metadata.ReplicationSettingsMap)
+}
+
 // XDCR Router does two things:
 // 1. converts UprEvent(DCP) to MCRequest (MemCached)
 // 2. routes MCRequest to downstream parts
 type Router struct {
+	RouterInjector
+
 	id string
 	*connector.Router
 	filter     baseFilter.Filter
@@ -1590,6 +1596,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	casDriftThreshold := spec.Settings.GetCasDriftThreshold()
 
 	router := &Router{
+		RouterInjector:           NewRouterInjector(),
 		id:                       id,
 		filter:                   filter,
 		routingMap:               routingMap,
@@ -2280,11 +2287,7 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		atomic.StoreUint32(&router.casDriftThreshold, casUint)
 	}
 
-	casDriftInjectDocKey, ok := settings[metadata.DevCasDriftForceDocKey].(string)
-	if ok && casDriftInjectDocKey != "" {
-		router.devCasDriftKey = casDriftInjectDocKey
-		atomic.StoreUint32(&router.devCasDriftInjectOn, 1)
-	}
+	router.RouterInjector.Inject(router, settings)
 
 	if len(errMap) > 0 {
 		return fmt.Errorf("Router %v UpdateSettings error(s): %v", router.id, base.FlattenErrorMap(errMap))

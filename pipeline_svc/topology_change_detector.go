@@ -732,6 +732,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 
 				// validate target bucket uuid
 				if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
+					top_detect_svc.logger.Warnf("Replication spec %v: Target bucket UUID has changed from %v to %v, indicating a bucket deletion and recreation", spec.Id, spec.TargetBucketUUID, targetBucketUUID)
 					shouldTryAgain := top_detect_svc.validateTargetBucketUUIDDifferences(spec)
 					if shouldTryAgain {
 						notification.Recycle()

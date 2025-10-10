@@ -59,7 +59,13 @@ type CheckpointMgrSvc interface {
 	MergePeerNodesCkptInfo(genericResponse interface{}) error
 }
 
+type CheckpointManagerInjector interface {
+	InjectGcWaitSec(ckmgr *CheckpointManager, settings metadata.ReplicationSettingsMap)
+}
+
 type CheckpointManager struct {
+	CheckpointManagerInjector
+
 	*component.AbstractComponent
 	*component.RemoteMemcachedComponent
 
@@ -472,7 +478,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	finCh := make(chan bool, 1)
 
 	ckmgr := &CheckpointManager{
-		AbstractComponent: component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		CheckpointManagerInjector: NewCheckpointManagerInjector(),
+		AbstractComponent:         component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
 		RemoteMemcachedComponent: component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
 			target_bucket_name).SetTargetKvVbMapGetter(
 			func() (base.KvVBMapType, error) {
@@ -714,10 +721,7 @@ func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSe
 		return fmt.Errorf("%v %v %v should be provided in settings", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), CHECKPOINT_INTERVAL)
 	}
 
-	devInjWaitSec, err := ckmgr.utils.GetIntSettingFromSettings(settings, metadata.DevCkptMgrForceGCWaitSec)
-	if err == nil {
-		ckmgr.xdcrDevInjectGcWaitSec = uint32(devInjWaitSec)
-	}
+	ckmgr.CheckpointManagerInjector.InjectGcWaitSec(ckmgr, settings)
 
 	if _, exists := settings[parts.ForceCollectionDisableKey]; exists {
 		atomic.StoreUint32(&ckmgr.collectionEnabledVar, 0)
@@ -1886,10 +1890,7 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSett
 		ckmgr.checkpointAllowedHelper.setCheckpointDisallowed()
 	}
 
-	devInjWaitSec, err := ckmgr.utils.GetIntSettingFromSettings(settings, metadata.DevCkptMgrForceGCWaitSec)
-	if err == nil && devInjWaitSec >= 0 {
-		atomic.StoreUint32(&ckmgr.xdcrDevInjectGcWaitSec, uint32(devInjWaitSec))
-	}
+	ckmgr.CheckpointManagerInjector.InjectGcWaitSec(ckmgr, settings)
 
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
@@ -3321,7 +3322,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 	}
 
-	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash)
+	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash, ckmgr.logger)
 
 	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
@@ -3695,10 +3696,11 @@ func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, src
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
 
-func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, currentReinitHash string) []metadata.VBsCkptsDocMap {
+func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, currentReinitHash string, logger *log.CommonLogger) []metadata.VBsCkptsDocMap {
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
+	reinitHashRecordMap := make(map[uint16]map[string]bool)
 
 	for i, ckptsMap := range ckptsMaps {
 		switch i {
@@ -3726,12 +3728,19 @@ func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, c
 				}
 
 				if ckptRecord.PipelineReinitHash != currentReinitHash {
+					if _, exists := reinitHashRecordMap[vbno]; !exists {
+						reinitHashRecordMap[vbno] = make(map[string]bool)
+					}
+					reinitHashRecordMap[vbno][ckptRecord.PipelineReinitHash] = true
 					continue
 				}
 
 				combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
 			}
 		}
+	}
+	if len(reinitHashRecordMap) > 0 {
+		logger.Warnf("filterCkptsBasedOnPipelineReinitHash based on current hash %v removed records with reinitHashes: %v", currentReinitHash, reinitHashRecordMap)
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
@@ -4074,7 +4083,7 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash)
+	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash, ckmgr.logger)
 
 	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var testDir string = "testData/"
+var testDir string = "testdata/"
 
 var emptyManifest string = testDir + "emptyCollectionManifest.json"
 var provisionedFile string = testDir + "provisionedManifest.json"

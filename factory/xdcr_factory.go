@@ -66,6 +66,8 @@ type XDCRFactoryIface interface {
 
 // Factory for XDCR pipelines
 type XDCRFactory struct {
+	FactoryDevInjector
+
 	repl_spec_svc            service_def.ReplicationSpecSvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
 	xdcr_topology_svc        service_def.XDCRCompTopologySvc
@@ -105,7 +107,9 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 	getBackfillMgr BackfillMgrGetter, backfillReplSvc service_def.BackfillReplSvc,
 	bucketTopologySvc service_def.BucketTopologySvc, p2pMgr peerToPeer.P2PManager,
 	replStatusGetter func(topic string) (pp.ReplicationStatusIface, error)) *XDCRFactory {
-	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
+	return &XDCRFactory{
+		FactoryDevInjector:       NewXDCRFactoryInjector(),
+		repl_spec_svc:            repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
 		checkpoint_svc:           checkpoint_svc,
@@ -1002,19 +1006,11 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForConnector(pipeline common.Pi
 func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
 	xmemSettings := make(metadata.ReplicationSettingsMap)
 
+	xdcrf.InjectXmemNozzleUpdate(settings, xmemSettings)
+
 	optiRepThreshold, ok := settings[metadata.OptimisticReplicationThresholdKey]
 	if ok {
 		xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = optiRepThreshold
-	}
-
-	mainSleepDelay, ok := settings[metadata.DevMainPipelineSendDelay]
-	if ok {
-		xmemSettings[parts.XMEM_DEV_MAIN_SLEEP_DELAY] = mainSleepDelay
-	}
-
-	backfillSleepDelay, ok := settings[metadata.DevBackfillPipelineSendDelay]
-	if ok {
-		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
 	}
 
 	conflictLoggingMap, ok := settings[metadata.CLogKey]
@@ -1054,15 +1050,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 		dcpSettings[parts.DCP_Nozzle_Stats_Interval] = statsInterval
 	}
 
-	devMainVbRollback, ok := settings[metadata.DevMainPipelineRollbackTo0VB]
-	if ok {
-		dcpSettings[parts.DCP_DEV_MAIN_ROLLBACK_VB] = devMainVbRollback
-	}
-
-	devBackfillVbRollback, ok := settings[metadata.DevBackfillRollbackTo0VB]
-	if ok {
-		dcpSettings[parts.DCP_DEV_BACKFILL_ROLLBACK_VB] = devBackfillVbRollback
-	}
+	xdcrf.InjectDcpNozzleUpdate(settings, dcpSettings)
 
 	repSettings := pipeline.Specification().GetReplicationSpec().Settings
 	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpSettings, repSettings, pipeline); err != nil {
@@ -1247,8 +1235,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	repSettings := spec.Settings
 	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
 
-	xmemSettings[parts.XMEM_DEV_MAIN_SLEEP_DELAY] = metadata.GetSettingFromSettingsMap(settings, metadata.DevMainPipelineSendDelay, 0)
-	xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = metadata.GetSettingFromSettingsMap(settings, metadata.DevBackfillPipelineSendDelay, 0)
+	xdcrf.InjectXmemNozzle(*repSettings, xmemSettings)
 
 	xmemSettings[parts.SETTING_BATCHCOUNT] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
 	xmemSettings[parts.SETTING_BATCHSIZE] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
@@ -1360,8 +1347,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
 
-	dcpNozzleSettings[parts.DCP_DEV_MAIN_ROLLBACK_VB] = metadata.GetSettingFromSettingsMap(settings, metadata.DevMainPipelineRollbackTo0VB, -1)
-	dcpNozzleSettings[parts.DCP_DEV_BACKFILL_ROLLBACK_VB] = metadata.GetSettingFromSettingsMap(settings, metadata.DevBackfillRollbackTo0VB, -1)
+	xdcrf.InjectDcpNozzle(settings, dcpNozzleSettings)
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Nozzle_Stats_Interval] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
@@ -1523,11 +1509,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.CASDriftThresholdSecsKey] = casDriftThreshold
 	}
 
-	devCasDriftForceDocKey, ok := settings[metadata.DevCasDriftForceDocKey]
-	if ok {
-		routerSettings[metadata.DevCasDriftForceDocKey] = devCasDriftForceDocKey
-	}
-
+	xdcrf.InjectRouter(settings, routerSettings)
 	return routerSettings, nil
 }
 
@@ -1726,7 +1708,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.CheckpointInterval)
-	s[metadata.DevCkptMgrForceGCWaitSec] = metadata.GetSettingFromSettingsMap(settings, metadata.DevCkptMgrForceGCWaitSec, metadata.XDCRDevCkptGcWaitConfig.Default())
+	xdcrf.InjectCheckpointMgr(settings, s)
 	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification().GetReplicationSpec())
 	return s, nil
 }
@@ -1775,7 +1757,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline c
 	if checkpoint_interval != nil {
 		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
 	}
-	s[metadata.DevCkptMgrForceGCWaitSec] = metadata.GetSettingFromSettingsMap(settings, metadata.DevCkptMgrForceGCWaitSec, metadata.XDCRDevCkptGcWaitConfig.Default())
+	xdcrf.InjectCheckpointMgr(settings, s)
 	return s, nil
 }
 

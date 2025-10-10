@@ -498,12 +498,12 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.BandwidthLimit != newSettings.BandwidthLimit ||
 		isOldReplHighPriority != isNewReplHighPriority ||
 		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() ||
-		oldSettings.GetDevMainPipelineDelay() != newSettings.GetDevMainPipelineDelay() ||
+		oldSettings.GetDevMainPipelineDelay(oldSettings) != newSettings.GetDevMainPipelineDelay(newSettings) ||
 		oldSettings.GetJsFunctionTimeoutMs() != newSettings.GetJsFunctionTimeoutMs() ||
-		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||
+		oldSettings.GetDevBackfillPipelineDelay(oldSettings) != newSettings.GetDevBackfillPipelineDelay(newSettings) ||
 		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
-		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() ||
+		oldSettings.GetCasDriftInjectDocKey(oldSettings) != newSettings.GetCasDriftInjectDocKey(newSettings) ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) ||
 		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() {

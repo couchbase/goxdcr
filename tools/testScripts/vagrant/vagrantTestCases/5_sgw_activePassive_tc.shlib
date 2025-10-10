@@ -22,8 +22,6 @@ VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C1P"]="192.168.56.3" ["C2"]="192.168.
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 unset CLUSTER_SETUP_DONE_MAP
 declare -gA CLUSTER_SETUP_DONE_MAP
 
@@ -37,15 +35,13 @@ insertPropertyIntoBucketNamePropertyMap "B4" LWWBucketProperty
 
 declare -A MobileBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
 
-#BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
-#SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
+declare -a collection1Arr=("col1")
+declare -a scope1Arr=("S1")
 
 # Test cases assume vagrant up has already been called
 
 function runDataLoad {
-	runCbWorkloadGenBucket "C1" "B1" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "col_" &
-	waitForBgJobs
+	runCbWorkloadGenBucket "C1" "B1"
 }
 
 function setupSGW {
@@ -85,9 +81,18 @@ function runActivePassiveSgwReplication {
 
 	vagrantRemoveCbServerAll
 	vagrantRemoveSGWAll
+
 	vagrantInstallCBServerAll "$versionToLoad"
 
+	# Do this every time a new version is loaded
+	cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+	CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]} ["B3"]=${scope1Arr[@]} ["B4"]=${scope1Arr[@]} ["B0"]=${scope1Arr[@]})
+
 	setupTopologies
+	sleep 5
+
 	setCrossClusterVersioningForBucket "C1" "B1"
 	setCrossClusterVersioningForBucket "C2" "B2"
 	setCrossClusterVersioningForBucket "C2" "B3"
@@ -126,9 +131,7 @@ function runActivePassiveSgwReplication {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-	cleanupBucketReplications
-	cleanupRemoteClusterRefs
-	cleanupBuckets
+
 }
 
 function runTestCase {

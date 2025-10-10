@@ -42,10 +42,18 @@ const (
 
 const BackfillHandlerPrefix = "backfillHandler"
 
+type BackfillRequestHandlerInjector interface {
+	InjectStartDelay(b *BackfillRequestHandler)
+	InitVbDelayInjection(b *BackfillRequestHandler)
+	InjectVbDelay(b *BackfillRequestHandler, vbno uint16)
+}
+
 // Provide a running request serializer that can handle incoming requests
 // and backend operations for backfill mgr
 // Each backfill request handler is responsible for one replication
 type BackfillRequestHandler struct {
+	BackfillRequestHandlerInjector
+
 	*component.AbstractComponent
 	id              string
 	bucketSvcId     string
@@ -145,32 +153,33 @@ var backfillReqHandlerCounter uint32
 
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter func(throughSeqnoErr error) (map[uint16]uint64, error), restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error), getSpecUpdateStatus func() (base.BackfillSpecUpdateStatus, error), setSpecUpdateStatus func(base.BackfillSpecUpdateStatus)) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
-		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
-		logger:                       logger,
-		bucketSvcId:                  common.ComposeFullTopic(replId, common.BackfillPipeline) + "_backfillReqHandler_" + base.GetIterationId(&backfillReqHandlerCounter),
-		id:                           replId,
-		finCh:                        make(chan bool),
-		incomingReqCh:                make(chan ReqAndResp),
-		doneTaskCh:                   make(chan ReqAndResp, base.NumberOfVbs),
-		persistenceNeededCh:          make(chan PersistType, 1),
-		spec:                         spec,
-		getThroughSeqno:              seqnoGetter,
-		backfillReplSvc:              backfillReplSvc,
-		persistInterval:              persistInterval,
-		vbsDoneNotifier:              vbsTasksDoneNotifier,
-		mainpipelineCkptSeqnosGetter: mainPipelineCkptSeqnosGetter,
-		restreamPipelineFatalFunc:    restreamPipelineFatalFunc,
-		specStillExists:              specCheckFunc,
-		bucketTopologySvc:            bucketTopologySvc,
-		getCompleteReq:               getCompleteReq,
-		sourceBucketTopologyCh:       make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
-		replicationSpecSvc:           replicationSpecSvc,
-		lastPullMergedMap:            map[string]*metadata.VBTasksMapType{},
-		lastPushMergedMap:            map[string]*metadata.VBTasksMapType{},
-		getLatestSrcManifestId:       getLatestSrcManifestId,
-		getSpecUpdateStatus:          getSpecUpdateStatus,
-		setSpecUpdateStatus:          setSpecUpdateStatus,
-		backfillSpecOpsCh:            make(chan interface{}, 1),
+		BackfillRequestHandlerInjector: NewBackfillReqHandlerInjector(),
+		AbstractComponent:              component.NewAbstractComponentWithLogger(replId, logger),
+		logger:                         logger,
+		bucketSvcId:                    common.ComposeFullTopic(replId, common.BackfillPipeline) + "_backfillReqHandler_" + base.GetIterationId(&backfillReqHandlerCounter),
+		id:                             replId,
+		finCh:                          make(chan bool),
+		incomingReqCh:                  make(chan ReqAndResp),
+		doneTaskCh:                     make(chan ReqAndResp, base.NumberOfVbs),
+		persistenceNeededCh:            make(chan PersistType, 1),
+		spec:                           spec,
+		getThroughSeqno:                seqnoGetter,
+		backfillReplSvc:                backfillReplSvc,
+		persistInterval:                persistInterval,
+		vbsDoneNotifier:                vbsTasksDoneNotifier,
+		mainpipelineCkptSeqnosGetter:   mainPipelineCkptSeqnosGetter,
+		restreamPipelineFatalFunc:      restreamPipelineFatalFunc,
+		specStillExists:                specCheckFunc,
+		bucketTopologySvc:              bucketTopologySvc,
+		getCompleteReq:                 getCompleteReq,
+		sourceBucketTopologyCh:         make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
+		replicationSpecSvc:             replicationSpecSvc,
+		lastPullMergedMap:              map[string]*metadata.VBTasksMapType{},
+		lastPushMergedMap:              map[string]*metadata.VBTasksMapType{},
+		getLatestSrcManifestId:         getLatestSrcManifestId,
+		getSpecUpdateStatus:            getSpecUpdateStatus,
+		setSpecUpdateStatus:            setSpecUpdateStatus,
+		backfillSpecOpsCh:              make(chan interface{}, 1),
 	}
 }
 
@@ -179,16 +188,8 @@ func (b *BackfillRequestHandler) Start() error {
 	b.startOnce.Do(func() {
 		atomic.StoreUint32(&b.stopRequested, 0)
 
-		startDelaySec := b.spec.Settings.GetIntSettingValue(metadata.DevBackfillReqHandlerStartOnceDelay)
-		if startDelaySec > 0 {
-			b.logger.Warnf("Dev injecton Sleeping %v sec for backfill repl service to load the spec before we poll it", startDelaySec)
-			time.Sleep(time.Duration(startDelaySec) * time.Second)
-		}
-		vbDoneDelayEnabled := b.spec.Settings.GetBoolSettingValue(metadata.DevBackfillReqHandlerHandleVBTaskDoneHang)
-		if vbDoneDelayEnabled {
-			b.logger.Warnf("vbNotToBeDone delay injection is enabled")
-			b.devVbDelayEnabled = true
-		}
+		b.BackfillRequestHandlerInjector.InjectStartDelay(b)
+		b.BackfillRequestHandlerInjector.InitVbDelayInjection(b)
 
 		var backfillSpec *metadata.BackfillReplicationSpec
 		backfillSpec, err = b.backfillReplSvc.BackfillReplSpec(b.id)
@@ -1052,11 +1053,7 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			return err
 		}
 
-		if b.devVbDelayEnabled {
-			// dev injection.
-			b.logger.Warnf("Dev inj HandleVBTaskDone waiting for 120s after P2P push is done setting VB to %v", vbno)
-			time.Sleep(120 * time.Second)
-		}
+		b.BackfillRequestHandlerInjector.InjectVbDelay(b, vbno)
 
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil && err != errorVbAlreadyDone && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {

@@ -100,6 +100,8 @@ function runTestCase {
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
 
+	# Give some time for system to quiesce before starting data load to ensure no backfill is raised
+	sleep 10
 	runDataLoad
 
 	# Account for no-op backfill

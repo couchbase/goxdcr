@@ -403,12 +403,12 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	fmt.Println("============== Test case end: TestRouterExpDelAllMode =================")
 }
 
-var testDir string = "../metadata/testData/"
+var testDir string = "../metadata/testdata/"
 
 var targetv8 string = testDir + "diffTargetv8.json"
 var targetv9 string = testDir + "diffTargetv9.json"
 
-var filterPath = "../base/filter/testData/"
+var filterPath = "../base/filter/testdata/"
 var bigMutationFile = filterPath + "edgyMB-33583.json"
 
 func TestRouterManifestChange(t *testing.T) {

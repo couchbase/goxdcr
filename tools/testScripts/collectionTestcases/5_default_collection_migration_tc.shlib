@@ -45,12 +45,10 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
-	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
+	local beerSample
+	beerSample=$(findFileTraverseUp "./install/samples" "beer-sample.zip")
 	if [[ -z "${beerSample:-}" ]]; then
-		beerSample=$(mdfind beer-sample.zip | grep install | grep samples | head -n 1)
-	fi
-	if [[ -z "${beerSample:-}" ]]; then
-		echo "Error: cannot locate beerSample"
+		echo "Error: cannot find beerSample"
 		exit 1
 	fi
 	runCbimport "C1" "B1" "$beerSample"

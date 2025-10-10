@@ -722,7 +722,7 @@ func TestMergeTasksIntoSpecWithNilTask(t *testing.T) {
 
 func TestDuplicateCIDs_ToDcpNozzleTask(t *testing.T) {
 	assert := assert.New(t)
-	testDir := "testData/"
+	testDir := "testdata/"
 	provisionedFile := testDir + "provisionedManifest.json"
 	data, err := os.ReadFile(provisionedFile)
 	assert.Nil(err)

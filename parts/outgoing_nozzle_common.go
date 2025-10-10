@@ -21,11 +21,6 @@ import (
 )
 
 const (
-	// Developer injection section
-	XMEM_DEV_MAIN_SLEEP_DELAY     = base.DevMainPipelineSendDelay
-	XMEM_DEV_BACKFILL_SLEEP_DELAY = base.DevBackfillPipelineSendDelay
-	// end developer injection section
-
 	SETTING_BATCHCOUNT            = "batch_count"
 	SETTING_BATCHSIZE             = "batch_size"
 	SETTING_OPTI_REP_THRESHOLD    = "optimistic_replication_threshold"
@@ -70,12 +65,19 @@ const (
 	NotSendOther          NeedSendStatus = iota
 )
 
+type baseConfigInjector interface {
+	InitInjector(cfg *baseConfig, settings metadata.ReplicationSettingsMap)
+	Update(config *baseConfig, settings metadata.ReplicationSettingsMap, logger *log.CommonLogger, id string)
+}
+
 /*
 ***********************************
 /* struct baseConfig
 ************************************
 */
 type baseConfig struct {
+	baseConfigInjector
+
 	maxCount         int
 	maxSize          int
 	optiRepThreshold uint32
@@ -218,12 +220,7 @@ type ManifestAdditional struct {
 
 // does not return error since the assumption is that settings have been validated prior
 func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettingsMap) {
-	if val, ok := settings[XMEM_DEV_MAIN_SLEEP_DELAY]; ok {
-		config.devMainSendDelay = uint32(val.(int))
-	}
-	if val, ok := settings[XMEM_DEV_BACKFILL_SLEEP_DELAY]; ok {
-		config.devBackfillSendDelay = uint32(val.(int))
-	}
+	config.baseConfigInjector.InitInjector(config, settings)
 	if val, ok := settings[SETTING_BATCHSIZE]; ok {
 		config.maxSize = val.(int)
 	}

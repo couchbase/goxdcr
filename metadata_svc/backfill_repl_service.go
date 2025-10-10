@@ -46,7 +46,15 @@ func getBackfillReplicationDocKeyFunc(replicationId string) string {
 
 const BackfillReplSvcId = "BackfillReplicationService"
 
+type BackfillReplInjector interface {
+	InjectBackfillReplDelay(spec *metadata.BackfillReplicationSpec)
+	InjectRaiseCompleteBackfillDelay(replSpecSvc service_def.ReplicationSpecSvc, backfillSpecId string, logger *log.CommonLogger, injected *bool, err *error)
+	InjectRaiseCompleteBackfillDelaySleep(replSpecSvc service_def.ReplicationSpecSvc, logger *log.CommonLogger)
+}
+
 type BackfillReplicationService struct {
+	BackfillReplInjector
+
 	*ShaRefCounterService
 	metadataSvc     service_def.MetadataSvc
 	uiLogSvc        service_def.UILogSvc
@@ -76,6 +84,7 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc se
 		return nil, err
 	}
 	svc := &BackfillReplicationService{
+		BackfillReplInjector: NewBackfillReplServiceInjector(),
 		ShaRefCounterService: shaRefSvc,
 		uiLogSvc:             uiLogSvc,
 		metadataSvc:          metadataSvc,
@@ -273,11 +282,7 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 		}
 	} else {
 		// replication spec has been created or updated
-		parentSpec := newSpec.GetReplicationSpec()
-		if parentSpec != nil && parentSpec.Settings != nil && parentSpec.Settings.GetIntSettingValue(metadata.DevBackfillReplUpdateDelay) > 0 {
-			msToSleep := parentSpec.Settings.GetIntSettingValue(metadata.DevBackfillReplUpdateDelay)
-			time.Sleep(time.Duration(msToSleep) * time.Millisecond)
-		}
+		b.BackfillReplInjector.InjectBackfillReplDelay(newSpec)
 
 		// no need to update cache if newSpec is the same as the one already in cache
 		if oldSpec == nil || !newSpec.SameAs(oldSpec) {
@@ -852,28 +857,15 @@ func (b *BackfillReplicationService) raiseCompleteBackfillsReqsAfterCleanup(init
 	var injected bool
 
 	for len(b.unrecoverableBackfillIds) > 0 {
-		var shouldInjAndDelay bool
-
 		var replacementList [][2]string
 		// Once the mapping is cleared, then call the raiser to raise a complete backfill, which should be able to
 		// properly write the spec and the corresponding mappings correctly
 		for _, backfillPair := range b.unrecoverableBackfillIds {
 			backfillSpecId := backfillPair[0]
 
-			specToCheck, specCheckErr := b.replSpecSvc.ReplicationSpec(backfillSpecId)
-			if specCheckErr == nil {
-				shouldInjAndDelay = specToCheck.Settings.GetBoolSettingValue(metadata.DevBackfillUnrecoverableErrorInj)
-				if shouldInjAndDelay {
-					b.logger.Warnf("Dev inj spec has specified error injection %v", backfillSpecId)
-				}
-			}
-
 			var err error
-			if shouldInjAndDelay && !injected {
-				// dev injection.
-				injected = true
-				err = fmt.Errorf("DevBackfillUnrecoverableErrorInj")
-			} else {
+			b.BackfillReplInjector.InjectRaiseCompleteBackfillDelay(b.replSpecSvc, backfillSpecId, b.logger, &injected, &err)
+			if !injected {
 				err = b.completeBackfillCb(backfillSpecId)
 			}
 			if err != nil {
@@ -888,10 +880,8 @@ func (b *BackfillReplicationService) raiseCompleteBackfillsReqsAfterCleanup(init
 
 		b.unrecoverableBackfillIds = replacementList
 
-		if shouldInjAndDelay && len(replacementList) > 0 {
-			// dev injection.
-			b.logger.Warnf("Dev inj sleeping for 90s for P2P push to kick in")
-			time.Sleep(90 * time.Second)
+		if len(replacementList) > 0 {
+			b.BackfillReplInjector.InjectRaiseCompleteBackfillDelaySleep(b.replSpecSvc, b.logger)
 		}
 
 		time.Sleep(retryInterval)

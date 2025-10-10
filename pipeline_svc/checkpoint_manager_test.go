@@ -103,7 +103,8 @@ func TestCombineFailoverlogs(t *testing.T) {
 	assert.Len(result[1].Checkpoint_records, 2)
 	assert.Len(result[2].Checkpoint_records, 1)
 
-	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash")
+	logger := log.NewLogger("", nil)
+	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash", logger)
 	hashFilteredResult := hashFilteredResults[0]
 	assert.Len(hashFilteredResult, len(result))
 
@@ -1535,7 +1536,7 @@ func generateMergeCkptArgs() *MergeCkptArgs {
 }
 
 func setupSpecSettings(replicationSpec *metadata.ReplicationSpecification) {
-	specSetting := &metadata.ReplicationSettings{}
+	specSetting := metadata.NewEmptyReplicationSettings()
 	specSetting.Settings = metadata.EmptySettings(func() map[string]*metadata.SettingsConfig {
 		configMap := make(map[string]*metadata.SettingsConfig)
 		configMap["CollectionsMgtMulti"] = metadata.CollectionsMgtConfig

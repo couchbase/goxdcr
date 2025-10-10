@@ -1477,23 +1477,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
 }
 
-// XDCR Dev hidden replication settings
-const DevMainPipelineSendDelay = "xdcrDevMainSendDelayMs"
-const DevBackfillPipelineSendDelay = "xdcrDevBackfillSendDelayMs"
-const DevMainPipelineRollbackTo0VB = "xdcrDevMainRollbackTo0VB"
-const DevBackfillRollbackTo0VB = "xdcrDevBackfillRollbackTo0VB"
-const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
-const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
-const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
-const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
-const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
-const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
-const DevPreCheckMaxCasErrorInjection = "xdcrDevPreCheckMaxCasErrorInjection"
-const DevBackfillReqHandlerStartOnceDelay = "xdcrDevBackfillReqHandlerStartOnceDelaySec"
-const DevBackfillReqHandlerHandleVBTaskDoneHang = "xdcrDevBackfillReqHandlerHandleVBTaskDoneHang"
-const DevBackfillUnrecoverableErrorInj = "xdcrDevBackfillUnrecoverableErrorInj"
-const DevBackfillMgrVbsTasksDoneNotifierDelay = "xdcrDevBackfillMgrVbsTasksDoneNotifierDelay"
-
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
 const ExternalKeyKey = "META\\(\\).id"
@@ -1961,9 +1944,9 @@ func SrcHeartbeatMaxInterval() time.Duration { // lower bound on heartbeat frequ
 
 // The default resource manager token distribution ratio:
 // 89 for high priority replications,
-// 9 for low priority replications,
+// 8 for low priority replications,
 // 3 for all the conflict loggers in the system.
-var RMTokenDistributionStr string = "89:9:3"
+var RMTokenDistributionStr string = "89:8:3"
 
 // RMTokenDistributionPartsCount is the number of parts in a token distribution string
 // The reason this is not derived from RMTokenDistribution is because it self

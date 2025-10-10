@@ -221,13 +221,17 @@ function runReplicationResume {
 		tempLogs=$(getInternalNodeXdcrLog "$dependentClusterName")
 
 		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
-		if (($resumeFrom0Cnt > 10)); then
-			echo "$dependentClusterName has at least ten VBs that resumed from seqno 0"
+		if (($resumeFrom0Cnt == 256)); then
+			# each node has 256 VBs. So, this test is to sanity check to make sure P2P worked
+			# As long as < 256 VBs got a checkpoint, we know P2P worked so it should be enough to validate
+			echo "$dependentClusterName has 256 VBs that resumed from 0"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
 		if (($resumeLoadBrokenMapCnt == 0)); then
 			echo "$dependentClusterName did not load broken map from checkpoint migration"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done

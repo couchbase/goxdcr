@@ -21,22 +21,6 @@ import (
 
 // keys for replication settings
 const (
-	DevMainPipelineSendDelay                  = base.DevMainPipelineSendDelay
-	DevBackfillPipelineSendDelay              = base.DevBackfillPipelineSendDelay
-	DevBackfillRollbackTo0VB                  = base.DevBackfillRollbackTo0VB
-	DevMainPipelineRollbackTo0VB              = base.DevMainPipelineRollbackTo0VB
-	DevCkptMgrForceGCWaitSec                  = base.DevCkptMgrForceGCWaitSec
-	DevColManifestSvcDelaySec                 = base.DevColManifestSvcDelaySec
-	DevNsServerPortSpecifier                  = base.DevNsServerPortSpecifier
-	DevBackfillReplUpdateDelay                = base.DevBackfillReplUpdateDelay
-	DevCasDriftForceDocKey                    = base.DevCasDriftForceDocKey
-	DevPreCheckCasDriftForceVbKey             = base.DevPreCheckCasDriftForceVbKey
-	DevPreCheckMaxCasErrorInjection           = base.DevPreCheckMaxCasErrorInjection
-	DevBackfillReqHandlerStartOnceDelay       = base.DevBackfillReqHandlerStartOnceDelay
-	DevBackfillReqHandlerHandleVBTaskDoneHang = base.DevBackfillReqHandlerHandleVBTaskDoneHang
-	DevBackfillUnrecoverableErrorInj          = base.DevBackfillUnrecoverableErrorInj
-	DevBackfillMgrVbsTasksDoneNotifierDelay   = base.DevBackfillMgrVbsTasksDoneNotifierDelay
-
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -173,12 +157,8 @@ var ImmutableSettings = []string{FilterSystemScopeKey, PipelineReinitHashKey}
 // settings that are internal and should be hidden from outside
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
-	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey,
-	DevPreCheckMaxCasErrorInjection, DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang,
-	DevBackfillUnrecoverableErrorInj, DevBackfillMgrVbsTasksDoneNotifierDelay, PipelineReinitHashKey}
+	CollectionsDelVbBackfillKey, DismissEventKey, FilterSystemScopeKey,
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, PipelineReinitHashKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -209,22 +189,6 @@ const (
 
 var DefaultPipelineStatsIntervalMs = 1000
 var DefaultMaxCasIntervalSec = 10
-
-var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
-var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
-var XDCRDevMainPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
-var XDCRDevBackfillPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
-var XDCRDevCkptGcWaitConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
-var XDCRDevColManifestSvcDelayConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
-var XDCRDevNsServerPortSpecifierConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 65535}}
-var XDCRDevBackfillReplUpdateDelayConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 100000}}
-var XDCRDevCasDriftForceDocConfig = &SettingsConfig{"", nil}
-var XDCRDevPreCheckCasDriftForceVBConfig = &SettingsConfig{-1, &Range{-1, 1023}}
-var XDCRDevPreCheckMaxCasErrorInjectionConfig = &SettingsConfig{false, nil}
-var XDCRDevBackfillReqHandlerStartOnceDelayConfig = &SettingsConfig{0, &Range{0, 1000}}
-var XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig = &SettingsConfig{false, nil}
-var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
-var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -312,22 +276,6 @@ var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
-	DevMainPipelineSendDelay:                  XDCRDevMainPipelineSendDelayConfig,
-	DevBackfillPipelineSendDelay:              XDCRDevBackfillPipelineSendDelayConfig,
-	DevMainPipelineRollbackTo0VB:              XDCRDevMainPipelineRollbackConfig,
-	DevBackfillRollbackTo0VB:                  XDCRDevBackfillPipelineRollbackConfig,
-	DevCkptMgrForceGCWaitSec:                  XDCRDevCkptGcWaitConfig,
-	DevColManifestSvcDelaySec:                 XDCRDevColManifestSvcDelayConfig,
-	DevNsServerPortSpecifier:                  XDCRDevNsServerPortSpecifierConfig,
-	DevBackfillReplUpdateDelay:                XDCRDevBackfillReplUpdateDelayConfig,
-	DevCasDriftForceDocKey:                    XDCRDevCasDriftForceDocConfig,
-	DevPreCheckCasDriftForceVbKey:             XDCRDevPreCheckCasDriftForceVBConfig,
-	DevPreCheckMaxCasErrorInjection:           XDCRDevPreCheckMaxCasErrorInjectionConfig,
-	DevBackfillReqHandlerStartOnceDelay:       XDCRDevBackfillReqHandlerStartOnceDelayConfig,
-	DevBackfillReqHandlerHandleVBTaskDoneHang: XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig,
-	DevBackfillUnrecoverableErrorInj:          XDCRDevBackfillUnrecoverableErrorInjConfig,
-	DevBackfillMgrVbsTasksDoneNotifierDelay:   XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
-
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
 	ActiveKey:                            ActiveConfig,
@@ -383,9 +331,22 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 }
 
+type replicationSettingsInjections interface {
+	GetDevMainPipelineDelay(*ReplicationSettings) int
+	GetDevPreCheckVBPoison(settings *ReplicationSettings) int
+	GetDevBackfillPipelineDelay(settings *ReplicationSettings) int
+	GetDevPreCheckMaxCasErrorInjection(settings *ReplicationSettings) bool
+	GetCasDriftInjectDocKey(settings *ReplicationSettings) string
+}
+
+func NewEmptyReplicationSettings() *ReplicationSettings {
+	return &ReplicationSettings{replicationSettingsInjections: NewReplicationSettingInjections()}
+}
+
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
 type ReplicationSettings struct {
 	*Settings
+	replicationSettingsInjections
 
 	//type - XMEM or CAPI
 	RepType string `json:"type"`
@@ -686,11 +647,19 @@ func GetReplicationSettingsConfigMap() map[string]*SettingsConfig {
 }
 
 func EmptyReplicationSettings() *ReplicationSettings {
-	return &ReplicationSettings{Settings: EmptySettings(GetReplicationSettingsConfigMap)}
+	emptySettings := EmptySettings(GetReplicationSettingsConfigMap)
+	emptyReplicationSettings := &ReplicationSettings{
+		replicationSettingsInjections: NewReplicationSettingInjections(),
+		Settings:                      emptySettings,
+	}
+	return emptyReplicationSettings
 }
 
 func DefaultReplicationSettings() *ReplicationSettings {
-	defaultSettings := &ReplicationSettings{Settings: DefaultSettings(GetReplicationSettingsConfigMap)}
+	defaultSettings := &ReplicationSettings{
+		replicationSettingsInjections: NewReplicationSettingInjections(),
+		Settings:                      DefaultSettings(GetReplicationSettingsConfigMap),
+	}
 	defaultSettings.populateFieldsUsingMap()
 	return defaultSettings
 }
@@ -700,7 +669,11 @@ func ValidateReplicationSettingsKey(settingsMap map[string]interface{}) map[stri
 }
 
 func (s *ReplicationSettings) Clone() *ReplicationSettings {
-	settings := &ReplicationSettings{Settings: s.Settings.Clone()}
+	clonedSettings := s.Settings.Clone()
+	settings := &ReplicationSettings{
+		replicationSettingsInjections: s.replicationSettingsInjections,
+		Settings:                      clonedSettings,
+	}
 	settings.populateFieldsUsingMap()
 	return settings
 }
@@ -832,6 +805,9 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 			s.Values[MergeFunctionMappingKey], _ = ValidateAndConvertJsonMapToMergeFunctionMapping(mergeFunctions.(map[string]interface{}))
 		}
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
+	}
+	if s.replicationSettingsInjections == nil {
+		s.replicationSettingsInjections = NewReplicationSettingInjections()
 	}
 }
 
@@ -1073,22 +1049,6 @@ func (s *ReplicationSettings) GetCollectionModes() base.CollectionsMgtType {
 	return val.(base.CollectionsMgtType)
 }
 
-func (s *ReplicationSettings) GetDevMainPipelineDelay() int {
-	return s.GetIntSettingValue(DevMainPipelineSendDelay)
-}
-
-func (s *ReplicationSettings) GetDevPreCheckVBPoison() int {
-	return s.GetIntSettingValue(DevPreCheckCasDriftForceVbKey)
-}
-
-func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
-	return s.GetIntSettingValue(DevBackfillPipelineSendDelay)
-}
-
-func (s *ReplicationSettings) GetDevPreCheckMaxCasErrorInjection() bool {
-	return s.GetBoolSettingValue(DevPreCheckMaxCasErrorInjection)
-}
-
 func (s *ReplicationSettings) GetJsFunctionTimeoutMs() int {
 	return s.GetIntSettingValue(JSFunctionTimeoutKey)
 }
@@ -1191,12 +1151,6 @@ func (s *ReplicationSettings) GetCasDriftThreshold() uint32 {
 
 	secsInt := val.(int)
 	return uint32(secsInt)
-}
-
-func (s *ReplicationSettings) GetCasDriftInjectDocKey() string {
-	val := s.GetStringSettingValue(DevCasDriftForceDocKey)
-
-	return val
 }
 
 func (s *ReplicationSettings) GetPreCheckCasDriftThreshold() uint32 {

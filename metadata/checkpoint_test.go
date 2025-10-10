@@ -235,7 +235,7 @@ func TestCheckpointSortByFailoverLogRealData(t *testing.T) {
 	fmt.Println("============== Test case start: TestCheckpointSortByFailoverLogRealData =================")
 	defer fmt.Println("============== Test case end: TestCheckpointSortByFailoverLogRealData =================")
 
-	testDataDir := "./testData/sortCkptData"
+	testDataDir := "./testdata/sortCkptData"
 	srcFailoverLogFile := testDataDir + "/srcFailoverLogs.json"
 	tgtFailoverLogFile := testDataDir + "/tgtFailoverLogs.json"
 	ckptsFile := testDataDir + "/currDocs.json"

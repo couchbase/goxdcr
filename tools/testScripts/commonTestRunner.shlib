@@ -55,11 +55,32 @@ function man() {
 	echo "-e OR --eccv                                      : Run all the tests to be run once again, but with enableCrossClusterVersioning turned on as an override."
 	echo "-m OR --mobile                                    : Run all the tests to be run once again, but with mobile and enableCrossClusterVersioning turned on as an override."
 	echo "-o OR --override                                  : Run all the tests once with the overriden settings only. Note: Can be used only if there is a -m or a -c."
+	echo "-p OR --production                                : Run all the tests once with the production environment only. Tests with injections are skipped."
 	echo "-x <path/to/xdcrDifferBin> "
 	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>        : Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
 	echo "-s <path/to/mobileImportSimBin> "
 	echo "OR --mobileImportSimDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
 	echo "-g <path/to/cng/root> OR --cngPath=<path>         : Enable CNG mode by pointing to the CNG repo root/path. Sets cngMode=1 and cngPath=<path>."
+}
+
+CONSTANTS_DEV_FILE="../../base/constants_dev.go"
+
+# testUsesInjections checks if a test case uses any injections
+# by comparing all the constants in the source file against the test script
+# returns 0 if it uses injections, else returns 1
+# Note the caller should utilize the return code appropriately
+function testUsesInjections() {
+	local testFile=$1
+	local injection
+	local injections
+	injections=$(cat $CONSTANTS_DEV_FILE | grep "const" | awk '{print $NF}' | sed 's/"//g')
+
+	for injection in $injections; do
+		if grep -q "$injection" "$testFile"; then
+			return 0
+		fi
+	done
+	return 1
 }
 
 # variables
@@ -78,6 +99,7 @@ differBin=""
 differSh=""
 mutationDir=""
 mutationDiffResults=""
+productionTestsOnly=0
 cngPath=""
 cngMode=0
 tests=$(ls ${testCasesDirectory:-} | sort)
@@ -87,7 +109,7 @@ OVERRIDE_MOBILE=0
 OVERRIDE_CRMODE=""
 OVERRIDE_ECCV=0
 
-optspec="homf:r:c:x:-:s:g:"
+optspec="hompf:r:c:x:-:s:g:"
 while getopts "$optspec" optchar; do
 	case "${optchar}" in
 	-)
@@ -115,6 +137,9 @@ while getopts "$optspec" optchar; do
 			;;
 		mobileImportSimDir=*)
 			mobileImportSimDir=${OPTARG#*=}
+			;;
+		production)
+			productionTestsOnly=1
 			;;
 		cngPath=*)
 			cngPath=${OPTARG#*=}
@@ -154,6 +179,9 @@ while getopts "$optspec" optchar; do
 		;;
 	s)
 		mobileImportSimDir=${OPTARG}
+		;;
+	p)
+		productionTestsOnly=1
 		;;
 	g)
 		cngPath=${OPTARG}
@@ -260,11 +288,24 @@ if [[ -z "$testCaseNumber" ]]; then
 			continue
 		fi
 
+		if [[ -d "$testcase" ]]; then
+			# skip directories
+			echo ""
+			echo "WARN: Skipping directory - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
 		if [[ "$testcase" =~ _idle ]]; then
 			# test cases with _idle in the filename means they take too long for the whole suite
 			# and should be run on an individual basis only
 			echo ""
 			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
+		if (($productionTestsOnly == 1)) && testUsesInjections "${testCasesDirectory:-}/$testcase"; then
+			echo ""
+			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase - since it is not a production test"
 			continue
 		fi
 
@@ -304,6 +345,12 @@ else
 	if [[ -z "$testCase" ]]; then
 		echo "ERRO: Cannot find test case number $testCaseNumber"
 		exit 1
+	fi
+
+	if (($productionTestsOnly == 1)) && testUsesInjections "$testCase"; then
+		echo ""
+		echo "WARN: Skipping test - $testCase - since it is not a production test"
+		exit 0
 	fi
 
 	echo "INFO: Running test - $testCase"

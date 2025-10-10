@@ -9,7 +9,7 @@ set -u
 # will be governed by the Apache License, Version 2.0, included in the file
 # licenses/APL2.txt.
 
-if (( `locate shfmt | grep -c .` == 0 ));then
+if (( `which shfmt | grep -c .` == 0 ));then
 	echo "shfmt not found"
 	exit 1
 fi

@@ -45,12 +45,10 @@ declare -A USRepl=(["filterExpression"]="$US_filter" ["replicationType"]="contin
 declare -A NonUSRepl=(["filterExpression"]="$NonUS_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 function runDataLoad {
-	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
+	local beerSample
+	beerSample=$(findFileTraverseUp "./install/samples" "beer-sample.zip")
 	if [[ -z "${beerSample:-}" ]]; then
-		beerSample=$(mdfind beer-sample.zip | grep install | grep samples | head -n 1)
-	fi
-	if [[ -z "${beerSample:-}" ]]; then
-		echo "Error: cannot locate beerSample"
+		echo "Error: cannot find beerSample"
 		exit 1
 	fi
 	runCbimport "HQ" "B1" "$beerSample"

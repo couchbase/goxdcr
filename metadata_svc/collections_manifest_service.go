@@ -31,7 +31,13 @@ const targetRefreshStr = "targetRefresh"
 var defaultManifest metadata.CollectionsManifest = metadata.NewDefaultCollectionsManifest()
 var collectionManifestCounter uint32
 
+type CollectionsManifestSvcInjector interface {
+	InjectDelay(spec *metadata.ReplicationSpecification, c *CollectionsManifestService)
+}
+
 type CollectionsManifestService struct {
+	CollectionsManifestSvcInjector
+
 	remoteClusterSvc        service_def.RemoteClusterSvc
 	replicationSpecSvc      service_def.ReplicationSpecSvc
 	uiLogSvc                service_def.UILogSvc
@@ -75,6 +81,8 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 	bucketTopooSvc service_def.BucketTopologySvc,
 	metakvSvc service_def.ManifestsService) (*CollectionsManifestService, error) {
 	svc := &CollectionsManifestService{
+		CollectionsManifestSvcInjector: NewCollectionsManifestSvcInjector(),
+
 		remoteClusterSvc:       remoteClusterSvc,
 		replicationSpecSvc:     replicationSpecSvc,
 		uiLogSvc:               uiLogSvc,
@@ -246,23 +254,7 @@ func (c *CollectionsManifestService) ReplicationSpecChangeCallback(id string, ol
 		c.handleDelReplSpec(oldSpec)
 	} else if newSpec != nil {
 		// replSpecChange
-		delaySec := newSpec.Settings.GetIntSettingValue(metadata.DevColManifestSvcDelaySec)
-		portSpecifier := newSpec.Settings.GetIntSettingValue(metadata.DevNsServerPortSpecifier)
-		if delaySec > 0 {
-			if portSpecifier > 0 {
-				myhostAddr, _ := c.xdcrTopologySvc.MyHostAddr()
-				myPortNumber, _ := base.GetPortNumber(myhostAddr)
-				// If err, myPortNumber is 0 and won't match portSpecifier anyway
-				if int(myPortNumber) == portSpecifier {
-					c.logger.Infof("XDCR Dev Injection for this node %v set delay to %v seconds", portSpecifier, delaySec)
-					atomic.StoreUint32(&c.xdcrInjDelaySec, uint32(delaySec))
-				}
-			} else {
-				c.logger.Infof("XDCR Dev Injection set delay to %v seconds", delaySec)
-			}
-		} else if delaySec == 0 {
-			atomic.StoreUint32(&c.xdcrInjDelaySec, 0)
-		}
+		c.CollectionsManifestSvcInjector.InjectDelay(newSpec, c)
 	}
 	return nil
 }

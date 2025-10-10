@@ -336,6 +336,7 @@ function waitForChangesLeft0 {
 	local targetCluster=$3
 	local targetBucket=$4
 	local changesLeft
+	local lastChangesLeft=-1
 	local i
 
 	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
@@ -360,11 +361,18 @@ function waitForChangesLeft0 {
 		else
 			echo "Changes left unknown value: $changesLeft"
 		fi
-		echo "Sleeping $CHANGES_LEFT_0_WAIT_SECS seconds and retrying..."
+		if (($changesLeft == $lastChangesLeft)); then
+			echo "Changes left is not going down. It is still $changesLeft"
+		else
+			lastChangesLeft=$changesLeft
+			i=$(($i - 1))
+			echo "Changes left is not 0. It is $changesLeft... it is decreasing"
+		fi
 		sleep $CHANGES_LEFT_0_WAIT_SECS
 	done
 
 	echo "changes_left never went to zero for $1.$2 -> $3.$4"
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -701,6 +709,54 @@ function getInternalNodeMetaKvLog {
 	cat $metaKvLog
 }
 
+function getInternalNodeNsServerInfoLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "info.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local info=${logfileDir}/info.log
+	if ! [[ -f "$info" ]]; then
+		echo "Unable to find file $info"
+		return 1
+	fi
+
+	cat $info
+}
+
+function getInternalNodeNsServerDebugLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "debug.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local debug=${logfileDir}/debug.log
+	if ! [[ -f "$debug" ]]; then
+		echo "Unable to find file $debug"
+		return 1
+	fi
+
+	cat $debug
+}
+
 # Used only if the log needs to be clean for parsing purposes
 function clearInternalNodeXdcrLog {
 	local clusterName=$1
@@ -718,7 +774,31 @@ function clearInternalNodeXdcrLog {
 		return 1
 	fi
 
-	echo "" >$goxdcrLogFile && sync "$goxdcrLogFile"
+	local gcFileName=${goxdcrLogFile}.$(date +%s)
+	mv $goxdcrLogFile $gcFileName
+	rm $gcFileName
+
+	sleep 2
+	local logValidated=0
+	local checkOpCode=1
+	local logs
+
+	while (($logValidated == 0)); do
+		logs=$(getInternalNodeXdcrLog "$clusterName")
+		checkOpCode=$?
+		while (($checkOpCode != 0)); do
+			sleep 2
+			logs=$(getInternalNodeXdcrLog "$clusterName")
+			checkOpCode=$?
+		done
+
+		# Check lines in the logs
+		local lineCnt=0
+		lineCnt=$(echo "$logs" | wc -l)
+		if (($lineCnt > 0)); then
+			logValidated=1
+		fi
+	done
 }
 
 function waitForOneReplicationToBeDeleted {
@@ -808,22 +888,57 @@ function validateInternalLogWithInstance {
 	count=$(echo "$logs" | grep -c "$grepStr")
 	if (($count != $instanceCnt)); then
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
-			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
-			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
-			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count" >&2
+			echo "Warning - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, found $count" >&2
 		else
-			echo "Error - requested count for $grepStr is $instanceCnt, but found $count" >&2
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt, but found $count" >&2
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
+	fi
+}
+
+function validateInternalLogWithInstanceWithGrepV {
+	local clusterName=$1
+	local grepStr="$2"
+	local inverseStr="$3"
+	local instanceCnt=$4
+	local maxInstanceCnt=${5:-}
+
+	logs=$(getInternalNodeXdcrLog "$clusterName")
+	if ! (($? == 0)); then
+		echo "Unable to get log for validation"
+		exit 1
+	fi
+
+	count=$(echo "$logs" | grep "$grepStr" | grep -v "$inverseStr" | wc -l)
+	if (($count != $instanceCnt)); then
+		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
+			echo "Error - requested count for \"$grepStr\" without \"$inverseStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
+			echo "Error - requested count for \"$grepStr\" without \"$inverseStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]]; then
+			echo "Warning - requested count for \"$grepStr\" without \"$inverseStr\" is $instanceCnt or <= $maxInstanceCnt, found $count" >&2
+		else
+			echo "Error - requested count for \"$grepStr\" without \"$inverseStr\" is $instanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+	else
+		echo "Found exactly $instanceCnt of \"$grepStr\" without \"$inverseStr\""
 	fi
 }
 
@@ -1357,10 +1472,14 @@ function dumpDebugInfoBeforeExit {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		mkdir -p "testOutput"
 		testOutputDir=$(realpath "testOutput")
-		getGoroutinesStack "$clusterName" >${testOutputDir}/$clusterName.pprof.log
-		getGoHeap "$clusterName" >${testOutputDir}/$clusterName.hprof.log
+		getGoroutinesStack "$clusterName" >${testOutputDir}/node${clusterName}_pprof.log
+		getGoHeap "$clusterName" >${testOutputDir}/node${clusterName}_hprof.log
+		getPrometheusStats "$clusterName" >${testOutputDir}/node${clusterName}_xdcrPrometheus.log
 		getInternalNodeXdcrLog "$clusterName" >${testOutputDir}/node${clusterName}_xdcrLog.log
 		getInternalNodeMemcachedLog "$clusterName" >${testOutputDir}/node${clusterName}_memcachedLog.log
+		getInternalNodeNsServerInfoLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_info.log
+		getInternalNodeNsServerDebugLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_debug.log
+		getInternalNodeMetaKvLog "$clusterName" >${testOutputDir}/node${clusterName}_metakv.log
 	done
 }
 
@@ -1397,7 +1516,7 @@ function setupCertificateAuthority {
 	# intended to be self-signed, meaning that it will not be vouched for by any other authority. This means that it can
 	# be created directly, based on the existing private key ca.key, without assistance from a third party.
 	openssl req -new -x509 -days 3650 -sha256 -key "./${caFileName}.key" -out "./${caFileName}.pem" \
-		-subj "/CN=${CN}"
+		-subj "/CN=${CN}" -addext "basicConstraints=CA:TRUE"
 	#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
 	# -subj "/CN=${CN}"
 
@@ -1695,6 +1814,7 @@ function validateLastBackfillContainsVBTask {
 	local result=$?
 	if ((!$result == 0)); then
 		echo "Unable to parse UUID return code $result" >&2
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1702,6 +1822,8 @@ function validateLastBackfillContainsVBTask {
 	inputToInternal=$(getInternalNodeXdcrLog "$logNodeName")
 	echo "$inputToInternal" | validateVBTaskExistsInternnal "$vb"
 	if ((!$? == 0)); then
+		echo "Unable to validate VB $vb exists in last backfill task instance for node $logNodeName cluster $remClusterName ($remClusterUUID)" >&2
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -2069,7 +2191,8 @@ function validatePrometheusStatsIs0 {
 	count=$(echo "$count" | sed 's/[^0-9]//g')
 
 	if (($count > 0)); then
-		echo "Stat $prometheusStatsName shows $count"
+		echo "Node $node source $sourceBucket target $targetBucket Stat $prometheusStatsName shows $count"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -2181,12 +2304,9 @@ function runCbcPillowFight {
 	fi
 
 	local cbcPillowfight
-	cbcPillowfight=$(locate cbc-pillowfight | grep install | grep bin | head -n 1)
+	cbcPillowfight=$(findFileTraverseUp "./install/bin" "cbc-pillowfight")
 	if [[ -z "${cbcPillowfight:-}" ]]; then
-		cbcPillowfight=$(mdfind cbc-pillowfight | grep install | grep bin | head -n 1)
-	fi
-	if [[ -z "${cbcPillowfight:-}" ]]; then
-		echo "Error: cannot locate cbc-pillowfight"
+		echo "Error: cannot find cbc-pillowfight"
 		return 1
 	fi
 
@@ -2216,10 +2336,7 @@ function runCbepctl {
 	fi
 
 	local cbepctl
-	cbepctl=$(locate cbepctl | grep install | grep bin | head -n 1)
-	if [[ -z "${cbepctl:-}" ]]; then
-		cbepctl=$(mdfind cbepctl | grep install | grep bin | head -n 1)
-	fi
+	cbepctl=$(findFileTraverseUp "./install/bin" "cbepctl")
 	if [[ -z "${cbepctl:-}" ]]; then
 		echo "Error: cannot locate cbepctl"
 		return 1

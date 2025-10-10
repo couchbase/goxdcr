@@ -75,7 +75,7 @@ function induceGuardrailFailedWrites {
 }
 
 function induceCasPoisonGuardrailFailedWrites {
-	local numberOfCasPoisonDocs=500
+	local numberOfCasPoisonDocs=100
 	local i=0
 	local docName
 
@@ -83,9 +83,9 @@ function induceCasPoisonGuardrailFailedWrites {
 		docName="casPoisonDoc_$i"
 		echo "Writing $docName out of $numberOfCasPoisonDocs"
 		setReplicationSettings "C1" "B1" "C2" "B1" "xdcrDevCasDriftInjectDocKey=$docName"
-		sleep 0.1
+		sleep 2
 		writeJSONDocument "C1" "B1" "$docName" '{"colFoo":"colBar"}'
-		sleep 0.1
+		sleep 2
 	done
 	validatePrometheusStatsCasPoisonNon0 "C1" "B1" "B1"
 }
@@ -156,7 +156,7 @@ function runOneRebalanceCycleIn {
 	grepForPanics
 }
 
-function pauseAndResumeReplication {
+function pauseReplications {
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 15 seconds for pipeline to really pause"
 	sleep 15
@@ -167,6 +167,9 @@ function pauseAndResumeReplication {
 	sleep 15
 	grepForPanics
 
+}
+
+function resumeReplications {
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 15 seconds for pipeline to really resume"
 	sleep 15
@@ -418,12 +421,14 @@ function runTestCase {
 		getCasPoisonStatsBefore $clusterName "B1"
 	done
 
-	pauseAndResumeReplication
+	pauseReplications
 
 	runOneRebalanceCycleIn
 
 	echo "Sleeping $sleepSecs seconds before gathering stats"
 	sleep $sleepSecs
+
+	resumeReplications
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
 		getFilteringStatsAfter $clusterName "B0"

@@ -71,8 +71,6 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{
 	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
 	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-	XMEM_DEV_MAIN_SLEEP_DELAY:       base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	XMEM_DEV_BACKFILL_SLEEP_DELAY:   base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 }
 
 var UninitializedReseverationNumber = -1
@@ -491,8 +489,10 @@ type xmemConfig struct {
 }
 
 func newConfig(logger *log.CommonLogger) xmemConfig {
+
 	config := xmemConfig{
 		baseConfig: baseConfig{maxCount: -1,
+			baseConfigInjector:  NewBaseConfigInjector(),
 			maxSize:             -1,
 			writeTimeout:        base.XmemWriteTimeout,
 			readTimeout:         base.XmemReadTimeout,
@@ -518,6 +518,7 @@ func newConfig(logger *log.CommonLogger) xmemConfig {
 	resptimeout := base.XmemDefaultRespTimeout
 	atomic.StorePointer(&config.respTimeout, unsafe.Pointer(&resptimeout))
 
+	config.InitInjector(&config.baseConfig, nil)
 	return config
 
 }
@@ -4842,24 +4843,8 @@ func (xmem *XmemNozzle) ConnStr() string {
 }
 
 func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	devMainDelay, ok := settings[XMEM_DEV_MAIN_SLEEP_DELAY]
-	if ok {
-		devMainDelayInt := devMainDelay.(int)
-		oldMainDelayInt := int(atomic.LoadUint32(&xmem.config.devMainSendDelay))
-		atomic.StoreUint32(&xmem.config.devMainSendDelay, uint32(devMainDelayInt))
-		if oldMainDelayInt != devMainDelayInt {
-			xmem.Logger().Infof("%v updated main pipeline delay to %v millisecond(s)\n", xmem.Id(), devMainDelayInt)
-		}
-	}
-	devBackfillDelay, ok := settings[XMEM_DEV_BACKFILL_SLEEP_DELAY]
-	if ok {
-		devBackfillDelayInt := devBackfillDelay.(int)
-		oldBackfillDelayInt := int(atomic.LoadUint32(&xmem.config.devBackfillSendDelay))
-		atomic.StoreUint32(&xmem.config.devBackfillSendDelay, uint32(devBackfillDelayInt))
-		if oldBackfillDelayInt != devBackfillDelayInt {
-			xmem.Logger().Infof("%v updated backfill pipeline delay to %v millisecond(s)\n", xmem.Id(), devBackfillDelay)
-		}
-	}
+	xmem.config.baseConfigInjector.Update(&xmem.config.baseConfig, settings, xmem.Logger(), xmem.Id())
+
 	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
 	if ok {
 		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)

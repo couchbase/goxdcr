@@ -45,15 +45,13 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 	["S3"]=${collection2ArrCrippled[@]} ["inventory"]=${inventoryArr[@]})
 
 function runDataLoad {
-	travelSample=$(locate travel-sample.zip | grep install | grep samples | head -n 1)
-	if [[ -z "${travelSample:-}" ]]; then
-		travelSample=$(mdfind travel-sample.zip | grep install | grep samples | head -n 1)
+	local travelSampleFile
+	travelSampleFile=$(findFileTraverseUp "./install/samples" "travel-sample.zip")
+	if (($? != 0)); then
+		echo "Failed to find travel-sample.zip"
+		exit $?
 	fi
-	if [[ -z "${travelSample:-}" ]]; then
-		echo "Error: cannot locate travel-sample"
-		exit 1
-	fi
-	runCbimport "C1" "B1" "$travelSample"
+	runCbimport "C1" "B1" "$travelSampleFile"
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL

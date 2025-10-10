@@ -235,9 +235,10 @@ function deleteBucketRecordNamespace {
 function insertPropertyIntoBucketNamePropertyMap {
 	local bucketName=$1
 	local -n incomingMap=$2
-	for key in ${!incomingMap[@]}; do
+	for key in "${!incomingMap[@]}"; do
 		BUCKET_NAME_PROPERTIES_MAP["${bucketName},${key}"]=${incomingMap[$key]}
 	done
+
 	export BUCKET_NAME_PROPERTIES_MAP
 }
 
@@ -260,7 +261,7 @@ function getPropertiesFromBucketNamePropertyMap {
 	BUCKET_PROPERTIES_OUTPUT_MAP=()
 
 	# key is bucketName,Property
-	for bp in ${!BUCKET_NAME_PROPERTIES_MAP[@]}; do
+	for bp in "${!BUCKET_NAME_PROPERTIES_MAP[@]}"; do
 		key=$(echo "$bp" | cut -d, -f1)
 		property=$(echo "$bp" | cut -d, -f2)
 		if [[ $key != $bucketName ]]; then
@@ -445,8 +446,13 @@ function getBucketItemCount {
 
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
-	for port in ${CLUSTER_NAME_PORT_MAP[@]}; do
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
+	local port
+	for port in "${CLUSTER_NAME_PORT_MAP[@]:-}"; do
+		if [[ -z "${port:-}" ]]; then
+			continue
+		fi
+
+		$CURL -X GET http://localhost:$port/pools >/dev/null 2>&1
 		if (($? != 0)); then
 			echo "Node $port not found. Skipping cluster_run XDCR init"
 			return 1
@@ -1080,8 +1086,8 @@ function createBucket {
 		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi
 
-	echo "Indexing scopes and collection cache from manifest..."
 	manifestOutput=$(getManifest $clusterName $bucketName)
+	echo "Indexing manifest: $clusterName $bucketName has manifest checksum : $manifestOutput"
 	populateManifestMaps "$manifestOutput"
 }
 
@@ -1831,29 +1837,46 @@ function cleanupBucketReplications {
 	[[ $(type -t waitForBgJobs) == function ]] && waitForBgJobs
 }
 
-function findCbDocLoader {
-	if [[ ! -z "${CBDOCLOADER:-}" ]]; then
-		echo "$CBDOCLOADER"
-		return 0
+function findFileTraverseUp {
+	local path=$(pwd)
+	local dirForFileToFind="$1"
+	local fileToFind="$2"
+	local fileAbsPath
+
+	# Ascend directories until we find dirForFileToFind or hit root
+	local -i found=0
+	while true; do
+		if [[ -d "$dirForFileToFind" ]]; then
+			found=1
+			break
+		fi
+		if [[ "$PWD" == "/" ]]; then
+			break
+		fi
+		cd .. || break
+	done
+
+	if ((found == 0)); then
+		echo "Error: cannot locate directory: $dirForFileToFind" >&2
+		exit 1
 	fi
 
-	which locate >/dev/null 2>&1
-	if (($? != 0)); then
-		return $?
+	if [[ ! -f "$dirForFileToFind/${fileToFind}" ]]; then
+		echo "Error: cannot locate $fileToFind at $dirForFileToFind/${fileToFind}" >&2
+		exit 1
 	fi
-	# Just pick one
-	docloader=$(locate cbdocloader | grep install | grep bin | head -n 1)
-	if (($? != 0)); then
-		echo ""
-		return 1
-	fi
-	if [[ -z "${CBDOCLOADER:-}" ]]; then
-		# set it in case needed it in future
-		export CBDOCLOADER=$docloader
-	fi
-	echo "$docloader"
-	return 0
 
+	fileAbsPath="$(cd "$dirForFileToFind" && pwd)/${fileToFind}"
+
+	# Restore original working directory
+	cd "$path" || true
+
+	if [[ -z "${fileAbsPath:-}" ]]; then
+		echo "Error: cannot locate $fileToFind" >&2
+		exit 1
+	fi
+
+	echo "$fileAbsPath"
 }
 
 function findCbimport {
@@ -1863,36 +1886,10 @@ function findCbimport {
 	fi
 
 	local cbimport
-	local command=locate
-
-	# need to have locate or mdfind
-	which locate >/dev/null 2>&1
+	cbimport=$(findFileTraverseUp "./install/bin" "cbimport")
 	if (($? != 0)); then
-		# locate is not present, use mdfind
-		which mdfind >/dev/null 2>&1
-		if (($? != 0)); then
-			# mdfind also not present
-			echo "locate or mdfind not found"
-			return $?
-		fi
-
-		# use mdfind instead of locate
-		command=mdfind
-	fi
-
-	cbimport=$($command cbimport | grep install | grep bin | head -n 1)
-	if (($? != 0)); then
-		echo ""
-		return 1
-	fi
-
-	# there may be cases where locate database isn't updated yet, try using mdfind
-	if [[ -z "${cbimport:-}" && "$command" == "locate" ]]; then
-		cbimport=$(mdfind cbimport | grep install | grep bin | head -n 1)
-		if (($? != 0)); then
-			echo ""
-			return 1
-		fi
+		echo "Error: cannot find cbimport"
+		exit $?
 	fi
 	echo "$cbimport"
 
@@ -1901,42 +1898,6 @@ function findCbimport {
 		export CBIMPORT=$cbimport
 	fi
 	return 0
-}
-
-#Input
-# 1 - cluster name
-# 2 - bucket name
-# 3 - file name
-# cbdocloader is deprecated. Use runCbimport instead
-function runDocLoader {
-	local clusterName=$1
-	local bucketName=$2
-	local fileName=$3
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]]; then
-		echo "Invalid input"
-		return 1
-	fi
-	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-
-	docLoader=$(findCbDocLoader)
-	if (($? != 0)); then
-		echo "Could not find docLoader"
-		return 1
-	fi
-
-	getPropertiesFromBucketNamePropertyMap "$bucketName"
-	local ramQuota=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
-	if [[ -z "$ramQuota" ]]; then
-		echo "Missing ramQuota for $bucketName"
-		return 1
-	fi
-
-	local retCode=1
-	while (($retCode > 0)); do
-		Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
-		$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
-		retCode=$?
-	done
 }
 
 #Input
@@ -1961,8 +1922,9 @@ function runCbimport {
 
 	local retCode=1
 	while (($retCode > 0)); do
-		Echo "Executing cbimport on bucket $bucketName for file $fileName..."
-		$cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d $fileName
+		echo "Executing cbimport on bucket $bucketName for file $fileName..."
+		echo $cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d "file://$fileName"
+		$cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d "file://$fileName"
 		retCode=$?
 	done
 }
@@ -2218,6 +2180,7 @@ function waitForBgJobs {
 	sleep 5
 
 	echo "Waiting for background jobs to finish..."
+
 	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
 	while (($jobsCnt > 0)); do
@@ -2393,8 +2356,9 @@ function getCollectionIdFromManifestCache {
 
 	# Look up scope checksum
 	local combinedKey="${manifestCksum},${scopeName}"
-	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]}"
+	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]:-}"
 	if [[ -z "$scopeCksum" ]]; then
+		echo "key $combinedKey not found in MANIFEST_CKSUM_SCOPE_MAP" >&2
 		echo ""
 		return 1
 	fi
@@ -3552,6 +3516,10 @@ function findInstallEtcDir {
 	findDirInternal "install/etc"
 }
 
+function findBuildDir {
+	findDirInternal "build"
+}
+
 function insertNXattrs {
 	local clusterName=$1
 	local bucketName=$2
@@ -3628,6 +3596,7 @@ function setupXdcrAdminUser {
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_admin
 }
 
+# This function could be slow
 function cleanupGoxdcrLogs {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"

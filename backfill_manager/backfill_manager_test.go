@@ -530,7 +530,9 @@ func TestBackfillMgrRetry(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Not tested here - but look at the logs - there should be 2 instances of retries
+	backfillMgr.errorRetryQMtx.RLock()
 	assert.Len(backfillMgr.errorRetryQueue, 3)
+	backfillMgr.errorRetryQMtx.RUnlock()
 }
 
 func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
