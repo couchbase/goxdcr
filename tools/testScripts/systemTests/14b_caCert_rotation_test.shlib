@@ -1,0 +1,166 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=13003)
+# Set c1 and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=300 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=3000)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scopeArr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scopeArr[@]} ["B2"]=${scopeArr[@]})
+
+# Scopes -> Collections
+# ----------------------
+declare -a collectionArr=("col1" "col2")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArr[@]} ["S2"]=${collectionArr[@]})
+
+# declare xdcr roles username and password
+DEFAULT_XDCR_ADMIN="XDCR_Admin"
+DEFAULT_XDCR_INBOUND="XDCR_Inbound"
+DEFAULT_PASSWORD="wewewe"
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2"
+	runCbWorkloadGenCollection "C1" "B1" "S2" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S2" "col2"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3"
+}
+
+function setupXdcrRoles {
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setupXdcrAdminUser "$clusterName" "$DEFAULT_XDCR_ADMIN" "$DEFAULT_PASSWORD"
+		setupXdcrInboundUser "$clusterName" "$DEFAULT_XDCR_INBOUND" "$DEFAULT_PASSWORD"
+	done
+}
+
+TLS_HANDSHAKE_FAILED_ERR_MSG="tls: failed to verify certificate: x509: certificate signed by unknown authority"
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running basic replication with ca-certificate rotation (TLS)"
+	echo "============================================================================"
+
+	# Previous test may have set up some certs
+	hardResetNodes
+
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	# Clear the logs at the beginning.
+	# This is necessary because we later use 'grep' to search for specific log lines and count their occurrences.
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+
+	addNodesIn
+	startRebalancing "C1"
+	startRebalancing "C2"
+	sleep 10
+
+	# create an additional collection S1.col3 in B1 on C1 to create a broken mapping scenario
+	createCollection "C1" "B1" "S1" "col3"
+
+	# setup the xdcr roles
+	setupXdcrRoles
+
+	setupCertsForTesting
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setEnableClientCert "$clusterName"
+	done
+
+	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+	sleep 2
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+
+	# run data load
+	runDataLoad
+	sleep 5
+	checkUnidirectionalChangesLeft
+
+	# create the collection S1.col3 in B2 on C2 to fix the broken mapping scenario
+	createCollection "C2" "B2" "S1" "col3"
+	echo "Sleeping 30 seconds for the backfill to trigger"
+	sleep 30
+
+	# clean up the certs to force a cert rotation
+	cleanupClientCertMaps
+	# setup the certs again to force a cert rotation
+	setupCertsForTesting
+
+	#edit the remote cluster reference to force a cert rotation
+	editSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+	sleep 1
+
+	#run data load again to ensure that we have some changes after the cert rotation
+	runDataLoad
+	sleep 2
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	tlsHandShapeErrCnt=$(echo "$currentXdcrLog" | grep -c "$TLS_HANDSHAKE_FAILED_ERR_MSG")
+	if [[ $tlsHandShapeErrCnt != 0 ]]; then
+		echo "Non zero count ($tlsHandShapeErrCnt) of TLS handshake errors found in the log after cert rotation"
+		echo "============================================================================"
+		echo "FAILED"
+		echo "============================================================================"
+		exit 1
+	fi
+
+	# speeden-up backfill before checking for changes_left and doc count
+	echo "speedening up backfill for it to finish"
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevBackfillSendDelayMs=0"
+
+	sleep 10
+	# check that we have no changes left
+	checkUnidirectionalChangesLeft
+	grepForPanics
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	cleanupClientCertMaps
+
+	restoreClusterBack "C1"
+	restoreClusterBack "C2"
+	cleanupTestCaseInternalSettings
+	# remove trap as no longer needed
+	trap - EXIT
+}
