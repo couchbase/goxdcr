@@ -672,6 +672,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 			// removed and re-created once the replications are started or resumed.
 			// Note that this needs to be done for paused replications as well.
 			base.ConnPoolMgr().SetStaleForPoolsWithNamePrefix(spec.Id)
+			base.ConnPoolMgr().SetStaleForPoolsWithNamePrefix(base.CompileBackfillPipelineSpecId(spec.Id))
 
 			if spec.Settings.Active {
 				rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster %v has been changed\n", spec.Id, oldRemoteClusterRef.Name)

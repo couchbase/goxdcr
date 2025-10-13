@@ -453,9 +453,9 @@ function getInternalNsServerLogDir {
 	local logNodeDir="n_${lastDigit}"
 
 	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
-	local nsServerLogDir="../../../../../../../ns_server/logs/"
+	local nsServerLogDir="../../../../../../../ns_server/logs"
 
-	echo "${nsServerLogDir}/${logNodeDir}/"
+	echo "${nsServerLogDir}/${logNodeDir}"
 }
 
 function getInternalNodeMemcachedLog {
