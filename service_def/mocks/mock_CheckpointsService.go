@@ -4,7 +4,6 @@ package mocks
 
 import (
 	metadata "github.com/couchbase/goxdcr/metadata"
-
 	mock "github.com/stretchr/testify/mock"
 
 	service_def "github.com/couchbase/goxdcr/service_def"

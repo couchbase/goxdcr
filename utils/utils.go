@@ -1000,6 +1000,10 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 }
 
 func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (map[string][]uint16, error) {
+	if len(bucketInfo) == 0 {
+		return nil, base.ErrorInvalidInput
+	}
+
 	kvVbMapPtr, err := u.GetServerVBucketsMap(connStr, bucketName, bucketInfo, nil, nil)
 	if err != nil {
 		return nil, err
@@ -1057,13 +1061,24 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
 // This method is used to get the SSL port for target nodes - will use alternate fields if requested
 func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
 	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
-	logger.Infof("GetMemcachedSSLPort, connStr=%v\n", connStr)
+	logger.Infof("GetMemcachedSSLPort, connStr=%v, useExternal=%v, authMech=%v", connStr, useExternal, authMech)
+
 	bucketInfo, err := u.GetClusterInfo(connStr, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	portMap, err := u.getMemcachedSSLPortMapInternal(connStr, bucketInfo, logger, useExternal)
+	nonTerseInfo, err := u.GetBucketInfo(connStr, bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	kvVbMapHasSSLPort, err := u.ShouldUseTerseBucketInfo(nonTerseInfo, connStr, bucket, useExternal, authMech == base.HttpAuthMechHttps)
+	if err != nil {
+		return nil, err
+	}
+
+	portMap, err := u.getMemcachedSSLPortMapInternal(connStr, bucketInfo, logger, useExternal, kvVbMapHasSSLPort)
 	if err != nil {
 		return nil, err
 	}
@@ -1071,7 +1086,13 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 	return portMap, nil
 }
 
-func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo map[string]interface{}, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
+// getMemcachedSSLPortMapInternal returns the mapping of hostAddr in kv_vb_map to kvSSL ports.
+// kvVbMapHasSSLPort is true when kv_vb_map already has kvSSL ports in hostAddress keys.
+func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo map[string]interface{}, logger *log.CommonLogger, useExternal bool, kvVbMapHasSSLPort bool) (base.SSLPortMap, error) {
+	if len(bucketInfo) == 0 {
+		return nil, base.ErrorInvalidInput
+	}
+
 	nodesExt, ok := bucketInfo[base.NodeExtKey]
 	if !ok {
 		errMsg := fmt.Sprintf("%v not found in bucketInfo=%v", base.NodeExtKey, bucketInfo)
@@ -1168,6 +1189,13 @@ func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo ma
 			portNumberToUse = uint16(kvSSLPortFloat)
 		}
 
+		if kvVbMapHasSSLPort {
+			// This is a special case where kv_vb_map was constructed using terse bucket info
+			// pools/default/b/bucketName instead of pools/default/buckets/bucketName. So kvSSL port
+			// will already be used to construct hostAddr key of kv_vb_map. To match the keys of ssl_port_map
+			// and kv_vb_map, we need to also construct the key using kvSSLPort.
+			hostAddr = base.GetHostAddr(base.GetHostName(hostAddr), portNumberToUse)
+		}
 		portMap[hostAddr] = portNumberToUse
 	}
 	logger.Infof("memcached ssl port map=%v\n", portMap)
@@ -1620,7 +1648,7 @@ func (u *Utilities) RemoteBucketValidationInfo(hostAddr, bucketName, username, p
 // 4. bucket eviction policy
 // 5. bucket server vb map
 func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	logger *log.CommonLogger, remote bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	logger *log.CommonLogger, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
 	bucketValidationInfoOp := func() error {
@@ -1628,33 +1656,56 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 		if err != nil {
 			return err
 		}
+
 		bucketType, err = u.GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
+
 		bucketUUID, err = u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
+
 		bucketConflictResolutionType, err = u.GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
+
 		bucketEvictionPolicy, err = u.GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
-		bucketKVVBMapPtr, err := u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo, nil, nil)
+
+		shouldUseTerseInfo, err := u.ShouldUseTerseBucketInfo(bucketInfo, hostAddr, bucketName, useExternal, authMech == base.HttpAuthMechHttps)
 		if err != nil {
-			err = fmt.Errorf("Error getServerVBucketsMap on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("error checking for the need of terse info for bucket %v: %w", bucketName, err)
 			return err
 		}
+
+		bucketInfoForKvVBMap := bucketInfo
+		if shouldUseTerseInfo {
+			terseBucketInfo, err := u.GetTerseBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+			if err != nil {
+				err = fmt.Errorf("error getting terse info for bucket %v: %w", bucketName, err)
+				return err
+			}
+
+			bucketInfoForKvVBMap = terseBucketInfo
+		}
+
+		bucketKVVBMapPtr, err := u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfoForKvVBMap, nil, nil)
+		if err != nil {
+			err = fmt.Errorf("error getServerVBucketsMap on bucket %v. err=%v", bucketName, err)
+			return err
+		}
+
 		bucketKVVBMap = *bucketKVVBMapPtr
-		if remote {
+		if useExternal {
 			u.TranslateKvVbMap(bucketKVVBMap, bucketInfo)
 		}
 		return nil
@@ -1730,6 +1781,28 @@ func (u *Utilities) GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]
 	}
 
 	return clusterCompatibility, nil
+}
+
+// GetNodeExtListFromInfoMap returns 'nodesExt' list from infoMap. Returns error if
+// it doesn't exist.
+func (u *Utilities) GetNodeExtListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
+	if len(infoMap) == 0 {
+		return nil, base.ErrorInvalidInput
+	}
+
+	nodesExt, ok := infoMap[base.NodeExtKey]
+	if !ok {
+		errMsg := fmt.Sprintf("%v not found in bucketInfo=%v for terse info", base.NodeExtKey, infoMap)
+		return nil, u.BucketInfoParseError(infoMap, errMsg, logger)
+	}
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	if !ok {
+		errMsg := fmt.Sprintf("nodesExt=%v cannot be parsed as []interface{}, as it is of incompatible type for terse info, its type=%v", nodesExt, reflect.TypeOf(nodesExt))
+		return nil, u.BucketInfoParseError(infoMap, errMsg, logger)
+	}
+
+	return nodesExtArray, nil
 }
 
 func (u *Utilities) GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
@@ -2254,18 +2327,9 @@ func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeIn
 	return hostAddr, nil
 }
 
-// Note - the translated map should be in the k->v form of:
-// internalNodeAddress:directPort -> externalNodeAddress:kvPort
-func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error) {
+func (u *Utilities) getInternalToExternalMapping(nodesList []interface{}, isTerseInfo bool) (map[string]string, error) {
 	internalExternalNodesMap := make(map[string]string)
-	var err error
 	var directPort int
-	var nodesList []interface{}
-
-	nodesList, err = u.GetNodeListFromInfoMap(mapContainingNodesKey, u.logger_utils)
-	if err != nil {
-		return internalExternalNodesMap, err
-	}
 
 	for _, nodeInfoRaw := range nodesList {
 		nodeInfo, ok := nodeInfoRaw.(map[string]interface{})
@@ -2290,52 +2354,130 @@ func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey 
 		}
 
 		internalAddress := base.GetHostName(internalAddressAndPort)
-		// Internally, we care about "direct" field
-		portsObjRaw, portsExists := nodeInfo[base.PortsKey]
+
+		portsKey := base.PortsKey
+		if isTerseInfo {
+			portsKey = base.ServicesKey
+		}
+
+		// Internally, we care about "direct" (or "kv" for terse bucket info) field
+		portsObjRaw, portsExists := nodeInfo[portsKey]
 		if !portsExists {
-			u.logger_utils.Warnf("Unable to get port for %v", internalAddress)
+			u.logger_utils.Warnf("Unable to get port for %v (%s)", internalAddress, portsKey)
 			// skip this node
 			continue
 		}
 		portsObj, ok := portsObjRaw.(map[string]interface{})
 		if !ok {
-			u.logger_utils.Warnf("GetIntExtHostNameKVPortTranslationMap unable to cast portsObj as map[string]interface{} from: %v", portsObjRaw)
+			u.logger_utils.Warnf("GetIntExtHostNameKVPortTranslationMap unable to cast portsObj as map[string]interface{} from (%s): %v", portsKey, portsObjRaw)
 			// skip this node
 			continue
 		}
 
-		directPortIface, directPortExists := portsObj[base.DirectPortKey]
+		kvPortKey := base.DirectPortKey
+		if isTerseInfo {
+			kvPortKey = base.KVPortKey
+		}
+
+		directPortIface, directPortExists := portsObj[kvPortKey]
 		if !directPortExists {
-			u.logger_utils.Warnf("Unable to get direct port for %v", internalAddress)
+			u.logger_utils.Warnf("Unable to get direct port for %v (%s)", internalAddress, kvPortKey)
 			// skip this node
 			continue
 		}
 		directPortFloat, ok := directPortIface.(float64)
 		if !ok {
-			u.logger_utils.Warnf("GetIntExtHostNameKVPortTranslationMap unable to cast directPort as float", directPortIface)
+			u.logger_utils.Warnf("GetIntExtHostNameKVPortTranslationMap unable to cast directPort as float (%s)", directPortIface, kvPortKey)
 			// skip this node
 			continue
 		}
 
 		directPort = (int)(directPortFloat)
+
 		internalAddressAndDirectPort := base.GetHostAddr(internalAddress, (uint16)(directPort))
 
-		externalAddress, externalDirectPort, externalErr, _, _ := u.GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo)
-		if len(externalAddress) > 0 {
-			if externalErr == nil {
-				// External address and port both exist
-				internalExternalNodesMap[internalAddressAndDirectPort] = base.GetHostAddr(externalAddress, (uint16)(externalDirectPort))
-			} else if externalErr == base.ErrorNoPortNumber {
-				// External address exists, but port does not. Use internal host's port number
-				internalExternalNodesMap[internalAddressAndDirectPort] = base.GetHostAddr(externalAddress, (uint16)(directPort))
+		externalAddress, externalDirectPort, externalErr, externalKvSSLPort, externalKvSSLErr := u.GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo)
+		if len(externalAddress) == 0 {
+			// no mapping to create
+			continue
+		}
+
+		mappedPort := -1
+		if isTerseInfo {
+			switch {
+			case externalKvSSLErr == nil:
+				// External address and KV SSL port both exist
+				mappedPort = externalKvSSLPort
+			case errors.Is(externalKvSSLErr, base.ErrorNoPortNumber):
+				// External address exists, but KV SSL port does not. Use internal host's port number just like
+				// non-terse bucket info behaviour.
+				mappedPort = directPort
 			}
+		} else {
+			switch {
+			case externalErr == nil:
+				// External address and port both exist
+				mappedPort = externalDirectPort
+			case errors.Is(externalErr, base.ErrorNoPortNumber):
+				// External address exists, but port does not. Use internal host's port number
+				mappedPort = directPort
+			}
+		}
+
+		if mappedPort < 0 {
+			// there was no mapped port for external address.
+			continue
+		}
+
+		// there was no mapped port for external address.
+		internalExternalNodesMap[internalAddressAndDirectPort] = base.GetHostAddr(externalAddress, (uint16)(mappedPort))
+	}
+
+	return internalExternalNodesMap, nil
+}
+
+// Note - the translated map should be in the k->v form of:
+// 1. internalNodeAddress:directPort -> externalNodeAddress:kvPort for non-terse bucket info
+// OR
+// 2. internalNodeAddress:directPort -> externalNodeAddress:kvSSLPort for non-terse bucket info
+// (2) will be used when externalNodeAddress:kvPort entries of (1) have the same values for all nodes.
+func (u *Utilities) GetIntExtHostNameKVPortTranslationMap(bucketInfo map[string]interface{}) (map[string]string, error) {
+	if len(bucketInfo) == 0 {
+		return nil, base.ErrorInvalidInput
+	}
+
+	var nodesList []interface{}
+
+	useTerseInfo, err := u.IsTerseBucketInfo(bucketInfo)
+	if err != nil {
+		u.logger_utils.Errorf("GetIntExtHostNameKVPortTranslationMap unable to check for terse info intent: %v", err)
+		return nil, err
+	}
+
+	if useTerseInfo {
+		// use the 'nodesExt' key as we need kvSSL port.
+		nodesList, err = u.GetNodeExtListFromInfoMap(bucketInfo, u.logger_utils)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// use the 'nodes' key as we do not need kvSSL port.
+		nodesList, err = u.GetNodeListFromInfoMap(bucketInfo, u.logger_utils)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	if len(internalExternalNodesMap) == 0 {
-		err = base.ErrorResourceDoesNotExist
+	internalExternalNodesMap, err := u.getInternalToExternalMapping(nodesList, useTerseInfo)
+	if err != nil {
+		return nil, err
 	}
-	return internalExternalNodesMap, err
+
+	if len(internalExternalNodesMap) == 0 {
+		return nil, base.ErrorResourceDoesNotExist
+	}
+
+	return internalExternalNodesMap, nil
 }
 
 func (u *Utilities) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
@@ -3649,4 +3791,92 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 		}
 	}
 	return vbReplicaMap, kvToNsServerTranslateMap, numOfReplicas, vbListForBeingAReplica, nil
+}
+
+// IsTerseBucketInfo returns bucketInfo using the pools/default/b/<bucketName> endpoint.
+func (u *Utilities) IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
+	if len(bucketInfo) == 0 {
+		return false, base.ErrorInvalidInput
+	}
+
+	// Ensure that the input map is buckets info in the first place. Nodes info like response from
+	// pools/default/nodeServices endpoint will also contain 'nodesExt' information.
+	_, ok1 := bucketInfo[base.BucketTypeKey]
+
+	// Non-terse bucket info doesn't contain 'nodesExt' information. It only contains 'nodes'.
+	_, ok2 := bucketInfo[base.NodeExtKey]
+
+	return ok1 && ok2, nil
+}
+
+// ShouldUseTerseBucketInfo returns whether kv_vb_map should be constructed using terse bucket info (pools/default/b/<bucketName>)
+// instead of pools/default/buckets/<bucketName>.
+// We should use terse bucket info when:
+// 1. the user intent is 'external'
+// 2. auth mech is 'Https'
+// 3. all external hostnames are the same (like in a case of replicating to a LB or private links in Capella).
+// If all these three conditions are met, the kv_vb_map generated using non-terse info will always contain one entry (or in general lesser
+// entries than the actual number of active KV nodes) due to the absense of kvSSL port in non-terse endpoint. So we use the terse endpoint.
+func (u *Utilities) ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, hostAddr, bucketName string, useExternal bool, isHttps bool) (bool, error) {
+	if len(bucketInfo) == 0 {
+		return false, base.ErrorInvalidInput
+	}
+
+	if !useExternal {
+		return false, nil
+	}
+
+	if !isHttps {
+		return false, nil
+	}
+
+	nodesList, err := u.GetNodeListFromInfoMap(bucketInfo, u.logger_utils)
+	if err != nil {
+		return false, err
+	}
+
+	if len(nodesList) == 1 {
+		// single node target cluster will not have any problems with non-terse bucket info.
+		return false, nil
+	}
+
+	kvVBMap, err := u.GetRemoteServerVBucketsMap(hostAddr, bucketName, bucketInfo, useExternal)
+	if err != nil {
+		return false, err
+	}
+
+	if len(kvVBMap) == len(nodesList) {
+		// kvVBMap should have all the active KV nodes in the target cluster. If not, then it's because
+		// non terse bucket info doesn't contain external kvSSL port. Terse bucket info should be used.
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// GetTerseBucketInfo returns the response of the pools/default/b/<bucketName> endpoint
+func (u *Utilities) GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	if len(bucketName) == 0 {
+		return nil, fmt.Errorf("bucket name cannot be empty")
+	}
+	bucketInfo := make(map[string]interface{})
+
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetTerseBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
+	defer stopFunc()
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.BPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
+	if err == nil && statusCode == http.StatusOK {
+		return bucketInfo, nil
+	}
+
+	switch statusCode {
+	case http.StatusNotFound:
+		return nil, u.GetNonExistentBucketError()
+	case http.StatusUnauthorized:
+		return nil, base.ErrorUnauthorized
+	case http.StatusForbidden:
+		return nil, base.ErrorForbidden
+	default:
+		logger.Errorf("Failed to get terse bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
+		return nil, fmt.Errorf("failed to get terse bucket info")
+	}
 }

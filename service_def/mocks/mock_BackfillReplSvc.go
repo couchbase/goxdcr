@@ -301,7 +301,7 @@ func (_c *BackfillReplSvc_GetMyVBs_Call) RunAndReturn(run func(*metadata.Replica
 	return _c
 }
 
-// RaiseUnrecoverableBackfillsIfNeeded provides a mock function with given fields:
+// RaiseUnrecoverableBackfillsIfNeeded provides a mock function with no fields
 func (_m *BackfillReplSvc) RaiseUnrecoverableBackfillsIfNeeded() chan bool {
 	ret := _m.Called()
 

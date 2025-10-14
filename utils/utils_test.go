@@ -16,15 +16,17 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
-	"github.com/couchbase/goxdcr/metadata"
 )
 
 // The test data's external node name is 10.10.10.10 instead of the regular 127.0.0.1
@@ -138,6 +140,15 @@ func getKvSSLFromBPath() map[string]interface{} {
 
 func getNlbDefaultPool() map[string]interface{} {
 	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_nlb.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getGCPPrivateLinksBPath() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_gcp_private_links.json")
 	retMap, _, err := readJsonHelper(fileName)
 	if err != nil {
 		panic(err)
@@ -499,6 +510,20 @@ func TestReplaceKVVBMapExternalK8(t *testing.T) {
 	assert.True((externalNodeList)(nodeNameList).check())
 }
 
+func TestGetIntExtHostNameTranslationMapForGCPPrivateLinks(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMapForGCPPrivateLinks =================")
+	a := assert.New(t)
+
+	bucketInfoMap := getGCPPrivateLinksBPath()
+
+	translatedMap, err := testUtils.GetIntExtHostNameKVPortTranslationMap(bucketInfoMap)
+
+	a.Equal(err, nil)
+	a.Greater(len(translatedMap), 1)
+
+	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMap =================")
+}
+
 func TestGetMemcachedSSLPortMapExternal(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetMemcachedSSLPortMapExternal =================")
 	assert := assert.New(t)
@@ -775,7 +800,7 @@ func TestUtilsCloudBucketInfo(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(cloudBucketInfo)
 
-	retPortMap, err := testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, false)
+	retPortMap, err := testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, false, false)
 	assert.Nil(err)
 	assert.NotNil(retPortMap)
 
@@ -784,7 +809,7 @@ func TestUtilsCloudBucketInfo(t *testing.T) {
 	}
 
 	// Try with external
-	retPortMap, err = testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, true)
+	retPortMap, err = testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, true, false)
 	for _, port := range retPortMap {
 		assert.Equal(uint16(11207), port)
 	}
@@ -950,10 +975,10 @@ func TestKvSSLPortAlternateAddr(t *testing.T) {
 
 	bucketInfo := getKvSSLFromBPath()
 	assert.NotNil(bucketInfo)
-	_, err := testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, false)
+	_, err := testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, false, false)
 	assert.Nil(err)
 
-	_, err = testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, true)
+	_, err = testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, true, false)
 	assert.Nil(err)
 }
 
@@ -1027,4 +1052,215 @@ func TestGetHostAddrFromNodeInfo(t *testing.T) {
 		assert.False(strings.Contains(addressPair.GetFirstString(), "18091"))
 		assert.False(strings.Contains(addressPair.GetSecondString(), "18091"))
 	}
+}
+
+// Local stub utilities for testing bucketValidationInfoInternal
+type stubUtilsForBucketValidation struct {
+	*Utilities
+	mockBucketInfo      map[string]interface{}
+	mockTerseBucketInfo map[string]interface{}
+}
+
+func (s *stubUtilsForBucketValidation) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	return s.mockBucketInfo, nil
+}
+
+func (s *stubUtilsForBucketValidation) GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	return s.mockTerseBucketInfo, nil
+}
+
+func TestBucketValidationInfoInternalWithGCPPrivateLinks(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketValidationInfoInternalWithGCPPrivateLinks =================")
+	defer fmt.Println("============== Test case end: TestBucketValidationInfoInternalWithGCPPrivateLinks =================")
+	assert := assert.New(t)
+
+	// Load the test data files as specified in requirements
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json")
+	bucketInfo, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+
+	fileName = fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_gcp_private_links.json")
+	terseBucketInfo, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+
+	// Test parameters as specified in requirements
+	hostAddr := "pe.vxzqmnl0syi3kpwn.aws-guardians.nonprod-project-avengers.com:1801"
+	bucketName := "B1"
+	username := "abc"
+	password := "def"
+	authMech := base.HttpAuthMechHttps
+	certificates := []byte("blah")
+	useExternal := true
+	logger := log.NewLogger("test", log.DefaultLoggerContext)
+
+	// Create a stub that will return our mock data
+	stub := &stubUtilsForBucketValidation{
+		Utilities:           testUtils,
+		mockBucketInfo:      bucketInfo,
+		mockTerseBucketInfo: terseBucketInfo,
+	}
+
+	// Manually test the core logic of bucketValidationInfoInternal
+	// First call GetBucketInfo (should return our mock)
+	bucketInfoResult, err := stub.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificates, false, nil, nil, logger)
+	assert.Nil(err)
+	assert.NotNil(bucketInfoResult)
+
+	// Check if we should use terse info
+	useTerseInfo, err := testUtils.ShouldUseTerseBucketInfo(bucketInfoResult, "", "", useExternal, authMech == base.HttpAuthMechHttps)
+	assert.Nil(err)
+	assert.True(useTerseInfo)
+
+	// Call GetTerseBucketInfo (should return our mock)
+	bucketInfoResult, err = stub.GetTerseBucketInfo(hostAddr, bucketName, username, password, authMech, certificates, false, nil, nil, logger)
+	assert.Nil(err)
+	assert.NotNil(bucketInfoResult)
+
+	// Get VB map from the bucket info
+	bucketKVVBMapPtr, err := testUtils.GetServerVBucketsMap(hostAddr, bucketName, bucketInfoResult, nil, nil)
+	assert.Nil(err)
+	bucketKVVBMap := *bucketKVVBMapPtr
+
+	// Translate if using external
+	testUtils.TranslateKvVbMap(bucketKVVBMap, bucketInfoResult)
+
+	// Verify results
+	assert.Equal(len(bucketKVVBMap), 3)
+
+	// Verify that terse bucket info was used
+	isTerse, err := testUtils.IsTerseBucketInfo(bucketInfoResult)
+	assert.Equal(err, nil)
+	assert.Equal(isTerse, true)
+
+	// Also check for validity of ssl_port_map
+	ssl_port_map, err := stub.getMemcachedSSLPortMapInternal(hostAddr, bucketInfoResult, logger, useExternal, true)
+	assert.Nil(err)
+	assert.Greater(len(ssl_port_map), 0)
+
+	for k := range bucketKVVBMap {
+		_, ok := ssl_port_map[k]
+		assert.True(ok)
+	}
+}
+
+func readJsonHelperForTest(fileName string) (retMap map[string]interface{}, err error) {
+	byteSlice, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the unmarshalled data is a map
+	if mapVal, ok := unmarshalledIface.(map[string]interface{}); ok {
+		retMap = mapVal
+		return retMap, nil
+	}
+
+	// If not a map, return empty map (will be handled as empty bucketInfo)
+	return make(map[string]interface{}), nil
+}
+
+func TestShouldUseTerseBucketInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestShouldUseTerseBucketInfo =================")
+	defer fmt.Println("============== Test case end: TestShouldUseTerseBucketInfo =================")
+	assert := assert.New(t)
+
+	// Test parameters needed to use terseInfo
+	useExternal := true
+	isHttps := true
+	hostAddr := "pe.vxzqmnl0syi3kpwn.aws-guardians.nonprod-project-avengers.com:1801"
+	bucketName := "B1"
+
+	// 1. Positive case - pools_default_buckets_gcp_private_links.json (GCP private endpoints),
+	// privateEndPoints.json & privateEndPoints1.json (AWS private endpoints)
+	positiveFiles := []string{
+		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json"),
+	}
+
+	for _, fileName := range positiveFiles {
+		bucketInfo, err := readJsonHelperForTest(fileName)
+		assert.Nil(err)
+
+		result, err := testUtils.ShouldUseTerseBucketInfo(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+		assert.Nil(err)
+		assert.True(result)
+	}
+
+	// Read all JSON files from all folders in goxdcr root directory
+	var jsonFiles []string
+	goxdcrRoot := ".." // Assuming the test is in utils/ subdirectory
+	err := filepath.Walk(goxdcrRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") {
+			jsonFiles = append(jsonFiles, path)
+		}
+		return nil
+	})
+	assert.Nil(err)
+
+	// 2. Negative cases - rest all of the valid bucketInfo files in the goxdcr repository.
+	for _, fileName := range jsonFiles {
+		var skip bool
+		for _, positiveFile := range positiveFiles {
+			if strings.Contains(fileName, positiveFile) {
+				// positive case.
+				skip = true
+				break
+			}
+		}
+
+		if skip {
+			fmt.Printf("Skipping file %s as it is a positive test: %v\n", filepath.Base(fileName), err)
+			continue
+		}
+
+		bucketInfo, err := readJsonHelperForTest(fileName)
+		assert.Nil(err)
+
+		if len(bucketInfo) == 0 {
+			fmt.Printf("Skipping file %s as it is not a bucketInfo: %v\n", filepath.Base(fileName), err)
+			continue
+		}
+
+		_, ok := bucketInfo["bucketType"]
+		if !ok {
+			fmt.Printf("Skipping file %s as it is not a bucketInfo or terseBucketInfo: %v\n", filepath.Base(fileName), err)
+			continue
+		}
+
+		isTerse, err := testUtils.IsTerseBucketInfo(bucketInfo)
+		assert.Nil(err)
+
+		if isTerse {
+			fmt.Printf("Skipping file %s as it terseBucketInfo: %v\n", filepath.Base(fileName), err)
+			continue
+		}
+
+		result, err := testUtils.ShouldUseTerseBucketInfo(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+		assert.Nil(err)
+		assert.False(result)
+	}
+}
+
+func TestGetServerVBucketsMapWithTerseInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetServerVBucketsMapWithTerseInfo =================")
+	assert := assert.New(t)
+
+	bucketInfo := getGCPPrivateLinksBPath()
+	assert.NotNil(bucketInfo)
+
+	serverName := "pe.vxzqmnl0syi3kpwn.aws-guardians.nonprod-project-avengers.com:1801"
+	kvVBMap, err := testUtils.GetRemoteServerVBucketsMap(serverName, "B1", bucketInfo, true /*useExternal*/)
+	assert.Nil(err)
+	assert.Equal(3, len(kvVBMap))
+
+	fmt.Println("============== Test case end: TestGetServerVBucketsMapWithTerseInfo =================")
 }
