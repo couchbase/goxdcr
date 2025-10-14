@@ -161,6 +161,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 	utils.On("GetCrossClusterVersioningFromBucketInfo", mock.Anything).Return(false, nil)
 	utils.On("GetVersionPruningWindowHrs", mock.Anything).Return(0, nil)
+	utils.On("ShouldUseTerseBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil)
 	highSeqnosMap := make(map[uint16]uint64)
 	translateMap := make(map[string]string)
 	for i := uint16(0); i < 1024; i++ {
@@ -190,6 +191,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		return bucketInfo, false, connStr, nil
 	}
 	remClusterSvc.On("GetBucketInfoGetter", mock.Anything, mock.Anything).Return(service_def.BucketInfoGetter(bucketInfoGetter), nil)
+	remClusterSvc.On("GetTerseBucketInfoGetter", mock.Anything, mock.Anything).Return(nil, nil)
 	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
 	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
 	remClusterSvc.On("GetMaxVBStatsGetter", mock.Anything, mock.Anything).Return(nil, nil)

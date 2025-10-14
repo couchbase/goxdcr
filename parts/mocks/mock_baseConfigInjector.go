@@ -22,36 +22,36 @@ func (_m *baseConfigInjector) EXPECT() *baseConfigInjector_Expecter {
 	return &baseConfigInjector_Expecter{mock: &_m.Mock}
 }
 
-// Init provides a mock function with given fields: cfg, settings
-func (_m *baseConfigInjector) Init(cfg *parts.baseConfig, settings metadata.ReplicationSettingsMap) {
+// InitInjector provides a mock function with given fields: cfg, settings
+func (_m *baseConfigInjector) InitInjector(cfg *parts.baseConfig, settings metadata.ReplicationSettingsMap) {
 	_m.Called(cfg, settings)
 }
 
-// baseConfigInjector_Init_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Init'
-type baseConfigInjector_Init_Call struct {
+// baseConfigInjector_InitInjector_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InitInjector'
+type baseConfigInjector_InitInjector_Call struct {
 	*mock.Call
 }
 
-// Init is a helper method to define mock.On call
+// InitInjector is a helper method to define mock.On call
 //   - cfg *parts.baseConfig
 //   - settings metadata.ReplicationSettingsMap
-func (_e *baseConfigInjector_Expecter) Init(cfg interface{}, settings interface{}) *baseConfigInjector_Init_Call {
-	return &baseConfigInjector_Init_Call{Call: _e.mock.On("Init", cfg, settings)}
+func (_e *baseConfigInjector_Expecter) InitInjector(cfg interface{}, settings interface{}) *baseConfigInjector_InitInjector_Call {
+	return &baseConfigInjector_InitInjector_Call{Call: _e.mock.On("InitInjector", cfg, settings)}
 }
 
-func (_c *baseConfigInjector_Init_Call) Run(run func(cfg *parts.baseConfig, settings metadata.ReplicationSettingsMap)) *baseConfigInjector_Init_Call {
+func (_c *baseConfigInjector_InitInjector_Call) Run(run func(cfg *parts.baseConfig, settings metadata.ReplicationSettingsMap)) *baseConfigInjector_InitInjector_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*parts.baseConfig), args[1].(metadata.ReplicationSettingsMap))
 	})
 	return _c
 }
 
-func (_c *baseConfigInjector_Init_Call) Return() *baseConfigInjector_Init_Call {
+func (_c *baseConfigInjector_InitInjector_Call) Return() *baseConfigInjector_InitInjector_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *baseConfigInjector_Init_Call) RunAndReturn(run func(*parts.baseConfig, metadata.ReplicationSettingsMap)) *baseConfigInjector_Init_Call {
+func (_c *baseConfigInjector_InitInjector_Call) RunAndReturn(run func(*parts.baseConfig, metadata.ReplicationSettingsMap)) *baseConfigInjector_InitInjector_Call {
 	_c.Run(run)
 	return _c
 }

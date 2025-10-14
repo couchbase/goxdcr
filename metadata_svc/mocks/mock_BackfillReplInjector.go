@@ -57,22 +57,9 @@ func (_c *BackfillReplInjector_InjectBackfillReplDelay_Call) RunAndReturn(run fu
 	return _c
 }
 
-// InjectRaiseCompleteBackfillDelay provides a mock function with given fields: replSpecSvc, backfillSpecId, logger
-func (_m *BackfillReplInjector) InjectRaiseCompleteBackfillDelay(replSpecSvc service_def.ReplicationSpecSvc, backfillSpecId string, logger *log.CommonLogger) bool {
-	ret := _m.Called(replSpecSvc, backfillSpecId, logger)
-
-	if len(ret) == 0 {
-		panic("no return value specified for InjectRaiseCompleteBackfillDelay")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(service_def.ReplicationSpecSvc, string, *log.CommonLogger) bool); ok {
-		r0 = rf(replSpecSvc, backfillSpecId, logger)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
+// InjectRaiseCompleteBackfillDelay provides a mock function with given fields: replSpecSvc, backfillSpecId, logger, injected, err
+func (_m *BackfillReplInjector) InjectRaiseCompleteBackfillDelay(replSpecSvc service_def.ReplicationSpecSvc, backfillSpecId string, logger *log.CommonLogger, injected *bool, err *error) {
+	_m.Called(replSpecSvc, backfillSpecId, logger, injected, err)
 }
 
 // BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InjectRaiseCompleteBackfillDelay'
@@ -84,24 +71,60 @@ type BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call struct {
 //   - replSpecSvc service_def.ReplicationSpecSvc
 //   - backfillSpecId string
 //   - logger *log.CommonLogger
-func (_e *BackfillReplInjector_Expecter) InjectRaiseCompleteBackfillDelay(replSpecSvc interface{}, backfillSpecId interface{}, logger interface{}) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
-	return &BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call{Call: _e.mock.On("InjectRaiseCompleteBackfillDelay", replSpecSvc, backfillSpecId, logger)}
+//   - injected *bool
+//   - err *error
+func (_e *BackfillReplInjector_Expecter) InjectRaiseCompleteBackfillDelay(replSpecSvc interface{}, backfillSpecId interface{}, logger interface{}, injected interface{}, err interface{}) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
+	return &BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call{Call: _e.mock.On("InjectRaiseCompleteBackfillDelay", replSpecSvc, backfillSpecId, logger, injected, err)}
 }
 
-func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) Run(run func(replSpecSvc service_def.ReplicationSpecSvc, backfillSpecId string, logger *log.CommonLogger)) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) Run(run func(replSpecSvc service_def.ReplicationSpecSvc, backfillSpecId string, logger *log.CommonLogger, injected *bool, err *error)) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(service_def.ReplicationSpecSvc), args[1].(string), args[2].(*log.CommonLogger))
+		run(args[0].(service_def.ReplicationSpecSvc), args[1].(string), args[2].(*log.CommonLogger), args[3].(*bool), args[4].(*error))
 	})
 	return _c
 }
 
-func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) Return(_a0 bool) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
-	_c.Call.Return(_a0)
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) Return() *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) RunAndReturn(run func(service_def.ReplicationSpecSvc, string, *log.CommonLogger) bool) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
-	_c.Call.Return(run)
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call) RunAndReturn(run func(service_def.ReplicationSpecSvc, string, *log.CommonLogger, *bool, *error)) *BackfillReplInjector_InjectRaiseCompleteBackfillDelay_Call {
+	_c.Run(run)
+	return _c
+}
+
+// InjectRaiseCompleteBackfillDelaySleep provides a mock function with given fields: replSpecSvc, logger
+func (_m *BackfillReplInjector) InjectRaiseCompleteBackfillDelaySleep(replSpecSvc service_def.ReplicationSpecSvc, logger *log.CommonLogger) {
+	_m.Called(replSpecSvc, logger)
+}
+
+// BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InjectRaiseCompleteBackfillDelaySleep'
+type BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call struct {
+	*mock.Call
+}
+
+// InjectRaiseCompleteBackfillDelaySleep is a helper method to define mock.On call
+//   - replSpecSvc service_def.ReplicationSpecSvc
+//   - logger *log.CommonLogger
+func (_e *BackfillReplInjector_Expecter) InjectRaiseCompleteBackfillDelaySleep(replSpecSvc interface{}, logger interface{}) *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call {
+	return &BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call{Call: _e.mock.On("InjectRaiseCompleteBackfillDelaySleep", replSpecSvc, logger)}
+}
+
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call) Run(run func(replSpecSvc service_def.ReplicationSpecSvc, logger *log.CommonLogger)) *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.ReplicationSpecSvc), args[1].(*log.CommonLogger))
+	})
+	return _c
+}
+
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call) Return() *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call) RunAndReturn(run func(service_def.ReplicationSpecSvc, *log.CommonLogger)) *BackfillReplInjector_InjectRaiseCompleteBackfillDelaySleep_Call {
+	_c.Run(run)
 	return _c
 }
 

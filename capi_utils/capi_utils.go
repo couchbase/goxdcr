@@ -13,12 +13,13 @@ package capi_utils
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+
 	base "github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"strconv"
-	"strings"
 )
 
 var logger_capi_utils *log.CommonLogger = log.NewLogger("CapiUtils", log.DefaultLoggerContext)
@@ -55,9 +56,22 @@ func ConstructServerCouchApiBaseMap(targetBucketName string, targetBucketInfo ma
 func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo map[string]interface{}, remoteClusterRef *metadata.RemoteClusterReference, utils utilities.UtilsIface, useCouchApiBase, useExternal bool) (map[string]string, error) {
 	endPointMap := make(map[string]string)
 
-	nodeList, err := utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
+	useTerseInfo, err := utils.IsTerseBucketInfo(targetBucketInfo)
 	if err != nil {
 		return nil, err
+	}
+
+	var nodeList []interface{}
+	if useTerseInfo {
+		nodeList, err = utils.GetNodeExtListFromInfoMap(targetBucketInfo, logger_capi_utils)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		nodeList, err = utils.GetNodeListFromInfoMap(targetBucketInfo, logger_capi_utils)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, node := range nodeList {
@@ -105,7 +119,11 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 		}
 
 		// Get internal direct ports
-		portsObj, ok := nodeMap[base.PortsKey]
+		portsKey := base.PortsKey
+		if useTerseInfo {
+			portsKey = base.ServicesKey
+		}
+		portsObj, ok := nodeMap[portsKey]
 		if !ok {
 			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
@@ -114,7 +132,11 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
 
-		directPortObj, ok := portsMap[base.DirectPortKey]
+		kvPortKey := base.DirectPortKey
+		if useTerseInfo {
+			kvPortKey = base.KVPortKey
+		}
+		directPortObj, ok := portsMap[kvPortKey]
 		if !ok {
 			return nil, ErrorBuildingCapiServerEndPointMap(targetBucketName, remoteClusterRef.Name(), node)
 		}
@@ -127,10 +149,12 @@ func ConstructCapiServiceEndPointMap(targetBucketName string, targetBucketInfo m
 
 		// Potentially, get external kv (direct) ports
 		if useExternal {
-			externalHostName, externalKvPort, externalKvPortErr, _, _ := utils.GetExternalAddressAndKvPortsFromNodeInfo(nodeMap)
+			externalHostName, externalKvPort, externalKvPortErr, externalKvSSLPort, externalKvPortSSLErr := utils.GetExternalAddressAndKvPortsFromNodeInfo(nodeMap)
 			if len(externalHostName) > 0 {
 				hostname = externalHostName
-				if externalKvPortErr == nil {
+				if useTerseInfo && externalKvPortSSLErr == nil {
+					portToUse = uint16(externalKvSSLPort)
+				} else if externalKvPortErr == nil {
 					portToUse = uint16(externalKvPort)
 				}
 			}
