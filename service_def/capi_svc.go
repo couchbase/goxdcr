@@ -117,9 +117,31 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		remoteBucket.Capabilities = append(remoteBucket.Capabilities, capability)
 	}
 
-	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo, useExternal)
+	ref := remoteBucket.RemoteClusterRef
+	shouldUseTerseInfo, err := remoteBucket.utils.ShouldUseTerseBucketInfo(targetBucketInfo, connStr, remoteBucket.BucketName, useExternal, ref.IsHttps())
 	if err != nil {
-		return fmt.Errorf("Failed to get VBServerMap for remote bucket %v", remoteBucket.BucketName)
+		const msg = "Error getting server vbuckets map from terse info for remote bucket"
+		remoteBucket.logger.Errorf("%s, targetBucketInfo=%v, ref=%s, bucket=%s, terse=%v, err=%v", msg, targetBucketInfo, ref.Uuid(), remoteBucket.BucketName, shouldUseTerseInfo, err)
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+
+	bucketInfoForKvVBMap := targetBucketInfo
+	if shouldUseTerseInfo {
+		remoteBucket.logger.Infof("using terse bucket info for kv_vb_map construction for remote component, ref=%s, bucket=%s", ref.Uuid(), remoteBucket.BucketName)
+		terseBucketInfo, err := remoteBucket.getTerseBucketInfo(ref, remoteBucket.BucketName)
+		if err != nil {
+			const msg = "Error checking for terse info necessity for remote bucket"
+			remoteBucket.logger.Errorf("%s, ref=%s, bucket=%s, err=%v", msg, ref.Uuid(), remoteBucket.BucketName, err)
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+
+		bucketInfoForKvVBMap = terseBucketInfo
+	}
+
+	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, bucketInfoForKvVBMap, useExternal)
+	if err != nil {
+		const msg = "Failed to get VBServerMap for remote bucket"
+		return fmt.Errorf("%s, bucket=%v, terse=%v: %w", msg, remoteBucket.BucketName, shouldUseTerseInfo, err)
 	}
 
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
@@ -132,7 +154,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 	nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
 	remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
 
-	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
+	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, bucketInfoForKvVBMap, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
 	if err != nil {
 		return err
 	}
@@ -162,6 +184,23 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 
 	return nil
+}
+
+// getTerseBucketInfo returns results from pools/default/b/<bucketName> endpoint of the target reference.
+func (remoteBucket *RemoteBucketInfo) getTerseBucketInfo(ref *metadata.RemoteClusterReference, bucketName string) (map[string]interface{}, error) {
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		remoteBucket.logger.Errorf("Error getting connection string from reference for remote bucket, id=%v, bucket=%s, err=%v", ref.Uuid(), bucketName, err)
+		return nil, err
+	}
+
+	terseTargetBucketInfo, err := remoteBucket.utils.GetTerseBucketInfo(connStr, bucketName, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), remoteBucket.logger)
+	if err != nil {
+		remoteBucket.logger.Errorf("Error getting terse bucket info from reference for remote bucket, id=%s, bucket=%s, err=%v", ref.Uuid(), bucketName, err)
+		return nil, err
+	}
+
+	return terseTargetBucketInfo, nil
 }
 
 func (remoteBucket *RemoteBucketInfo) String() string {

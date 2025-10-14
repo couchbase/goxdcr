@@ -94,8 +94,14 @@ type RemoteClusterSvc interface {
 	// Gets a list of references that have experienced auth errors and have not been queried before
 	GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error)
 
-	// Gives an API that returns the ability to retrieve target bucket info - note that this call may be heavy on ns_server
+	// Gives an API that returns the ability to retrieve target bucket info from pools/default/buckets/<bucketName>.
+	// Note that this call may be heavy on ns_server
 	GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (BucketInfoGetter, error)
+
+	// Gives an API that returns the ability to retrieve terse target bucket info from pools/default/b/<bucketName>.
+	// This call is lightweight when compared to pools/default/buckets/<bucketName> since the information is tersed and
+	// mostly cached in the node.
+	GetTerseBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (BucketInfoGetter, error)
 
 	SetBucketTopologySvc(svc BucketTopologySvc)
 

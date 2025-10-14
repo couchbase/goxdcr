@@ -178,6 +178,7 @@ type UtilsIface interface {
 	GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[string]interface{}) (string, int, error, int, error)
 	GetExternalMgtHostAndPort(nodeInfo map[string]interface{}, isHttps bool) (string, int, error)
 	GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{}) (int, error)
+	GetNodeExtListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error)
 	GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error)
 	GetNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) ([]interface{}, error)
 	GetNodeServicesInfo(hostAddr string, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
@@ -186,6 +187,9 @@ type UtilsIface interface {
 	GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger, useExternal bool) (base.StringPairList, error)
 	GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (map[string][]uint16, error)
 	GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (base.HttpAuthMech, map[string]interface{}, int, error)
+	GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
+	IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error)
+	ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, hostAddr, bucketName string, useExternal bool, isHttps bool) (bool, error)
 
 	// Network related utilities
 	GetRemoteMemcachedConnection(serverAddr, username, password, bucketName, userAgent string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)

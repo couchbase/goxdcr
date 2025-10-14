@@ -375,9 +375,10 @@ type RemoteClusterAgent struct {
 	// As such, each bucket monitoring request will translate into individual remote memcached components
 	targetKVComponents map[string]*component.RemoteMemcachedComponent
 	// Each bucket on one remote cluster will have one centralized getter
-	bucketManifestGetters    map[string]*BucketManifestGetter
-	bucketTopologyGetter     map[string]*BucketTopologyGetter
-	bucketMaxCasStatsGetters map[string]*MaxCasStatsGetter
+	bucketManifestGetters     map[string]*BucketManifestGetter
+	bucketTopologyGetter      map[string]*BucketTopologyGetter
+	terseBucketTopologyGetter map[string]*BucketTopologyGetter
+	bucketMaxCasStatsGetters  map[string]*MaxCasStatsGetter
 	// bucket refcounts
 	bucketRefCnt map[string]uint32
 	// protects the maps
@@ -2177,6 +2178,18 @@ func (agent *RemoteClusterAgent) getBucketInfoGetter(bucketName string) (service
 	return getter.bucketInfoGetter, nil
 }
 
+func (agent *RemoteClusterAgent) getTerseBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error) {
+	agent.bucketMtx.RLock()
+	defer agent.bucketMtx.RUnlock()
+
+	getter, ok := agent.terseBucketTopologyGetter[bucketName]
+	if !ok || getter == nil {
+		return nil, base.ErrorNotFound
+	}
+
+	return getter.bucketInfoGetter, nil
+}
+
 func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error) {
 	agent.bucketMtx.RLock()
 	defer agent.bucketMtx.RUnlock()
@@ -2187,6 +2200,23 @@ func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (servic
 	}
 
 	return getter.maxCasStatsGetter, nil
+}
+
+// getTerseBucketInfo returns results from pools/default/b/<bucketName> endpoint of the target reference.
+func (agent *RemoteClusterAgent) getTerseBucketInfo(ref *metadata.RemoteClusterReference, bucketName string) (map[string]interface{}, error) {
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		agent.logger.Errorf("Error getting connection string from reference for remote agent, id=%v, err=%v", ref.Uuid(), err)
+		return nil, err
+	}
+
+	terseTargetBucketInfo, err := agent.utils.GetTerseBucketInfo(connStr, bucketName, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), agent.logger)
+	if err != nil {
+		agent.logger.Errorf("Error getting terse bucket info from reference for remote agent, id=%s, bucket=%s, err=%v", ref.Uuid(), bucketName, err)
+		return nil, err
+	}
+
+	return terseTargetBucketInfo, nil
 }
 
 func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) *component.RemoteMemcachedComponent {
@@ -2238,10 +2268,28 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
 		defer latestTargetBucketTopology.Recycle()
 
-		kvVBMap, err := agent.utils.GetRemoteServerVBucketsMap(hostname, bucketName, targetBucketInfo, useAlternate)
+		shouldUseTerseInfo, err := agent.utils.ShouldUseTerseBucketInfo(targetBucketInfo, hostname, bucketName, useAlternate, refCpy.IsHttps())
 		if err != nil {
+			agent.logger.Errorf("Error checking for terse info necessity for remote agent, targetBucketInfo=%v, ref=%s, bucket=%s, err=%v", targetBucketInfo, refCpy.Uuid(), bucketName, err)
 			return nil, err
 		}
+
+		bucketInfoForKvVBMap := targetBucketInfo
+		if shouldUseTerseInfo {
+			agent.logger.Infof("using terse bucket info for kv_vb_map construction during remote component creation, ref=%s, bucket=%s", refCpy.Uuid(), bucketName)
+			bucketInfoForKvVBMap, err = agent.getTerseBucketInfo(refCpy, bucketName)
+			if err != nil {
+				agent.logger.Errorf("Error getting server vbuckets map from terse info during remote component creation, ref=%s, bucket=%s, err=%v", refCpy.Uuid(), bucketName, err)
+				return nil, err
+			}
+		}
+
+		kvVBMap, err := agent.utils.GetRemoteServerVBucketsMap(hostname, bucketName, bucketInfoForKvVBMap, useAlternate)
+		if err != nil {
+			agent.logger.Errorf("Error getting server vbuckets map from buckets info during remote component creation, ref=%s, bucket=%s, terse=%v, err=%v", refCpy.Uuid(), bucketName, shouldUseTerseInfo, err)
+			return nil, err
+		}
+
 		if len(kvVBMap) == 0 {
 			err = base.ErrorNoTargetNozzle
 			return nil, err
@@ -2278,6 +2326,13 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 		getterFunc := agent.initTopologyGetterFunc(bucketName)
 		topologyGetter = NewBucketTopologyGetter(bucketName, getterFunc)
 		agent.bucketTopologyGetter[bucketName] = topologyGetter
+	}
+
+	terseTopologyGetter, ok := agent.terseBucketTopologyGetter[bucketName]
+	if !ok {
+		terseGetterFunc := agent.initTerseTopologyGetterFunc(bucketName)
+		terseTopologyGetter = NewBucketTopologyGetter(bucketName, terseGetterFunc)
+		agent.terseBucketTopologyGetter[bucketName] = terseTopologyGetter
 	}
 
 	_, ok = agent.bucketMaxCasStatsGetters[bucketName]
@@ -2323,6 +2378,35 @@ func (agent *RemoteClusterAgent) initTopologyGetterFunc(bucketName string) func(
 	}
 }
 
+// initTerseTopologyGetterFunc returns terse bucket info from pools/default/b/<bucketName> endpoint.
+func (agent *RemoteClusterAgent) initTerseTopologyGetterFunc(bucketName string) func() (map[string]interface{}, bool, string, error) {
+	return func() (map[string]interface{}, bool, string, error) {
+		agent.refMtx.RLock()
+		connStr, err := agent.reference.MyConnectionStr()
+		if err != nil {
+			agent.refMtx.RUnlock()
+			return nil, false, "", err
+		}
+		username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.reference.MyCredentials()
+		if err != nil {
+			agent.refMtx.RUnlock()
+			return nil, false, "", err
+		}
+		agent.refMtx.RUnlock()
+
+		useExternal, err := agent.UsesAlternateAddress()
+		if err != nil {
+			return nil, false, "", err
+		}
+
+		terseTargetBucketInfo, err := agent.utils.GetTerseBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		if err != nil {
+			return nil, false, "", err
+		}
+		return terseTargetBucketInfo, useExternal, connStr, nil
+	}
+}
+
 func (agent *RemoteClusterAgent) initMaxCasGetterFunc(bucketName string) func() (base.HighSeqnosMapType, error) {
 	remComponent := agent.targetKVComponents[bucketName]
 	return remComponent.GetVbMaxCasMap
@@ -2350,6 +2434,7 @@ func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) erro
 		delete(agent.bucketManifestGetters, bucketName)
 		delete(agent.bucketTopologyGetter, bucketName)
 		delete(agent.bucketMaxCasStatsGetters, bucketName)
+		delete(agent.terseBucketTopologyGetter, bucketName)
 	}
 	return nil
 }
@@ -3428,22 +3513,23 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 	finCh := make(chan bool, 1)
 
 	newAgent := &RemoteClusterAgent{
-		metakvSvc:                service.metakv_svc,
-		uiLogSvc:                 service.uilog_svc,
-		utils:                    service.utils,
-		logger:                   service.logger,
-		topologySvc:              service.xdcr_topology_svc,
-		metadataChangeCallback:   service.metadata_change_callback,
-		bucketRefCnt:             make(map[string]uint32),
-		bucketManifestGetters:    make(map[string]*BucketManifestGetter),
-		agentFinCh:               finCh,
-		connectivityHelper:       NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
-		bucketTopologyGetter:     map[string]*BucketTopologyGetter{},
-		bucketMaxCasStatsGetters: map[string]*MaxCasStatsGetter{},
-		targetKVComponents:       make(map[string]*component.RemoteMemcachedComponent),
-		bucketTopologySvc:        service.GetBucketTopologySvc,
-		heartbeatAPI:             service.getHeartbeatSenderAPI(),
-		specsReader:              service.getReplReader(),
+		metakvSvc:                 service.metakv_svc,
+		uiLogSvc:                  service.uilog_svc,
+		utils:                     service.utils,
+		logger:                    service.logger,
+		topologySvc:               service.xdcr_topology_svc,
+		metadataChangeCallback:    service.metadata_change_callback,
+		bucketRefCnt:              make(map[string]uint32),
+		bucketManifestGetters:     make(map[string]*BucketManifestGetter),
+		agentFinCh:                finCh,
+		connectivityHelper:        NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
+		bucketTopologyGetter:      map[string]*BucketTopologyGetter{},
+		bucketMaxCasStatsGetters:  map[string]*MaxCasStatsGetter{},
+		targetKVComponents:        make(map[string]*component.RemoteMemcachedComponent),
+		bucketTopologySvc:         service.GetBucketTopologySvc,
+		heartbeatAPI:              service.getHeartbeatSenderAPI(),
+		specsReader:               service.getReplReader(),
+		terseBucketTopologyGetter: map[string]*BucketTopologyGetter{},
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent
@@ -4325,6 +4411,22 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 	service.agentMutex.RUnlock()
 
 	return agent.getBucketInfoGetter(bucketName)
+}
+
+func (service *RemoteClusterService) GetTerseBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.BucketInfoGetter, error) {
+	if ref == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	service.agentMutex.RLock()
+	agent := service.agentMap[ref.Id()]
+	if agent == nil {
+		service.agentMutex.RUnlock()
+		return nil, getUnknownCluster("refId", ref.Id())
+	}
+	service.agentMutex.RUnlock()
+
+	return agent.getTerseBucketInfoGetter(bucketName)
 }
 
 func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
