@@ -3580,6 +3580,65 @@ func (_c *UtilsIface_GetMemcachedSSLPortMap_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
+// GetNodeExtListFromInfoMap provides a mock function with given fields: infoMap, logger
+func (_m *UtilsIface) GetNodeExtListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
+	ret := _m.Called(infoMap, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeExtListFromInfoMap")
+	}
+
+	var r0 []interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) ([]interface{}, error)); ok {
+		return rf(infoMap, logger)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) []interface{}); ok {
+		r0 = rf(infoMap, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, *log.CommonLogger) error); ok {
+		r1 = rf(infoMap, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetNodeExtListFromInfoMap_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodeExtListFromInfoMap'
+type UtilsIface_GetNodeExtListFromInfoMap_Call struct {
+	*mock.Call
+}
+
+// GetNodeExtListFromInfoMap is a helper method to define mock.On call
+//   - infoMap map[string]interface{}
+//   - logger *log.CommonLogger
+func (_e *UtilsIface_Expecter) GetNodeExtListFromInfoMap(infoMap interface{}, logger interface{}) *UtilsIface_GetNodeExtListFromInfoMap_Call {
+	return &UtilsIface_GetNodeExtListFromInfoMap_Call{Call: _e.mock.On("GetNodeExtListFromInfoMap", infoMap, logger)}
+}
+
+func (_c *UtilsIface_GetNodeExtListFromInfoMap_Call) Run(run func(infoMap map[string]interface{}, logger *log.CommonLogger)) *UtilsIface_GetNodeExtListFromInfoMap_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}), args[1].(*log.CommonLogger))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetNodeExtListFromInfoMap_Call) Return(_a0 []interface{}, _a1 error) *UtilsIface_GetNodeExtListFromInfoMap_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetNodeExtListFromInfoMap_Call) RunAndReturn(run func(map[string]interface{}, *log.CommonLogger) ([]interface{}, error)) *UtilsIface_GetNodeExtListFromInfoMap_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNodeListFromInfoMap provides a mock function with given fields: infoMap, logger
 func (_m *UtilsIface) GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
 	ret := _m.Called(infoMap, logger)
@@ -4678,6 +4737,73 @@ func (_c *UtilsIface_GetStringSettingFromSettings_Call) RunAndReturn(run func(me
 	return _c
 }
 
+// GetTerseBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger
+func (_m *UtilsIface) GetTerseBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTerseBucketInfo")
+	}
+
+	var r0 map[string]interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
+		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetTerseBucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTerseBucketInfo'
+type UtilsIface_GetTerseBucketInfo_Call struct {
+	*mock.Call
+}
+
+// GetTerseBucketInfo is a helper method to define mock.On call
+//   - hostAddr string
+//   - bucketName string
+//   - username string
+//   - password string
+//   - authMech base.HttpAuthMech
+//   - certificate []byte
+//   - sanInCertificate bool
+//   - clientCert []byte
+//   - clientKey []byte
+//   - logger *log.CommonLogger
+func (_e *UtilsIface_Expecter) GetTerseBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCert interface{}, clientKey interface{}, logger interface{}) *UtilsIface_GetTerseBucketInfo_Call {
+	return &UtilsIface_GetTerseBucketInfo_Call{Call: _e.mock.On("GetTerseBucketInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)}
+}
+
+func (_c *UtilsIface_GetTerseBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_GetTerseBucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetTerseBucketInfo_Call) Return(_a0 map[string]interface{}, _a1 error) *UtilsIface_GetTerseBucketInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetTerseBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)) *UtilsIface_GetTerseBucketInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HttpsRemoteHostAddr provides a mock function with given fields: hostAddr, logger
 func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, string, error) {
 	ret := _m.Called(hostAddr, logger)
@@ -4973,6 +5099,62 @@ func (_c *UtilsIface_IsSeriousNetError_Call) Return(_a0 bool) *UtilsIface_IsSeri
 }
 
 func (_c *UtilsIface_IsSeriousNetError_Call) RunAndReturn(run func(error) bool) *UtilsIface_IsSeriousNetError_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsTerseBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
+	ret := _m.Called(bucketInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsTerseBucketInfo")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) (bool, error)); ok {
+		return rf(bucketInfo)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) bool); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_IsTerseBucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsTerseBucketInfo'
+type UtilsIface_IsTerseBucketInfo_Call struct {
+	*mock.Call
+}
+
+// IsTerseBucketInfo is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) IsTerseBucketInfo(bucketInfo interface{}) *UtilsIface_IsTerseBucketInfo_Call {
+	return &UtilsIface_IsTerseBucketInfo_Call{Call: _e.mock.On("IsTerseBucketInfo", bucketInfo)}
+}
+
+func (_c *UtilsIface_IsTerseBucketInfo_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_IsTerseBucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_IsTerseBucketInfo_Call) Return(_a0 bool, _a1 error) *UtilsIface_IsTerseBucketInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_IsTerseBucketInfo_Call) RunAndReturn(run func(map[string]interface{}) (bool, error)) *UtilsIface_IsTerseBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6023,6 +6205,66 @@ func (_c *UtilsIface_SendHELOWithFeatures_Call) Return(respondedFeatures utils.H
 }
 
 func (_c *UtilsIface_SendHELOWithFeatures_Call) RunAndReturn(run func(memcached.ClientIface, string, time.Duration, time.Duration, utils.HELOFeatures, *log.CommonLogger) (utils.HELOFeatures, error)) *UtilsIface_SendHELOWithFeatures_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ShouldUseTerseBucketInfo provides a mock function with given fields: bucketInfo, hostAddr, bucketName, useExternal, isHttps
+func (_m *UtilsIface) ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, hostAddr string, bucketName string, useExternal bool, isHttps bool) (bool, error) {
+	ret := _m.Called(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShouldUseTerseBucketInfo")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, string, bool, bool) (bool, error)); ok {
+		return rf(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, string, bool, bool) bool); ok {
+		r0 = rf(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, string, bool, bool) error); ok {
+		r1 = rf(bucketInfo, hostAddr, bucketName, useExternal, isHttps)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_ShouldUseTerseBucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShouldUseTerseBucketInfo'
+type UtilsIface_ShouldUseTerseBucketInfo_Call struct {
+	*mock.Call
+}
+
+// ShouldUseTerseBucketInfo is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+//   - hostAddr string
+//   - bucketName string
+//   - useExternal bool
+//   - isHttps bool
+func (_e *UtilsIface_Expecter) ShouldUseTerseBucketInfo(bucketInfo interface{}, hostAddr interface{}, bucketName interface{}, useExternal interface{}, isHttps interface{}) *UtilsIface_ShouldUseTerseBucketInfo_Call {
+	return &UtilsIface_ShouldUseTerseBucketInfo_Call{Call: _e.mock.On("ShouldUseTerseBucketInfo", bucketInfo, hostAddr, bucketName, useExternal, isHttps)}
+}
+
+func (_c *UtilsIface_ShouldUseTerseBucketInfo_Call) Run(run func(bucketInfo map[string]interface{}, hostAddr string, bucketName string, useExternal bool, isHttps bool)) *UtilsIface_ShouldUseTerseBucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}), args[1].(string), args[2].(string), args[3].(bool), args[4].(bool))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_ShouldUseTerseBucketInfo_Call) Return(_a0 bool, _a1 error) *UtilsIface_ShouldUseTerseBucketInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_ShouldUseTerseBucketInfo_Call) RunAndReturn(run func(map[string]interface{}, string, string, bool, bool) (bool, error)) *UtilsIface_ShouldUseTerseBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

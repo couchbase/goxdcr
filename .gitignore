@@ -30,3 +30,9 @@ tools/testScripts/testsLibrary.sh
 
 # GoLand project space
 .idea/
+
+# vscode config
+.vscode/
+
+# local env file
+.envrc

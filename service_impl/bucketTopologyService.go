@@ -352,6 +352,11 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		return nil, fmt.Errorf("Unable to get remote bucketInfo getter for spec %v", spec.Id)
 	}
 
+	terseBucketInfoGetter, err := b.remClusterSvc.GetTerseBucketInfoGetter(ref, spec.TargetBucketName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get terse remote bucketInfo getter for spec %v", spec.Id)
+	}
+
 	maxCasGetter, err := b.remClusterSvc.GetMaxVBStatsGetter(ref, spec.TargetBucketName)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to get remote maxCasGetter for spec %v", spec.Id)
@@ -364,7 +369,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
 		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 
-		topologyUpdateFunc := b.getRemoteTopologyUpdateFunc(spec, bucketInfoGetter, watcher)
+		topologyUpdateFunc := b.getRemoteTopologyUpdateFunc(spec, bucketInfoGetter, terseBucketInfoGetter, watcher)
 
 		intervalFuncMap := make(IntervalFuncMap)
 		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
@@ -402,23 +407,42 @@ func (b *BucketTopologyService) getRemoteMaxCasUpdater(spec *metadata.Replicatio
 	return maxCasGetterFunc
 }
 
-func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, bucketInfoGetter service_def.BucketInfoGetter, watcher *BucketTopologySvcWatcher) func() error {
+func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, bucketInfoGetter, terseBucketInfoGetter service_def.BucketInfoGetter, watcher *BucketTopologySvcWatcher) func() error {
 	topologyUpdateFunc := func() error {
 		targetBucketInfo, shouldUseExternal, connStr, err := bucketInfoGetter()
 		if err != nil {
 			return err
 		}
+
 		targetBucketUUID, err := b.utils.GetBucketUuidFromBucketInfo(spec.TargetBucketName, targetBucketInfo, b.logger)
 		if err != nil {
 			return err
 		}
-		targetServerVBMap, err := b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, targetBucketInfo, shouldUseExternal)
-		if err != nil {
-			return err
-		}
+
 		perUpdateRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 		if err != nil {
 			return err
+		}
+
+		shouldUseTerseInfo, err := b.utils.ShouldUseTerseBucketInfo(targetBucketInfo, connStr, spec.TargetBucketName, shouldUseExternal, perUpdateRef.IsHttps())
+		if err != nil {
+			return err
+		}
+
+		bucketInfoForKvVBMap := targetBucketInfo
+		if shouldUseTerseInfo {
+			terseTargetBucketInfo, shouldUseExternal, connStr, err := terseBucketInfoGetter()
+			if err != nil {
+				return err
+			}
+
+			b.logger.Debugf("using terse bucket info for kv_vb_map construction during remote topology change check. external=%v, connStr=%v, bucket=%s", shouldUseExternal, connStr, targetBucketUUID)
+			bucketInfoForKvVBMap = terseTargetBucketInfo
+		}
+
+		targetServerVBMap, err := b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, bucketInfoForKvVBMap, shouldUseExternal)
+		if err != nil {
+			return fmt.Errorf("error constructing targetServerVbMap (terse=%v): %w", shouldUseTerseInfo, err)
 		}
 
 		nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)

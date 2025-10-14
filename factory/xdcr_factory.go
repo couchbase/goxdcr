@@ -551,6 +551,23 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
 	return ret
 }
 
+// getTerseBucketInfo returns results from pools/default/b/<bucketName> endpoint of the target reference.
+func (xdcrf *XDCRFactory) getTerseBucketInfo(ref *metadata.RemoteClusterReference, bucketName string) (map[string]interface{}, error) {
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting connection string from reference, id=%v, err=%v", ref.Uuid(), err)
+		return nil, err
+	}
+
+	terseTargetBucketInfo, err := xdcrf.utils.GetTerseBucketInfo(connStr, bucketName, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), xdcrf.logger)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting terse bucket info from reference, id=%s, bucket=%s, err=%v", ref.Uuid(), bucketName, err)
+		return nil, err
+	}
+
+	return terseTargetBucketInfo, nil
+}
+
 /**
  * Constructs the outgoing nozzles
  * Returns:
@@ -574,12 +591,29 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 		return
 	}
 
-	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
-	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, useExternal)
+	shouldUseTerseInfo, err := xdcrf.utils.ShouldUseTerseBucketInfo(targetBucketInfo, targetClusterRef.HostName(), spec.TargetBucketName, useExternal, targetClusterRef.IsHttps())
 	if err != nil {
-		xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
+		xdcrf.logger.Errorf("Error checking for terse info necessity, targetBucketInfo=%v, topic=%s, err=%v", targetBucketInfo, topic, err)
 		return
 	}
+
+	// Get a Map of Remote kvNode -> vBucket#s it's responsible for
+	bucketInfoForKvVBMap := targetBucketInfo
+	if shouldUseTerseInfo {
+		xdcrf.logger.Infof("using terse bucket info for kv_vb_map construction during pipeline creation, topic=%s", topic)
+		bucketInfoForKvVBMap, err = xdcrf.getTerseBucketInfo(targetClusterRef, spec.TargetBucketName)
+		if err != nil {
+			xdcrf.logger.Errorf("Error getting server vbuckets map from terse info, topic=%s, err=%v", topic, err)
+			return
+		}
+	}
+
+	kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, bucketInfoForKvVBMap, useExternal)
+	if err != nil {
+		xdcrf.logger.Errorf("Error getting server vbuckets map, topic=%s, terseInfo=%v, err=%v", topic, shouldUseTerseInfo, err)
+		return
+	}
+
 	if len(kvVBMap) == 0 {
 		err = base.ErrorNoTargetNozzle
 		return
