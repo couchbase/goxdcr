@@ -303,8 +303,8 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore(t *testing.T) {
 }
 
 func TestPipelineEventsMgr_LargeBrokenMap(t *testing.T) {
-	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
-	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_LargeBrokenMap =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_LargeBrokenMap =================")
 	assert := assert.New(t)
 
 	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
@@ -359,6 +359,9 @@ func TestPipelineEventsMgr_LargeBrokenMap(t *testing.T) {
 
 	// Fail the test if querying is getting close to half as long as setting a time
 	// Then this means lock contention is an issue
+	if comparison < 3 {
+		t.Errorf("Setting time is %v, max querying time is %v, ratio is %v.  This indicates lock contention issue", settingTimeTaken, maxCheckTime, comparison)
+	}
 	assert.True(comparison >= 3)
 }
 
