@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
 	"reflect"
 	"sort"
 	"strings"
@@ -758,7 +757,8 @@ func (ckmgr *CheckpointManager) collectionEnabled() bool {
 func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 	//randomize the starting point so that checkpoint managers for the same
 	//replication on different nodes have different starting points
-	starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.getCheckpointInterval()
+	//starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.getCheckpointInterval()
+	starting_time := time.Duration(30 * time.Second)
 	ckmgr.logger.Infof("Checkpointing starts in %v sec", starting_time.Seconds())
 	ckmgr.checkpoint_ticker_ch <- time.NewTicker(starting_time)
 }
@@ -2276,6 +2276,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 // local API. supports periodical checkpoint operations
 func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
+	ckmgr.LoggerImpl.Infof(">> performCkpt called")
 	defer wait_grp.Done()
 
 	if !ckmgr.isCheckpointAllowed() {
@@ -2536,6 +2537,8 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 		ckmgr.logger.Debugf("No replication has happened in vb %v since replication start or last checkpoint. seqno=%v. Skip checkpointing\\n", vbno, lastSeqno)
 		return
 	}
+
+	ckmgr.logger.Infof(">> checkpointing for vb %v with throughSeqno %v lastSeqno %v\n", vbno, throughSeqno, lastSeqno)
 
 	// Go through the local snapshot records repository and figure out which snapshot contains this latest sequence number
 	// Item: 5 and 6

@@ -129,6 +129,11 @@ const (
 	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
 	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
 	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
+
+	// CNG related settings
+	CNGWorkerCountKey = base.CNGWorkerCountKey
+	CNGQueueSizeKey   = base.CNGQueueSizeKey
+	CNGConnCountKey   = base.CNGConnCountKey
 )
 
 // constants for parsing create/change/view replication response
@@ -272,6 +277,11 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
 	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
 	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
+
+	// CNG nozzle settings
+	CNGWorkerCountKey: metadata.CNGWorkerCountKey,
+	CNGQueueSizeKey:   metadata.CNGQueueSizeKey,
+	CNGConnCountKey:   metadata.CNGConnCountKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -346,6 +356,11 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
 	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
 	metadata.MinPVLenForMobileKey:                 MinPVLenForMobileKey,
+
+	// CNG nozzle settings
+	metadata.CNGWorkerCountKey: CNGWorkerCountKey,
+	metadata.CNGQueueSizeKey:   CNGQueueSizeKey,
+	metadata.CNGConnCountKey:   CNGConnCountKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

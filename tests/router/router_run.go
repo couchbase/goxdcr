@@ -13,19 +13,21 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
-	mc "github.com/couchbase/gomemcached"
-	"github.com/couchbase/goxdcr/v8/base"
-	pc "github.com/couchbase/goxdcr/v8/common"
-	couchlog "github.com/couchbase/goxdcr/v8/log"
-	parts "github.com/couchbase/goxdcr/v8/parts"
-	utils "github.com/couchbase/goxdcr/v8/utils"
 	"log"
 	"math"
 	"os"
 	"regexp"
 	"strconv"
 	"sync"
+
+	"github.com/couchbase/go-couchbase"
+	mc "github.com/couchbase/gomemcached"
+	"github.com/couchbase/goxdcr/v8/base"
+	pc "github.com/couchbase/goxdcr/v8/common"
+	couchlog "github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	parts "github.com/couchbase/goxdcr/v8/parts"
+	utils "github.com/couchbase/goxdcr/v8/utils"
 )
 
 var options struct {
@@ -182,11 +184,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-<<<<<<< HEAD
-	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0, nil)
-=======
 	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0, nil, nil)
->>>>>>> 951f3ff0 (MB-53378: replicating with variable vb mapping works without checkpointing)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {
@@ -240,6 +238,10 @@ func (tp *TestPart) Receive(data interface{}) error {
 		return errors.New("Data with key=" + string(request.Key) + " has not been filtered out as expected by filter expression=" + options.filter_expression)
 	}
 
+	return nil
+}
+
+func (tp *TestPart) ResponsibleVBs() []uint16 {
 	return nil
 }
 

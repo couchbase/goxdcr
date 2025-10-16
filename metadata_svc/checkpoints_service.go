@@ -392,7 +392,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 // these operations are done in the same metakv operation to ensure that they succeed and fail together
 // Returns size of the checkpoint
 func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
-	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v for vbno=%v replication=%v\n", ckpt_record, vbno, replicationId)
+	ckpt_svc.logger.Infof(">> Persisting checkpoint record=%v for vbno=%v replication=%v\n", ckpt_record, vbno, replicationId)
 	var size int
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 
@@ -432,6 +432,7 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 			return size, err
 		}
 
+		ckpt_svc.logger.Infof(">> ckpt_json: %s\n", ckpt_json)
 		//always update the checkpoint without revision
 		err = ckpt_svc.metadata_svc.Set(key, ckpt_json, nil)
 		if err != nil {

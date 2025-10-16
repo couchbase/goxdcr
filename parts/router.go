@@ -1769,6 +1769,8 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		wrapped_req.OrigSrcVB = &sourceVB
 	}
 	req.Key = event.Key
+	// CNG TODO: Do we need OriginalKey or derive it from wmc.Key?
+	wrapped_req.OriginalKey = event.Key
 	req.Opcode = event.Opcode
 	req.DataType = event.DataType
 
