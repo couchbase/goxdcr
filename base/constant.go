@@ -226,6 +226,7 @@ type XDCROutgoingNozzleType int
 const (
 	Xmem XDCROutgoingNozzleType = iota
 	Capi XDCROutgoingNozzleType = iota
+	CNG  XDCROutgoingNozzleType = iota
 )
 
 // Last element is invalid and is there to keep consistency with the EndMarker
@@ -1573,6 +1574,11 @@ const (
 	CLogConnPoolLimit        string = "cLogConnPoolLimit"
 	CLogConnPoolGCInterval   string = "cLogConnPoolGCIntervalMs"
 	CLogConnPoolReapInterval string = "cLogConnPoolReapIntervalMs"
+
+	// CNG related settings
+	CNGWorkerCountKey string = "cngWorkerCount"
+	CNGQueueSizeKey   string = "cngQueueSize"
+	CNGConnCountKey   string = "cngConnCount"
 )
 
 // simple keys inside conflict logging mapping. It excludes loggingRules key.
@@ -1613,6 +1619,13 @@ const (
 	DefaultCLogConnPoolGCIntervalMs = 60000 // in milliseconds
 	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
 	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
+
+	// CNG TODO: change this number
+	DefaultCNGQueueSize     = 1000
+	DefaultCNGWorkerCount   = 1
+	DefaultCNGRetryInterval = 5000 // in milliseconds
+	DefaultCNGConnCount     = 1    // Default number of connections in pool
+
 )
 
 // Used for internal testing with self-signed certs.

@@ -826,9 +826,12 @@ type TargetCollectionInfo struct {
 
 // Remember to reset the field values for recycling in MCRequestPool.cleanReq
 type WrappedMCRequest struct {
-	Seqno                      uint64
-	VbUUID                     uint64
-	Req                        *mc.MCRequest
+	Seqno  uint64
+	VbUUID uint64
+	Req    *mc.MCRequest
+	// OriginalKey is the original key before any collection prefix is added
+	// This is added for CNG nozzle.
+	OriginalKey                []byte
 	Start_time                 time.Time
 	UniqueKey                  string
 	SrcColNamespace            *CollectionNamespace
@@ -870,6 +873,33 @@ type WrappedMCRequest struct {
 
 	// If VariableVB mode is enabled (not-nil), we need to store the original source VB
 	OrigSrcVB *uint16
+}
+
+func (req *WrappedMCRequest) Flags() (n uint32, err error) {
+	if len(req.Req.Extras) == 0 || len(req.Req.Extras) < 4 {
+		err = fmt.Errorf("Invalid extras for flags, got len=%v", len(req.Req.Extras))
+		return
+	}
+	n = binary.BigEndian.Uint32(req.Req.Extras[0:4])
+	return
+}
+
+func (req *WrappedMCRequest) Expiry() (n uint32, err error) {
+	if len(req.Req.Extras) == 0 || len(req.Req.Extras) < 8 {
+		err = fmt.Errorf("Invalid extras for expiry, got len=%v", len(req.Req.Extras))
+		return
+	}
+	n = binary.BigEndian.Uint32(req.Req.Extras[4:8])
+	return
+}
+
+func (req *WrappedMCRequest) RevSeqNo() (n uint64, err error) {
+	if len(req.Req.Extras) == 0 || len(req.Req.Extras) < 16 {
+		err = fmt.Errorf("Invalid extras for revSeqNo, got len=%v", len(req.Req.Extras))
+		return
+	}
+	n = binary.BigEndian.Uint64(req.Req.Extras[8:16])
+	return
 }
 
 // GetSourceVB returns math.MaxUint16 in an error scenario

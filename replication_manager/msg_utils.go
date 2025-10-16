@@ -123,6 +123,11 @@ const (
 	CLogConnPoolReapIntervalKey       = base.CLogConnPoolReapInterval
 	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
 	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
+
+	// CNG related settings
+	CNGWorkerCountKey = base.CNGWorkerCountKey
+	CNGQueueSizeKey   = base.CNGQueueSizeKey
+	CNGConnCountKey   = base.CNGConnCountKey
 )
 
 // constants for parsing create/change/view replication response
@@ -259,6 +264,11 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CLogConnPoolReapIntervalKey:       metadata.CLogConnPoolReapIntervalKey,
 	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
 	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
+
+	// CNG nozzle settings
+	CNGWorkerCountKey: metadata.CNGWorkerCountKey,
+	CNGQueueSizeKey:   metadata.CNGQueueSizeKey,
+	CNGConnCountKey:   metadata.CNGConnCountKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -327,6 +337,11 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
+
+	// CNG nozzle settings
+	metadata.CNGWorkerCountKey: CNGWorkerCountKey,
+	metadata.CNGQueueSizeKey:   CNGQueueSizeKey,
+	metadata.CNGConnCountKey:   CNGConnCountKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

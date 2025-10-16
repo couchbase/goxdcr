@@ -31,6 +31,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
+	"github.com/couchbase/goxdcr/v8/parts/cng"
 	pipeline_pkg "github.com/couchbase/goxdcr/v8/pipeline"
 	"github.com/couchbase/goxdcr/v8/pipeline_utils"
 	"github.com/couchbase/goxdcr/v8/service_def"
@@ -388,7 +389,7 @@ type StatisticsManager struct {
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
 	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error),
-	hasConflictLogger bool, variableVBMode bool) *StatisticsManager {
+	hasConflictLogger bool, variableVBMode bool, nozzleType base.XDCROutgoingNozzleType) *StatisticsManager {
 	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
@@ -414,7 +415,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		initDone:                  make(chan bool),
 		variableVBMode:            variableVBMode,
 	}
-	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
+	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{nozzleType: nozzleType}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 	if hasConflictLogger {
 		// the data-structures needed for stats collection will not be initialised
 		// if conflict logger doesn't exist for this pipeline,
@@ -592,7 +593,14 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 		outNozzle_parts := stats_mgr.pipeline.Targets()
 		for _, part := range outNozzle_parts {
 			if stats_mgr.pipeline.Specification().GetReplicationSpec().Settings.RepType == metadata.ReplicationTypeXmem {
-				part.(*parts.XmemNozzle).PrintStatusSummary()
+				// CNG TODO: need to set replication Type as CNG
+				switch nozzle := part.(type) {
+				case *parts.XmemNozzle:
+					nozzle.PrintStatusSummary()
+				case *cng.Nozzle:
+					nozzle.PrintStatusSummary()
+				}
+
 			} else {
 				part.(*parts.CapiNozzle).PrintStatusSummary()
 			}
@@ -1576,6 +1584,7 @@ type outNozzleCollector struct {
 	// key of inner map: metric name
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
+	nozzleType    base.XDCROutgoingNozzleType
 
 	vbMetricHelper *VbBasedMetricHelper
 }
@@ -1842,77 +1851,95 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			metricMap[service_def.IMPORT_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		opcode := event_otherInfo.Opcode
-		switch opcode {
-		case base.DELETE_WITH_META:
-			metricMap[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-			if event_otherInfo.FailedTargetCR {
-				metricMap[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
-			}
-
-		case base.SET_WITH_META:
-			metricMap[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-			if event_otherInfo.FailedTargetCR {
-				metricMap[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
-			}
-
-		case base.ADD_WITH_META:
-			metricMap[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-			if event_otherInfo.FailedTargetCR {
-				metricMap[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
-			}
-
-		case base.SUBDOC_MULTI_MUTATION:
-			// SUBDOC_MULTI_MUTATION docs written as taken care as part of DocsSentWithSubdocCmd event, so ignore here.
-			// There are no failed CR on target SUBDOC_MULTI_MUTATION docs, because it is only used in mobile mode.
-
-		default:
-			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", opcode, event.Component.Id())
-		}
 		metricMap[service_def.DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metricMap[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 
-		// record the cas poisoning protection mode by target KV if any
-		protectionMode := event_otherInfo.CasPoisonProtection
-		if protectionMode != base.CasNotPoisoned {
-			switch protectionMode {
-			case base.ErrorMode:
-				metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR].(metrics.Counter).Inc(1)
-				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR)
-				if err != nil {
-					return err
+		if event_otherInfo.NozzleType == base.CNG {
+			switch event_otherInfo.Opcode {
+			case mc.UPR_MUTATION:
+				metricMap[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+				if event_otherInfo.FailedTargetCR {
+					metricMap[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 				}
-			case base.ReplaceMode:
-				metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE].(metrics.Counter).Inc(1)
-				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE)
-				if err != nil {
-					return err
+			case mc.UPR_DELETION:
+				metricMap[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+				if event_otherInfo.FailedTargetCR {
+					metricMap[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 				}
 			}
 		}
 
-		// record the type of subdoc operation if any
-		subdocOp := event_otherInfo.SubdocOpType
-		if subdocOp != base.NotSubdoc {
-			switch subdocOp {
-			case base.SubdocDelete:
-				metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
-				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
-				if err != nil {
-					return err
+		if event_otherInfo.NozzleType != base.CNG {
+			opcode := event_otherInfo.Opcode
+			switch opcode {
+			case base.DELETE_WITH_META:
+				metricMap[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+				if event_otherInfo.FailedTargetCR {
+					metricMap[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 				}
-			case base.SubdocSet:
-				metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
-				err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
-				if err != nil {
-					return err
+
+			case base.SET_WITH_META:
+				metricMap[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+				if event_otherInfo.FailedTargetCR {
+					metricMap[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 				}
+
+			case base.ADD_WITH_META:
+				metricMap[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+				if event_otherInfo.FailedTargetCR {
+					metricMap[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+				}
+
+			case base.SUBDOC_MULTI_MUTATION:
+				// SUBDOC_MULTI_MUTATION docs written as taken care as part of DocsSentWithSubdocCmd event, so ignore here.
+				// There are no failed CR on target SUBDOC_MULTI_MUTATION docs, because it is only used in mobile mode.
+
 			default:
-				err := base.ErrorUnexpectedSubdocOp
-				outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
-				return err
+				outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", opcode, event.Component.Id())
 			}
 
+			// record the cas poisoning protection mode by target KV if any
+			protectionMode := event_otherInfo.CasPoisonProtection
+			if protectionMode != base.CasNotPoisoned {
+				switch protectionMode {
+				case base.ErrorMode:
+					metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR].(metrics.Counter).Inc(1)
+					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR)
+					if err != nil {
+						return err
+					}
+				case base.ReplaceMode:
+					metricMap[service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE].(metrics.Counter).Inc(1)
+					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE)
+					if err != nil {
+						return err
+					}
+				}
+			}
+
+			// record the type of subdoc operation if any
+			subdocOp := event_otherInfo.SubdocOpType
+			if subdocOp != base.NotSubdoc {
+				switch subdocOp {
+				case base.SubdocDelete:
+					metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
+					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
+					if err != nil {
+						return err
+					}
+				case base.SubdocSet:
+					metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
+					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
+					if err != nil {
+						return err
+					}
+				default:
+					err := base.ErrorUnexpectedSubdocOp
+					outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
+					return err
+				}
+
+			}
 		}
 
 	case common.DataFailedCRSource:

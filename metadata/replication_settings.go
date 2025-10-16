@@ -131,6 +131,11 @@ const (
 	PipelineReinitHashKey = base.PipelineReinitHash
 
 	DisableHlvBasedShortCircuitKey = base.DisableHlvBasedShortCircuitKey
+
+	// CNG Nozzle settings
+	CNGWorkerCountKey = base.CNGWorkerCountKey // number of workers per nozzle to process incoming data
+	CNGQueueSizeKey   = base.CNGQueueSizeKey   // size of the channel buffer between nozzle and workers
+	CNGConnCountKey   = base.CNGConnCountKey   // number of gRPC connections to CNG per nozzle
 )
 
 // keys to facilitate redaction of replication settings map
@@ -273,6 +278,11 @@ var PipelineReinitHashConfig = &SettingsConfig{"", nil}
 // of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
 var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 
+// CNG Nozzle settings
+var CNGWorkerCountConfig = &SettingsConfig{base.DefaultCNGWorkerCount, &Range{1, 10000}}
+var CNGQueueSizeConfig = &SettingsConfig{base.DefaultCNGQueueSize, &Range{1, 10000}}
+var CNGConnCountConfig = &SettingsConfig{base.DefaultCNGConnCount, &Range{1, 100}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -329,6 +339,11 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	PipelineReinitHashKey:                PipelineReinitHashConfig,
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
+
+	// CNG Nozzle settings
+	CNGWorkerCountKey: CNGWorkerCountConfig,
+	CNGQueueSizeKey:   CNGQueueSizeConfig,
+	CNGConnCountKey:   CNGConnCountConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1511,6 +1526,21 @@ func (s *ReplicationSettings) GetCLogReattemptDuration() time.Duration {
 	val, _ := s.GetSettingValueOrDefaultValue(CLogReattemptDurationKey)
 	msInt := val.(int)
 	return time.Duration(msInt) * time.Millisecond
+}
+
+func (s *ReplicationSettings) GetCNGWorkerCount() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CNGWorkerCountKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCNGQueueSize() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CNGQueueSizeKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCNGConnCount() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CNGConnCountKey)
+	return val.(int)
 }
 
 func (s *ReplicationSettings) GetHlvBasedShortCircuitToggle() bool {

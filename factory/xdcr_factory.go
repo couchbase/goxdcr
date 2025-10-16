@@ -29,6 +29,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
+	"github.com/couchbase/goxdcr/v8/parts/cng"
 	"github.com/couchbase/goxdcr/v8/peerToPeer"
 	pp "github.com/couchbase/goxdcr/v8/pipeline"
 	pctx "github.com/couchbase/goxdcr/v8/pipeline_ctx"
@@ -45,6 +46,7 @@ const (
 	DCP_NOZZLE_NAME_PREFIX  = "dcp"
 	XMEM_NOZZLE_NAME_PREFIX = "xmem"
 	CAPI_NOZZLE_NAME_PREFIX = "capi"
+	CNG_NOZZLE_NAME_PREFIX  = "cng"
 
 	notification_delay_factor = 0.7
 )
@@ -226,7 +228,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		xdcrf.logger.Errorf("Failed to get the nozzle type for %v, err=%v\n", spec.Id, err)
 		return nil, nil, err
 	}
-	isCapiReplication := (nozzleType == base.Capi)
+	// CNG TODO: remove hard coding
+	nozzleType = base.CNG
 
 	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {
@@ -251,7 +254,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
 	// capi replication always uses rev id based conflict resolution
 	sourceCRMode := base.CRMode_RevId
-	if !isCapiReplication {
+	if nozzleType != base.CNG {
 		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 		// resolution and target side conflict resolution yield consistent results
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
@@ -285,7 +288,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx, latestSourceBucketTopology, variableVBMode)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, nozzleType == base.Capi, logger_ctx, latestSourceBucketTopology, variableVBMode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -311,7 +314,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
 		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef,
-			isCapiReplication, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap)
+			nozzleType, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap)
 
 	if err != nil {
 		return nil, nil, err
@@ -356,7 +359,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
 		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName,
-			target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode, variableVBMode)
+			target_kv_vb_map, targetClusterRef, targetClusterVersion, nozzleType, mainPipeline, sourceCRMode, variableVBMode)
 	}
 
 	return pipeline, registerCb, nil
@@ -721,11 +724,74 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, srcKvVbMap map[s
  */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext, sourceClusterUUID string,
+	targetClusterRef *metadata.RemoteClusterReference, nozzleType base.XDCROutgoingNozzleType, logger_ctx *log.LoggerContext, sourceClusterUUID string,
 	pipelineType common.PipelineType, kvsVbMap base.KvVBMapType) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
+
+	xdcrf.logger.Infof("constructing outgoing nozzles for topic=%v, nozzleType=%v\n", topic, nozzleType)
+
+	if nozzleType == base.CNG {
+		targetUserName = targetClusterRef.UserName()
+		targetPassword = targetClusterRef.Password()
+		xdcrf.logger.Infof("%v username for target bucket access=%v%v%v\n", spec.Id, base.UdTagBegin, targetUserName, base.UdTagEnd)
+
+		// For CNG, there is only one nozzle per target cluster
+		id := xdcrf.partId(CNG_NOZZLE_NAME_PREFIX, topic, targetClusterRef.HostName(), 0)
+		cfg := cng.Config{
+			Replication: cng.ReplicationConfig{
+				CRMode:            sourceCRMode,
+				SNGAddr:           "localhost:18098",
+				SourceBucketName:  spec.SourceBucketName,
+				SourceClusterUUID: sourceClusterUUID,
+				SourceBucketUUID:  spec.SourceBucketUUID,
+				TargetClusterUUD:  spec.TargetClusterUUID,
+				TargetBucketName:  spec.TargetBucketName,
+				TargetBucketUUID:  spec.TargetBucketUUID,
+			},
+			Services: cng.Services{
+				RemoteClusterSvc: xdcrf.remote_cluster_svc,
+				Utils:            xdcrf.utils,
+			},
+		}
+
+		var nozzle *cng.Nozzle
+		nozzle, err = cng.New(id, xdcrf.logger.LoggerContext(), cfg)
+		if err != nil {
+			xdcrf.logger.Errorf("Error constructing CNG nozzle, err=%v\n", err)
+			return nil, nil, nil, "", "", 0, err
+		}
+		xdcrf.logger.Infof("constructed CNG nozzle %v for target cluster %v\n", id, targetClusterRef.HostName())
+
+		vblist := []uint16{}
+		outNozzles[nozzle.Id()] = nozzle
+		for i := uint16(0); i < 128; i++ {
+			vbNozzleMap[i] = nozzle.Id()
+			vblist = append(vblist, uint16(i))
+		}
+
+		// CNG TODO: The commented kvVBMap is the real thing but commented
+		// out for now.
+		/*
+			kvVBMap = map[string][]uint16{
+				targetClusterRef.HostName(): vblist,
+			}
+		*/
+
+		// CNG TODO: get rid of this call
+		kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, false)
+		if err != nil {
+			xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
+			return
+		}
+		if len(kvVBMap) == 0 {
+			err = base.ErrorNoTargetNozzle
+			return
+		}
+		xdcrf.logger.Infof(">> target topology retrieved. kvVBMap = %v\n", kvVBMap)
+		return
+	}
 
 	useExternal, err := xdcrf.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
 	if err != nil {
@@ -763,7 +829,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 
 	// For each destination host (kvaddr) and its vbucvket list that it has (kvVBList)
 	for kvaddr, kvVBList := range kvVBMap {
-		if isCapiReplication && len(vbCouchApiBaseMap) == 0 {
+		if nozzleType == base.Capi && len(vbCouchApiBaseMap) == 0 {
 			// construct vbCouchApiBaseMap only when nessary and only once
 			vbCouchApiBaseMap, err = capi_utils.ConstructVBCouchApiBaseMap(spec.TargetBucketName, targetBucketInfo, targetClusterRef, xdcrf.utils, useExternal)
 			if err != nil {
@@ -801,7 +867,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			// construct outgoing nozzle
 			var outNozzle common.OutNozzle
 
-			if isCapiReplication {
+			if nozzleType == base.Capi {
 				outNozzle, err = xdcrf.constructCAPINozzle(topic, targetUserName, targetPassword, targetClusterRef.Certificates(), vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return
@@ -1513,7 +1579,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	return routerSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, targetUserName, targetPassword, targetBucketName string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference, targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode, variableVBMode bool) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, targetUserName, targetPassword, targetBucketName string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference, targetClusterVersion int, nozzleType base.XDCROutgoingNozzleType, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode, variableVBMode bool) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
@@ -1533,7 +1599,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	// Register ConflictManager after pipeline supervisor
 	if crMode == base.CRMode_Custom {
-		if isCapi {
+		if nozzleType == base.Capi {
 			return errors.New("Custom conflict resolution cannot be used with Capi nozzle.")
 		}
 		conflictMgr := pipeline_svc.NewConflictManager(xdcrf.resolverSvc, pipeline.Specification().GetReplicationSpec().Id, xdcrf.xdcr_topology_svc, logger_ctx, xdcrf.utils)
@@ -1563,7 +1629,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	bucket_name := pipeline.Specification().GetReplicationSpec().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc,
-		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter, conflictLogger != nil, variableVBMode)
+		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter, conflictLogger != nil, variableVBMode, nozzleType)
 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc,
@@ -1613,7 +1679,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		return err
 	}
 
-	if !isCapi {
+	if nozzleType != base.Capi {
 		var bw_throttler_svc *pipeline_svc.BandwidthThrottler
 		if mainPipeline != nil {
 			var ok bool
@@ -1630,7 +1696,12 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 			return err
 		}
 		for _, target := range pipeline.Targets() {
-			target.(*parts.XmemNozzle).SetBandwidthThrottler(bw_throttler_svc)
+			switch nozzle := target.(type) {
+			case *parts.XmemNozzle:
+				nozzle.SetBandwidthThrottler(bw_throttler_svc)
+			case *cng.Nozzle:
+				nozzle.SetBandwidthThrottler(bw_throttler_svc)
+			}
 		}
 	}
 

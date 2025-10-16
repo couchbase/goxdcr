@@ -190,6 +190,7 @@ type DataSentEventAdditional struct {
 	CloneSyncCh          chan bool
 	SubdocOpType         base.SubdocOpType
 	CasPoisonProtection  base.TargetKVCasPoisonProtectionMode
+	NozzleType           base.XDCROutgoingNozzleType
 }
 
 // GetVB is used for doing throughSeqno processing
