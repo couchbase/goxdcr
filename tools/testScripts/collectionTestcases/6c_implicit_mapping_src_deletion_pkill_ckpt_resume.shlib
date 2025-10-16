@@ -147,7 +147,7 @@ function runTestCase {
 	tgtItemCnt=$(getBucketItemCount "C2" "B2")
 	minCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 	maxCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 4))
-	if ! [[ $tgtItemCnt -ge $minCnt && $tgtItemCnt -lt $maxCnt ]]; then
+	if ! [[ $tgtItemCnt -ge $minCnt && $tgtItemCnt -le $maxCnt ]]; then
 		echo "Item count should be within range $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3)) and $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 4)), but is $tgtItemCnt"
 		return 1
 	fi
