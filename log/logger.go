@@ -85,7 +85,7 @@ type CommonLogger struct {
 }
 
 type LoggerContext struct {
-	Log_writers map[LogLevel]*LogWriter
+	Log_writers map[LogLevel]io.Writer
 	Log_level   LogLevel
 
 	additionalInfo      map[string]string
@@ -169,7 +169,7 @@ var DefaultLoggerContext *LoggerContext
 
 // before logging paramters become available, direct all logging to stdout
 func init() {
-	logWriters := make(map[LogLevel]*LogWriter)
+	logWriters := make(map[LogLevel]io.Writer)
 	logWriter := &LogWriter{os.Stdout}
 	logWriters[LogLevelFatal] = logWriter
 	logWriters[LogLevelError] = logWriter
@@ -199,8 +199,7 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	if err != nil {
 		return err
 	}
-	xdcrLogWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelInfo]
-	xdcrLogWriterWrapper.writer = xdcrLogWriter
+	DefaultLoggerContext.Log_writers[LogLevelInfo] = xdcrLogWriter
 
 	// xdcr trace log -- both debug level and trace level entries are written to this file
 	xdcrTraceFilePath := filepath.Join(logFileDir, XdcrTraceLogFileName)
@@ -208,10 +207,9 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	if err != nil {
 		return err
 	}
-	xdcrDebugWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelDebug]
-	xdcrDebugWriterWrapper.writer = xdcrTraceWriter
-	xdcrTraceWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelTrace]
-	xdcrTraceWriterWrapper.writer = xdcrTraceWriter
+
+	DefaultLoggerContext.Log_writers[LogLevelDebug] = xdcrTraceWriter
+	DefaultLoggerContext.Log_writers[LogLevelTrace] = xdcrTraceWriter
 
 	// xdcr error log file
 	xdcrErrorFilePath := filepath.Join(logFileDir, XdcrErrorLogFileName)
@@ -219,9 +217,7 @@ func Init(logFileDir string, maxLogFileSize, maxNumberOfLogFiles uint64) error {
 	if err != nil {
 		return err
 	}
-	xdcrErrorWriterWrapper := DefaultLoggerContext.Log_writers[LogLevelError]
-	xdcrErrorWriterWrapper.writer = xdcrErrorWriter
-
+	DefaultLoggerContext.Log_writers[LogLevelError] = xdcrErrorWriter
 	return nil
 }
 
