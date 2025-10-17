@@ -1706,7 +1706,7 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 
 		bucketKVVBMap = *bucketKVVBMapPtr
 		if useExternal {
-			u.TranslateKvVbMap(bucketKVVBMap, bucketInfo)
+			u.TranslateKvVbMap(bucketKVVBMap, bucketInfoForKvVBMap)
 		}
 		return nil
 	}
