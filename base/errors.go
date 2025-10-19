@@ -107,6 +107,8 @@ var (
 	ErrUpsertAlreadyOccurring                    = fmt.Errorf("Error upserting mapping as an operation is happening already")
 	ErrUnsupportedAlternateAddressing            = errors.New("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
 	ErrorCngUnsupported                          = errors.New("replication to cng target is not supported in mixed-mode clusters. Upgrade all nodes to version >=8.1 to enable replication over cng")
+	ErrorUnmarshallFailed                        = errors.New("unmarshal failed")
+	ErrorUserInitiatedStreamRpcCancellation      = errors.New("user initiated cancellation of the stream RPC")
 )
 
 // Various non-error internal msgs

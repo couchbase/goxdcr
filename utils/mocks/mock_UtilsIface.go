@@ -3,10 +3,8 @@
 package mocks
 
 import (
-	base "github.com/couchbase/goxdcr/v8/base"
-	codes "google.golang.org/grpc/codes"
-
 	couchbase "github.com/couchbase/go-couchbase"
+	base "github.com/couchbase/goxdcr/v8/base"
 
 	expvar "expvar"
 
@@ -546,41 +544,73 @@ func (_c *UtilsIface_CheckForNecessarySystemXattrsInUprEvent_Call) RunAndReturn(
 	return _c
 }
 
-// CngGetClusterInfo provides a mock function with given fields: grpcOpts
-func (_m *UtilsIface) CngGetClusterInfo(grpcOpts *base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error) {
-	ret := _m.Called(grpcOpts)
+// CngGetBucketInfo provides a mock function with given fields: client, request
+func (_m *UtilsIface) CngGetBucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse] {
+	ret := _m.Called(client, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngGetBucketInfo")
+	}
+
+	var r0 *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]
+	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]); ok {
+		r0 = rf(client, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse])
+		}
+	}
+
+	return r0
+}
+
+// UtilsIface_CngGetBucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetBucketInfo'
+type UtilsIface_CngGetBucketInfo_Call struct {
+	*mock.Call
+}
+
+// CngGetBucketInfo is a helper method to define mock.On call
+//   - client base.CngClient
+//   - request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]
+func (_e *UtilsIface_Expecter) CngGetBucketInfo(client interface{}, request interface{}) *UtilsIface_CngGetBucketInfo_Call {
+	return &UtilsIface_CngGetBucketInfo_Call{Call: _e.mock.On("CngGetBucketInfo", client, request)}
+}
+
+func (_c *UtilsIface_CngGetBucketInfo_Call) Run(run func(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest])) *UtilsIface_CngGetBucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(base.CngClient), args[1].(*base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngGetBucketInfo_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]) *UtilsIface_CngGetBucketInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *UtilsIface_CngGetBucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]) *UtilsIface_CngGetBucketInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CngGetClusterInfo provides a mock function with given fields: client, request
+func (_m *UtilsIface) CngGetClusterInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse] {
+	ret := _m.Called(client, request)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CngGetClusterInfo")
 	}
 
-	var r0 *internal_xdcr_v1.GetClusterInfoResponse
-	var r1 codes.Code
-	var r2 error
-	if rf, ok := ret.Get(0).(func(*base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)); ok {
-		return rf(grpcOpts)
-	}
-	if rf, ok := ret.Get(0).(func(*base.GrpcOptions) *internal_xdcr_v1.GetClusterInfoResponse); ok {
-		r0 = rf(grpcOpts)
+	var r0 *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]
+	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]); ok {
+		r0 = rf(client, request)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*internal_xdcr_v1.GetClusterInfoResponse)
+			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse])
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*base.GrpcOptions) codes.Code); ok {
-		r1 = rf(grpcOpts)
-	} else {
-		r1 = ret.Get(1).(codes.Code)
-	}
-
-	if rf, ok := ret.Get(2).(func(*base.GrpcOptions) error); ok {
-		r2 = rf(grpcOpts)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0
 }
 
 // UtilsIface_CngGetClusterInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetClusterInfo'
@@ -589,24 +619,174 @@ type UtilsIface_CngGetClusterInfo_Call struct {
 }
 
 // CngGetClusterInfo is a helper method to define mock.On call
-//   - grpcOpts *base.GrpcOptions
-func (_e *UtilsIface_Expecter) CngGetClusterInfo(grpcOpts interface{}) *UtilsIface_CngGetClusterInfo_Call {
-	return &UtilsIface_CngGetClusterInfo_Call{Call: _e.mock.On("CngGetClusterInfo", grpcOpts)}
+//   - client base.CngClient
+//   - request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]
+func (_e *UtilsIface_Expecter) CngGetClusterInfo(client interface{}, request interface{}) *UtilsIface_CngGetClusterInfo_Call {
+	return &UtilsIface_CngGetClusterInfo_Call{Call: _e.mock.On("CngGetClusterInfo", client, request)}
 }
 
-func (_c *UtilsIface_CngGetClusterInfo_Call) Run(run func(grpcOpts *base.GrpcOptions)) *UtilsIface_CngGetClusterInfo_Call {
+func (_c *UtilsIface_CngGetClusterInfo_Call) Run(run func(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest])) *UtilsIface_CngGetClusterInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.GrpcOptions))
+		run(args[0].(base.CngClient), args[1].(*base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]))
 	})
 	return _c
 }
 
-func (_c *UtilsIface_CngGetClusterInfo_Call) Return(_a0 *internal_xdcr_v1.GetClusterInfoResponse, _a1 codes.Code, _a2 error) *UtilsIface_CngGetClusterInfo_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *UtilsIface_CngGetClusterInfo_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]) *UtilsIface_CngGetClusterInfo_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *UtilsIface_CngGetClusterInfo_Call) RunAndReturn(run func(*base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)) *UtilsIface_CngGetClusterInfo_Call {
+func (_c *UtilsIface_CngGetClusterInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]) *UtilsIface_CngGetClusterInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CngGetVbucketInfo provides a mock function with given fields: client, request, handler
+func (_m *UtilsIface) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse] {
+	ret := _m.Called(client, request, handler)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngGetVbucketInfo")
+	}
+
+	var r0 *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]
+	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]); ok {
+		r0 = rf(client, request, handler)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse])
+		}
+	}
+
+	return r0
+}
+
+// UtilsIface_CngGetVbucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetVbucketInfo'
+type UtilsIface_CngGetVbucketInfo_Call struct {
+	*mock.Call
+}
+
+// CngGetVbucketInfo is a helper method to define mock.On call
+//   - client base.CngClient
+//   - request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]
+//   - handler utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]
+func (_e *UtilsIface_Expecter) CngGetVbucketInfo(client interface{}, request interface{}, handler interface{}) *UtilsIface_CngGetVbucketInfo_Call {
+	return &UtilsIface_CngGetVbucketInfo_Call{Call: _e.mock.On("CngGetVbucketInfo", client, request, handler)}
+}
+
+func (_c *UtilsIface_CngGetVbucketInfo_Call) Run(run func(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])) *UtilsIface_CngGetVbucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(base.CngClient), args[1].(*base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]), args[2].(utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngGetVbucketInfo_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]) *UtilsIface_CngGetVbucketInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *UtilsIface_CngGetVbucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]) *UtilsIface_CngGetVbucketInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CngHeartbeat provides a mock function with given fields: client, request
+func (_m *UtilsIface) CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
+	ret := _m.Called(client, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngHeartbeat")
+	}
+
+	var r0 *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]
+	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]); ok {
+		r0 = rf(client, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse])
+		}
+	}
+
+	return r0
+}
+
+// UtilsIface_CngHeartbeat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngHeartbeat'
+type UtilsIface_CngHeartbeat_Call struct {
+	*mock.Call
+}
+
+// CngHeartbeat is a helper method to define mock.On call
+//   - client base.CngClient
+//   - request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]
+func (_e *UtilsIface_Expecter) CngHeartbeat(client interface{}, request interface{}) *UtilsIface_CngHeartbeat_Call {
+	return &UtilsIface_CngHeartbeat_Call{Call: _e.mock.On("CngHeartbeat", client, request)}
+}
+
+func (_c *UtilsIface_CngHeartbeat_Call) Run(run func(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest])) *UtilsIface_CngHeartbeat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(base.CngClient), args[1].(*base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngHeartbeat_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]) *UtilsIface_CngHeartbeat_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *UtilsIface_CngHeartbeat_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]) *UtilsIface_CngHeartbeat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CngWatchCollections provides a mock function with given fields: client, request, handler
+func (_m *UtilsIface) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse] {
+	ret := _m.Called(client, request, handler)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngWatchCollections")
+	}
+
+	var r0 *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]
+	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]); ok {
+		r0 = rf(client, request, handler)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse])
+		}
+	}
+
+	return r0
+}
+
+// UtilsIface_CngWatchCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngWatchCollections'
+type UtilsIface_CngWatchCollections_Call struct {
+	*mock.Call
+}
+
+// CngWatchCollections is a helper method to define mock.On call
+//   - client base.CngClient
+//   - request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest]
+//   - handler utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]
+func (_e *UtilsIface_Expecter) CngWatchCollections(client interface{}, request interface{}, handler interface{}) *UtilsIface_CngWatchCollections_Call {
+	return &UtilsIface_CngWatchCollections_Call{Call: _e.mock.On("CngWatchCollections", client, request, handler)}
+}
+
+func (_c *UtilsIface_CngWatchCollections_Call) Run(run func(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse])) *UtilsIface_CngWatchCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(base.CngClient), args[1].(*base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest]), args[2].(utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngWatchCollections_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]) *UtilsIface_CngWatchCollections_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *UtilsIface_CngWatchCollections_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]) *UtilsIface_CngWatchCollections_Call {
 	_c.Call.Return(run)
 	return _c
 }
