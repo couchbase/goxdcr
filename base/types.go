@@ -10,6 +10,7 @@ package base
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
@@ -31,6 +32,8 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/golang/snappy"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type SettingDef struct {
@@ -3890,4 +3893,47 @@ func NewGrpcOptionsSecure(connStr string, getCredentials func() *Credentials, ca
 // NewGrpcOptionsInSecure creates a new GrpcOptions instance with TLS disabled.
 func NewGrpcOptionsInSecure(connStr string, getCredentials func() *Credentials, caCert []byte) (*GrpcOptions, error) {
 	return NewGrpcOptions(connStr, getCredentials, caCert, false)
+}
+
+// GrpcRequest encapsulates the request for a gRPC call.
+type GrpcRequest[Req any] struct {
+	// Context is the context for the gRPC call.
+	Context context.Context
+	// Request is the request for the gRPC call.
+	Request Req
+}
+
+// GrpcResponse encapsulates the response for a gRPC call.
+type GrpcResponse[Resp any] struct {
+	// Resp is the response for the gRPC call.
+	Resp Resp
+	// Status is the status for the gRPC call.
+	Status *status.Status
+	// Error is the error for the gRPC call.
+	Error error
+}
+
+// Code returns the status code for the gRPC call.
+func (rsp *GrpcResponse[Resp]) Code() codes.Code {
+	return rsp.Status.Code()
+}
+
+// Message returns the message associated with the status of the gRPC call.
+func (rsp *GrpcResponse[Resp]) Message() string {
+	return rsp.Status.Message()
+}
+
+// Details returns the details associated with the status of the gRPC call.
+func (rsp *GrpcResponse[Resp]) Details() []any {
+	return rsp.Status.Details()
+}
+
+// Response returns the response for the gRPC call.
+func (rsp *GrpcResponse[Resp]) Response() Resp {
+	return rsp.Resp
+}
+
+// Err returns the error for the gRPC call.
+func (rsp *GrpcResponse[Resp]) Err() error {
+	return rsp.Error
 }

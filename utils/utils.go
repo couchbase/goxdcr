@@ -46,7 +46,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbaselabs/gojsonsm"
-	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
 
@@ -3771,33 +3771,121 @@ func (u *Utilities) GetTerseInfo(localConnStr string, username, password string,
 	return clusterInfo, nil
 }
 
+// GrpcStreamHandler defines the interface for handling streamed messages.
+type GrpcStreamHandler[Resp any] interface {
+	// OnMessage is called for each message received from the stream.
+	OnMessage(msg Resp)
+	// OnError is called if an error occurs during streaming.
+	OnError(err error)
+	// OnComplete is called when the stream completes successfully.
+	OnComplete()
+}
+
+// grpcCall handles simple unary gRPC calls.
+func grpcCall[Req, Resp any](request *base.GrpcRequest[Req], rpc func(ctx context.Context, request Req, opts ...grpc.CallOption) (Resp, error)) *base.GrpcResponse[Resp] {
+	resp, err := rpc(request.Context, request.Request)
+	st, _ := status.FromError(err)
+	return &base.GrpcResponse[Resp]{
+		Resp:   resp,
+		Status: st,
+		Error:  err,
+	}
+}
+
+// isUserTriggeredCancellation checks if the cancellation was caused by user action
+func isUserTriggeredCancellation(cause error) bool {
+	if cause == nil {
+		return false
+	}
+	return errors.Is(cause, base.ErrorUserInitiatedStreamRpcCancellation)
+}
+
+// grpcServerStreamCall handles server-side streaming gRPC calls.
+func grpcServerStreamCall[Req, Resp any](
+	request *base.GrpcRequest[Req],
+	handler GrpcStreamHandler[*Resp],
+	rpc func(ctx context.Context, request Req, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Resp], error),
+) *base.GrpcResponse[*Resp] {
+	stream, err := rpc(request.Context, request.Request)
+	if err != nil {
+		st, _ := status.FromError(err)
+		handler.OnError(err)
+		return &base.GrpcResponse[*Resp]{
+			Status: st,
+			Error:  err,
+		}
+	}
+
+	// Wait for the header to be received
+	// A receipt of the header indicates that the server has accepted the request and
+	// is ready to send messages
+	if _, err := stream.Header(); err != nil {
+		handler.OnError(err)
+		st, _ := status.FromError(err)
+		return &base.GrpcResponse[*Resp]{
+			Status: st,
+			Error:  err,
+		}
+	}
+
+	// Get the context for the stream
+	streamCtx := stream.Context()
+
+	// Receive messages from the stream
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				// Stream completed successfully
+				handler.OnComplete()
+				st, _ := status.FromError(nil)
+				return &base.GrpcResponse[*Resp]{
+					Status: st,
+					Error:  nil,
+				}
+			}
+			if errors.Is(err, context.Canceled) {
+				// Check if the cancellation was caused by user action
+				if isUserTriggeredCancellation(context.Cause(streamCtx)) {
+					handler.OnComplete()
+					st, _ := status.FromError(nil)
+					return &base.GrpcResponse[*Resp]{
+						Status: st,
+						Error:  nil,
+					}
+				}
+			}
+			// Other errors (timeout, connection breakdown, application errors etc.)
+			st, _ := status.FromError(err)
+			handler.OnError(err)
+			return &base.GrpcResponse[*Resp]{
+				Status: st,
+				Error:  err,
+			}
+		}
+		handler.OnMessage(resp)
+	}
+}
+
 // CngGetClusterInfo fetches cluster information from the target couchbase cluster via CNG
-// Returns the cluster info, gRPC status code, and error if any
-func (u *Utilities) CngGetClusterInfo(grpcOpts *base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error) {
-	cngConn, err := base.NewCngConn(grpcOpts)
-	if err != nil {
-		return nil, codes.Unknown, fmt.Errorf("failed to initialize grpc client: %w", err)
-	}
-	defer cngConn.Close()
+func (u *Utilities) CngGetClusterInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse] {
+	return grpcCall(request, client.GetClusterInfo)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
-	defer cancel()
+// CngGetBucketInfo fetches bucket information from the target couchbase cluster via CNG
+func (u *Utilities) CngGetBucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse] {
+	return grpcCall(request, client.GetBucketInfo)
+}
 
-	clusterInfo, err := cngConn.Client().GetClusterInfo(ctx, &internal_xdcr_v1.GetClusterInfoRequest{})
-	if err != nil {
-		// Handle context deadline exceeded
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, codes.DeadlineExceeded, fmt.Errorf("rpc timeout: %w", err)
-		}
+// CngHeartbeat sends a heartbeat to the target couchbase cluster via CNG
+func (u *Utilities) CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
+	return grpcCall(request, client.Heartbeat)
+}
 
-		// Handle gRPC status errors
-		if st, ok := status.FromError(err); ok {
-			return nil, st.Code(), fmt.Errorf("gRPC error: %w", err)
-		}
+func (u *Utilities) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse] {
+	return grpcServerStreamCall(request, handler, client.GetVbucketInfo)
+}
 
-		// any unexpected errors
-		return nil, codes.Unknown, fmt.Errorf("unexpected error: %w", err)
-	}
-
-	return clusterInfo, codes.OK, nil
+func (u *Utilities) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse] {
+	return grpcServerStreamCall(request, handler, client.WatchCollections)
 }

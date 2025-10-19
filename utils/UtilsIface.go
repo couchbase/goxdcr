@@ -26,7 +26,6 @@ import (
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
-	"google.golang.org/grpc/codes"
 )
 
 type ExponentialOpFunc func() error
@@ -50,7 +49,11 @@ func (h *HELOFeatures) String() string {
 }
 
 type CngUtils interface {
-	CngGetClusterInfo(grpcOpts *base.GrpcOptions) (*internal_xdcr_v1.GetClusterInfoResponse, codes.Code, error)
+	CngGetClusterInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]
+	CngGetBucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]
+	CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]
+	CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]
+	CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]
 }
 
 type UtilsIface interface {

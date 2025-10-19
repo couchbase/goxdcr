@@ -105,6 +105,8 @@ var (
 	ErrorSubdocMaxPathLimitBreached              = fmt.Errorf("subdoc max path limit breached")
 	ErrorSeamlessCredsChangeMixedModeUnsupported = errors.New("Seamless credentials change is not supported in mixed-mode clusters. Upgrade all nodes to version >=8.1 to enable credential staging.")
 	ErrorCngUnsupported                          = errors.New("replication to cng target is not supported in mixed-mode clusters. Upgrade all nodes to version >=8.1 to enable replication over cng")
+	ErrorUnmarshallFailed                        = errors.New("unmarshal failed")
+	ErrorUserInitiatedStreamRpcCancellation      = errors.New("user initiated cancellation of the stream RPC")
 )
 
 // Various non-error internal msgs

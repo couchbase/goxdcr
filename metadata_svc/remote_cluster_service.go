@@ -11,6 +11,7 @@ package metadata_svc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -28,6 +30,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
+	"google.golang.org/grpc/codes"
 )
 
 const (
@@ -3065,14 +3068,33 @@ func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClust
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	clusterInfo, statusCode, err := service.utils.CngGetClusterInfo(grpcOpts)
+	// Darshan TODO: validateRemoteCng can be called in the following cases:
+	// 1. When a new CNG reference is being created
+	// 2. During pipeline validation
+	// Ideally we should not create a New connection here, but rather fetch the connection from the global connection pool
+	// This TODO is a placeholder until we have the conn pool checked in
+	cngConn, err := base.NewCngConn(grpcOpts)
 	if err != nil {
-		service.logger.Errorf("RemoteRef %v: CngGetClusterInfo on %s failed with err=%v statusCode=%v", ref.Name(), connStr, err, statusCode)
+		service.logger.Errorf("failed to create CNG connection for remote cluster %v. err=%v", ref.Name(), err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
+	defer cngConn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
+	defer cancel()
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: ctx,
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := service.utils.CngGetClusterInfo(cngConn.Client(), request)
+	if response.Code() != codes.OK {
+		service.logger.Errorf("RemoteRef %v: CngGetClusterInfo on %s failed with err=%s statusCode=%v", ref.Name(), connStr, response.Message(), response.Code())
+		return wrapAsInvalidRemoteClusterError(response.Message())
 	}
 
 	if updateRef {
-		ref.SetUuid(clusterInfo.GetClusterUuid())
+		ref.SetUuid(response.Response().GetClusterUuid())
 	}
 
 	return nil

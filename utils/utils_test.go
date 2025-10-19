@@ -12,19 +12,29 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/v8/metadata"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
+	"github.com/couchbase/goxdcr/v8/metadata"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcMetadata "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // The test data's external node name is 10.10.10.10 instead of the regular 127.0.0.1
@@ -1073,4 +1083,451 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
 	assert.Nil(err)
 	assert.Equal(false, exists)
+}
+
+// TestGrpcCallSuccess tests grpcCall with successful RPC execution (nil error)
+func TestGrpcCallSuccess(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcCallSuccess =================")
+	defer fmt.Println("============== Test case end: TestGrpcCallSuccess =================")
+	assert := assert.New(t)
+
+	// Mock RPC function that succeeds
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (*internal_xdcr_v1.GetClusterInfoResponse, error) {
+		return &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "1234567890"}, nil
+	}
+
+	response := grpcCall(&base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{Context: context.Background(), Request: &internal_xdcr_v1.GetClusterInfoRequest{}}, mockRPC)
+
+	// When error is nil, status.FromError(nil) returns (nil, true), so Status field should be nil
+	assert.Nil(response.Status)
+	assert.Nil(response.Error)
+	assert.Equal("1234567890", response.Response().ClusterUuid)
+}
+
+// TestGrpcCallWithGrpcError tests grpcCall with gRPC status error from RPC
+func TestGrpcCallWithGrpcError(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcCallWithGrpcError =================")
+	defer fmt.Println("============== Test case end: TestGrpcCallWithGrpcError =================")
+	assert := assert.New(t)
+
+	// Mock RPC function that returns a gRPC status error
+	grpcErr := status.Error(codes.Unauthenticated, "unauthenticated")
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (*internal_xdcr_v1.GetClusterInfoResponse, error) {
+		return nil, grpcErr
+	}
+
+	response := grpcCall(&base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{Context: context.Background(), Request: &internal_xdcr_v1.GetClusterInfoRequest{}}, mockRPC)
+
+	// Verify response structure exists
+	assert.Nil(response.Response())
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Unauthenticated, response.Code())
+	assert.Equal("unauthenticated", response.Message())
+	assert.Equal(grpcErr, response.Error)
+}
+
+// TestGrpcCallWithRegularError tests grpcCall with regular non-gRPC error from RPC
+func TestGrpcCallWithRegularError(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcCallWithRegularError =================")
+	defer fmt.Println("============== Test case end: TestGrpcCallWithRegularError =================")
+	assert := assert.New(t)
+
+	// Mock RPC function that returns a regular error (not gRPC status error)
+	regularErr := errors.New("regular error occurred")
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (*internal_xdcr_v1.GetClusterInfoResponse, error) {
+		return nil, regularErr
+	}
+
+	// Call grpcCall
+	response := grpcCall(&base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{Context: context.Background(), Request: &internal_xdcr_v1.GetClusterInfoRequest{}}, mockRPC)
+
+	// Verify response structure
+	assert.Nil(response.Response())
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Unknown, response.Code())
+	assert.Equal("regular error occurred", response.Message())
+	assert.Equal(regularErr, response.Error)
+}
+
+// TestStatusFromErrorBehavior tests the behavior of status.FromError with different error types
+// This test is not related to grpcCall function, but it is useful to understand the behavior of status.FromError
+func TestStatusFromErrorBehavior(t *testing.T) {
+	fmt.Println("============== Test case start: TestStatusFromErrorBehavior =================")
+	defer fmt.Println("============== Test case end: TestStatusFromErrorBehavior =================")
+	assert := assert.New(t)
+
+	// Test with nil error (success case)
+	st, ok := status.FromError(nil)
+	assert.True(ok)
+	assert.Nil(st) // status.FromError(nil) returns (nil, true)
+	assert.Equal(codes.OK, st.Code())
+	assert.Equal("", st.Message())
+
+	// Test with regular error (not gRPC status)
+	regularErr := errors.New("regular error")
+	st, ok = status.FromError(regularErr)
+	assert.False(ok) // Should be false for non-gRPC errors
+	assert.NotNil(st)
+	assert.Equal(codes.Unknown, st.Code())
+	assert.Equal("regular error", st.Message())
+
+	// Test with gRPC status error
+	grpcErr := status.Error(codes.NotFound, "resource not found")
+	st, ok = status.FromError(grpcErr)
+	assert.True(ok) // Should be true for gRPC errors
+	assert.NotNil(st)
+	assert.Equal(codes.NotFound, st.Code())
+	assert.Equal("resource not found", st.Message())
+
+	// Test with permission denied gRPC error
+	permissionErr := status.Error(codes.PermissionDenied, "access denied")
+	st, ok = status.FromError(permissionErr)
+	assert.True(ok)
+	assert.NotNil(st)
+	assert.Equal(codes.PermissionDenied, st.Code())
+	assert.Equal("access denied", st.Message())
+}
+
+// MockStreamHandler implements GrpcStreamHandler using testify/mock
+type MockStreamHandler struct {
+	mock.Mock
+}
+
+func (m *MockStreamHandler) OnMessage(msg *internal_xdcr_v1.GetClusterInfoResponse) {
+	m.Called(msg)
+}
+
+func (m *MockStreamHandler) OnError(err error) {
+	m.Called(err)
+}
+
+func (m *MockStreamHandler) OnComplete() {
+	m.Called()
+}
+
+// Simple mock streaming client for testing
+type MockStreamClient struct {
+	responses []internal_xdcr_v1.GetClusterInfoResponse
+	errors    []error
+	index     int
+	headerErr error
+	ctx       context.Context
+}
+
+func (m *MockStreamClient) Recv() (*internal_xdcr_v1.GetClusterInfoResponse, error) {
+	if m.index < len(m.errors) && m.errors[m.index] != nil {
+		err := m.errors[m.index]
+		m.index++
+		return nil, err
+	}
+	if m.index >= len(m.responses) {
+		return nil, io.EOF
+	}
+	resp := m.responses[m.index]
+	m.index++
+	return &resp, nil
+}
+
+func (m *MockStreamClient) Header() (grpcMetadata.MD, error) {
+	return grpcMetadata.MD{}, m.headerErr
+}
+
+func (m *MockStreamClient) Trailer() grpcMetadata.MD {
+	return grpcMetadata.MD{}
+}
+
+func (m *MockStreamClient) CloseSend() error {
+	return nil
+}
+
+func (m *MockStreamClient) Context() context.Context {
+	return m.ctx
+}
+
+func (m *MockStreamClient) RecvMsg(message interface{}) error {
+	// This method is required by grpc.ClientStream interface but not used in our tests
+	return nil
+}
+
+func (m *MockStreamClient) SendMsg(message interface{}) error {
+	// This method is required by grpc.ClientStream interface but not used in our tests
+	return nil
+}
+
+// TestGrpcServerStreamCallSuccess tests successful streaming
+func TestGrpcServerStreamCallSuccess(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallSuccess =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallSuccess =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations
+	resp1 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid1"}
+	resp2 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid2"}
+	resp3 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid3"}
+
+	handler.On("OnMessage", resp1).Return().Once()
+	handler.On("OnMessage", resp2).Return().Once()
+	handler.On("OnMessage", resp3).Return().Once()
+	handler.On("OnComplete").Return().Once()
+
+	// Mock stream client
+	mockClient := &MockStreamClient{
+		responses: []internal_xdcr_v1.GetClusterInfoResponse{*resp1, *resp2, *resp3},
+		ctx:       context.Background(),
+	}
+
+	// Mock RPC function
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return mockClient, nil
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// Verify response
+	assert.Nil(response.Status)
+	assert.Nil(response.Error)
+
+	// Verify all mock expectations were met
+	handler.AssertExpectations(t)
+}
+
+// TestGrpcServerStreamCallRpcFailure tests RPC failure
+func TestGrpcServerStreamCallRpcFailure(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallRpcFailure =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallRpcFailure =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations for error
+	rpcErr := status.Error(codes.Unauthenticated, "authentication failed")
+	handler.On("OnError", rpcErr).Return().Once()
+
+	// Mock RPC function that fails
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return nil, rpcErr
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// Verify response
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Unauthenticated, response.Status.Code())
+	assert.Equal("authentication failed", response.Status.Message())
+	assert.Equal(rpcErr, response.Error)
+
+	// Verify mock expectations
+	handler.AssertExpectations(t)
+}
+
+// TestGrpcServerStreamCallHeaderFailure tests header failure
+func TestGrpcServerStreamCallHeaderFailure(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallHeaderFailure =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallHeaderFailure =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations for header error
+	headerErr := status.Error(codes.Unknown, "xyz")
+	handler.On("OnError", headerErr).Return().Once()
+
+	// Mock stream client that fails on header
+	mockClient := &MockStreamClient{
+		headerErr: headerErr,
+		ctx:       context.Background(),
+	}
+
+	// Mock RPC function
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return mockClient, nil
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// Verify response
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Unknown, response.Status.Code())
+	assert.Equal("xyz", response.Status.Message())
+	assert.Equal(headerErr, response.Error)
+
+	// Verify mock expectations
+	handler.AssertExpectations(t)
+}
+
+// TestGrpcServerStreamCallStreamError tests streaming error
+func TestGrpcServerStreamCallStreamError(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallStreamError =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallStreamError =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations for one message then error
+	resp1 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid1"}
+	streamErr := status.Error(codes.Internal, "internal server error")
+
+	handler.On("OnMessage", resp1).Return().Once()
+	handler.On("OnError", streamErr).Return().Once()
+
+	// Mock stream client that sends one message then fails
+	mockClient := &MockStreamClient{
+		responses: []internal_xdcr_v1.GetClusterInfoResponse{*resp1},
+		errors:    []error{nil, streamErr}, // First message succeeds, second fails
+		ctx:       context.Background(),
+	}
+
+	// Mock RPC function
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return mockClient, nil
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// Verify response
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Internal, response.Status.Code())
+	assert.Equal("internal server error", response.Status.Message())
+	assert.Equal(streamErr, response.Error)
+
+	// Verify mock expectations
+	handler.AssertExpectations(t)
+}
+
+// TestGrpcServerStreamCallContextCancellation tests context cancellation (non-user triggered)
+func TestGrpcServerStreamCallContextCancellation(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallContextCancellation =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallContextCancellation =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations for one message then cancellation
+	resp1 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid1"}
+
+	handler.On("OnMessage", resp1).Return().Once()
+	handler.On("OnError", context.Canceled).Return().Once()
+
+	// Mock stream client that sends one message then gets canceled
+	mockClient := &MockStreamClient{
+		responses: []internal_xdcr_v1.GetClusterInfoResponse{*resp1},
+		errors:    []error{nil, context.Canceled},
+		ctx:       context.Background(), // No user cancellation cause
+	}
+
+	// Mock RPC function
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return mockClient, nil
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// Verify response indicates error (non-user cancellation)
+	assert.NotNil(response.Status)
+	assert.Equal(codes.Unknown, response.Status.Code())
+	assert.Equal("context canceled", response.Status.Message())
+	assert.Equal(context.Canceled, response.Error)
+
+	// Verify mock expectations
+	handler.AssertExpectations(t)
+}
+
+// TestGrpcServerStreamCallContextCancellationUserTriggered tests context cancellation (user triggered)
+func TestGrpcServerStreamCallContextCancellationUserTriggered(t *testing.T) {
+	fmt.Println("============== Test case start: TestGrpcServerStreamCallContextCancellationUserTriggered =================")
+	defer fmt.Println("============== Test case end: TestGrpcServerStreamCallContextCancellationUserTriggered =================")
+	assert := assert.New(t)
+
+	handler := &MockStreamHandler{}
+
+	// Set up mock expectations for one message then cancellation
+	resp1 := &internal_xdcr_v1.GetClusterInfoResponse{ClusterUuid: "uuid1"}
+
+	handler.On("OnMessage", resp1).Return().Once()
+	handler.On("OnComplete").Return().Once()
+
+	ctx, cancelWithCause := context.WithCancelCause(context.Background())
+	cancelWithCause(base.ErrorUserInitiatedStreamRpcCancellation)
+
+	// Mock stream client that sends one message then gets canceled
+	mockClient := &MockStreamClient{
+		responses: []internal_xdcr_v1.GetClusterInfoResponse{*resp1},
+		errors:    []error{nil, context.Canceled},
+		ctx:       ctx, // User triggered cancellation
+	}
+
+	// Mock RPC function
+	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
+		return mockClient, nil
+	}
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: context.Background(),
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	}
+
+	response := grpcServerStreamCall(request, handler, mockRPC)
+
+	// User triggered cancellation should be marked as successful
+	assert.Nil(response.Status)
+	assert.Nil(response.Error)
+
+	// Verify mock expectations
+	handler.AssertExpectations(t)
+}
+
+// TestIsUserTriggeredCancellation tests the helper function
+func TestIsUserTriggeredCancellation(t *testing.T) {
+	fmt.Println("============== Test case start: TestIsUserTriggeredCancellation =================")
+	defer fmt.Println("============== Test case end: TestIsUserTriggeredCancellation =================")
+	assert := assert.New(t)
+
+	// Test with nil error
+	result := isUserTriggeredCancellation(nil)
+	assert.False(result)
+
+	// Test with user-triggered cancellation error
+	result = isUserTriggeredCancellation(base.ErrorUserInitiatedStreamRpcCancellation)
+	assert.True(result)
+
+	// Test with wrapped user-triggered cancellation error
+	wrappedErr := fmt.Errorf("wrapper: %w", base.ErrorUserInitiatedStreamRpcCancellation)
+	result = isUserTriggeredCancellation(wrappedErr)
+	assert.True(result)
+
+	// Test with other error
+	otherErr := errors.New("some other error")
+	result = isUserTriggeredCancellation(otherErr)
+	assert.False(result)
+
+	// Test with context.Canceled (not user-triggered)
+	result = isUserTriggeredCancellation(context.Canceled)
+	assert.False(result)
 }
