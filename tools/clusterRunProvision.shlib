@@ -3321,7 +3321,8 @@ function setEncryptionLevel {
 	$CURL -POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/settings/security -d "clusterEncryptionLevel=$value"
 	if (($? != 0)); then
 		echo "Failed to set cluster encryption level to $value"
-		return 1
+		dumpDebugInfoBeforeExit
+		exit 1
 	fi
 	echo "Encryption level for $cluster is set to $value" >&1
 	CLUSTER_ENCRYPTION_LEVEL_MAP[$cluster]="$value"
