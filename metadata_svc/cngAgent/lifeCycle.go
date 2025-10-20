@@ -125,7 +125,11 @@ func (agent *RemoteCngAgent) Start(newRef *metadata.RemoteClusterReference, user
 	agent.waitGrp.Add(1)
 	go agent.runPeriodicRefresh()
 
-	// Darshan TODO: Start heartbeat routine.
+	if agent.heartbeatManager.allowedToSendHeartbeats(agent.HostName(), agent.Uuid()) {
+		agent.waitGrp.Add(1)
+		agent.heartbeatManager.setUUID(newRef.Uuid())
+		go agent.runHeartbeatSender()
+	}
 
 	agent.logger.Infof("successfully started remote agent for reference %s", newRef.Name())
 	return nil
@@ -461,4 +465,25 @@ func (agent *RemoteCngAgent) clearConnErrs() {
 		agent.refCache.reference.ClearConnErrs()
 	}
 	agent.refCache.mutex.RUnlock()
+}
+
+// getCredentials returns the credentials for the remote cluster
+func (agent *RemoteCngAgent) getCredentials() *base.Credentials {
+	agent.refCache.mutex.RLock()
+	defer agent.refCache.mutex.RUnlock()
+	return agent.refCache.reference.Credentials.Clone()
+}
+
+// GetGrpcOpts returns the gRPC options for the remote cluster
+func (agent *RemoteCngAgent) GetGrpcOpts() *base.GrpcOptions {
+	for !agent.InitDone() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	agent.refCache.mutex.RLock()
+	// Its ok to ignore the error since the validation is already done at the REST layer
+	connStr, _ := agent.refCache.reference.MyConnectionStr()
+	// Its ok to ignore the error since the connection string is already validated at the REST layer
+	grpcOpts, _ := base.NewGrpcOptionsSecure(connStr, agent.getCredentials, base.DeepCopyByteArray(agent.refCache.reference.Certificates()))
+	agent.refCache.mutex.RUnlock()
+	return grpcOpts
 }

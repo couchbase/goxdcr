@@ -46,6 +46,8 @@ type services struct {
 	metakv service_def.MetadataSvc
 	// uiLog provides access to the UI logging service.
 	uiLog service_def.UILogSvc
+	// topologySvc provides access to the topology service.
+	topologySvc service_def.XDCRCompTopologySvc
 }
 
 // referenceCache denotes the in-memory component of the remote cluster reference.
@@ -111,6 +113,38 @@ type targetHealthTracker struct {
 	connErrCount int
 }
 
+// heartbeatStats tracks the statistics of the heartbeat operations
+type heartbeatStats struct {
+	// totalHeartbeatsSent tracks the total number of heartbeat attempts
+	totalHeartbeatsSent uint64
+	// successfulHeartbeats tracks the number of successful heartbeats
+	successfulHeartbeats uint64
+	// connectionErrors tracks heartbeats that failed due to connection issues
+	connectionErrors uint64
+	// otherErrors tracks heartbeats that failed due to other reasons
+	otherErrors uint64
+	// mutex protects access to the heartbeat stats
+	mutex sync.RWMutex
+}
+
+// heartBeatManager is responsible for managing and tracking the heartbeat metadata sent to the remote cluster.
+type heartBeatManager struct {
+	// remoteClusterUuid is the UUID of the remote cluster
+	remoteClusterUuid string
+	// lastSentHeartbeatMetadata is the last heartbeat metadata sent to the remote cluster
+	lastSentHeartbeatMetadata *metadata.HeartbeatMetadata
+	// specsReader is used to fetch the replication specs for the remote cluster.
+	specsReader service_def.ReplicationSpecReader
+	// services provides access to the external services used by the heartbeat tracker
+	services services
+	// logger for logging
+	logger *log.CommonLogger
+	// mutex protects "this" struct from concurrent access
+	mutex sync.RWMutex
+	// heartbeatStats tracks the statistics of the heartbeat operations
+	heartbeatStats heartbeatStats
+}
+
 // RemoteCngAgent implements the RemoteAgentIface for CNG targets.
 type RemoteCngAgent struct {
 	// services denotes the external services required by the agent
@@ -137,6 +171,8 @@ type RemoteCngAgent struct {
 	capability metadata.Capability
 	// healthTracker records the health of the remote cluster
 	healthTracker *targetHealthTracker
+	// heartbeatManager manages the heartbeat metadata sent to the remote cluster
+	heartbeatManager *heartBeatManager
 }
 
 var _ metadata_svc.RemoteAgentIface = &RemoteCngAgent{}
@@ -165,17 +201,23 @@ func NewRefreshSnapShot(ref *metadata.RemoteClusterReference, capability metadat
 }
 
 // NewRemoteCngAgent is a constructor for RemoteCngAgent.
-func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
+func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
 	services := services{
-		utils:  utils,
-		metakv: metakv,
-		uiLog:  uiLog,
+		utils:       utils,
+		metakv:      metakv,
+		uiLog:       uiLog,
+		topologySvc: topologySvc,
 	}
 
 	cngAgent := &RemoteCngAgent{
 		services: services,
 		finCh:    make(chan struct{}),
 		logger:   logger,
+		heartbeatManager: &heartBeatManager{
+			specsReader: specsReader,
+			services:    services,
+			logger:      logger,
+		},
 	}
 	cngAgent.refreshState.cond = sync.NewCond(&cngAgent.refreshState.mutex)
 

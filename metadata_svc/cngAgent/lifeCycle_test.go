@@ -50,12 +50,16 @@ func setupTestServices() (services, *utilsMock.UtilsIface, *service_def.Metadata
 	utilsMock := &utilsMock.UtilsIface{}
 	metakvMock := &service_def.MetadataSvc{}
 	uiLogMock := &service_def.UILogSvc{}
+	topologySvcMock := &service_def.XDCRCompTopologySvc{}
 
 	services := services{
-		utils:  utilsMock,
-		metakv: metakvMock,
-		uiLog:  uiLogMock,
+		utils:       utilsMock,
+		metakv:      metakvMock,
+		uiLog:       uiLogMock,
+		topologySvc: topologySvcMock,
 	}
+
+	topologySvcMock.On("MyClusterUUID").Return(testUuid, nil)
 
 	return services, utilsMock, metakvMock, uiLogMock
 }
@@ -68,6 +72,11 @@ func createTestRemoteCngAgent() (*RemoteCngAgent, *utilsMock.UtilsIface, *servic
 		services: services,
 		finCh:    make(chan struct{}),
 		logger:   logger,
+		heartbeatManager: &heartBeatManager{
+			specsReader: &service_def.ReplicationSpecReader{},
+			services:    services,
+			logger:      logger,
+		},
 	}
 	agent.refreshState.cond = sync.NewCond(&agent.refreshState.mutex)
 
