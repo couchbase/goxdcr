@@ -135,6 +135,15 @@ func TestReplicatorChangeSpecDuringInitWait(t *testing.T) {
 	}
 
 	// After the agent finished running, the minInterval should change
+	for i := 0; i < 5; i++ {
+		replicator.minIntervalMtx.Lock()
+		if replicator.minInterval.Minutes() == 1 {
+			replicator.minIntervalMtx.Unlock()
+			break
+		}
+		replicator.minIntervalMtx.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
 	replicator.minIntervalMtx.Lock()
 	assert.NotEqual(float64(20), replicator.minInterval.Minutes())
 	assert.Equal(float64(1), replicator.minInterval.Minutes())
