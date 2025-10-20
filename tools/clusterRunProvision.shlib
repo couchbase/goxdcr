@@ -3295,17 +3295,20 @@ function setNodeToNodeEncryption {
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=false
 	if (($? != 0)); then
 		echo "Failed to turn off autoFailover"
-		exit $?
+		dumpDebugInfoBeforeExit
+		exit 1
 	fi
 	$CB_CLI_BIN node-to-node-encryption -c http://127.0.0.1:$port -u $DEFAULT_ADMIN -p $DEFAULT_PW --$value
 	if (($? != 0)); then
 		echo "Failed to set node to node encryption to $value"
-		exit $?
+		dumpDebugInfoBeforeExit
+		exit 1
 	fi
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=true
 	if (($? != 0)); then
 		echo "Failed to turn on autoFailover"
-		return 1
+		dumpDebugInfoBeforeExit
+		exit 1
 	fi
 	echo "Node to node encryption for $cluster is set to $value" >&1
 }
