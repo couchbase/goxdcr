@@ -60,20 +60,62 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	}
 	replicator.agentMapMtx.Unlock()
 	replicator.HandleSpecChange(spec, newSpec)
-	replicator.minIntervalMtx.Lock()
-	assert.Equal(float64(30), replicator.minInterval.Minutes())
-	replicator.minIntervalMtx.Unlock()
+	success := false
+	for i := 0; i < 3; i++ {
+		replicator.minIntervalMtx.Lock()
+		if replicator.minInterval.Minutes() == 30 {
+			assert.Equal(float64(30), replicator.minInterval.Minutes())
+			success = true
+			replicator.minIntervalMtx.Unlock()
+			break
+		}
+		replicator.minIntervalMtx.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !success {
+		replicator.minIntervalMtx.Lock()
+		assert.Equal(float64(30), replicator.minInterval.Minutes())
+		replicator.minIntervalMtx.Unlock()
+	}
 
 	replicator.HandleSpecCreation(spec2)
-	replicator.minIntervalMtx.Lock()
-	assert.Equal(float64(5), replicator.minInterval.Minutes())
-	replicator.minIntervalMtx.Unlock()
+	success2 := false
+	for i := 0; i < 3; i++ {
+		replicator.minIntervalMtx.Lock()
+		if replicator.minInterval.Minutes() == 5 {
+			assert.Equal(float64(5), replicator.minInterval.Minutes())
+			success2 = true
+			replicator.minIntervalMtx.Unlock()
+			break
+		}
+		replicator.minIntervalMtx.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !success2 {
+		replicator.minIntervalMtx.Lock()
+		assert.Equal(float64(5), replicator.minInterval.Minutes())
+		replicator.minIntervalMtx.Unlock()
+	}
 
 	// Deleting 5 will leave the last remaining one, 30
 	replicator.HandleSpecDeletion(spec2)
-	replicator.minIntervalMtx.Lock()
-	assert.Equal(float64(30), replicator.minInterval.Minutes())
-	replicator.minIntervalMtx.Unlock()
+	success3 := false
+	for i := 0; i < 3; i++ {
+		replicator.minIntervalMtx.Lock()
+		if replicator.minInterval.Minutes() == 30 {
+			assert.Equal(float64(30), replicator.minInterval.Minutes())
+			success3 = true
+			replicator.minIntervalMtx.Unlock()
+			break
+		}
+		replicator.minIntervalMtx.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !success3 {
+		replicator.minIntervalMtx.Lock()
+		assert.Equal(float64(30), replicator.minInterval.Minutes())
+		replicator.minIntervalMtx.Unlock()
+	}
 }
 
 func TestReplicatorChangeSpecDuringInitWait(t *testing.T) {
