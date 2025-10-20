@@ -134,9 +134,8 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 		// This TODO is a placeholder until we have the conn pool checked in
 		cngConn, err := base.NewCngConn(grpcOpts)
 		if err != nil {
-			st, _ := status.FromError(err)
 			return &base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]{
-				Status: st,
+				Status: status.New(codes.Unknown, err.Error()),
 				Error:  err,
 			}
 		}
@@ -225,6 +224,7 @@ func (agent *RemoteCngAgent) runPeriodicRefresh() {
 	defer ticker.Stop()
 
 	agentName := agent.Name()
+	agent.logger.Infof("runPeriodicRefresh for remote cluster %s is started", agentName)
 
 	for {
 		select {

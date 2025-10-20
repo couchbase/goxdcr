@@ -71,7 +71,7 @@ func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
 }
 
-type RemoteCngAgentFactory func(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, logger *log.CommonLogger) RemoteAgentIface
+type RemoteCngAgentFactory func(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger) RemoteAgentIface
 
 var NewRemoteCngAgent RemoteCngAgentFactory
 
@@ -3723,7 +3723,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 			case metadata.RemoteTypeCbCluster:
 				newAgent = service.NewRemoteClusterAgent()
 			case metadata.RemoteTypeCng:
-				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.logger)
+				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.xdcr_topology_svc, service.getReplReader(), service.logger)
 			default:
 				// should never happen
 				return nil, false, fmt.Errorf("unknown remoteType %v for reference %v", ref.GetRemoteType(), ref.Name())

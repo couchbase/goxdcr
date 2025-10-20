@@ -136,9 +136,12 @@ func (agent *RemoteCngAgent) UnRegisterBucketRefresh(bucketName string) error {
 }
 
 func (agent *RemoteCngAgent) SetHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
-	// Darshan TODO: implement
+	// no-op
 }
 
 func (agent *RemoteCngAgent) SetReplReader(reader service_def.ReplicationSpecReader) {
-	// Darshan TODO: implement
+	agent.heartbeatManager.mutex.Lock()
+	defer agent.heartbeatManager.mutex.Unlock()
+
+	agent.heartbeatManager.specsReader = reader
 }
