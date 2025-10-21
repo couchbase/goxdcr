@@ -2176,16 +2176,48 @@ function runCbWorkloadGenCollectionCont {
 }
 
 function waitForBgJobs {
-	echo "Waiting for background jobs to start..."
-	sleep 5
+	# Configurable (seconds) via env; defaults: warn at 10 min, stop at 30 min
+	local warn_secs=${WAIT_FOR_BG_WARN_SECS:-600}
+	local max_secs=${WAIT_FOR_BG_MAX_SECS:-1800}
 
-	echo "Waiting for background jobs to finish..."
+	local start_ts
+	start_ts=$(date +%s)
 
-	local jobsCnt=$(jobs -l | grep -c "Running")
-	echo "$jobsCnt background jobs were running initially"
-	while (($jobsCnt > 0)); do
-		sleep 1
-		jobsCnt=$(jobs -l | grep -c "Running")
+	local warned=0
+
+	# Capture initial background jobs (if any)
+	# jobs -p prints PIDs of current shell's background jobs
+	while true; do
+		# Get active job PIDs
+		# shellcheck disable=SC2207
+		local -a pids=($(jobs -p))
+
+		# No jobs left
+		if ((${#pids[@]} == 0)); then
+			return 0
+		fi
+
+		local now elapsed
+		now=$(date +%s)
+		elapsed=$((now - start_ts))
+
+		# Warn after warn_secs
+		if ((elapsed >= warn_secs)) && ((warned == 0)); then
+			echo "waitForBgJobs: Still waiting after $((warn_secs / 60)) minutes. Active background jobs:"
+			# Show detailed listing
+			jobs -l
+			warned=1
+		fi
+
+		# Timeout after max_secs
+		if ((elapsed >= max_secs)); then
+			echo "waitForBgJobs: Timeout after $((max_secs / 60)) minutes. Remaining jobs (not waited for):"
+			jobs -l
+			return 2
+		fi
+
+		# Brief sleep to avoid busy loop
+		sleep 5
 	done
 }
 
