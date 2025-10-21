@@ -2183,9 +2183,19 @@ function waitForBgJobs {
 
 	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
+
+	local startedTime=$(date +%s)
+	local maxSecsToWait=1800
+
 	while (($jobsCnt > 0)); do
 		sleep 1
 		jobsCnt=$(jobs -l | grep -c "Running")
+		local currentTime=$(date +%s)
+		local elapsed=$((currentTime - startedTime))
+		if (($elapsed > $maxSecsToWait)); then
+			echo "Timeout waiting for background jobs to finish after $maxSecsToWait seconds"
+			return 0
+		fi
 	done
 }
 
