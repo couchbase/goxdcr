@@ -3994,15 +3994,11 @@ func grpcServerStreamCall[Req, Resp any](
 	request *base.GrpcRequest[Req],
 	handler GrpcStreamHandler[*Resp],
 	rpc func(ctx context.Context, request Req, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Resp], error),
-) *base.GrpcResponse[*Resp] {
+) {
 	stream, err := rpc(request.Context, request.Request)
 	if err != nil {
-		st, _ := status.FromError(err)
 		handler.OnError(err)
-		return &base.GrpcResponse[*Resp]{
-			Status: st,
-			Error:  err,
-		}
+		return
 	}
 
 	// Wait for the header to be received
@@ -4010,11 +4006,7 @@ func grpcServerStreamCall[Req, Resp any](
 	// is ready to send messages
 	if _, err := stream.Header(); err != nil {
 		handler.OnError(err)
-		st, _ := status.FromError(err)
-		return &base.GrpcResponse[*Resp]{
-			Status: st,
-			Error:  err,
-		}
+		return
 	}
 
 	// Get the context for the stream
@@ -4027,30 +4019,18 @@ func grpcServerStreamCall[Req, Resp any](
 			if err == io.EOF {
 				// Stream completed successfully
 				handler.OnComplete()
-				st, _ := status.FromError(nil)
-				return &base.GrpcResponse[*Resp]{
-					Status: st,
-					Error:  nil,
-				}
+				return
 			}
 			if errors.Is(err, context.Canceled) {
 				// Check if the cancellation was caused by user action
 				if isUserTriggeredCancellation(context.Cause(streamCtx)) {
 					handler.OnComplete()
-					st, _ := status.FromError(nil)
-					return &base.GrpcResponse[*Resp]{
-						Status: st,
-						Error:  nil,
-					}
+					return
 				}
 			}
 			// Other errors (timeout, connection breakdown, application errors etc.)
-			st, _ := status.FromError(err)
 			handler.OnError(err)
-			return &base.GrpcResponse[*Resp]{
-				Status: st,
-				Error:  err,
-			}
+			return
 		}
 		handler.OnMessage(resp)
 	}
@@ -4071,12 +4051,12 @@ func (u *Utilities) CngHeartbeat(client base.CngClient, request *base.GrpcReques
 	return grpcCall(request, client.Heartbeat)
 }
 
-func (u *Utilities) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse] {
-	return grpcServerStreamCall(request, handler, client.GetVbucketInfo)
+func (u *Utilities) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) {
+	grpcServerStreamCall(request, handler, client.GetVbucketInfo)
 }
 
-func (u *Utilities) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse] {
-	return grpcServerStreamCall(request, handler, client.WatchCollections)
+func (u *Utilities) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) {
+	grpcServerStreamCall(request, handler, client.WatchCollections)
 }
 
 // IsTerseBucketInfo returns bucketInfo using the pools/default/b/<bucketName> endpoint.

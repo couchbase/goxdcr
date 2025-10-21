@@ -51,8 +51,8 @@ func (h *HELOFeatures) String() string {
 type CngUtils interface {
 	CngGetClusterInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse]
 	CngGetBucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse]
-	CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]
-	CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]
+	CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])
+	CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse])
 	CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]
 }
 
