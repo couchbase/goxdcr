@@ -122,23 +122,8 @@ func (_c *CngUtils_CngGetClusterInfo_Call) RunAndReturn(run func(base.CngClient,
 }
 
 // CngGetVbucketInfo provides a mock function with given fields: client, request, handler
-func (_m *CngUtils) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse] {
-	ret := _m.Called(client, request, handler)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CngGetVbucketInfo")
-	}
-
-	var r0 *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]
-	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]); ok {
-		r0 = rf(client, request, handler)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse])
-		}
-	}
-
-	return r0
+func (_m *CngUtils) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) {
+	_m.Called(client, request, handler)
 }
 
 // CngUtils_CngGetVbucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetVbucketInfo'
@@ -161,13 +146,13 @@ func (_c *CngUtils_CngGetVbucketInfo_Call) Run(run func(client base.CngClient, r
 	return _c
 }
 
-func (_c *CngUtils_CngGetVbucketInfo_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]) *CngUtils_CngGetVbucketInfo_Call {
-	_c.Call.Return(_a0)
+func (_c *CngUtils_CngGetVbucketInfo_Call) Return() *CngUtils_CngGetVbucketInfo_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *CngUtils_CngGetVbucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) *base.GrpcResponse[*internal_xdcr_v1.GetVbucketInfoResponse]) *CngUtils_CngGetVbucketInfo_Call {
-	_c.Call.Return(run)
+func (_c *CngUtils_CngGetVbucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])) *CngUtils_CngGetVbucketInfo_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -221,23 +206,8 @@ func (_c *CngUtils_CngHeartbeat_Call) RunAndReturn(run func(base.CngClient, *bas
 }
 
 // CngWatchCollections provides a mock function with given fields: client, request, handler
-func (_m *CngUtils) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse] {
-	ret := _m.Called(client, request, handler)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CngWatchCollections")
-	}
-
-	var r0 *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]
-	if rf, ok := ret.Get(0).(func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]); ok {
-		r0 = rf(client, request, handler)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse])
-		}
-	}
-
-	return r0
+func (_m *CngUtils) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) {
+	_m.Called(client, request, handler)
 }
 
 // CngUtils_CngWatchCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngWatchCollections'
@@ -260,13 +230,13 @@ func (_c *CngUtils_CngWatchCollections_Call) Run(run func(client base.CngClient,
 	return _c
 }
 
-func (_c *CngUtils_CngWatchCollections_Call) Return(_a0 *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]) *CngUtils_CngWatchCollections_Call {
-	_c.Call.Return(_a0)
+func (_c *CngUtils_CngWatchCollections_Call) Return() *CngUtils_CngWatchCollections_Call {
+	_c.Call.Return()
 	return _c
 }
 
-func (_c *CngUtils_CngWatchCollections_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) *base.GrpcResponse[*internal_xdcr_v1.WatchCollectionsResponse]) *CngUtils_CngWatchCollections_Call {
-	_c.Call.Return(run)
+func (_c *CngUtils_CngWatchCollections_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse])) *CngUtils_CngWatchCollections_Call {
+	_c.Run(run)
 	return _c
 }
 

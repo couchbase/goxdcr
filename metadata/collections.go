@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -465,6 +466,25 @@ func (c *CollectionsManifest) LoadBytes(data []byte) error {
 	}
 
 	return c.Load(collectionsMeta)
+}
+
+func (c *CollectionsManifest) LoadFromWatchCollectionsResp(resp *internal_xdcr_v1.WatchCollectionsResponse) {
+	c.uid = uint64(resp.GetManifestUid())
+	c.scopes = make(ScopesMap)
+	for _, scopeVal := range resp.GetScopes() {
+		scope := Scope{}
+		scope.Uid = scopeVal.GetScopeId()
+		scope.Name = scopeVal.GetScopeName()
+		scope.Collections = make(CollectionsMap)
+		for _, collVal := range scopeVal.GetCollections() {
+			collection := Collection{}
+			collection.Uid = collVal.GetCollectionId()
+			collection.Name = collVal.GetCollectionName()
+			scope.Collections[collection.Name] = collection
+		}
+		c.scopes[scope.Name] = scope
+	}
+	c.generateReverseLookupMap()
 }
 
 // Implements the marshaller interface
