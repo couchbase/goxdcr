@@ -10,13 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type wrapperConn struct {
-	conn       *CNGConn
+	conn       *base.CngConn
 	rw         sync.RWMutex
 	generation atomic.Int64
 }
@@ -50,7 +51,7 @@ type ConnPool struct {
 
 type PoolConfig struct {
 	ConnCount     int
-	ConnFn        func() (*CNGConn, error)
+	ConnFn        func() (*base.CngConn, error)
 	RetryInterval int // in milliseconds
 }
 
@@ -149,7 +150,7 @@ func (p *ConnPool) callFn(w *wrapperConn, fn func(client XDCRClient) error) erro
 	if w.conn == nil {
 		return fmt.Errorf("connection is nil")
 	}
-	return fn(w.conn.client)
+	return fn(w.conn.Client())
 }
 
 func (p *ConnPool) Close() {
@@ -165,8 +166,8 @@ func (p *ConnPool) Close() {
 func (p *ConnPool) closeAllConnUnsafe() (err error) {
 	for _, w := range p.clients {
 		w.rw.Lock()
-		if w.conn != nil && w.conn.conn != nil {
-			w.conn.conn.Close()
+		if w.conn != nil && w.conn != nil {
+			w.conn.Close()
 		}
 		w.rw.Unlock()
 	}
@@ -205,8 +206,8 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 		for i := newCount; i < len(p.clients); i++ {
 			wrapper := p.clients[i]
 			wrapper.rw.Lock()
-			if wrapper.conn != nil && wrapper.conn.conn != nil {
-				wrapper.conn.conn.Close()
+			if wrapper.conn != nil {
+				wrapper.conn.Close()
 			}
 			wrapper.rw.Unlock()
 		}
