@@ -97,7 +97,7 @@ declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 
 REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
-CHECK_CHANGES_LEFT_MAX=5
+CHECK_CHANGES_LEFT_MAX=10
 declare BULK_COLLECTION_THRESHOLD=10
 
 # With python 3.9 to bypass "OpenSSL 3.0's legacy provider failed to load" message when running cbworkloadgen
