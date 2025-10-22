@@ -742,6 +742,7 @@ function addOneNodeIn {
 		fi
 	done
 
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -863,6 +864,7 @@ function startEjectNode {
 			local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
 			if (($postEjectCnt != $(($preEjectCnt - 1)))); then
 				echo "Error - ejecting a node resulted going from $preEjectCnt to $postEjectCnt"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		fi
