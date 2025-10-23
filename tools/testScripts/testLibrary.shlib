@@ -1488,9 +1488,30 @@ function xdcrMemRss {
 	done
 }
 
+function runCbCollectInfo {
+	local clusterName=$1
+	local outputFile=$2
+	local port="${CLUSTER_NAME_PORT_MAP[$clusterName]:-}"
+	local clusterIdx=$(getClusterIdx $clusterName)
+	local installBinDir=$(findInstallBinDir)
+	local cbcollectInfo="${installBinDir}/cbcollect_info"
+	local nsServerDir
+	local local_workspace
+
+	if [[ ! -z "${EXT_WORKSPACE:-}" ]]; then
+		local_workspace="${EXT_WORKSPACE}/$(basename $WORKSPACE)"
+		nsServerDir=$local_workspace/ns_server
+	else
+		nsServerDir=$(findNsServerDir)
+	fi
+
+	$cbcollectInfo -v --initargs=${nsServerDir}/data/n_${clusterIdx}/initargs $outputFile
+}
+
 function dumpDebugInfoBeforeExit {
 	local clusterName
 	local testOutputDir
+	local shouldRunCbCollect="${RUN_CBCOLLECT:-}"
 
 	xdcrMemRss
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
@@ -1505,6 +1526,10 @@ function dumpDebugInfoBeforeExit {
 		getInternalNodeNsServerDebugLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_debug.log
 		getInternalNodeNsServerErrorLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_error.log
 		getInternalNodeMetaKvLog "$clusterName" >${testOutputDir}/node${clusterName}_metakv.log
+
+		if [[ ! -z "${shouldRunCbCollect:-}" ]]; then
+			runCbCollectInfo "$clusterName" "${testOutputDir}/cbcollect_${clusterName}.zip"
+		fi
 	done
 }
 
