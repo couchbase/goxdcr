@@ -159,6 +159,7 @@ function runReplicationResume {
 	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
 	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
 		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill) when looking for $(($curCkptsFoundDocsCnt + 1)) counts"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
@@ -185,6 +186,7 @@ function runReplicationResume {
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 	if (($resumeFrom0Cnt > 10)); then
 		echo "C1P main pipeline has at least ten VBs that resumed from seqno 0"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	bpResumeFromNon0Cnt=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "backfill" | grep -cv "${TS_PREFIX}=0")
@@ -192,6 +194,7 @@ function runReplicationResume {
 	if (($curBackfillResumeNon0CntC1P == $bpResumeFromNon0Cnt)); then
 		# Resume from non-0 stayed constant
 		echo "C1P backfill pipeline did not seem to have resumed from non-0 ckpts"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 

@@ -175,6 +175,7 @@ function runReplicationResume {
 	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
 	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
 		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill) when looking for $(($curCkptsFoundDocsCnt + 1)) counts"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
