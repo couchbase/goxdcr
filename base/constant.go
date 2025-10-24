@@ -2016,6 +2016,11 @@ const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
 // MaxAllowedRCDegradedCyclesForCng denotes the threshold number of consecutive refresh cycles RC can remain degraded before reporting RC_ERROR.
 const MaxAllowedRCDegradedCyclesForCng = 6
 
+// Collections watcher related constants
+const CollectionsWatcherWaitTime = 5 * time.Second
+const CollectionsWatcherBackoffFactor = 2
+const CollectionsWatcherMaxWaitTime = 60 * time.Second
+
 /**
 * In order for DCP flow control to work correctly, the number of mutations in DCP buffer
 * should be no larger than the size of the DCP data channel. This way we can ensure

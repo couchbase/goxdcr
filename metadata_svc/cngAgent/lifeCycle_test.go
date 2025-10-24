@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -76,6 +77,10 @@ func createTestRemoteCngAgent() (*RemoteCngAgent, *utilsMock.UtilsIface, *servic
 			specsReader: &service_def.ReplicationSpecReader{},
 			services:    services,
 			logger:      logger,
+		},
+		remoteDataProvider: &remoteDataProvider{
+			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]),
+			refCount:              make(map[string]uint32),
 		},
 	}
 	agent.refreshState.cond = sync.NewCond(&agent.refreshState.mutex)

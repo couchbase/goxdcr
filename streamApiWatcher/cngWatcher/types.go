@@ -8,6 +8,7 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -94,6 +95,10 @@ type CollectionsWatcher struct {
 	opState WatchCollectionsOpState
 	// finCh denotes the signal to terminate the watcher
 	finCh chan struct{}
+	// rpcInitDone denotes the signal to indicate that the stream request has been initialized
+	rpcInitDone chan struct{}
+	// rpcInitDoneOnce ensures that the rpcInitDone channel is closed only once
+	rpcInitDoneOnce sync.Once
 	// utils service here is used to issue the stream request
 	utils utils.CngUtils
 	// logger for logging
@@ -106,6 +111,8 @@ type CollectionsWatcher struct {
 	backoffFactor int
 	// maxWaitTime denotes the maximum time to wait before retrying the stream operation
 	maxWaitTime time.Duration
+	// retry denotes whether the stream operation should be retried on error
+	retry bool
 	// CngConn denotes the CNG connection to the target couchbase cluster
 	// Darshan TODO: Ideally we should use the global connection pool instead of creating a new connection here
 	// This TODO is a placeholder until we have the conn pool checked in
@@ -113,7 +120,7 @@ type CollectionsWatcher struct {
 }
 
 // NewCollectionsWatcher creates a new CollectionsWatcher
-func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptions, utils utils.CngUtils, waitTime time.Duration, backoffFactor int, maxWaitTime time.Duration, logger *log.CommonLogger) *CollectionsWatcher {
+func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptions, utils utils.CngUtils, waitTime time.Duration, backoffFactor int, maxWaitTime time.Duration, retry bool, logger *log.CommonLogger) GrpcStreamManagerIface[*metadata.CollectionsManifest] {
 	return &CollectionsWatcher{
 		bucketName:    bucketName,
 		getGrpcOpts:   getGrpcOpts,
@@ -121,8 +128,10 @@ func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptio
 		waitTime:      waitTime,
 		backoffFactor: backoffFactor,
 		maxWaitTime:   maxWaitTime,
+		retry:         retry,
 		logger:        logger,
 		finCh:         make(chan struct{}),
+		rpcInitDone:   make(chan struct{}),
 	}
 }
 
