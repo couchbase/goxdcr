@@ -2013,3 +2013,8 @@ const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
 
 // MaxAllowedRCDegradedCyclesForCng denotes the threshold number of consecutive refresh cycles RC can remain degraded before reporting RC_ERROR.
 const MaxAllowedRCDegradedCyclesForCng = 6
+
+// Collections watcher related constants
+const CollectionsWatcherWaitTime = 5 * time.Second
+const CollectionsWatcherBackoffFactor = 2
+const CollectionsWatcherMaxWaitTime = 60 * time.Second

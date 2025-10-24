@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
@@ -145,6 +146,15 @@ type heartBeatManager struct {
 	heartbeatStats heartbeatStats
 }
 
+type remoteDataProvider struct {
+	// bucketManifestWatcher maps the bucket name to the bucket manifest watcher
+	bucketManifestWatcher map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]
+	// mutex protects "this" struct from concurrent access
+	mutex sync.RWMutex
+	// refCount tracks the number of references to a target bucket
+	refCount map[string]uint32
+}
+
 // RemoteCngAgent implements the RemoteAgentIface for CNG targets.
 type RemoteCngAgent struct {
 	// services denotes the external services required by the agent
@@ -173,6 +183,8 @@ type RemoteCngAgent struct {
 	healthTracker *targetHealthTracker
 	// heartbeatManager manages the heartbeat metadata sent to the remote cluster
 	heartbeatManager *heartBeatManager
+	// remoteDataProvider encapsulates the data providers for the remote cluster
+	remoteDataProvider *remoteDataProvider
 }
 
 var _ metadata_svc.RemoteAgentIface = &RemoteCngAgent{}
@@ -217,6 +229,10 @@ func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, u
 			specsReader: specsReader,
 			services:    services,
 			logger:      logger,
+		},
+		remoteDataProvider: &remoteDataProvider{
+			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]),
+			refCount:              make(map[string]uint32),
 		},
 	}
 	cngAgent.refreshState.cond = sync.NewCond(&cngAgent.refreshState.mutex)

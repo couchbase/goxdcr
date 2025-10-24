@@ -469,6 +469,9 @@ func (c *CollectionsManifest) LoadBytes(data []byte) error {
 }
 
 func (c *CollectionsManifest) LoadFromWatchCollectionsResp(resp *internal_xdcr_v1.WatchCollectionsResponse) {
+	if resp == nil {
+		return
+	}
 	c.uid = uint64(resp.GetManifestUid())
 	c.scopes = make(ScopesMap)
 	for _, scopeVal := range resp.GetScopes() {

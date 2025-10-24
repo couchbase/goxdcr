@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 )
 
 var _ metadata_svc.RemoteAgentMetadata = &RemoteCngAgent{}
@@ -126,12 +127,34 @@ func (agent *RemoteCngAgent) SetMetadataChangeHandlerCallback(callBack base.Meta
 }
 
 func (agent *RemoteCngAgent) RegisterBucketRequest(bucketName string) error {
-	// Darshan TODO: implement
+	agent.remoteDataProvider.mutex.Lock()
+	defer agent.remoteDataProvider.mutex.Unlock()
+	if _, ok := agent.remoteDataProvider.bucketManifestWatcher[bucketName]; !ok {
+		agent.remoteDataProvider.bucketManifestWatcher[bucketName] = cngWatcher.NewCollectionsWatcher(bucketName, agent.GetGrpcOpts, agent.services.utils, base.CollectionsWatcherWaitTime,
+			base.CollectionsWatcherBackoffFactor, base.CollectionsWatcherMaxWaitTime, true, agent.logger)
+		agent.remoteDataProvider.bucketManifestWatcher[bucketName].Start()
+	}
+	agent.remoteDataProvider.refCount[bucketName]++
 	return nil
 }
 
 func (agent *RemoteCngAgent) UnRegisterBucketRefresh(bucketName string) error {
-	// Darshan TODO: implement
+	agent.remoteDataProvider.mutex.Lock()
+	defer agent.remoteDataProvider.mutex.Unlock()
+
+	_, ok := agent.remoteDataProvider.refCount[bucketName]
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if agent.remoteDataProvider.refCount[bucketName] > uint32(0) {
+		agent.remoteDataProvider.refCount[bucketName]--
+	}
+
+	if agent.remoteDataProvider.refCount[bucketName] == uint32(0) {
+		agent.remoteDataProvider.bucketManifestWatcher[bucketName].Stop()
+		delete(agent.remoteDataProvider.bucketManifestWatcher, bucketName)
+	}
 	return nil
 }
 
