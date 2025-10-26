@@ -3056,7 +3056,11 @@ func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClust
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	grpcOpts, err := base.NewGrpcOptionsSecure(connStr, *ref.Credentials.Clone(), base.DeepCopyByteArray(ref.Certificates()))
+	getCredentials := func() *base.Credentials {
+		return ref.Credentials.Clone()
+	}
+
+	grpcOpts, err := base.NewGrpcOptionsSecure(connStr, getCredentials, base.DeepCopyByteArray(ref.Certificates()))
 	if err != nil {
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}

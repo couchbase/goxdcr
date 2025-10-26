@@ -10,6 +10,7 @@ package base
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/golang/snappy"
 	"github.com/google/uuid"
 )
@@ -3820,13 +3822,47 @@ func (c *Credentials) Redact() *Credentials {
 	return c
 }
 
+// Validate validates the credentials.
+func (c *Credentials) Validate() error {
+	switch {
+	// if c is nil, return an error
+	case c.IsEmpty():
+		return errors.New("Validate called on nil Credentials")
+	// either username or client certificate must be present
+	case len(c.UserName_) == 0 && len(c.ClientCertificate_) == 0:
+		return errors.New("either username or client certificate must be present")
+	// both username and client certificate cannot be present
+	case len(c.UserName_) > 0 && len(c.ClientCertificate_) > 0:
+		return errors.New("both username and client certificate cannot be present")
+	case len(c.UserName_) > 0:
+		// If username is present, password must be present
+		if len(c.Password_) == 0 {
+			return errors.New("password must be present when username is present")
+		}
+	case len(c.ClientCertificate_) > 0:
+		// If client certificate is present, client key must be present
+		if len(c.ClientKey_) == 0 {
+			return errors.New("client key must be present when client certificate is present")
+		}
+		// Verify if the entered client certificate and client key pair is valid
+		_, err := tls.X509KeyPair(c.ClientCertificate_, c.ClientKey_)
+		if err != nil {
+			return fmt.Errorf("failed to parse client certificate/key pair; err=%v", err)
+		}
+	}
+	return nil
+}
+
+type CngClient internal_xdcr_v1.XdcrServiceClient
+
 // GrpcOptions encapsulates the options needed to create a gRPC connection.
 type GrpcOptions struct {
 	// ConnStr is the connection string for the gRPC server.
 	// It should be in the format "host:port".
 	ConnStr string
-	// Creds are the credentials used for authentication.
-	Creds Credentials
+	// GetCredentials is a function pointer that retrieves connection credentials dynamically.
+	// Allows the gRPC client (channel) to refresh credentials dynamically without needing to recreate the channel.
+	GetCredentials func() *Credentials
 	// CaCert is the CA certificate used for TLS verification.
 	CaCert []byte
 	// UseTLS indicates whether to use TLS for the connection.
@@ -3834,24 +3870,24 @@ type GrpcOptions struct {
 }
 
 // NewGrpcOptions creates a new GrpcOptions instance.
-func NewGrpcOptions(connStr string, creds Credentials, caCert []byte, useTLS bool) (*GrpcOptions, error) {
+func NewGrpcOptions(connStr string, getCredentials func() *Credentials, caCert []byte, useTLS bool) (*GrpcOptions, error) {
 	if _, _, err := net.SplitHostPort(connStr); err != nil {
 		return nil, err
 	}
 	return &GrpcOptions{
-		ConnStr: connStr,
-		Creds:   creds,
-		CaCert:  caCert,
-		UseTLS:  useTLS,
+		ConnStr:        connStr,
+		GetCredentials: getCredentials,
+		CaCert:         caCert,
+		UseTLS:         useTLS,
 	}, nil
 }
 
 // NewGrpcOptionsSecure creates a new GrpcOptions instance with TLS enabled.
-func NewGrpcOptionsSecure(connStr string, creds Credentials, caCert []byte) (*GrpcOptions, error) {
-	return NewGrpcOptions(connStr, creds, caCert, true)
+func NewGrpcOptionsSecure(connStr string, getCredentials func() *Credentials, caCert []byte) (*GrpcOptions, error) {
+	return NewGrpcOptions(connStr, getCredentials, caCert, true)
 }
 
 // NewGrpcOptionsInSecure creates a new GrpcOptions instance with TLS disabled.
-func NewGrpcOptionsInSecure(connStr string, creds Credentials, caCert []byte) (*GrpcOptions, error) {
-	return NewGrpcOptions(connStr, creds, caCert, false)
+func NewGrpcOptionsInSecure(connStr string, getCredentials func() *Credentials, caCert []byte) (*GrpcOptions, error) {
+	return NewGrpcOptions(connStr, getCredentials, caCert, false)
 }

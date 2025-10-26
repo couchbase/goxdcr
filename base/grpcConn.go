@@ -16,8 +16,8 @@ import (
 
 // GrpcCredentials implements gRPC PerRPCCredentials interface using basic authentication.
 type GrpcCredentials struct {
-	// Base64EncodedAuth contains the base64-encoded "username:password" string for gRPC authentication
-	Base64EncodedAuth string
+	// GetCredentials is a function pointer that retrieves connection credentials dynamically.
+	GetCredentials func() *Credentials
 	// RequireTLS when set to true ensures the credentials are sent across only on a connection that is TLS/SSL secured
 	RequireTLS bool
 	// IsMTLS indicates if mutual TLS is being used for authentication
@@ -25,7 +25,9 @@ type GrpcCredentials struct {
 }
 
 // NewGrpcCredentials creates a new GrpcCredentials instance based on the provided client credentials.
-func NewGrpcCredentials(clientCreds Credentials, requireTLS bool) (*GrpcCredentials, error) {
+func NewGrpcCredentials(getCredentials func() *Credentials, requireTLS bool) (*GrpcCredentials, error) {
+	// Get the client credentials to determine if mTLS is required.
+	clientCreds := getCredentials()
 	if len(clientCreds.ClientCertificate_) > 0 {
 		// In mTLS mode, PerRPCCredentials are not required.
 		// The grpc framework on server side(CNG) automatically extracts the client certificate
@@ -37,25 +39,26 @@ func NewGrpcCredentials(clientCreds Credentials, requireTLS bool) (*GrpcCredenti
 		}, nil
 	}
 
-	// For non-mTLS, username and password must be provided
-	if clientCreds.UserName_ == "" || clientCreds.Password_ == "" {
-		return nil, fmt.Errorf("username and password must not be empty. username empty? %t, password empty? %t", len(clientCreds.UserName_) == 0, len(clientCreds.Password_) == 0)
-	}
-
-	basicAuth := fmt.Sprintf("%s%s%s", clientCreds.UserName_, JsonDelimiter, clientCreds.Password_)
-	base64EncodedAuth := base64.StdEncoding.EncodeToString([]byte(basicAuth))
-
 	return &GrpcCredentials{
-		Base64EncodedAuth: base64EncodedAuth,
-		RequireTLS:        requireTLS,
-		IsMTLS:            false,
+		GetCredentials: getCredentials,
+		RequireTLS:     requireTLS,
+		IsMTLS:         false,
 	}, nil
 }
 
 // GetRequestMetadata attaches authentication headers to outgoing RPCs.
 func (grpc *GrpcCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	credentials := grpc.GetCredentials()
+
+	if err := credentials.Validate(); err != nil {
+		return nil, err
+	}
+
+	basicAuth := fmt.Sprintf("%s%s%s", credentials.UserName_, JsonDelimiter, credentials.Password_)
+	base64EncodedAuth := base64.StdEncoding.EncodeToString([]byte(basicAuth))
+
 	return map[string]string{
-		AuthorizationKey: BasicAuthorizationKey + grpc.Base64EncodedAuth,
+		AuthorizationKey: BasicAuthorizationKey + base64EncodedAuth,
 	}, nil
 }
 
@@ -77,8 +80,8 @@ func (grpc *GrpcCredentials) UseWithPerRPCCredentials() bool {
 type TLSConfigOptions struct {
 	// ServerName specifies the hostname for TLS handshake verification.
 	ServerName string
-	// Creds holds the user credentials for authentication.
-	Creds Credentials
+	// GetCredentials is a function pointer that retrieves connection credentials dynamically.
+	GetCredentials func() *Credentials
 	// CACert contains the CA certificate for server certificate verification.
 	CACert []byte
 	// Insecure, when true, skips server certificate and hostname validation.
@@ -89,6 +92,23 @@ type TLSConfigOptions struct {
 // IsCapella checks if the ServerName indicates a Capella deployment.
 func (opts *TLSConfigOptions) IsCapella() bool {
 	return strings.Contains(opts.ServerName, CapellaHostnameSuffix)
+}
+
+// GetClientCertificate is a function pointer that retrieves the client certificate for the connection.
+// This is used to support dynamic client certificate refresh.
+func (opts *TLSConfigOptions) GetClientCertificate(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	clientCreds := opts.GetCredentials()
+	if len(clientCreds.ClientCertificate_) == 0 {
+		// No client certificate to provide. (i.e., no mTLS)
+		// return an empty certificate to indicate that no client certificate is available.
+		// Go's tls package will not send any client certificate in this case.
+		return new(tls.Certificate), nil
+	}
+	cert, err := tls.X509KeyPair(clientCreds.ClientCertificate_, clientCreds.ClientKey_)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load client certificate/key pair: %w", err)
+	}
+	return &cert, nil
 }
 
 // configureTLS creates a TLS configuration based on the provided options.
@@ -111,13 +131,7 @@ func configureTLS(opts TLSConfigOptions) (*tls.Config, error) {
 	// mTLS: attach client cert/key if provided
 	// CNG currently does not support mtls
 	// Tracking ticket - https://jira.issues.couchbase.com/browse/ING-662
-	if len(opts.Creds.ClientCertificate_) > 0 && len(opts.Creds.ClientKey_) > 0 {
-		cert, tlsErr := tls.X509KeyPair(opts.Creds.ClientCertificate_, opts.Creds.ClientKey_)
-		if tlsErr != nil {
-			return nil, fmt.Errorf("failed to load client certificate/key pair: %w", tlsErr)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
+	tlsConfig.GetClientCertificate = opts.GetClientCertificate
 
 	return tlsConfig, nil
 }
@@ -146,7 +160,7 @@ func configureCACertPool(caCert []byte, isCapella bool) (*x509.CertPool, error) 
 // CngConn encapsulates a gRPC connection and the associated XdcrService client.
 type CngConn struct {
 	conn   *grpc.ClientConn
-	client internal_xdcr_v1.XdcrServiceClient
+	client CngClient
 }
 
 // Close closes the underlying gRPC connection.
@@ -158,7 +172,7 @@ func (c *CngConn) Close() error {
 }
 
 // Client returns the XdcrServiceClient for making gRPC calls.
-func (c *CngConn) Client() internal_xdcr_v1.XdcrServiceClient {
+func (c *CngConn) Client() CngClient {
 	return c.client
 }
 
@@ -166,17 +180,17 @@ func (c *CngConn) Client() internal_xdcr_v1.XdcrServiceClient {
 // and returns a CngConn that wraps both the connection and the protostellar-defined XDCR client.
 func NewCngConn(grpcOptions *GrpcOptions, dialOptions ...grpc.DialOption) (*CngConn, error) {
 	// Configure per-RPC credentials.
-	grpcCreds, err := NewGrpcCredentials(grpcOptions.Creds, grpcOptions.UseTLS)
+	grpcCreds, err := NewGrpcCredentials(grpcOptions.GetCredentials, grpcOptions.UseTLS)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC credentials: %w", err)
 	}
 
 	// Configure TLS.
 	tlsOpts := TLSConfigOptions{
-		ServerName: GetHostName(grpcOptions.ConnStr),
-		CACert:     grpcOptions.CaCert,
-		Creds:      grpcOptions.Creds,
-		Insecure:   !grpcOptions.UseTLS,
+		ServerName:     GetHostName(grpcOptions.ConnStr),
+		CACert:         grpcOptions.CaCert,
+		GetCredentials: grpcOptions.GetCredentials,
+		Insecure:       !grpcOptions.UseTLS,
 	}
 	tlsConfig, err := configureTLS(tlsOpts)
 	if err != nil {
