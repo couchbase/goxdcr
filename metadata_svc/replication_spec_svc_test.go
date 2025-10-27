@@ -571,6 +571,8 @@ func TestSpecMetadataCache(t *testing.T) {
 		utilitiesMock, replSpecSvc,
 		sourceBucket, targetBucket, _, _, clientMock, backfillReplSvc := setupBoilerPlate()
 
+	remoteClusterMock.On("ValidateRemote", mock.Anything).Return(nil)
+
 	pipelineMgr, pipelineMock, ckptMock, testPipeline := setupPipelineBoilerPlate(replSpecSvc, xdcrTopologyMock, remoteClusterMock, uiLogSvcMock, backfillReplSvc, defaultManifestGetter)
 
 	// Begin mocks

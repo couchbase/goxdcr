@@ -174,7 +174,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.Pip
 
 	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(testRemoteClusterRef, nil)
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(testRemoteClusterRef, nil)
-	remoteClusterMock.On("ValidateRemoteCluster", testRemoteClusterRef).Return(nil)
+	remoteClusterMock.On("ValidateRemote", testRemoteClusterRef).Return(nil)
 	remoteClusterMock.On("GetConnectivityStatus", mock.Anything).Return(metadata.ConnValid, nil)
 	rcCapability := metadata.UnitTestGetCollectionsCapability()
 	remoteClusterMock.On("GetCapability", mock.Anything).Return(rcCapability, nil)

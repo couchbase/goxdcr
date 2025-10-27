@@ -459,6 +459,7 @@ func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
 
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", "", false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
@@ -471,12 +472,14 @@ func createRemoteClusterReferenceWithRev(id string, rev interface{}) *metadata.R
 func createRemoteClusterReferenceExtOnly(id string) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_External, false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
 func createRemoteClusterReferenceIntOnly(id string) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
@@ -484,6 +487,7 @@ func createRemoteClusterReferenceDNSSRV(id string, helper base2.DnsSrvHelperIfac
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, dnsSrvHostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil,
 		nil, helper)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
@@ -492,6 +496,7 @@ var dummySelfSignedCert = []byte("-----BEGIN CERTIFICATE-----\nMIIB/TCCAWagAwIBA
 func createSSLRemoteClusterRef(id string, helper base2.DnsSrvHelperIface) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "username", "passworD", metadata.HostnameMode_Internal, true, metadata.EncryptionType_Full, dummySelfSignedCert, nil, nil, helper)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
@@ -500,6 +505,7 @@ func createRemoteClusterRefWithHost(id, host string, helper base2.DnsSrvHelperIf
 	assert.Nil(err)
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostAddr, "", "", "", false, "", nil, nil, nil, helper)
 	aRef.SetId(id)
+	aRef.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return aRef
 }
 
@@ -521,16 +527,17 @@ func TestAddDelRemoteClusterRef(t *testing.T) {
 	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
 
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
-	assert.NotEqual(agent.addressPreference, Uninitialized)
+	agentImpl := agent.(*RemoteClusterAgent)
+	assert.NotEqual(agentImpl.addressPreference, Uninitialized)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.NotNil(agent.currentCapability)
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.NotNil(agentImpl.currentCapability)
 
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 	remoteClusterSvc.agentMutex.RLock()
-	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	referencesMap, _ := remoteClusterSvc.RemoteClusters()
@@ -640,7 +647,8 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	// check before update
 	agent, exists, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
-	assert.Equal("oldUserName", agent.reference.UserName())
+	agentImpl := agent.(*RemoteClusterAgent)
+	assert.Equal("oldUserName", agentImpl.reference.UserName())
 
 	// Update the remoteClusterSvc and agents with a new mock svc to return the actual reference
 	newRef := ref.Clone()
@@ -655,14 +663,14 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 	metadataSvcMock2.On("DelWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	remoteClusterSvc.metakv_svc = metadataSvcMock2
 	remoteClusterSvc.agentMutex.Lock()
-	remoteClusterSvc.agentMap[idAndName].metakvSvc = metadataSvcMock2
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metakvSvc = metadataSvcMock2
 	remoteClusterSvc.agentMutex.Unlock()
 
 	assert.Nil(remoteClusterSvc.SetRemoteCluster(idAndName, newRef))
 	remoteClusterSvc.agentMutex.RLock()
 	assert.Nil(remoteClusterSvc.agentCacheRefNameMap[idAndName])
 	assert.NotNil(remoteClusterSvc.agentCacheRefNameMap[idAndName2])
-	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// A set should call the callback
@@ -670,8 +678,9 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 	agent, exists, _ = remoteClusterSvc.getOrStartNewAgent(newRef, false, false)
+	agentImpl = agent.(*RemoteClusterAgent)
 	assert.True(exists)
-	assert.Equal("newUserName", agent.reference.UserName())
+	assert.Equal("newUserName", agentImpl.reference.UserName())
 
 	remoteClusterSvc.DelRemoteCluster(idAndName2)
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -701,10 +710,10 @@ func TestAddThenSetCallback(t *testing.T) {
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
-	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
 
 	remoteClusterSvc.agentMutex.RLock()
-	assert.Nil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	assert.Nil(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metadataChangeCallback("", nil, nil))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// After creating agent, update the remoteClusterSvc callback
@@ -712,7 +721,7 @@ func TestAddThenSetCallback(t *testing.T) {
 
 	// Should point to the second callback
 	remoteClusterSvc.agentMutex.RLock()
-	assert.NotNil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	assert.NotNil(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metadataChangeCallback("", nil, nil))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	remoteClusterSvc.DelRemoteCluster(idAndName)
@@ -752,10 +761,10 @@ func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
-	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
 
 	remoteClusterSvc.agentMutex.RLock()
-	assert.Nil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	assert.Nil(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metadataChangeCallback("", nil, nil))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// After creating agent, update the remoteClusterSvc callback
@@ -763,7 +772,7 @@ func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
 
 	// Should point to the second callback
 	remoteClusterSvc.agentMutex.RLock()
-	assert.NotNil(remoteClusterSvc.agentMap[idAndName].metadataChangeCallback("", nil, nil))
+	assert.NotNil(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metadataChangeCallback("", nil, nil))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	remoteClusterSvc.DelRemoteCluster(idAndName)
@@ -815,7 +824,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	metadataSvcMock2.On("SetSensitive", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	remoteClusterSvc.metakv_svc = metadataSvcMock2
 	remoteClusterSvc.agentMutex.Lock()
-	remoteClusterSvc.agentMap[idAndName].metakvSvc = metadataSvcMock2
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).metakvSvc = metadataSvcMock2
 	remoteClusterSvc.agentMutex.Unlock()
 
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
@@ -824,7 +833,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert.Equal(2, callBackCount)
 	remoteClusterSvc.agentMutex.RLock()
 	assert.NotNil(remoteClusterSvc.agentMap[idAndName])
-	assert.Equal(ref2.HostName(), remoteClusterSvc.agentMap[idAndName].reference.HostName())
+	assert.Equal(ref2.HostName(), remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).reference.HostName())
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// Delete op via callback
@@ -860,7 +869,7 @@ func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 	remoteClusterSvc.agentMutex.RLock()
-	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
+	assert.NotEqual(0, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
 	remoteClusterSvc.agentMutex.RUnlock()
 
 	// Not Capi should return connectionStr
@@ -872,20 +881,20 @@ func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 	// No host in the list - but UpdateReferenceFrom would have pulled one
 	hostStr, err = remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, true)
 	remoteClusterSvc.agentMutex.RLock()
-	remoteClusterSvc.agentMap[idAndName].refMtx.RLock()
-	assert.Equal(3, len(remoteClusterSvc.agentMap[idAndName].refNodesList))
-	remoteClusterSvc.agentMap[idAndName].refMtx.RUnlock()
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refMtx.RLock()
+	assert.Equal(3, len(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList))
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refMtx.RUnlock()
 	remoteClusterSvc.agentMutex.RUnlock()
 	assert.Nil(err)
 	assert.Equal(hostname, hostStr)
 
 	// Have a host in the list, should return sorted top one
 	remoteClusterSvc.agentMutex.RLock()
-	remoteClusterSvc.agentMap[idAndName].refMtx.Lock()
-	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, base.StringPair{"dummyNewHost", ""})
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refMtx.Lock()
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList = append(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList, base.StringPair{"dummyNewHost", ""})
 	topHostName := "aaaaaHost"
-	remoteClusterSvc.agentMap[idAndName].refNodesList = append(remoteClusterSvc.agentMap[idAndName].refNodesList, base.StringPair{topHostName, ""})
-	remoteClusterSvc.agentMap[idAndName].refMtx.Unlock()
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList = append(remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refNodesList, base.StringPair{topHostName, ""})
+	remoteClusterSvc.agentMap[idAndName].(*RemoteClusterAgent).refMtx.Unlock()
 	remoteClusterSvc.agentMutex.RUnlock()
 	hostStr, _ = remoteClusterSvc.GetConnectionStringForRemoteCluster(ref, true)
 	assert.Equal(topHostName, hostStr)
@@ -931,10 +940,11 @@ func TestPositiveRefresh(t *testing.T) {
 	assert.Equal(1, callBackCount)
 
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	agent.Refresh()
 	assert.Equal(1, callBackCount) // refresh positive does not call callback
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, dummyHostNameList))
 
 	fmt.Println("============== Test case end: TestPositiveRefresh =================")
 }
@@ -961,10 +971,11 @@ func TestPositiveRefreshMultiples(t *testing.T) {
 	assert.Equal(1, callBackCount)
 
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	agent.Refresh()
 	assert.Equal(1, callBackCount) // refresh positive does not call callback
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, dummyHostNameList))
 
 	fmt.Println("Executing multiple parallel refreshes for 10 times. If it is stuck here, something is wrong...")
 	for i := 0; i < 10; i++ {
@@ -1001,9 +1012,10 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, dummyHostNameList))
 
 	// Currently nodes are: [dummyHostName1:9999 ] [dummyHostName2:9999 ] [dummyHostName3:9999 ]
 
@@ -1024,8 +1036,8 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 
 	// Second refresh
 	assert.Nil(agent.Refresh())
-	assert.NotEqual(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
+	assert.NotEqual(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, newNodeList))
 
 	fmt.Println("============== Test case end: TestRefresh3Nodes2GoesBad =================")
 }
@@ -1059,9 +1071,10 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList2))
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, dummyHostNameList2))
 
 	// First refresh should not have added to callback count because the reference boostrap node has not been changed
 	assert.Equal(1, callBackCount)
@@ -1095,8 +1108,8 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 
 	assert.Nil(refreshErr1)
 	assert.Nil(refreshErr2)
-	assert.NotEqual(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
+	assert.NotEqual(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, newNodeList))
 
 	// This second refresh should have changed the bootstrap node because node 1 was the bootstrap node and it has been declared "bad"
 	assert.Equal(2, callBackCount)
@@ -1120,10 +1133,11 @@ func TestRefreshFirstNodeIsBad(t *testing.T) {
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
-	agent.waitForRefreshEnabled()
+	agentImpl := agent.(*RemoteClusterAgent)
+	agentImpl.waitForRefreshEnabled()
 	agent.Refresh()
-	assert.Equal(hostname, agent.reference.HostName())
-	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+	assert.Equal(hostname, agentImpl.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agentImpl, dummyHostNameList))
 
 	// hostName 1 and 2 and 3 have been moved
 	// set things up for second refresh
@@ -1210,8 +1224,9 @@ func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
 	assert.Equal(1, callBackCount)
 
 	agent, exists, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.True(exists)
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 
 	// Try agent refresh delay
 	var waitGrp sync.WaitGroup
@@ -1220,7 +1235,7 @@ func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
 	waitGrp.Add(1)
 	go runFuncGetTimeElapsed(func() { refreshErr = agent.Refresh() }, &waitGrp, &refreshTimeTaken)
 	time.Sleep(100 * time.Nanosecond)
-	agent.waitForRefreshOngoing()
+	agentImpl.waitForRefreshOngoing()
 	agent.AbortAnyOngoingRefresh()
 	waitGrp.Wait()
 
@@ -1287,11 +1302,12 @@ func TestRefreshAndOverride(t *testing.T) {
 	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
 
 	agent, exists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*UserInitiated*/, false /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.NotNil(agent)
 	assert.False(exists)
-	agent.unitTestBypassMetaKV = true
-	agent.waitForRefreshEnabled()
+	agentImpl.unitTestBypassMetaKV = true
+	agentImpl.waitForRefreshEnabled()
 
 	var waitGrp sync.WaitGroup
 	var refreshTimeTaken time.Duration
@@ -1299,7 +1315,7 @@ func TestRefreshAndOverride(t *testing.T) {
 	waitGrp.Add(1)
 	go runFuncGetTimeElapsed(func() { refreshErr = agent.Refresh() }, &waitGrp, &refreshTimeTaken)
 	time.Sleep(200 * time.Nanosecond)
-	agent.waitForRefreshOngoing()
+	agentImpl.waitForRefreshOngoing()
 
 	// Once refresh is underway, do a set that overrides the reset
 	setErr := agent.UpdateReferenceFrom(setRef, true /*updateMetakv*/)
@@ -1308,7 +1324,7 @@ func TestRefreshAndOverride(t *testing.T) {
 	waitGrp.Wait()
 	assert.Equal(RefreshAborted, refreshErr)
 
-	assert.Equal(testcaseUserName, agent.reference.UserName())
+	assert.Equal(testcaseUserName, agentImpl.reference.UserName())
 
 	fmt.Println("============== Test case end: TestRefreshAndOverride =================")
 }
@@ -1334,11 +1350,12 @@ func TestSetDisablesRefresh(t *testing.T) {
 	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
 
 	agent, exists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*UserInitiated*/, false /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.NotNil(agent)
 	assert.False(exists)
-	agent.unitTestBypassMetaKV = true
-	agent.waitForRefreshEnabled()
+	agentImpl.unitTestBypassMetaKV = true
+	agentImpl.waitForRefreshEnabled()
 
 	var waitGrp sync.WaitGroup
 	var setTimeTaken time.Duration
@@ -1349,9 +1366,9 @@ func TestSetDisablesRefresh(t *testing.T) {
 	var pendingRefIsEmpty bool = true
 	for pendingRefIsEmpty {
 		time.Sleep(100 * time.Nanosecond)
-		agent.refMtx.RLock()
-		pendingRefIsEmpty = agent.pendingRef.IsEmpty()
-		agent.refMtx.RUnlock()
+		agentImpl.refMtx.RLock()
+		pendingRefIsEmpty = agentImpl.pendingRef.IsEmpty()
+		agentImpl.refMtx.RUnlock()
 	}
 
 	// Once set is occurring, Refresh should be disabled
@@ -1360,7 +1377,7 @@ func TestSetDisablesRefresh(t *testing.T) {
 
 	waitGrp.Wait()
 	assert.Equal(nil, setErr)
-	assert.Equal(testcaseUserName, agent.reference.UserName())
+	assert.Equal(testcaseUserName, agentImpl.reference.UserName())
 
 	// Once set finished, refresh should be re-enabled
 	refreshErr = agent.Refresh()
@@ -1390,7 +1407,8 @@ func TestNoWriteAfterDeletes(t *testing.T) {
 	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.Equal(1, callBackCount)
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
-	assert.Nil(agent.deleteFromMetaKV())
+	agentImpl := agent.(*RemoteClusterAgent)
+	assert.Nil(agentImpl.deleteFromMetaKV())
 	// Make minor changes
 	ref.UserName_ = "changedUsername"
 	assert.NotNil(agent.UpdateReferenceFrom(ref, true /*updateMetaKV*/))
@@ -1588,17 +1606,18 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 
 	// When there's an error contacting the bootstrap node, agent should still be created and started
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
 
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 
 	// However, agent should return error when bootstrap had issues
 	_, err = agent.UsesAlternateAddress()
 	assert.Equal(base.ErrorRemoteClusterUninit, err)
 
 	// Agent should also not get the list of refNodes yet
-	assert.Equal(0, len(agent.refNodesList))
+	assert.Equal(0, len(agentImpl.refNodesList))
 
 	// Pretend the second pull now will return ok
 	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
@@ -1607,7 +1626,7 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 
 	// now a refresh should populate node list and also the user's intent
 	assert.Nil(agent.Refresh())
-	assert.NotEqual(0, len(agent.refNodesList))
+	assert.NotEqual(0, len(agentImpl.refNodesList))
 	_, err = agent.UsesAlternateAddress()
 	assert.Nil(err)
 
@@ -1698,9 +1717,10 @@ func TestAddressPreferenceChange(t *testing.T) {
 
 	// First bootstrap agent with a reference that refers to the external hostname
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Due to the async nature, alternate address should have error
 	_, err = agent.UsesAlternateAddress()
@@ -1711,11 +1731,11 @@ func TestAddressPreferenceChange(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.True(useAlternate)
-	assert.Equal(0, agent.pendingAddressPrefCnt)
+	assert.Equal(0, agentImpl.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
@@ -1776,9 +1796,10 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 
 	// First bootstrap agent with a reference that refers to the external hostname
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Due to the async nature, alternate address should have error
 	_, err = agent.UsesAlternateAddress()
@@ -1789,11 +1810,11 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.True(useAlternate)
-	assert.Equal(0, agent.pendingAddressPrefCnt)
+	assert.Equal(0, agentImpl.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
@@ -1855,9 +1876,10 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 
 	// First bootstrap agent with a reference that refers to the external hostname
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Due to the async nature, alternate address should have error
 	_, err = agent.UsesAlternateAddress()
@@ -1868,11 +1890,11 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.True(useAlternate)
-	assert.Equal(0, agent.pendingAddressPrefCnt)
+	assert.Equal(0, agentImpl.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
@@ -1886,11 +1908,11 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	// Now pretend user changed his mind and now future pulls will go back go external
 	remoteClusterSvc.updateUtilities(utilitiesMockExt)
 	// Force the refname to match external - because unit test
-	agent.reference.HostName_ = externalHostName
+	agentImpl.reference.HostName_ = externalHostName
 	assert.Nil(agent.Refresh())
 
 	// Since currently it is running external, and flipflopped back to external, there should not be any need for updates
-	assert.Equal(0, agent.pendingAddressPrefCnt)
+	assert.Equal(0, agentImpl.pendingAddressPrefCnt)
 
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeFlipFlop =================")
 }
@@ -2012,8 +2034,9 @@ func TestCapabilityChange(t *testing.T) {
 	assert.Equal(0, len(refListChanged))
 
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, false /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.NotNil(agent)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Now pretend target cluster upgraded to Cheshire Cat
 	_, _, _, utilitiesMockNew, _ := setupBoilerPlateRCS()
@@ -2055,6 +2078,7 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*userInitiated*/, false /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.False(alreadyExists)
 	assert.Nil(err)
 	assert.NotNil(agent)
@@ -2063,11 +2087,11 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	// external node list and external hostname
 
 	// hostname is not the node list but uses external
-	assert.True(agent.reference.HostName() != "11.11.11.11:1100" && agent.reference.HostName() != "12.12.12.12:1100")
+	assert.True(agentImpl.reference.HostName() != "11.11.11.11:1100" && agentImpl.reference.HostName() != "12.12.12.12:1100")
 	useExternal, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.True(useExternal)
-	for _, node := range agent.refNodesList {
+	for _, node := range agentImpl.refNodesList {
 		assert.True(node[0] == "11.11.11.11:1100" || node[0] == "12.12.12.12:1100")
 	}
 
@@ -2079,14 +2103,14 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	//	assert.Nil(err)
 	//	assert.True(useExternal)
 
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 	assert.Nil(agent.Refresh())
 
-	assert.True(agent.reference.HostName() == "11.11.11.11:1100" || agent.reference.HostName() == "12.12.12.12:1100")
+	assert.True(agentImpl.reference.HostName() == "11.11.11.11:1100" || agentImpl.reference.HostName() == "12.12.12.12:1100")
 	useExternal, err = agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.True(useExternal)
-	for _, node := range agent.refNodesList {
+	for _, node := range agentImpl.refNodesList {
 		assert.True(node[0] == "11.11.11.11:1100" || node[0] == "12.12.12.12:1100")
 	}
 
@@ -2112,27 +2136,28 @@ func TestInitializeWithoutExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*userInitiated*/, false /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.False(alreadyExists)
 	assert.Nil(err)
 	assert.NotNil(agent)
 
 	// hostname is not the node list and does not use external
-	assert.True(agent.reference.HostName() != "11.11.11.11:1100" && agent.reference.HostName() != "12.12.12.12:1100")
+	assert.True(agentImpl.reference.HostName() != "11.11.11.11:1100" && agentImpl.reference.HostName() != "12.12.12.12:1100")
 	useExternal, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.False(useExternal)
-	for _, node := range agent.refNodesList {
+	for _, node := range agentImpl.refNodesList {
 		assert.True(node[0] != "11.11.11.11:1100" && node[0] != "12.12.12.12:1100")
 	}
 
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 	assert.Nil(agent.Refresh())
 
-	assert.False(agent.reference.HostName() == "11.11.11.11:1100" || agent.reference.HostName() == "12.12.12.12:1100")
+	assert.False(agentImpl.reference.HostName() == "11.11.11.11:1100" || agentImpl.reference.HostName() == "12.12.12.12:1100")
 	useExternal, err = agent.UsesAlternateAddress()
 	assert.Nil(err)
 	assert.False(useExternal)
-	for _, node := range agent.refNodesList {
+	for _, node := range agentImpl.refNodesList {
 		assert.False(node[0] == "11.11.11.11:1100" || node[0] == "12.12.12.12:1100")
 	}
 
@@ -2171,9 +2196,10 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 
 	// First bootstrap agent with a reference that refers to the external hostname
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Due to the async nature, alternate address should have error
 	_, err = agent.UsesAlternateAddress()
@@ -2184,12 +2210,12 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
-	agent.waitForRefreshEnabled()
+	agentImpl.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
 	assert.Nil(err)
 	// Should be false for use alternate because of forced internal
 	assert.False(useAlternate)
-	assert.Equal(0, agent.pendingAddressPrefCnt)
+	assert.Equal(0, agentImpl.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
@@ -2246,17 +2272,18 @@ func TestDNSSrv(t *testing.T) {
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
-	agent.waitForRefreshEnabled()
-	agent.refMtx.RLock()
-	assert.True(agent.reference.IsDnsSRV())
-	srvHostNames := agent.reference.GetSRVHostNames()
+	agentImpl.waitForRefreshEnabled()
+	agentImpl.refMtx.RLock()
+	assert.True(agentImpl.reference.IsDnsSRV())
+	srvHostNames := agentImpl.reference.GetSRVHostNames()
 	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
 	dnsRemotenodeHostname = "192.168.0.1:8091"
-	agent.refMtx.RUnlock()
+	agentImpl.refMtx.RUnlock()
 	var found bool
 	for _, host := range srvHostNames {
 		if host == dnsRemotenodeHostname {
@@ -2266,32 +2293,32 @@ func TestDNSSrv(t *testing.T) {
 	}
 	assert.True(found)
 	assert.Equal(dnsSrvHostname, ref.HostName())
-	agent.waitForRefreshEnabled()
-	agent.refMtx.RLock()
-	assert.Equal(dnsSrvHostname, agent.reference.HostName())
-	assert.True(agent.reference.IsDnsSRV())
-	agent.refMtx.RUnlock()
+	agentImpl.waitForRefreshEnabled()
+	agentImpl.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agentImpl.reference.HostName())
+	assert.True(agentImpl.reference.IsDnsSRV())
+	agentImpl.refMtx.RUnlock()
 
 	// After refresh, hostname should remain the same
 	assert.Nil(agent.Refresh())
-	agent.refMtx.RLock()
-	assert.Equal(dnsSrvHostname, agent.reference.HostName())
-	oldHostName := agent.reference.HostName()
-	agent.refMtx.RUnlock()
+	agentImpl.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agentImpl.reference.HostName())
+	oldHostName := agentImpl.reference.HostName()
+	agentImpl.refMtx.RUnlock()
 
 	// Now pretend DNS SRV is turned off/broken
 	badSRVHelper := &baseMock.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
 	badSRVHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, base2.SrvRecordsInvalid, fmt.Errorf("Dummy"))
-	agent.refMtx.Lock()
-	agent.reference.UnitTestSetSRVHelper(badSRVHelper)
-	agent.refMtx.Unlock()
+	agentImpl.refMtx.Lock()
+	agentImpl.reference.UnitTestSetSRVHelper(badSRVHelper)
+	agentImpl.refMtx.Unlock()
 
 	// Host name should be replaced
 	assert.Nil(agent.Refresh())
-	agent.refMtx.RLock()
-	assert.NotEqual(oldHostName, agent.reference.HostName())
-	agent.refMtx.RUnlock()
+	agentImpl.refMtx.RLock()
+	assert.NotEqual(oldHostName, agentImpl.reference.HostName())
+	agentImpl.refMtx.RUnlock()
 	fmt.Println("============== Test case end: TestDNSSrv =================")
 }
 
@@ -2438,6 +2465,7 @@ func TestParallelSecureGetFail(t *testing.T) {
 	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
 
 	agent, _, err := remoteClusterSvc.getOrStartNewAgent(ref, true, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.NotNil(agent)
 
@@ -2445,14 +2473,14 @@ func TestParallelSecureGetFail(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(nodeList)
 
-	agent.utils = testUtils
+	agentImpl.utils = testUtils
 	hostname := "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com"
-	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
+	isExternal, err := agentImpl.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
 	assert.Nil(err)
 	assert.True(isExternal)
 
 	hostname = "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:8091"
-	isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
+	isExternal, err = agentImpl.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
 	assert.Nil(err)
 	assert.True(isExternal)
 }
@@ -2479,11 +2507,12 @@ func TestDNSSRVReturnAlternate(t *testing.T) {
 	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
 
 	agent, _, err := remoteClusterSvc.getOrStartNewAgent(ref, true, false)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.NotNil(agent)
 
 	// agent to use a real utils for the following test
-	agent.utils = testUtils
+	agentImpl.utils = testUtils
 
 	nodeList, err := getCloudNodeList()
 	assert.Nil(err)
@@ -2496,7 +2525,7 @@ func TestDNSSRVReturnAlternate(t *testing.T) {
 		"cb-0001.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:18091",
 		"cb-0002.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:18091",
 	}
-	isExteranal, err := agent.checkIfHostnameIsAlternate(nodeList, srvName, true, srvNodeList)
+	isExteranal, err := agentImpl.checkIfHostnameIsAlternate(nodeList, srvName, true, srvNodeList)
 	assert.Nil(err)
 	assert.True(isExteranal)
 }
@@ -2539,25 +2568,26 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 
 	// First bootstrap agent with a reference that refers to the external hostname
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
 	// Helper first returns everything healthy
-	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
+	agentImpl.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
 
 	// Should not report unhealthy
 	assert.False(agent.GetUnreportedAuthError())
 
 	// Now cluster auth is bad
-	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnAuthErr)
+	agentImpl.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnAuthErr)
 
 	// Should report unhealthy for one time only
 	assert.True(agent.GetUnreportedAuthError())
 	assert.False(agent.GetUnreportedAuthError())
 
 	// Now cluster auth is good again
-	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
+	agentImpl.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
 
 	// should not report
 	assert.False(agent.GetUnreportedAuthError())
@@ -2799,17 +2829,18 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
+	agentImpl.unitTestBypassMetaKV = true
 
-	agent.waitForRefreshEnabled()
-	agent.refMtx.RLock()
-	assert.True(agent.reference.IsDnsSRV())
-	srvHostNames := agent.reference.GetSRVHostNames()
+	agentImpl.waitForRefreshEnabled()
+	agentImpl.refMtx.RLock()
+	assert.True(agentImpl.reference.IsDnsSRV())
+	srvHostNames := agentImpl.reference.GetSRVHostNames()
 	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
 	dnsRemotenodeHostname = "192.168.0.1:8091"
-	agent.refMtx.RUnlock()
+	agentImpl.refMtx.RUnlock()
 	var found bool
 	for _, host := range srvHostNames {
 		if host == dnsRemotenodeHostname {
@@ -2819,11 +2850,11 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 	}
 	assert.True(found)
 	assert.Equal(dnsSrvHostname, ref.HostName())
-	agent.waitForRefreshEnabled()
-	agent.refMtx.RLock()
-	assert.Equal(dnsSrvHostname, agent.reference.HostName())
-	assert.True(agent.reference.IsDnsSRV())
-	agent.refMtx.RUnlock()
+	agentImpl.waitForRefreshEnabled()
+	agentImpl.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agentImpl.reference.HostName())
+	assert.True(agentImpl.reference.IsDnsSRV())
+	agentImpl.refMtx.RUnlock()
 
 	// Now let's pretend the SRV record points to a completely different set of A records
 	srvHelper2 := &baseMock.DnsSrvHelperIface{}
@@ -2835,10 +2866,10 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 	srvList2 = append(srvList2, srvEntry2)
 	srvHelper2.On("DnsSrvLookup", dnsSrvHostname).Return(srvList2, base2.SrvRecordsNonSecure, nil)
 
-	agent.refMtx.Lock()
-	agent.reference.UnitTestSetSRVHelper(srvHelper2)
-	agent.pendingRef.UnitTestSetSRVHelper(srvHelper2)
-	agent.refMtx.Unlock()
+	agentImpl.refMtx.Lock()
+	agentImpl.reference.UnitTestSetSRVHelper(srvHelper2)
+	agentImpl.pendingRef.UnitTestSetSRVHelper(srvHelper2)
+	agentImpl.refMtx.Unlock()
 
 	_, _, _, utilitiesMockErr, _ := setupBoilerPlateRCS()
 	forcedErr := fmt.Errorf("Unit test force error when refreshing")
@@ -2848,15 +2879,15 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 
 	// Wait until the periodic refresh hits and utils returns an error
 	// Then it should trigger a re-bootstrap of SRV entries
-	agent.reference.PopulateDnsSrvIfNeeded(nil)
+	agentImpl.reference.PopulateDnsSrvIfNeeded(nil)
 	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
 
-	agent.refMtx.RLock()
-	assert.True(agent.reference.IsDnsSRV())
-	srvHostNames = agent.reference.GetSRVHostNames()
+	agentImpl.refMtx.RLock()
+	assert.True(agentImpl.reference.IsDnsSRV())
+	srvHostNames = agentImpl.reference.GetSRVHostNames()
 	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
 	dnsRemotenodeHostname = "192.168.0.2:8091"
-	agent.refMtx.RUnlock()
+	agentImpl.refMtx.RUnlock()
 	found = false
 	for _, host := range srvHostNames {
 		if host == dnsRemotenodeHostname {
@@ -2866,15 +2897,15 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 	}
 	assert.True(found)
 	assert.Equal(dnsSrvHostname, ref.HostName())
-	assert.Equal(dnsSrvHostname, agent.reference.HostName())
-	assert.Equal("", agent.reference.ActiveHostName())
+	assert.Equal(dnsSrvHostname, agentImpl.reference.HostName())
+	assert.Equal("", agentImpl.reference.ActiveHostName())
 
 	// Restore a valid utils
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 	// Wait for a valid refresh
 	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
 	// Ensure activeHostname is repopulated
-	assert.NotEqual("", agent.reference.ActiveHostName())
+	assert.NotEqual("", agentImpl.reference.ActiveHostName())
 }
 
 func TestConnectivityHelper_SyncWithValidList(t *testing.T) {
@@ -3013,29 +3044,30 @@ func TestNLBPoolsDefaultSSLMgmt(t *testing.T) {
 
 	idAndName := "test"
 	ref, _ := metadata.NewRemoteClusterReference(uuidField, idAndName, "192.168.56.10:15022", "", "", metadata.HostnameMode_External, true, metadata.EncryptionType_Full, nil, nil, nil, nil)
-
+	ref.SetRemoteType(metadata.RemoteTypeCbCluster)
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
-	agent.initDone = uint32(1)
+	agentImpl.unitTestBypassMetaKV = true
+	agentImpl.initDone = uint32(1)
 
 	clonedRef := ref.Clone()
-	agent.pendingRef = *clonedRef
+	agentImpl.pendingRef = *clonedRef
 
 	time.Sleep(2 * time.Second)
 
-	rctx, _, err := agent.initializeNewRefreshContext()
+	rctx, _, err := agentImpl.initializeNewRefreshContext()
 	assert.Nil(err)
 	assert.NotNil(rctx)
 
-	agent.syncInternalsFromStagedReference(rctx)
+	agentImpl.syncInternalsFromStagedReference(rctx)
 
-	assert.NotNil(agent.pendingRefNodes)
-	for _, nodePair := range agent.pendingRefNodes {
+	assert.NotNil(agentImpl.pendingRefNodes)
+	for _, nodePair := range agentImpl.pendingRefNodes {
 		assert.False(strings.Contains(nodePair.GetFirstString(), "18091"))
 		assert.False(strings.Contains(nodePair.GetSecondString(), "18091"))
 	}
@@ -3056,10 +3088,11 @@ func TestBootstrapNodeMoves(t *testing.T) {
 	})
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
-	agent.waitForRefreshEnabled()
+	agentImpl.unitTestBypassMetaKV = true
+	agentImpl.waitForRefreshEnabled()
 
 	agent.SetBootstrap()
 	assert.Equal(BootStrapNodeHasMovedError, agent.Refresh())
@@ -3093,10 +3126,11 @@ func TestBootstrapNodeMovesWithDNSSrv(t *testing.T) {
 	})
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	agentImpl := agent.(*RemoteClusterAgent)
 	assert.Nil(err)
 	assert.False(alreadyExists)
-	agent.unitTestBypassMetaKV = true
-	agent.waitForRefreshEnabled()
+	agentImpl.unitTestBypassMetaKV = true
+	agentImpl.waitForRefreshEnabled()
 
 	agent.SetBootstrap()
 	assert.Equal(ErrorRefreshUnreachable, agent.Refresh())
