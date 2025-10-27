@@ -84,6 +84,7 @@ DIRS_WITH_UT=(
 	hlv
 	metadata
 	metadata_svc
+	metadata_svc/cngAgent
 	parts
 	peerToPeer
 	pipeline
@@ -94,6 +95,7 @@ DIRS_WITH_UT=(
 	resource_manager
 	service_impl
 	streamApiWatcher
+	streamApiWatcher/cngWatcher
 	utils
 	base/iopool
 	service_impl/throttlerSvcImpl
