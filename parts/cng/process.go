@@ -45,6 +45,27 @@ type mutationTrace struct {
 	pushRsp PushDocRsp
 }
 
+func (d mutationTrace) Equal(other mutationTrace) bool {
+	res := d.opcode == other.opcode &&
+		d.vbno == other.vbno &&
+		d.optimistic == other.optimistic &&
+		d.isExpiry == other.isExpiry &&
+		d.isDelete == other.isDelete &&
+		d.checked == other.checked
+	if !res {
+		return false
+	}
+
+	if d.checked && !d.conflictCheckRsp.Equal(other.conflictCheckRsp) {
+		return false
+	}
+	if d.pushed && !d.pushRsp.Equal(other.pushRsp) {
+		return false
+	}
+
+	return true
+}
+
 func (d mutationTrace) String() string {
 	sbuf := strings.Builder{}
 	sbuf.WriteString(fmt.Sprintf("opcode=%s, vbno=%d, optimistic=%v, isDel=%v, isExp=%v, checked: %v",
@@ -69,10 +90,11 @@ func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (tr
 }
 
 func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (trace mutationTrace, err error) {
+	trace.vbno = req.GetSourceVB()
 	trace.opcode = req.Req.Opcode
 
-	n.Logger().Infof(">> processing key=%s, dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v",
-		string(req.OriginalKey), req.Req.DataType, base.HasXattr(req.Req.DataType),
+	n.Logger().Debugf("processing key=%s, opcode=%s, dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v",
+		string(req.OriginalKey), req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
 		req.NeedToRecompress,
 		req.Req.DataType&base.SnappyDataType > 0)
 
@@ -133,6 +155,10 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 type conflictCheckRsp struct {
 	sourceWon bool
 	reason    string
+}
+
+func (r conflictCheckRsp) Equal(other conflictCheckRsp) bool {
+	return r.sourceWon == other.sourceWon && r.reason == other.reason
 }
 
 func (c conflictCheckRsp) String() string {

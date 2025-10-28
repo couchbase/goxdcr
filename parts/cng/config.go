@@ -22,9 +22,9 @@ type ReplicationConfig struct {
 	SourceBucketName  string
 	SourceBucketUUID  string
 
-	TargetClusterUUD string
-	TargetBucketName string
-	TargetBucketUUID string
+	TargetClusterUUID string
+	TargetBucketName  string
+	TargetBucketUUID  string
 }
 
 func (rc *ReplicationConfig) Validate() error {
@@ -40,7 +40,7 @@ func (rc *ReplicationConfig) Validate() error {
 	if rc.SourceBucketUUID == "" {
 		return fmt.Errorf("SourceBucketUUID is empty")
 	}
-	if rc.TargetClusterUUD == "" {
+	if rc.TargetClusterUUID == "" {
 		return fmt.Errorf("TargetClusterUUD is empty")
 	}
 	return nil

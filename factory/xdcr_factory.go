@@ -812,7 +812,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 				SourceBucketName:  spec.SourceBucketName,
 				SourceClusterUUID: sourceClusterUUID,
 				SourceBucketUUID:  spec.SourceBucketUUID,
-				TargetClusterUUD:  spec.TargetClusterUUID,
+				TargetClusterUUID: spec.TargetClusterUUID,
 				TargetBucketName:  spec.TargetBucketName,
 				TargetBucketUUID:  spec.TargetBucketUUID,
 			},
@@ -855,7 +855,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			err = base.ErrorNoTargetNozzle
 			return
 		}
-		xdcrf.logger.Infof(">> target topology retrieved. kvVBMap = %v\n", kvVBMap)
 		return
 	}
 
