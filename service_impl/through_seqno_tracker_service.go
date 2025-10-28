@@ -1818,7 +1818,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addManifestId(vbno uint16, seqno, manif
 		return
 	}
 
-	tsTracker.Logger().Infof(">> tsTracker addManifestId, vbno=%d, seqno=%d, manifestId=%d\n", vbno, seqno, manifestId)
 	tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(vbno, seqno, manifestId)
 }
 

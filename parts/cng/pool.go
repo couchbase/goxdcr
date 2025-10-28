@@ -154,6 +154,10 @@ func (p *ConnPool) callFn(w *wrapperConn, fn func(client XDCRClient) error) erro
 }
 
 func (p *ConnPool) Close() {
+	if p == nil {
+		return
+	}
+
 	p.isClosed.Store(true)
 	close(p.shutdown)
 	p.poolLock.Lock()
@@ -166,7 +170,7 @@ func (p *ConnPool) Close() {
 func (p *ConnPool) closeAllConnUnsafe() (err error) {
 	for _, w := range p.clients {
 		w.rw.Lock()
-		if w.conn != nil && w.conn != nil {
+		if w.conn != nil {
 			w.conn.Close()
 		}
 		w.rw.Unlock()

@@ -16,7 +16,6 @@ func (n *Nozzle) worker(ctx context.Context) {
 			return
 		case req := <-n.dataCh:
 			trace, err := n.processReq(ctx, req)
-			trace.vbno = req.GetSourceVB()
 			trace.commitTime = time.Since(req.Start_time)
 
 			if err == nil {
