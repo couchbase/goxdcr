@@ -841,7 +841,7 @@ type WrappedMCRequest struct {
 	Req    *mc.MCRequest
 	// OriginalKey is the original key before any collection prefix is added
 	// This is added for CNG nozzle.
-	OriginalKey                []byte
+	OriginalKey                string
 	Start_time                 time.Time
 	UniqueKey                  string
 	SrcColNamespace            *CollectionNamespace

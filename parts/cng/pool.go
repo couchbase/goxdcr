@@ -251,7 +251,6 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
 				return err
 			}
 
-			p.logger.Infof("network error, connIndex=%d, err: %v", index, err)
 			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
 			// Attempt to recreate the connection
 			err = p.connect(int(index))

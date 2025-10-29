@@ -16,6 +16,12 @@ import (
 
 type XDCRClient internal_xdcr_v1.XdcrServiceClient
 
+type CNGContextKey string
+
+const (
+	MutationTraceContextKey CNGContextKey = "mtrace"
+)
+
 type Nozzle struct {
 	parts.AbstractPart
 	cfg Config

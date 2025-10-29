@@ -3,100 +3,28 @@ package cng
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/v8/base"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// mutationTrace keeps track of the operations performed for a mutation
-// The fields are set during various stages of processing
-type mutationTrace struct {
-	opcode mc.CommandCode
-
-	// source vbucket number
-	vbno uint16
-
-	// optimistic indicates whether replication is done in optimistic mode or not
-	optimistic bool
-
-	// isExpiry indicates whether the mutation has an expiration
-	isExpiry bool
-
-	// isDelete indicates whether the mutation is a deletion
-	isDelete bool
-
-	// commitTime is the time taken for from DCP to processing completion
-	commitTime time.Duration
-
-	// checked indicates whether conflict check was performed
-	checked bool
-	// conflictCheckRsp holds the response from the conflict check
-	// This is relevant only if checked is true
-	conflictCheckRsp conflictCheckRsp
-
-	// pushed indicates whether pushDocument was performed
-	pushed bool
-	// pushRsp holds the response from the pushDocument
-	// This is relevant only if pushed is true
-	pushRsp PushDocRsp
-}
-
-func (d mutationTrace) Equal(other mutationTrace) bool {
-	res := d.opcode == other.opcode &&
-		d.vbno == other.vbno &&
-		d.optimistic == other.optimistic &&
-		d.isExpiry == other.isExpiry &&
-		d.isDelete == other.isDelete &&
-		d.checked == other.checked
-	if !res {
-		return false
-	}
-
-	if d.checked && !d.conflictCheckRsp.Equal(other.conflictCheckRsp) {
-		return false
-	}
-	if d.pushed && !d.pushRsp.Equal(other.pushRsp) {
-		return false
-	}
-
-	return true
-}
-
-func (d mutationTrace) String() string {
-	sbuf := strings.Builder{}
-	sbuf.WriteString(fmt.Sprintf("opcode=%s, vbno=%d, optimistic=%v, isDel=%v, isExp=%v, checked: %v",
-		d.opcode.String(), d.vbno, d.optimistic, d.isDelete, d.isExpiry, d.checked))
-	if d.checked {
-		sbuf.WriteString(fmt.Sprintf(", conflictRsp: (%v)", d.conflictCheckRsp))
-	}
-	sbuf.WriteString(fmt.Sprintf(", pushed: %v", d.pushed))
-	if d.pushed {
-		sbuf.WriteString(fmt.Sprintf(", pushRsp: (%s)", d.pushRsp.String()))
-	}
-
-	return sbuf.String()
-}
-
-func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (trace mutationTrace, err error) {
+func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (err error) {
 	err = n.connPool.WithConn(func(client XDCRClient) (err error) {
-		trace, err = n.transfer(ctx, client, req)
-		return err
+		return n.transfer(ctx, client, req)
 	})
 	return
 }
 
-func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (trace mutationTrace, err error) {
+func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (err error) {
+	trace, err := getTrace(ctx)
+	if err != nil {
+		return
+	}
 	trace.vbno = req.GetSourceVB()
 	trace.opcode = req.Req.Opcode
-
-	n.Logger().Debugf("processing key=%s, opcode=%s, dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v",
-		string(req.OriginalKey), req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
-		req.NeedToRecompress,
-		req.Req.DataType&base.SnappyDataType > 0)
 
 	expiry, err := req.Expiry()
 	if err != nil {
@@ -111,8 +39,13 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 	if err != nil {
 		return
 	}
-	n.Logger().Infof("processing key=%s, seqNo=%v, cas=%v, opcode=%v, revSeqNo=%v, flags=%v, expiry=%v",
-		string(req.OriginalKey), req.Seqno, req.Req.Cas, req.Req.Opcode, revSeqNo, flags, expiry)
+
+	n.Logger().Debugf("processing key=%s, seqno=%d, opcode=%s,  dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v, revSeqNo=%v, expiry=%v, flags=%v",
+		req.OriginalKey, req.Seqno, req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
+		req.NeedToRecompress,
+		req.Req.DataType&base.SnappyDataType > 0,
+		revSeqNo,
+		expiry, flags)
 
 	isOptimistic := n.isOptimistic(req)
 	trace.optimistic = isOptimistic
@@ -121,40 +54,30 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 
 	if !isOptimistic {
 		trace.checked = true
-		conflictRsp, err := n.conflictCheck(ctx, client, req)
+		conflictCheckRsp, err := n.conflictCheck(ctx, client, req)
+		trace.conflictCheckRsp = conflictCheckRsp
 		if err != nil {
-			st, ok := status.FromError(err)
-			if !ok {
-				return trace, err
-			}
-
-			// CNG TODO: make it a util to log grpc errors
-			n.Logger().Errorf("conflictCheck failed, code=%v, details=%v, message=%v",
-				st.Code(), st.Details(), st.Message())
-			return trace, err
+			return err
 		}
 
-		trace.conflictCheckRsp = conflictRsp
-
-		n.Logger().Infof("conflictCheck response=%v", conflictRsp)
-		if !conflictRsp.sourceWon {
-			return trace, nil
+		if !conflictCheckRsp.sourceWon {
+			return nil
 		}
 	}
 
 	trace.pushed = true
-	pushRsp, err := n.PushDocument(ctx, client, req)
+	trace.pushRsp, err = n.PushDocument(ctx, client, req)
 	if err != nil {
 		return
 	}
 
-	trace.pushRsp = pushRsp
 	return
 }
 
 type conflictCheckRsp struct {
 	sourceWon bool
 	reason    string
+	exists    bool
 }
 
 func (r conflictCheckRsp) Equal(other conflictCheckRsp) bool {
@@ -169,11 +92,16 @@ func (c conflictCheckRsp) String() string {
 // An error returned indicates that the conflict check failed. The caller must check sourceWon only if err is nil
 func (n *Nozzle) conflictCheck(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp conflictCheckRsp, err error) {
 	// CNG TODO: check for optimistic replication
+	_, err = n.CheckDocument(ctx, client, req)
+	err = handleConflictCheckErr(err, &rsp)
+	return
+}
 
-	checkRsp, err := n.CheckDocument(ctx, client, req)
+func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
+	err = origErr
 	if err == nil {
-		rsp.sourceWon = !checkRsp.Exists
-		rsp.reason = ConflictReasonDocMissing
+		rsp.sourceWon = true
+		rsp.reason = ConflictReasonSuccess
 		return
 	}
 
@@ -187,18 +115,37 @@ func (n *Nozzle) conflictCheck(ctx context.Context, client XDCRClient, req *base
 		return
 	}
 
-	// We check only the first detail for now
-	// Have not seen multiple details so far
+	switch st.Code() {
+	case codes.NotFound:
+		for _, d := range details {
+			switch info := d.(type) {
+			case *errdetails.ResourceInfo:
+				switch info.ResourceType {
+				case ResourceTypeDocument:
+					err = nil
+					rsp.sourceWon = true
+					rsp.reason = ConflictReasonDocMissing
+				case ResourceTypeCollection:
+					err = ErrCollectionNotFound
+				case ResourceTypeScope:
+					err = ErrScopeNotFound
+				}
+			}
+		}
 
-	detail, ok := details[0].(*errdetails.ErrorInfo)
-	if !ok || detail.Reason != ConflictReasonDocNewer {
-		return
+	case codes.Aborted:
+		for _, d := range details {
+			switch info := d.(type) {
+			case *errdetails.ErrorInfo:
+				if info.Reason == ConflictReasonDocNewer {
+					err = nil
+					rsp.exists = true
+					rsp.sourceWon = false
+					rsp.reason = ConflictReasonDocNewer
+				}
+			}
+		}
 	}
-
-	rsp.sourceWon = false
-	rsp.reason = ConflictReasonDocNewer
-
-	err = nil
 
 	return
 }
