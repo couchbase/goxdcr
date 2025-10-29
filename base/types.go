@@ -3967,3 +3967,39 @@ func (rsp *GrpcResponse[Resp]) Response() Resp {
 func (rsp *GrpcResponse[Resp]) Err() error {
 	return rsp.Error
 }
+
+// GetManifestOpts encapsulates the options for getting a manifest.
+type GetManifestOpts struct {
+	// ClusterUUID is the UUID of the cluster to get the manifest for.
+	ClusterUUID string
+	// BucketName is the name of the bucket to get the manifest for.
+	BucketName string
+	// ForceRefresh is a flag to force a refresh of the manifest.
+	ForceRefresh bool
+	// RestAPIQuery is a flag to indicate if the manifest request is coming from the REST API.
+	RestAPIQuery bool
+}
+
+// NewGetManifestOpts is the constructor for GetManifestOpts.
+func NewGetManifestOpts(clusterUUID, bucketName string, forceRefresh, restAPIQuery bool) *GetManifestOpts {
+	return &GetManifestOpts{
+		ClusterUUID:  clusterUUID,
+		BucketName:   bucketName,
+		ForceRefresh: forceRefresh,
+		RestAPIQuery: restAPIQuery,
+	}
+}
+
+// Validate validates the GetManifestOpts.
+func (opts *GetManifestOpts) Validate() error {
+	if opts == nil {
+		return errors.New("Validate called on nil GetManifestOpts")
+	}
+	if opts.ClusterUUID == "" {
+		return errors.New("ClusterUUID is required in GetManifestOpts")
+	}
+	if opts.BucketName == "" {
+		return errors.New("BucketName is required in GetManifestOpts")
+	}
+	return nil
+}

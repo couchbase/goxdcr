@@ -359,6 +359,64 @@ func (_c *RemoteAgentIface_GetConnectivityStatus_Call) RunAndReturn(run func() m
 	return _c
 }
 
+// GetManifest provides a mock function with given fields: opts
+func (_m *RemoteAgentIface) GetManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(opts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetManifest")
+	}
+
+	var r0 *metadata.CollectionsManifest
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)); ok {
+		return rf(opts)
+	}
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) *metadata.CollectionsManifest); ok {
+		r0 = rf(opts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*base.GetManifestOpts) error); ok {
+		r1 = rf(opts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteAgentIface_GetManifest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetManifest'
+type RemoteAgentIface_GetManifest_Call struct {
+	*mock.Call
+}
+
+// GetManifest is a helper method to define mock.On call
+//   - opts *base.GetManifestOpts
+func (_e *RemoteAgentIface_Expecter) GetManifest(opts interface{}) *RemoteAgentIface_GetManifest_Call {
+	return &RemoteAgentIface_GetManifest_Call{Call: _e.mock.On("GetManifest", opts)}
+}
+
+func (_c *RemoteAgentIface_GetManifest_Call) Run(run func(opts *base.GetManifestOpts)) *RemoteAgentIface_GetManifest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*base.GetManifestOpts))
+	})
+	return _c
+}
+
+func (_c *RemoteAgentIface_GetManifest_Call) Return(_a0 *metadata.CollectionsManifest, _a1 error) *RemoteAgentIface_GetManifest_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteAgentIface_GetManifest_Call) RunAndReturn(run func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)) *RemoteAgentIface_GetManifest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReferenceAndStatusClone provides a mock function with no fields
 func (_m *RemoteAgentIface) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
 	ret := _m.Called()
@@ -731,6 +789,64 @@ func (_c *RemoteAgentIface_Name_Call) Return(_a0 string) *RemoteAgentIface_Name_
 }
 
 func (_c *RemoteAgentIface_Name_Call) RunAndReturn(run func() string) *RemoteAgentIface_Name_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// OneTimeGetRemoteBucketManifest provides a mock function with given fields: opts
+func (_m *RemoteAgentIface) OneTimeGetRemoteBucketManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(opts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for OneTimeGetRemoteBucketManifest")
+	}
+
+	var r0 *metadata.CollectionsManifest
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)); ok {
+		return rf(opts)
+	}
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) *metadata.CollectionsManifest); ok {
+		r0 = rf(opts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*base.GetManifestOpts) error); ok {
+		r1 = rf(opts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OneTimeGetRemoteBucketManifest'
+type RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call struct {
+	*mock.Call
+}
+
+// OneTimeGetRemoteBucketManifest is a helper method to define mock.On call
+//   - opts *base.GetManifestOpts
+func (_e *RemoteAgentIface_Expecter) OneTimeGetRemoteBucketManifest(opts interface{}) *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call {
+	return &RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call{Call: _e.mock.On("OneTimeGetRemoteBucketManifest", opts)}
+}
+
+func (_c *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call) Run(run func(opts *base.GetManifestOpts)) *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*base.GetManifestOpts))
+	})
+	return _c
+}
+
+func (_c *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call) Return(_a0 *metadata.CollectionsManifest, _a1 error) *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call) RunAndReturn(run func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)) *RemoteAgentIface_OneTimeGetRemoteBucketManifest_Call {
 	_c.Call.Return(run)
 	return _c
 }

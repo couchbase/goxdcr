@@ -2463,7 +2463,11 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string, has
 
 // forceRefresh triggers a target manifest fetch outside the regular refresh interval.
 // Use with caution to avoid overwhelming the target.
-func (agent *RemoteClusterAgent) GetManifest(bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
+func (agent *RemoteClusterAgent) GetManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	if err := requestOpts.Validate(); err != nil {
+		return nil, err
+	}
+
 	// Avoid get to avoid clone since this is a high-volume call
 	if !agent.currentCapability.HasInitialized() || atomic.LoadUint32(&agent.initDone) == 0 {
 		return nil, RefreshNotEnabledYet
@@ -2475,23 +2479,23 @@ func (agent *RemoteClusterAgent) GetManifest(bucketName string, forceRefresh boo
 	}
 
 	agent.bucketMtx.RLock()
-	getter, ok := agent.bucketManifestGetters[bucketName]
-	if !ok && !restAPIQuery {
-		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", bucketName)
+	getter, ok := agent.bucketManifestGetters[requestOpts.BucketName]
+	if !ok && !requestOpts.RestAPIQuery {
+		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", requestOpts.BucketName)
 		agent.logger.Warnf(errMsg)
 		agent.bucketMtx.RUnlock()
 		return nil, fmt.Errorf(errMsg)
 	}
 	agent.bucketMtx.RUnlock()
 
-	if !ok && restAPIQuery {
+	if !ok && requestOpts.RestAPIQuery {
 		// When REST path is asking for a manifest, it's most likely UI trying to get the manifest so it can display information
 		// It also means that the replication to the said target bucket should not already exist
 		// So we will need a one time getter for this purpose
-		return agent.OneTimeGetRemoteBucketManifest(bucketName)
+		return agent.OneTimeGetRemoteBucketManifest(requestOpts)
 	}
 
-	return getter.GetManifest(forceRefresh), nil
+	return getter.GetManifest(requestOpts.ForceRefresh), nil
 }
 
 func (agent *RemoteClusterAgent) InitDone() bool {
@@ -4147,7 +4151,6 @@ func (service *RemoteClusterService) updateUtilities(utilsIn utilities.UtilsIfac
 		switch a := agent.(type) {
 		case *RemoteClusterAgent:
 			a.utils = utilsIn
-		//case *RemoteCngAgent:
 		default:
 			service.logger.Fatalf("unexpected agent type encountered type=%T agentID=%v", a, a.Id())
 		}
@@ -4164,30 +4167,25 @@ func (service *RemoteClusterService) updateMetaSvc(metaSvc service_def.MetadataS
 		switch a := agent.(type) {
 		case *RemoteClusterAgent:
 			a.metakvSvc = metaSvc
-		//case *RemoteCngAgent:
 		default:
 			service.logger.Fatalf("unexpected agent type encountered type=%T agentID=%v", a, a.Id())
 		}
 	}
 }
 
-func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, forceRefresh, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
+func (service *RemoteClusterService) GetManifestByUuid(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	if err := requestOpts.Validate(); err != nil {
+		return nil, err
+	}
+
 	service.agentMutex.RLock()
-	agent, ok := service.agentCacheUuidMap[uuid]
+	agent, ok := service.agentCacheUuidMap[requestOpts.ClusterUUID]
 	service.agentMutex.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("unable to find remote cluster agent given cluster UUID: %v", uuid)
+		return nil, fmt.Errorf("unable to find remote cluster agent given cluster UUID: %v", requestOpts.ClusterUUID)
 	}
-	switch a := agent.(type) {
-	case RemoteClusterAgentDataProvider:
-		return a.GetManifest(bucketName, forceRefresh, restAPIQuery)
-	case RemoteCngAgentDataProvider:
-		return a.GetManifest(bucketName, restAPIQuery)
-	default:
-		// agent implements neither interface
-		return nil, fmt.Errorf("unexpected agent type encountered type=%T agentID=%v", agent, agent.Id())
-	}
+	return agent.GetManifest(requestOpts)
 }
 
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
@@ -4268,10 +4266,16 @@ End Unit test functions
 var coolDownPeriod = 3 * time.Second
 var coolDownError = fmt.Errorf("This remote cluster has recently just serviced manifest retrieval request and is currently in cool down. Please wait %v", coolDownPeriod)
 
-func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error) {
+func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	if err := requestOpts.Validate(); err != nil {
+		return nil, err
+	}
+
 	if atomic.LoadUint32(&agent.restQueryCoolDown) > 0 {
 		return nil, coolDownError
 	}
+
+	bucketName := requestOpts.BucketName
 
 	agent.refMtx.RLock()
 	userName := agent.reference.UserName()
@@ -4541,7 +4545,7 @@ func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteC
 }
 
 // GetBucketInfoGetter is consumed by the bucket topology service's remote watcher to fetch the bucket info
-// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentDataProvider
+// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentBucketOps
 func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.BucketInfoGetter, error) {
 	if ref == nil {
 		return nil, base.ErrorInvalidInput
@@ -4555,14 +4559,14 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 	}
 	service.agentMutex.RUnlock()
 
-	if agentDataProvider, ok := agent.(RemoteClusterAgentDataProvider); ok {
+	if agentDataProvider, ok := agent.(RemoteClusterAgentBucketOps); ok {
 		return agentDataProvider.GetBucketInfoGetter(bucketName)
 	}
 	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
 }
 
 // GetMaxVBStatsGetter is consumed by the bucket topology service's remote watcher to fetch the max cas
-// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentDataProvider
+// This will only be supported for remoteClusterAgents that implement RemoteClusterAgentBucketOps
 func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
 	if ref == nil {
 		return nil, base.ErrorInvalidInput
@@ -4576,7 +4580,7 @@ func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClu
 	}
 	service.agentMutex.RUnlock()
 
-	if agentDataProvider, ok := agent.(RemoteClusterAgentDataProvider); ok {
+	if agentDataProvider, ok := agent.(RemoteClusterAgentBucketOps); ok {
 		return agentDataProvider.GetMaxCasGetter(bucketName)
 	}
 	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)

@@ -18,36 +18,44 @@ import (
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 )
 
-var _ metadata_svc.RemoteCngAgentDataProvider = &RemoteCngAgent{}
+var _ metadata_svc.RemoteAgentManifestOps = &RemoteCngAgent{}
 
-func (agent *RemoteCngAgent) OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error) {
-	collectionsWatcher := cngWatcher.NewCollectionsWatcher(bucketName, agent.GetGrpcOpts, agent.services.utils, base.CollectionsWatcherWaitTime,
+func (agent *RemoteCngAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	if err := requestOpts.Validate(); err != nil {
+		return nil, err
+	}
+
+	collectionsWatcher := cngWatcher.NewCollectionsWatcher(requestOpts.BucketName, agent.GetGrpcOpts, agent.services.utils, base.CollectionsWatcherWaitTime,
 		base.CollectionsWatcherBackoffFactor, base.CollectionsWatcherMaxWaitTime, false, agent.logger)
 	collectionsWatcher.Start()
 	defer collectionsWatcher.Stop()
 	res := collectionsWatcher.GetResult()
 	if res == nil {
-		return nil, fmt.Errorf("failed to get manifest for the target bucket %v", bucketName)
+		return nil, fmt.Errorf("failed to get manifest for the target bucket %v", requestOpts.BucketName)
 	}
 	return res, nil
 }
 
-func (agent *RemoteCngAgent) GetManifest(bucketName string, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
+func (agent *RemoteCngAgent) GetManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	if err := requestOpts.Validate(); err != nil {
+		return nil, err
+	}
+
 	agent.remoteDataProvider.mutex.RLock()
-	watcher, ok := agent.remoteDataProvider.bucketManifestWatcher[bucketName]
-	if !ok && !restAPIQuery {
-		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", bucketName)
+	watcher, ok := agent.remoteDataProvider.bucketManifestWatcher[requestOpts.BucketName]
+	if !ok && !requestOpts.RestAPIQuery {
+		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", requestOpts.BucketName)
 		agent.logger.Warnf(errMsg)
 		agent.remoteDataProvider.mutex.RUnlock()
 		return nil, errors.New(errMsg)
 	}
 	agent.remoteDataProvider.mutex.RUnlock()
 
-	if restAPIQuery {
+	if requestOpts.RestAPIQuery {
 		// A manifest request via REST usually comes from the UI to display details.
 		// Since replication to the target bucket probably doesn’t exist yet,
 		// we need a one-time manifest fetch operation.
-		return agent.OneTimeGetRemoteBucketManifest(bucketName)
+		return agent.OneTimeGetRemoteBucketManifest(requestOpts)
 	}
 	return watcher.GetResult(), nil
 }

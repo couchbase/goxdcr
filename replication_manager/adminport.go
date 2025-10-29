@@ -272,7 +272,8 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		}
-		manifest, err := RemoteClusterService().GetManifestByUuid(remoteClusterGetOpts.RemoteClusterUuid, remoteClusterGetOpts.BucketManifestBucketName, false, true)
+		getManifestReqOpts := base.NewGetManifestOpts(remoteClusterGetOpts.RemoteClusterUuid, remoteClusterGetOpts.BucketManifestBucketName, false, true)
+		manifest, err := RemoteClusterService().GetManifestByUuid(getManifestReqOpts)
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		}

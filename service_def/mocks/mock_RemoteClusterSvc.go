@@ -415,9 +415,9 @@ func (_c *RemoteClusterSvc_GetConnectivityStatus_Call) RunAndReturn(run func(*me
 	return _c
 }
 
-// GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh, restAPIQuery
-func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
-	ret := _m.Called(uuid, bucketName, forceRefresh, restAPIQuery)
+// GetManifestByUuid provides a mock function with given fields: requestOpts
+func (_m *RemoteClusterSvc) GetManifestByUuid(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(requestOpts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetManifestByUuid")
@@ -425,19 +425,19 @@ func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, fo
 
 	var r0 *metadata.CollectionsManifest
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, bool, bool) (*metadata.CollectionsManifest, error)); ok {
-		return rf(uuid, bucketName, forceRefresh, restAPIQuery)
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)); ok {
+		return rf(requestOpts)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, bool, bool) *metadata.CollectionsManifest); ok {
-		r0 = rf(uuid, bucketName, forceRefresh, restAPIQuery)
+	if rf, ok := ret.Get(0).(func(*base.GetManifestOpts) *metadata.CollectionsManifest); ok {
+		r0 = rf(requestOpts)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*metadata.CollectionsManifest)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, bool, bool) error); ok {
-		r1 = rf(uuid, bucketName, forceRefresh, restAPIQuery)
+	if rf, ok := ret.Get(1).(func(*base.GetManifestOpts) error); ok {
+		r1 = rf(requestOpts)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -451,17 +451,14 @@ type RemoteClusterSvc_GetManifestByUuid_Call struct {
 }
 
 // GetManifestByUuid is a helper method to define mock.On call
-//   - uuid string
-//   - bucketName string
-//   - forceRefresh bool
-//   - restAPIQuery bool
-func (_e *RemoteClusterSvc_Expecter) GetManifestByUuid(uuid interface{}, bucketName interface{}, forceRefresh interface{}, restAPIQuery interface{}) *RemoteClusterSvc_GetManifestByUuid_Call {
-	return &RemoteClusterSvc_GetManifestByUuid_Call{Call: _e.mock.On("GetManifestByUuid", uuid, bucketName, forceRefresh, restAPIQuery)}
+//   - requestOpts *base.GetManifestOpts
+func (_e *RemoteClusterSvc_Expecter) GetManifestByUuid(requestOpts interface{}) *RemoteClusterSvc_GetManifestByUuid_Call {
+	return &RemoteClusterSvc_GetManifestByUuid_Call{Call: _e.mock.On("GetManifestByUuid", requestOpts)}
 }
 
-func (_c *RemoteClusterSvc_GetManifestByUuid_Call) Run(run func(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool)) *RemoteClusterSvc_GetManifestByUuid_Call {
+func (_c *RemoteClusterSvc_GetManifestByUuid_Call) Run(run func(requestOpts *base.GetManifestOpts)) *RemoteClusterSvc_GetManifestByUuid_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(bool))
+		run(args[0].(*base.GetManifestOpts))
 	})
 	return _c
 }
@@ -471,7 +468,7 @@ func (_c *RemoteClusterSvc_GetManifestByUuid_Call) Return(manifest *metadata.Col
 	return _c
 }
 
-func (_c *RemoteClusterSvc_GetManifestByUuid_Call) RunAndReturn(run func(string, string, bool, bool) (*metadata.CollectionsManifest, error)) *RemoteClusterSvc_GetManifestByUuid_Call {
+func (_c *RemoteClusterSvc_GetManifestByUuid_Call) RunAndReturn(run func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)) *RemoteClusterSvc_GetManifestByUuid_Call {
 	_c.Call.Return(run)
 	return _c
 }
