@@ -78,24 +78,21 @@ type RemoteAgentMetadata interface {
 	UsesAlternateAddress() (bool, error)
 }
 
-// ClusterAgentDataProvider defines methods that fetch data from the remote cluster.
-type RemoteClusterAgentDataProvider interface {
-	// GetMaxCasGetter returns a getter func to fetch maxCas for a given bucket
-	GetMaxCasGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error)
-	// GetBucketInfoGetter returns a getter func to fetch bucket info for a given bucket from the remote cluster
-	GetBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error)
+// RemoteAgentManifestOps defines the methods to fetch manifests from remote cluster.
+type RemoteAgentManifestOps interface {
 	// OneTimeGetRemoteBucketManifest fetches the latest manifest for a given bucket on demand.
-	OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error)
+	OneTimeGetRemoteBucketManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error)
 	// GetManifest returns the latest manifest fetched from the remote cluster.
-	GetManifest(bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error)
+	GetManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error)
 }
 
-// CngAgentDataProvider defines methods that fetch data from the CNG.
-type RemoteCngAgentDataProvider interface {
-	// GetManifest returns the latest manifest fetched from the remote cluster.
-	GetManifest(bucketName string, restAPIQuery bool) (*metadata.CollectionsManifest, error)
-	// OneTimeGetRemoteBucketManifest fetches the latest manifest for a given bucket on demand.
-	OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error)
+// RemoteClusterAgentBucketOps defines the methods to fetch bucket related info from remote cluster.
+// This interface is only implemented by RemoteClusterAgent.
+type RemoteClusterAgentBucketOps interface {
+	// GetMaxCasGetter returns a getter func to fetch maxCas for a given bucket.
+	GetMaxCasGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error)
+	// GetBucketInfoGetter returns a getter func to fetch bucket info for a given bucket from the remote cluster.
+	GetBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error)
 }
 
 // AgentConfig defines the setter methods for configuring the remote agent.
@@ -121,4 +118,5 @@ type RemoteAgentIface interface {
 	RemoteAgentClusterStatus
 	RemoteAgentMetadata
 	RemoteAgentConfig
+	RemoteAgentManifestOps
 }
