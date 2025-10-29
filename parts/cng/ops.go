@@ -10,6 +10,8 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -25,7 +27,7 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 	}
 
 	n.Logger().Infof("checkDocument req key=%s, seqNo=%v, cas=%v, revSeqNo=%v, expiry=%v",
-		string(req.OriginalKey), req.Seqno, req.Req.Cas, revSeqNo, expiry)
+		req.OriginalKey, req.Seqno, req.Req.Cas, revSeqNo, expiry)
 
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
 
@@ -35,7 +37,7 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 		ScopeName:      req.TgtColNamespace.ScopeName,
 		CollectionName: req.TgtColNamespace.CollectionName,
 		// Use OriginalKey which is the key before any collection prefix is added
-		Key:        string(req.OriginalKey),
+		Key:        req.OriginalKey,
 		StoreCas:   req.Req.Cas,
 		Revno:      revSeqNo,
 		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION,
@@ -43,6 +45,17 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 	}
 
 	// CNG TODO: use context for timeout and cancellation
+	// Return values from CheckDocument RPC
+	// if Mutation:
+	// 	- Document does not exist, err == nil
+	// 	- Document exists
+	//       - Source wins, err == nil
+	//       - Target wins, err == GRPC Error with Code=Aborted, and ErrorInfo with reason=doc_newer
+	// if Deletion:
+	//  - Document does not exist, err == GRPC Error with Code=NotFound
+	//  - Document exists
+	//       - Source wins, err == nil
+	//       - Target wins, err == GRPC Error with Code=Aborted, and ErrorInfo with reason=doc_newer
 	rsp, err = client.CheckDocument(ctx, checkDocReq)
 	return
 }
@@ -103,7 +116,7 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		CollectionName: req.TgtColNamespace.CollectionName,
 		ContentFlags:   flags,
 		// Use OriginalKey which is the key before any collection prefix is added
-		Key: string(req.OriginalKey),
+		Key: req.OriginalKey,
 		// CNG TODO: handle binary docs
 		//ContentFlags: uint32(internal_xdcr_v1.ContentType_CONTENT_TYPE_JSON),
 		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION,
@@ -139,33 +152,54 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 			pushDocReq.Xattrs = content.Xattrs
 		}
 		n.Logger().Debugf("PushDocument content, key=%s, dataType=%v, hasXattrs=%v, notCompressed=%v, isJson=%v",
-			string(req.OriginalKey), req.Req.DataType, len(content.Xattrs) > 0, content.NotCompressed, content.IsJson)
+			req.OriginalKey, req.Req.DataType, len(content.Xattrs) > 0, content.NotCompressed, content.IsJson)
 	}
 
 	now := time.Now()
 	// CNG TODO: use context for timeout and cancellation
 	rpcRsp, err := client.PushDocument(ctx, pushDocReq)
-	if err != nil {
-		var errInfo *errdetails.ErrorInfo
-		errInfo, err = cngConflictError(err)
-		if err != nil || errInfo == nil { // Non conflict CNG error
-			return rsp, err
-		}
-		if errInfo.Reason != ConflictReasonDocNewer { // Non conflict CNG error
-			return rsp, err
-		}
-
-		// Handle CNG conflict error
-		err = nil
-		rsp.isConflict = true
-		rsp.conflictReason = ConflictReasonDocNewer
-	}
-
 	rsp.latency = time.Since(now)
+	err = handlePushDocErr(err, &rsp)
+	if err != nil {
+		return
+	}
 
 	if rpcRsp != nil { // rpcRsp will be nil in case of conflict error
 		rsp.cas = rpcRsp.Cas
 		rsp.seqNo = rpcRsp.Seqno
 	}
+	return
+}
+
+func handlePushDocErr(origErr error, rsp *PushDocRsp) (err error) {
+	err = origErr
+	if err == nil {
+		return
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		return
+	}
+
+	details := st.Details()
+	if len(details) == 0 {
+		return
+	}
+
+	switch st.Code() {
+	case codes.Aborted:
+		for _, d := range details {
+			switch info := d.(type) {
+			case *errdetails.ErrorInfo:
+				if info.Reason == ConflictReasonDocNewer {
+					err = nil
+					rsp.isConflict = true
+					rsp.conflictReason = ConflictReasonDocNewer
+				}
+			}
+		}
+	}
+
 	return
 }

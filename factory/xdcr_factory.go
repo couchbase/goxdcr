@@ -763,11 +763,27 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			xdcrf.logger.Errorf("Error constructing CNG nozzle, err=%v\n", err)
 			return nil, nil, nil, "", "", 0, err
 		}
-		xdcrf.logger.Infof("constructed CNG nozzle %v for target cluster %v\n", id, targetClusterRef.HostName())
 
+		// CNG TODO: get rid of this call
+		kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, false)
+		if err != nil {
+			xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
+			return
+		}
+		if len(kvVBMap) == 0 {
+			err = base.ErrorNoTargetNozzle
+			return
+		}
+
+		numVBs := 0
+		for _, vbList := range kvVBMap {
+			numVBs += len(vbList)
+		}
+
+		xdcrf.logger.Infof("constructed CNG nozzle %v for target cluster %v numVBs=%d\n", id, targetClusterRef.HostName(), numVBs)
 		vblist := []uint16{}
 		outNozzles[nozzle.Id()] = nozzle
-		for i := uint16(0); i < 128; i++ {
+		for i := uint16(0); i < uint16(numVBs); i++ {
 			vbNozzleMap[i] = nozzle.Id()
 			vblist = append(vblist, uint16(i))
 		}
@@ -780,16 +796,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			}
 		*/
 
-		// CNG TODO: get rid of this call
-		kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, false)
-		if err != nil {
-			xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
-			return
-		}
-		if len(kvVBMap) == 0 {
-			err = base.ErrorNoTargetNozzle
-			return
-		}
 		return
 	}
 

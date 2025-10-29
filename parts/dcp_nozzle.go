@@ -1343,6 +1343,18 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 		wrappedEvent.UprEvent = m
 		return wrappedEvent, nil
 	}
+	/*
+		if m.DataType&base.SnappyDataType > 0 {
+			buf, err := snappy.Decode(nil, m.Value)
+			if err == nil {
+				dcp.Logger().Infof(">> dcp key=%s snappy buf=%v", string(m.Key), buf)
+			} else {
+				dcp.Logger().Errorf(">> dcp key=%s snappy decode error=%v", string(m.Key), err)
+			}
+		} else {
+			dcp.Logger().Infof(">> dcp key=%s buf=%v", string(m.Key), m.Value)
+		}
+	*/
 
 	var mappedScopeName = base.DefaultScopeCollectionName
 	var mappedColName = base.DefaultScopeCollectionName

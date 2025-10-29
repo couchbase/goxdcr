@@ -11,6 +11,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	basecng "github.com/couchbase/goxdcr/v8/base/cng"
 	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 
 	service_mocks "github.com/couchbase/goxdcr/v8/service_def/mocks"
@@ -23,7 +24,7 @@ type transferParams struct {
 	checkDocRsp basecng.CheckDocumentRsp
 	pushDocRsp  basecng.PushDocumentRsp
 	shouldFail  bool
-	trace       mutationTrace
+	trace       Trace
 }
 
 func makeExtras(flags, expiry uint32, revSeqno, cas uint64) []byte {
@@ -49,7 +50,7 @@ func makeWrappedMCRequest(opcode mc.CommandCode, value []byte, flags, expiry uin
 			Body:    value,
 			Extras:  extras,
 		},
-		OriginalKey:     []byte(key),
+		OriginalKey:     key,
 		TgtColNamespace: &base.CollectionNamespace{ScopeName: "_default", CollectionName: "_default"},
 	}
 }
@@ -63,6 +64,9 @@ func TestTransfer(t *testing.T) {
 	}`)
 	optimisticPayload := []byte(`{"a": 1}`)
 
+	optPayloadCompressed := snappy.Encode(nil, optimisticPayload)
+	nonOptPayloadCompressed := snappy.Encode(nil, nonOptimisticPayload)
+
 	tests := []transferParams{
 		{
 			name: "ok: optimistic, simple transfer",
@@ -75,13 +79,13 @@ func TestTransfer(t *testing.T) {
 				Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 12345, Seqno: 1},
 				Err: nil,
 			},
-			trace: mutationTrace{
+			trace: Trace{
 				opcode:     mc.UPR_MUTATION,
 				vbno:       73,
 				optimistic: true,
 				checked:    false,
 				pushed:     true,
-				pushRsp:    PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: len(optimisticPayload), isConflict: false},
+				pushRsp:    PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: len(optPayloadCompressed), isConflict: false},
 			},
 		},
 		{
@@ -95,13 +99,77 @@ func TestTransfer(t *testing.T) {
 				Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 12345, Seqno: 1},
 				Err: nil,
 			},
-			trace: mutationTrace{
+			trace: Trace{
 				opcode:           mc.UPR_MUTATION,
 				vbno:             73,
 				checked:          true,
 				conflictCheckRsp: conflictCheckRsp{sourceWon: true, reason: ConflictReasonDocMissing},
 				pushed:           true,
-				pushRsp:          PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: len(nonOptimisticPayload), isConflict: false},
+				pushRsp:          PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: len(nonOptPayloadCompressed), isConflict: false},
+			},
+		},
+		{
+			name: "ok: delete optimistic",
+			req:  makeWrappedMCRequest(mc.UPR_DELETION, optimisticPayload, 7, 0, 0, 0),
+			checkDocRsp: basecng.CheckDocumentRsp{
+				Rsp: internal_xdcr_v1.CheckDocumentResponse{},
+				Err: nil,
+			},
+			pushDocRsp: basecng.PushDocumentRsp{
+				Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 12345, Seqno: 1},
+				Err: nil,
+			},
+			trace: Trace{
+				opcode:           mc.UPR_DELETION,
+				vbno:             73,
+				isDelete:         true,
+				optimistic:       true,
+				conflictCheckRsp: conflictCheckRsp{sourceWon: true, reason: ConflictReasonDocMissing},
+				pushed:           true,
+				pushRsp:          PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: 0, isConflict: false},
+			},
+		},
+		{
+			name: "ok: delete non-optimistic",
+			req:  makeWrappedMCRequest(mc.UPR_DELETION, nonOptimisticPayload, 7, 0, 0, 0),
+			checkDocRsp: basecng.CheckDocumentRsp{
+				Rsp: internal_xdcr_v1.CheckDocumentResponse{},
+				Err: nil,
+			},
+			pushDocRsp: basecng.PushDocumentRsp{
+				Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 12345, Seqno: 1},
+				Err: nil,
+			},
+			trace: Trace{
+				opcode:           mc.UPR_DELETION,
+				vbno:             73,
+				isDelete:         true,
+				checked:          true,
+				conflictCheckRsp: conflictCheckRsp{sourceWon: true, reason: ConflictReasonDocMissing},
+				pushed:           true,
+				pushRsp:          PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: 0, isConflict: false},
+			},
+		},
+		{
+			name: "ok: optimistic, source lost conflict",
+			req:  makeWrappedMCRequest(mc.UPR_MUTATION, optimisticPayload, 7, 0, 0, 0),
+			checkDocRsp: basecng.CheckDocumentRsp{
+				Rsp: internal_xdcr_v1.CheckDocumentResponse{
+					Exists: true,
+				},
+				Err: nil,
+			},
+			pushDocRsp: basecng.PushDocumentRsp{
+				Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 12345, Seqno: 1},
+				Err: nil,
+			},
+			trace: Trace{
+				opcode:     mc.UPR_MUTATION,
+				vbno:       73,
+				optimistic: true,
+				checked:    false,
+				pushed:     true,
+				pushRsp:    PushDocRsp{cas: 12345, seqNo: 1, bytesReplicated: len(optPayloadCompressed), isConflict: false},
 			},
 		},
 	}
@@ -131,13 +199,15 @@ func TestTransfer(t *testing.T) {
 				PushDocRsp:  tt.pushDocRsp,
 			}
 
-			trace, err := n.transfer(ctx, mockClient, tt.req)
+			childCtx := startTrace(ctx, &Trace{})
+			err = n.transfer(childCtx, mockClient, tt.req)
 			if tt.shouldFail {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
-			assert.True(t, tt.trace.Equal(trace), "expected trace \n%+v\n%+v", tt.trace, trace)
+			trace, _ := getTrace(childCtx)
+			assert.True(t, tt.trace.Equal(*trace), "expected trace \n%+v\n%+v", tt.trace, trace)
 		})
 	}
 }

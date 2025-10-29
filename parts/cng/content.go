@@ -29,30 +29,28 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 
 	if base.HasXattr(req.Req.DataType) {
 		var body []byte
-		if req.NeedToRecompress {
+		if req.Req.DataType&base.SnappyDataType == 0 {
 			// If true, then body is not compressed
 			body = req.Req.Body
 		} else {
-			buflen := req.GetUncompressedBodySize()
-			body = make([]byte, buflen)
-			_, err = snappy.Decode(body, req.Req.Body)
+			body, err = snappy.Decode(nil, req.Req.Body)
 			if err != nil {
 				logger.Errorf("Failed to snappy decode body for key=%s, err=%v",
-					string(req.OriginalKey), err)
+					req.OriginalKey, err)
 				return
 			}
 		}
 		c.Xattrs, err = getXattrMap(body)
 		if err != nil {
 			logger.Errorf("Failed to get xattr map for key=%s, err=%v",
-				string(req.OriginalKey), err)
+				req.OriginalKey, err)
 			return
 		}
 
 		bodyWithoutXattr, err := base.StripXattrAndGetBody(body)
 		if err != nil {
 			logger.Errorf("Failed to strip xattr for key=%s, err=%v",
-				string(req.OriginalKey), err)
+				req.OriginalKey, err)
 			return c, err
 		}
 
@@ -62,7 +60,7 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 		return c, nil
 	}
 
-	if req.NeedToRecompress || req.Req.DataType&base.SnappyDataType == 0 {
+	if req.Req.DataType&base.SnappyDataType == 0 {
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(req.Req.Body)))
 		c.Body = snappy.Encode(cbuf, req.Req.Body)
 		req.NeedToRecompress = false
