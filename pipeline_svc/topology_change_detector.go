@@ -106,9 +106,12 @@ type TopologyChangeDetectorSvc struct {
 	// number of times target topology was checked to have changed by monitorTarget
 	targetMonitorCnt uint64
 	logFrequency     uint64
+
+	// variableVBMode indicates if the source and target have different number of VBs
+	variableVBMode bool
 }
 
-func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
+func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, variableVBMode bool) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
 		remote_cluster_svc:     remote_cluster_svc,
@@ -122,6 +125,7 @@ func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopology
 		utils:                  utilsIn,
 		bucketTopologySvc:      bucketTopologySvc,
 		vblistOriginalInitDone: make(chan bool),
+		variableVBMode:         variableVBMode,
 	}
 }
 
@@ -701,8 +705,15 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	// Wait for vblistOriginal to be done first
 	// monitorSource must have had occurred first already
 	<-top_detect_svc.vblistOriginalInitDone
-	top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
+
+	switch top_detect_svc.variableVBMode {
+	case true:
+		top_detect_svc.target_vb_server_map_original = target_server_vb_map.CompileLookupIndex()
+	case false:
+		top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
+	}
 	top_detect_svc.targetKvVbMapOriginal = target_server_vb_map
+
 	if spec != nil && spec.Settings != nil {
 		top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
 	}
@@ -740,10 +751,22 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				}
 
 				targetServerVBMap := notification.GetTargetServerVBMap()
-				// check for target topology changes
-				target_vb_server_map := base.ConstructVbServerMap(top_detect_svc.vblist_original, targetServerVBMap)
+				var target_vb_server_map map[uint16]string
 
-				diff_vb_list := base.GetDiffVBList(top_detect_svc.vblist_original, top_detect_svc.target_vb_server_map_original, target_vb_server_map)
+				// check for target topology changes
+				switch top_detect_svc.variableVBMode {
+				case true:
+					target_vb_server_map = targetServerVBMap.CompileLookupIndex()
+				case false:
+					target_vb_server_map = base.ConstructVbServerMap(top_detect_svc.vblist_original, targetServerVBMap)
+				}
+				diff_vb_list, err := base.DiffVBServerMaps(top_detect_svc.target_vb_server_map_original, target_vb_server_map)
+				if err != nil {
+					// should never happen
+					top_detect_svc.logger.Warnf("Error diffing target vb server maps. err=%v", err)
+					notification.Recycle()
+					continue
+				}
 				var errToHandleTargetChange error
 				if len(diff_vb_list) > 0 {
 					errToHandleTargetChange = target_topology_changedErr

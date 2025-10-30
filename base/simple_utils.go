@@ -638,17 +638,24 @@ func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) C
 	return CRMode_RevId
 }
 
-// get the subset of vbs in vbList that point to different servers in the two vb server maps
-func GetDiffVBList(vbList []uint16, vbServerMap1, vbServerMap2 map[uint16]string) []uint16 {
+// DiffVBServerMaps compares two vb_server_maps and returns a sorted list of vBuckets
+// whose server assignments differ between the two maps.
+// Both maps are expected to contain the same set of vBucket keys.
+// The caller is responsible for ensuring this precondition.
+func DiffVBServerMaps(vbServerMap1, vbServerMap2 map[uint16]string) ([]uint16, error) {
 	diffVBList := make([]uint16, 0)
-	for _, vb := range vbList {
-		if vbServerMap1[vb] != vbServerMap2[vb] {
+	for vb, server1 := range vbServerMap1 {
+		server2, ok := vbServerMap2[vb]
+		if !ok {
+			// should never happen
+			return nil, fmt.Errorf("vb %v is in vbServerMap1 but not in vbServerMap2", vb)
+		}
+		if server1 != server2 {
 			diffVBList = append(diffVBList, vb)
 		}
 	}
-
 	SortUint16List(diffVBList)
-	return diffVBList
+	return diffVBList, nil
 }
 
 func DiffVBsList(vbList1, vbList2 []uint16) (added, removed []uint16) {
