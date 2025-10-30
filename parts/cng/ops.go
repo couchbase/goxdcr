@@ -26,7 +26,7 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 		return
 	}
 
-	n.Logger().Infof("checkDocument req key=%s, seqNo=%v, cas=%v, revSeqNo=%v, expiry=%v",
+	n.Logger().Tracef("checkDocument req key=%s, seqNo=%v, cas=%v, revSeqNo=%v, expiry=%v",
 		req.OriginalKey, req.Seqno, req.Req.Cas, revSeqNo, expiry)
 
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
@@ -56,7 +56,9 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 	//  - Document exists
 	//       - Source wins, err == nil
 	//       - Target wins, err == GRPC Error with Code=Aborted, and ErrorInfo with reason=doc_newer
-	rsp, err = client.CheckDocument(ctx, checkDocReq)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
+	defer cancel()
+	rsp, err = client.CheckDocument(ctxWithTimeout, checkDocReq)
 	return
 }
 
@@ -157,7 +159,9 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 
 	now := time.Now()
 	// CNG TODO: use context for timeout and cancellation
-	rpcRsp, err := client.PushDocument(ctx, pushDocReq)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
+	defer cancel()
+	rpcRsp, err := client.PushDocument(ctxWithTimeout, pushDocReq)
 	rsp.latency = time.Since(now)
 	err = handlePushDocErr(err, &rsp)
 	if err != nil {

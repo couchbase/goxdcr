@@ -254,7 +254,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	// sourceCRMode is the conflict resolution mode to use when resolving conflicts for big documents at source side
 	// capi replication always uses rev id based conflict resolution
 	sourceCRMode := base.CRMode_RevId
-	if nozzleType != base.CNG {
+	if nozzleType != base.Capi {
 		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 		// resolution and target side conflict resolution yield consistent results
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
@@ -743,7 +743,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			Replication: cng.ReplicationConfig{
 				CRMode: sourceCRMode,
 				// CNG TODO: HARDCODED
-				SNGAddr:           "127.0.0.1:18098",
+				SNGAddr:           "127.0.0.1:18070",
 				SourceBucketName:  spec.SourceBucketName,
 				SourceClusterUUID: sourceClusterUUID,
 				SourceBucketUUID:  spec.SourceBucketUUID,
@@ -1635,7 +1635,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	bucket_name := pipeline.Specification().GetReplicationSpec().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc,
-		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter, conflictLogger != nil, variableVBMode, nozzleType)
+		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter, conflictLogger != nil, variableVBMode)
 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc,

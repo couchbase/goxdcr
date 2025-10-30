@@ -103,7 +103,7 @@ func (p *ConnPool) init() error {
 
 	p.logger.Infof("initializing CNG connection pool, conntCount=%d", p.cfg.ConnCount)
 	for i := 0; i < p.cfg.ConnCount; i++ {
-		err := p.connect(i)
+		err := p.connect(i, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create connection %d: %w", i, err)
 		}
@@ -114,7 +114,10 @@ func (p *ConnPool) init() error {
 
 // connect recreates a connection at the specified index in a thread-safe manner
 // This method assumes the pool is already initialized
-func (p *ConnPool) connect(index int) error {
+// nwErr (optional) is the error that caused the need to recreate the connection
+// The only reason to pass this is for logging purposes here. The objective is to
+// to print the error under a lock to avoid log flooding from multiple goroutines
+func (p *ConnPool) connect(index int, nwErr error) error {
 	if index < 0 || index >= len(p.clients) {
 		return fmt.Errorf("connection index %d out of range", index)
 	}
@@ -132,7 +135,7 @@ func (p *ConnPool) connect(index int) error {
 
 	wrapper.Close()
 
-	p.logger.Infof("creating connection at index=%d, generation=%d", index, gen)
+	p.logger.Infof("creating connection at index=%d, generation=%d, nwErr=%v", index, gen, nwErr)
 	// Create new connection
 	newConn, err := p.cfg.ConnFn()
 	if err != nil {
@@ -190,6 +193,8 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 	p.poolLock.Lock()
 	defer p.poolLock.Unlock()
 
+	p.logger.Infof("changing connection pool size from %d to %d", len(p.clients), newCount)
+
 	if newCount == len(p.clients) {
 		// no change
 		return nil
@@ -200,7 +205,7 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 		for i := len(p.clients); i < newCount; i++ {
 			wrapper := &wrapperConn{}
 			p.clients = append(p.clients, wrapper)
-			err = p.connect(i)
+			err = p.connect(i, nil)
 			if err != nil {
 				return fmt.Errorf("failed to create connection %d: %v", i, err)
 			}
@@ -253,7 +258,7 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
 
 			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
 			// Attempt to recreate the connection
-			err = p.connect(int(index))
+			err = p.connect(int(index), err)
 			if err != nil {
 				// If recreation fails, return the original error
 				return fmt.Errorf("network error: %v", err)

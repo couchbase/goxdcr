@@ -1556,7 +1556,7 @@ func TestCheckpointManager_OnEvent(t *testing.T) {
 		backfillReplSvc, xmemNozzle)
 	setupSpecSettings(replicationSpec)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false, base.Xmem)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
@@ -1662,7 +1662,7 @@ func TestCheckpointManager_CleanupInMemoryBrokenMap(t *testing.T) {
 
 	setupSpecSettings(replicationSpec)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false, base.Xmem)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,

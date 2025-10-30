@@ -3,6 +3,7 @@ package cng
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
@@ -40,7 +41,7 @@ func (n *Nozzle) startInner(ctx context.Context, settings metadata.ReplicationSe
 		return
 	}
 
-	n.Logger().Infof("nozzle tunables=%s", n.cfg.Tunables.String())
+	n.Logger().Infof("nozzle tunables: %s", n.cfg.Tunables.String())
 	if err = n.cfg.Tunables.Validate(); err != nil {
 		return
 	}
@@ -68,6 +69,13 @@ func (n *Nozzle) initConfig(settings metadata.ReplicationSettingsMap) (err error
 	if n.cfg.Tunables.ConnCount, err = getSetting[int](settings, base.CNGConnCountKey); err != nil {
 		return
 	}
+
+	var deadlineMs int
+	if deadlineMs, err = getSetting[int](settings, base.CNGRPCDeadline); err != nil {
+		return
+	}
+
+	n.cfg.Tunables.Deadline = time.Duration(deadlineMs) * time.Millisecond
 
 	// CNG TODO: make retry interval configurable
 	n.cfg.Tunables.RetryInterval = base.DefaultCNGRetryInterval

@@ -128,6 +128,7 @@ const (
 	CNGWorkerCountKey = base.CNGWorkerCountKey
 	CNGQueueSizeKey   = base.CNGQueueSizeKey
 	CNGConnCountKey   = base.CNGConnCountKey
+	CNGRPCDeadline    = base.CNGRPCDeadline
 )
 
 // constants for parsing create/change/view replication response
@@ -269,6 +270,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CNGWorkerCountKey: metadata.CNGWorkerCountKey,
 	CNGQueueSizeKey:   metadata.CNGQueueSizeKey,
 	CNGConnCountKey:   metadata.CNGConnCountKey,
+	CNGRPCDeadline:    metadata.CNGRPCDeadlineKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -342,6 +344,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CNGWorkerCountKey: CNGWorkerCountKey,
 	metadata.CNGQueueSizeKey:   CNGQueueSizeKey,
 	metadata.CNGConnCountKey:   CNGConnCountKey,
+	metadata.CNGRPCDeadlineKey: CNGRPCDeadline,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

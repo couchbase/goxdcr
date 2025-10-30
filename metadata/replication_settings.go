@@ -136,6 +136,7 @@ const (
 	CNGWorkerCountKey = base.CNGWorkerCountKey // number of workers per nozzle to process incoming data
 	CNGQueueSizeKey   = base.CNGQueueSizeKey   // size of the channel buffer between nozzle and workers
 	CNGConnCountKey   = base.CNGConnCountKey   // number of gRPC connections to CNG per nozzle
+	CNGRPCDeadlineKey = base.CNGRPCDeadline    // gRPC deadline in milliseconds for each RPC call to CNG
 )
 
 // keys to facilitate redaction of replication settings map
@@ -282,6 +283,7 @@ var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 var CNGWorkerCountConfig = &SettingsConfig{base.DefaultCNGWorkerCount, &Range{1, 10000}}
 var CNGQueueSizeConfig = &SettingsConfig{base.DefaultCNGQueueSize, &Range{1, 10000}}
 var CNGConnCountConfig = &SettingsConfig{base.DefaultCNGConnCount, &Range{1, 100}}
+var CNGRPCDeadlineConfig = &SettingsConfig{base.DefaultCNGRPCDeadline, &Range{500, 60000}} // (in ms) range = 500 ms to 1 minute
 
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
@@ -344,6 +346,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CNGWorkerCountKey: CNGWorkerCountConfig,
 	CNGQueueSizeKey:   CNGQueueSizeConfig,
 	CNGConnCountKey:   CNGConnCountConfig,
+	CNGRPCDeadlineKey: CNGRPCDeadlineConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1530,6 +1533,11 @@ func (s *ReplicationSettings) GetCLogReattemptDuration() time.Duration {
 
 func (s *ReplicationSettings) GetCNGWorkerCount() int {
 	val, _ := s.GetSettingValueOrDefaultValue(CNGWorkerCountKey)
+	return val.(int)
+}
+
+func (s *ReplicationSettings) GetCNGRPCDeadline() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CNGRPCDeadlineKey)
 	return val.(int)
 }
 

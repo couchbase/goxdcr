@@ -40,12 +40,13 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 		return
 	}
 
-	n.Logger().Debugf("processing key=%s, seqno=%d, opcode=%s,  dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v, revSeqNo=%v, expiry=%v, flags=%v",
-		req.OriginalKey, req.Seqno, req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
+	n.Logger().Tracef("processing key=%s, seqno=%d, cas=%d, opcode=%s, dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v, revSeqNo=%v, expiry=%v, flags=%v",
+		req.OriginalKey, req.Seqno, req.Req.Cas, req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
 		req.NeedToRecompress,
 		req.Req.DataType&base.SnappyDataType > 0,
 		revSeqNo,
-		expiry, flags)
+		expiry,
+		flags)
 
 	isOptimistic := n.isOptimistic(req)
 	trace.optimistic = isOptimistic
@@ -147,35 +148,6 @@ func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
 		}
 	}
 
-	return
-}
-
-// cngConflictError checks if the error is a CNG conflict error and returns the ErrorInfo
-// and err is returned as nil. If the error is not a CNG conflict error, the original
-// error is returned
-func cngConflictError(cngErr error) (errInfo *errdetails.ErrorInfo, err error) {
-	st, ok := status.FromError(cngErr)
-	if !ok {
-		err = cngErr
-		return
-	}
-
-	details := st.Details()
-	if len(details) == 0 {
-		err = cngErr
-		return
-	}
-
-	// We check only the first detail for now
-	// Have not seen multiple details so far
-
-	detail, ok := details[0].(*errdetails.ErrorInfo)
-	if !ok || detail.Reason != ConflictReasonDocNewer {
-		err = cngErr
-		return
-	}
-
-	errInfo = detail
 	return
 }
 

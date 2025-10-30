@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"reflect"
 	"sort"
 	"strings"
@@ -737,8 +738,7 @@ func (ckmgr *CheckpointManager) collectionEnabled() bool {
 func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 	//randomize the starting point so that checkpoint managers for the same
 	//replication on different nodes have different starting points
-	//starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.getCheckpointInterval()
-	starting_time := time.Duration(30 * time.Second)
+	starting_time := time.Duration(rand.Intn(5000))*time.Millisecond + ckmgr.getCheckpointInterval()
 	ckmgr.logger.Infof("Checkpointing starts in %v sec", starting_time.Seconds())
 	ckmgr.checkpoint_ticker_ch <- time.NewTicker(starting_time)
 }

@@ -2,6 +2,7 @@ package cng
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/service_def"
@@ -70,11 +71,12 @@ type Tunables struct {
 	WorkerCount        int
 	ConnCount          int
 	RetryInterval      int // in milliseconds
+	Deadline           time.Duration
 }
 
 func (t *Tunables) String() string {
-	return fmt.Sprintf("InsecureSkipVerify=%v, DataChanSize=%d, WorkerCount=%d, ConnCount=%d, RetryInterval=%d",
-		t.InsecureSkipVerify, t.DataChanSize, t.WorkerCount, t.ConnCount, t.RetryInterval)
+	return fmt.Sprintf("InsecureSkipVerify=%v, DataChanSize=%d, WorkerCount=%d, ConnCount=%d, RetryInterval=%d, Deadline=%dms",
+		t.InsecureSkipVerify, t.DataChanSize, t.WorkerCount, t.ConnCount, t.RetryInterval, t.Deadline.Milliseconds())
 }
 
 func (t *Tunables) Validate() (err error) {
@@ -89,6 +91,9 @@ func (t *Tunables) Validate() (err error) {
 	}
 	if t.RetryInterval <= 0 {
 		return fmt.Errorf("RetryInterval must be positive")
+	}
+	if t.Deadline <= 0 {
+		return fmt.Errorf("Deadline must be positive")
 	}
 	return nil
 }
