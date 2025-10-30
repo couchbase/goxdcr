@@ -1578,6 +1578,7 @@ const (
 	CNGWorkerCountKey string = "cngWorkerCount"
 	CNGQueueSizeKey   string = "cngQueueSize"
 	CNGConnCountKey   string = "cngConnCount"
+	CNGRPCDeadline    string = "cngRPCDeadlineMs"
 )
 
 // simple keys inside conflict logging mapping. It excludes loggingRules key.
@@ -1624,6 +1625,7 @@ const (
 	DefaultCNGWorkerCount   = 1
 	DefaultCNGRetryInterval = 5000 // in milliseconds
 	DefaultCNGConnCount     = 1    // Default number of connections in pool
+	DefaultCNGRPCDeadline   = 5000 // in milliseconds
 
 )
 

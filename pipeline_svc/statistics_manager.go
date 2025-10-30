@@ -391,7 +391,7 @@ type StatisticsManager struct {
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
 	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error),
-	hasConflictLogger bool, variableVBMode bool, nozzleType base.XDCROutgoingNozzleType) *StatisticsManager {
+	hasConflictLogger bool, variableVBMode bool) *StatisticsManager {
 	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
@@ -417,7 +417,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		initDone:                  make(chan bool),
 		variableVBMode:            variableVBMode,
 	}
-	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{nozzleType: nozzleType}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
+	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 	if hasConflictLogger {
 		// the data-structures needed for stats collection will not be initialised
 		// if conflict logger doesn't exist for this pipeline,
@@ -1585,7 +1585,6 @@ type outNozzleCollector struct {
 	// key of inner map: metric name
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
-	nozzleType    base.XDCROutgoingNozzleType
 
 	vbMetricHelper *VbBasedMetricHelper
 }
