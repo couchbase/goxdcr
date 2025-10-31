@@ -2187,20 +2187,20 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	metric_map := dcp_collector.component_map[event.Component.Id()]
 	switch event.EventType {
 	case common.DataReceived:
-		uprEvent := event.Data.(*mcc.UprEvent)
+		eventData := event.Data.(*common.DataReceivedEventData)
 		metric_map[service_def.DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
-		if uprEvent.Expiry != 0 {
+		if eventData.Expiry != 0 {
 			metric_map[service_def.EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		}
-		if uprEvent.Opcode == mc.UPR_DELETION {
+		if eventData.Opcode == mc.UPR_DELETION {
 			metric_map[service_def.DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
-		} else if uprEvent.Opcode == mc.UPR_MUTATION {
+		} else if eventData.Opcode == mc.UPR_MUTATION {
 			metric_map[service_def.SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
-		} else if uprEvent.IsSystemEvent() {
+		} else if eventData.IsSystemEvent {
 			// ignore system events
 		} else {
-			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
+			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", eventData.Opcode, event.Component.Id())
 		}
 	case common.DataProcessed:
 		dcp_dispatch_time := event.OtherInfos.(float64)
@@ -3018,54 +3018,55 @@ func (r_collector *routerCollector) Id() string {
 	return r_collector.id
 }
 
+var metricUsesDataFilteredEventData = map[string]bool{
+	service_def.DOCS_FILTERED_CLOG_METRIC:         true,
+	service_def.DOCS_FILTERED_METRIC:              true,
+	service_def.EXPIRY_FILTERED_METRIC:            true,
+	service_def.DELETION_FILTERED_METRIC:          true,
+	service_def.SET_FILTERED_METRIC:               true,
+	service_def.BINARY_FILTERED_METRIC:            true,
+	service_def.DOCS_FILTERED_TXN_ATR_METRIC:      true,
+	service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:   true,
+	service_def.DOCS_FILTERED_TXN_XATTR_METRIC:    true,
+	service_def.DOCS_FILTERED_USER_DEFINED_METRIC: true,
+	service_def.DOCS_FILTERED_MOBILE_METRIC:       true,
+}
+
+var metricUsesFilterRelatedCommonEventData = map[string]bool{
+	service_def.EXPIRY_STRIPPED_METRIC:       true,
+	service_def.DOCS_UNABLE_TO_FILTER_METRIC: true,
+}
+
 func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey string) error {
-	switch metricKey {
-	case service_def.DOCS_FILTERED_CLOG_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_METRIC:
-		fallthrough
-	case service_def.EXPIRY_FILTERED_METRIC:
-		fallthrough
-	case service_def.DELETION_FILTERED_METRIC:
-		fallthrough
-	case service_def.SET_FILTERED_METRIC:
-		fallthrough
-	case service_def.EXPIRY_STRIPPED_METRIC:
-		fallthrough
-	case service_def.BINARY_FILTERED_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_TXN_ATR_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_TXN_XATTR_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_USER_DEFINED_METRIC:
-		fallthrough
-	case service_def.DOCS_FILTERED_MOBILE_METRIC:
-		fallthrough
-	case service_def.DOCS_UNABLE_TO_FILTER_METRIC:
-		uprEvent := event.Data.(*mcc.UprEvent)
-		vbucket := uprEvent.VBucket // denotes the source VB
-		seqno := uprEvent.Seqno
-		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
-		if !ok {
-			return base.ErrorNotMyVbucket
-		}
-		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
-		return nil
-	case service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
-		vbucket := event.DerivedData[1].(uint16) // denotes the source VB
-		seqno := event.DerivedData[2].(uint64)
-		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
-		if !ok {
-			return base.ErrorNotMyVbucket
-		}
-		helper.handleIncomingSeqno(vbucket, seqno, metricKey)
-		return nil
+	var vbucket uint16
+	var seqno uint64
+
+	switch {
+	case metricUsesDataFilteredEventData[metricKey]:
+		eventData := event.Data.(*common.DataFilteredEventData)
+		vbucket = eventData.FilterRelatedCommonEventData.VBucket
+		seqno = eventData.FilterRelatedCommonEventData.Seqno
+	case metricUsesFilterRelatedCommonEventData[metricKey]:
+		eventData := event.Data.(*common.FilterRelatedCommonEventData)
+		vbucket = eventData.VBucket
+		seqno = eventData.Seqno
+	case metricKey == service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
+		vbucket = event.DerivedData[1].(uint16)
+		seqno = event.DerivedData[2].(uint64)
 	default:
 		return base.ErrorInvalidInput
 	}
+
+	return r_collector.processVBEventData(vbucket, seqno, metricKey)
+}
+
+func (r_collector *routerCollector) processVBEventData(vbucket uint16, seqno uint64, metricKey string) error {
+	helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
+	if !ok {
+		return base.ErrorNotMyVbucket
+	}
+	helper.handleIncomingSeqno(vbucket, seqno, metricKey)
+	return nil
 }
 
 func (r_collector *routerCollector) OnEvent(event *common.Event) {
@@ -3085,26 +3086,26 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	var err error
 	switch event.EventType {
 	case common.DataFiltered:
-		uprEvent := event.Data.(*mcc.UprEvent)
+		eventData := event.Data.(*common.DataFilteredEventData)
 		metric_map[service_def.DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
-		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
-		isTombstone := (uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION)
+		dataTypeIsJson := eventData.DataType&mcc.JSONDataType > 0
+		isTombstone := (eventData.Opcode == mc.UPR_DELETION || eventData.Opcode == mc.UPR_EXPIRATION)
 		if !dataTypeIsJson && !isTombstone {
 			metric_map[service_def.BINARY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 			err = r_collector.handleVBEvent(event, service_def.BINARY_FILTERED_METRIC)
 		}
-		if uprEvent.Opcode == mc.UPR_DELETION {
+		if eventData.Opcode == mc.UPR_DELETION {
 			metric_map[service_def.DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
 			err = r_collector.handleVBEvent(event, service_def.DELETION_FILTERED_METRIC)
-		} else if uprEvent.Opcode == mc.UPR_MUTATION {
+		} else if eventData.Opcode == mc.UPR_MUTATION {
 			metric_map[service_def.SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
 			err = r_collector.handleVBEvent(event, service_def.SET_FILTERED_METRIC)
-		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
+		} else if eventData.Opcode == mc.UPR_EXPIRATION {
 			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 			err = r_collector.handleVBEvent(event, service_def.EXPIRY_FILTERED_METRIC)
 		} else {
-			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
+			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", eventData.Opcode, event.Component.Id())
 		}
 
 		if err != nil {

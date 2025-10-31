@@ -8,7 +8,11 @@
 
 package common
 
-import "github.com/couchbase/goxdcr/v8/base"
+import (
+	"github.com/couchbase/gomemcached"
+	memcached "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/v8/base"
+)
 
 // ComponentEventType is the common event type that Component can raise during its lifecycle
 // It is not required for Component to raise all those event
@@ -117,6 +121,52 @@ const (
 	// the maximum operations limit.
 	SubdocCmdSkippedDueToLimits ComponentEventType = iota
 )
+
+// Struct definitions for holding data specific to the processing of certain event types
+// (Used to decouple object lifecycles from the asynchronous event processing)
+
+type StreamingStartEventData struct {
+	VBucket     uint16
+	FailoverLog *memcached.FailoverLog
+}
+
+type SystemEventReceivedEventData struct {
+	VBucket    uint16
+	Seqno      uint64
+	ManifestID uint64
+}
+
+type DataReceivedEventData struct {
+	VBucket       uint16
+	Seqno         uint64
+	Expiry        uint32
+	Opcode        gomemcached.CommandCode
+	IsSystemEvent bool
+}
+
+type SnapshotMarkerReceivedEventData struct {
+	VBucket      uint16
+	SnapstartSeq uint64 // start sequence number of this snapshot
+	SnapendSeq   uint64 // End sequence number of the snapshotSnapshotType string
+}
+
+type DataFilteredEventData struct {
+	FilterRelatedCommonEventData
+	DataType uint8
+	Opcode   gomemcached.CommandCode
+}
+
+type FilterRelatedCommonEventData struct {
+	VBucket       uint16
+	Seqno         uint64
+	TargetVBToUse uint16 // valid in both standard and variable VB modes
+	DebugUprEvent *memcached.UprEvent
+}
+
+type SeqnoAdvReceivedEventData struct {
+	VBucket uint16
+	Seqno   uint64
+}
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	switch c {

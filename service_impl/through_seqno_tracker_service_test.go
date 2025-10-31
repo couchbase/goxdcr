@@ -200,29 +200,32 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	manifestAdditional.RecycleFunc = func(obj interface{}) {}
 
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	systemEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.SystemEventReceived, systemEvent, nil, nil, nil)
+	manifestID, _ := systemEvent.GetManifestId()
+	commonEvent = common.NewEvent(common.SystemEventReceived, &common.SystemEventReceivedEventData{VBucket: systemEvent.VBucket, Seqno: systemEvent.Seqno, ManifestID: manifestID}, nil, nil, nil)
 	oldFilteredLen := svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	newFilteredLen := svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
 	assert.NotEqual(oldFilteredLen, newFilteredLen)
 
 	systemEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.SystemEventReceived, systemEvent, nil, nil, nil)
+	commonEvent = common.NewEvent(common.SystemEventReceived, &common.SystemEventReceivedEventData{VBucket: systemEvent.VBucket, Seqno: systemEvent.Seqno, ManifestID: manifestID}, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	newFilteredLen = svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
@@ -235,10 +238,12 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	// Say 5 and 6 are not replicated
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 6
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	wrappedMCR := &base.WrappedMCRequest{
@@ -265,10 +270,11 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	// Say 7 was sent
 	mutationEvent.Seqno = 7
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	through_seqno = svc.GetThroughSeqno(1)
@@ -277,15 +283,18 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	// Pretend everything else from now on is not sent but ignored
 	mutationEvent.Seqno = 8
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 9
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 10
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	wrappedMCR.Seqno = 8
@@ -370,7 +379,8 @@ func TestClonedData(t *testing.T) {
 	dataSentAdditional.CloneSyncCh = cloneSyncCh
 
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
@@ -386,7 +396,7 @@ func TestClonedData(t *testing.T) {
 	assert.Nil(svc.ProcessEvent(clonedEvent))
 
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// The main req + one single sibling req means that seqno shouldn't move since until both events are heard back
@@ -419,11 +429,12 @@ func TestOsoModeSimple(t *testing.T) {
 	dataSentAdditional.VBucket = 1
 
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Happy path, seqno is at 1
@@ -447,7 +458,8 @@ func TestOsoModeSimple(t *testing.T) {
 
 	// seqno 2 received
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
@@ -476,7 +488,7 @@ func TestOsoModeSimple(t *testing.T) {
 	assert.Equal(uint64(1), through_seqno)
 
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	through_seqno = svc.GetThroughSeqno(1)
@@ -504,18 +516,20 @@ func TestOsoMode(t *testing.T) {
 	dataSentAdditional.VBucket = 1
 
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Happy path, seqno is at 2
@@ -539,10 +553,10 @@ func TestOsoMode(t *testing.T) {
 
 	// Now let's pretend DCP is sending things out of order, in the order of 4, 3, 7
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// oso mode is on - which means throughSeqno must not go past the last seen seqno when oso mode was on
@@ -550,14 +564,16 @@ func TestOsoMode(t *testing.T) {
 	assert.Equal(uint64(2), through_seqno)
 
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 7
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// Before 7 is has been sent acknowledged, osomode is turned off
@@ -583,10 +599,11 @@ func TestOsoMode(t *testing.T) {
 	// At this point, we're waiting for seqno 7 to be handled. Once it's handled, throughSeqno should move to 7
 	// Inject some future seqnos to throw it off
 	mutationEvent.Seqno = 10
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Just for sanity check
@@ -610,7 +627,8 @@ func TestOsoMode(t *testing.T) {
 
 	// And say DCP sends down a seqno of 11
 	mutationEvent.Seqno = 11
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// Just for sanity check
@@ -620,7 +638,7 @@ func TestOsoMode(t *testing.T) {
 	// Now 7 is handled, throughSeqno should move to 10, as it has been sent and also as 7 was the missing piece
 	mutationEvent.Seqno = 7
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// After DataSent, the throughSeqno should move
@@ -650,7 +668,7 @@ func TestOsoMode(t *testing.T) {
 	// Then we finally sent the seqno of 10
 	mutationEvent.Seqno = 11
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// After DataSent, the throughSeqno should move
@@ -683,18 +701,20 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	dataSentAdditional.VBucket = 1
 
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Happy path, seqno is at 2
@@ -719,7 +739,8 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// DCP sends seqno 3
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 
@@ -746,21 +767,22 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// Say seqno 5 is now heard from DCP but we're still waiting for seqno 3 to come back from downstream
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 
 	// seqno 3 is now finally heard back, and 5 too
 	mutationEvent.Seqno = 3
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// When 5 is heard, the snapshot raised should be of seqno 5
 	osoSnapshotSeqnoCheck = 5
 	mutationEvent.Seqno = 5
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Sanity check
@@ -783,7 +805,8 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	// Check along the way to make sure
 
 	mutationEvent.Seqno = 6
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// sanity check - to make sure that it is not logged into a session since all session should be done
@@ -809,15 +832,18 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	}
 
 	mutationEvent.Seqno = 10
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 8
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 9
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// Session 1 ends
@@ -843,7 +869,8 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	// Part2: non-session seqno11
 	mutationEvent.Seqno = 11
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// sanity check
@@ -868,15 +895,18 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	}
 
 	mutationEvent.Seqno = 13
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 15
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	mutationEvent.Seqno = 14
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// Session 2 ends
@@ -903,17 +933,17 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	// Now, XMEM sends everything out in reverse order
 	mutationEvent.Seqno = 14
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 15
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 13
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Sanity check
@@ -923,7 +953,7 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	mutationEvent.Seqno = 11
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Sanity check
@@ -933,12 +963,12 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 
 	mutationEvent.Seqno = 9
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	mutationEvent.Seqno = 8
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Throwing in another OSO session here for good measure to try to see if the system should still behave correctly
@@ -959,7 +989,8 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	}
 
 	mutationEvent.Seqno = 17
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// With 10 sent last, it'll raise a snapshot for 15
@@ -967,13 +998,13 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	osoSnapshotSeqnoCheck = 15
 	mutationEvent.Seqno = 10
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// The very first seqno that was received from DCP. ThroughSeqno should have moved after this
 	mutationEvent.Seqno = 6
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Seqno wouldn't have moved because an OSO session is currently open. The 6 should have been moved into the "unsure" list
@@ -981,7 +1012,7 @@ func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
 	// simulate slow KV - where 17 is handled and then OSO end comes
 	mutationEvent.Seqno = 17
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// OSO now ends -
@@ -1066,47 +1097,51 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	// 2. 5 sent
 	mutationEvent.Seqno = 5
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 3. 3 received
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 4. 2 sent
 	mutationEvent.Seqno = 2
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 5. 1 sent
 	mutationEvent.Seqno = 1
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 2, 1, 4 received
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 1
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 9. 4 sent
 	mutationEvent.Seqno = 4
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 11. 3 sent
 	mutationEvent.Seqno = 3
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Before OSO ends, throughSeqno should not move
@@ -1132,7 +1167,8 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 
 	// 10. 5 received
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	through_seqno = svc.GetThroughSeqno(1)
@@ -1195,17 +1231,20 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 
 	// 2. 3 received
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 3. 2 received
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 4. 1 received
 	mutationEvent.Seqno = 1
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	var dataSentAdditional parts.DataSentEventAdditional
@@ -1214,24 +1253,25 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	// 5. 1 sent
 	mutationEvent.Seqno = 1
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 6. 2 sent
 	mutationEvent.Seqno = 2
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 7. 3 sent
 	mutationEvent.Seqno = 3
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 8. 4 received
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// Before OSO end, throughSeqno does not move
@@ -1262,7 +1302,7 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	// 10. 4 sent
 	mutationEvent.Seqno = 4
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	assert.Equal(uint32(1), atomic.LoadUint32(&osoSnapshotRaisedCnt))
@@ -1296,16 +1336,18 @@ func TestVariableVBSent(t *testing.T) {
 
 	// First let VB 1 replicate to VB 1
 	mutationEvent.Seqno = 1
-	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent := common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.NotNil(commonEvent)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.Seqno = mutationEvent.Seqno
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Let VB 1 replicate to VB 2
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.VbucketCommon.VBucket = 2
 	dataSentAdditional.Seqno = mutationEvent.Seqno
@@ -1316,7 +1358,8 @@ func TestVariableVBSent(t *testing.T) {
 
 	// Let VB 1 replicate to VB 3
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	dataSentAdditional.VbucketCommon.VBucket = 3
 	dataSentAdditional.Seqno = mutationEvent.Seqno
@@ -1330,7 +1373,8 @@ func TestVariableVBSent(t *testing.T) {
 	assert.Equal(uint64(3), through_seqno)
 
 	systemEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.SystemEventReceived, systemEvent, nil, nil, nil)
+	manifestID, _ := systemEvent.GetManifestId()
+	commonEvent = common.NewEvent(common.SystemEventReceived, &common.SystemEventReceivedEventData{VBucket: systemEvent.VBucket, Seqno: systemEvent.Seqno, ManifestID: manifestID}, nil, nil, nil)
 	oldFilteredLen := svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Nil(svc.ProcessEvent(commonEvent))
@@ -1343,10 +1387,12 @@ func TestVariableVBSent(t *testing.T) {
 	assert.Equal(uint64(4), through_seqno)
 
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 6
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	wrappedMCR := &base.WrappedMCRequest{
@@ -1451,13 +1497,14 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 	mutationEvent.Seqno = 5
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 	dataSentAdditional.ManifestId = highestTgtManifestIdToUse
-	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent := common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 	dataSentAdditional.ManifestId = 1 // restore to 1
 
 	// 3. 3 received
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 4. 2 sent
@@ -1466,7 +1513,7 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 	dataSentAdditional.VBucket = targetVBRandomRoute()
 	// Let's bump the manifest for this one to 5
 	// dataSentAdditional.ManifestId = highestTgtManifestIdToUse
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 	//dataSentAdditional.ManifestId = 1 // restore to 1
 
@@ -1474,32 +1521,35 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 	mutationEvent.Seqno = 1
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 	dataSentAdditional.VBucket = targetVBRandomRoute()
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 2, 1, 4 received
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 1
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	// 9. 4 sent
 	mutationEvent.Seqno = 4
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 	dataSentAdditional.VBucket = targetVBRandomRoute()
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// 11. 3 sent
 	mutationEvent.Seqno = 3
 	dataSentAdditional.Seqno = mutationEvent.Seqno
 	dataSentAdditional.VBucket = targetVBRandomRoute()
-	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
 	// Before OSO ends, throughSeqno should not move
@@ -1525,7 +1575,8 @@ func TestOSOSentFirstOutOfOrderVariableVB(t *testing.T) {
 
 	// 10. 5 received
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	through_seqno = svc.GetThroughSeqno(1)
@@ -1723,18 +1774,21 @@ func TestOSOModeWithCLogger(t *testing.T) {
 			assert.Nil(svc.ProcessEvent(event))
 		}
 		var seqno uint64
-		if upr, ok := event.Data.(*mcc.UprEvent); ok {
-			seqno = upr.Seqno
-		} else if dataSent, ok := event.Data.(parts.DataSentEventAdditional); ok {
+		if dataSent, ok := event.Data.(parts.DataSentEventAdditional); ok {
 			seqno = dataSent.Seqno
 		} else if cLogReq, ok := event.Data.(conflictlog.CLogReqT); ok {
 			seqno = cLogReq.Seqno
 		} else if cLogRes, ok := event.Data.(conflictlog.CLogRespT); ok {
 			seqno = cLogRes.Seqno
+		} else if eventData, ok := event.Data.(*common.DataReceivedEventData); ok {
+			seqno = eventData.Seqno
 		} else if event.EventType == common.OsoSnapshotReceived {
 			assert.Equal(svc.GetThroughSeqno(vbno), uint64(ts))
 			// we don't know the seqno to fetch the appropriate session
 			return
+		} else if event.EventType == common.DataSent {
+			sentAdditional := event.OtherInfos.(parts.DataSentEventAdditional)
+			seqno = sentAdditional.Seqno
 		} else {
 			panic(fmt.Sprintf("implement %T", event.Data))
 		}
@@ -1770,33 +1824,36 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// seqno 2 received
 	mutationEvent.Seqno = 2
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 2, 1, 0, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 5 received
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 2, 0, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 5 sent
 	mutationEvent.Seqno = 5
 	dataSentAdditional.Seqno = 5
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 2, 1, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 3 received
 	mutationEvent.Seqno = 3
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 1, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 2 sent
 	mutationEvent.Seqno = 2
 	dataSentAdditional.Seqno = 2
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 2, 0, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -1811,13 +1868,14 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// seqno 3 sent
 	mutationEvent.Seqno = 3
 	dataSentAdditional.Seqno = 3
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 3, 3, 0, 1, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 4 received
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 4, 3, 0, 1, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -1832,13 +1890,14 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// seqno 4 sent
 	mutationEvent.Seqno = 4
 	dataSentAdditional.Seqno = 4
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 2, 5, 4, 4, 0, 2, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 1 received
 	mutationEvent.Seqno = 1
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 1, 5, 5, 4, 0, 2, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -1869,7 +1928,8 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// seqno 8 received
 	mutationEvent.Seqno = 8
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 8, 8, 1, 0, 5, 0, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 
@@ -1884,14 +1944,14 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// seqno 8 sent
 	mutationEvent.Seqno = 8
 	dataSentAdditional.Seqno = 8
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 8, 8, 1, 1, 5, 1, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 
 	// seqno 1 sent - but cLog not yet done, so throughSeqno still 0.
 	mutationEvent.Seqno = 1
 	dataSentAdditional.Seqno = 1
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, true, 1, 5, 5, 5, 0, 2, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 
@@ -1904,13 +1964,15 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// seqno 7 received
 	mutationEvent.Seqno = 7
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 7, 8, 2, 1, 5, 1, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 
 	// seqno 6 received
 	mutationEvent.Seqno = 6
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 1, 5, 1, 0, 0)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 
@@ -1925,7 +1987,7 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// seqno 6 sent
 	mutationEvent.Seqno = 6
 	dataSentAdditional.Seqno = 6
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, false, 6, 8, 3, 2, 5, 1, 0, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -1938,13 +2000,15 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// seqno 9 received
 	mutationEvent.Seqno = 9
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 6, 9, 4, 2, 5, 1, 1, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 10 received
 	mutationEvent.Seqno = 10
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 6, 10, 5, 2, 5, 1, 1, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -1972,14 +2036,14 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// seqno 10 sent
 	mutationEvent.Seqno = 10
 	dataSentAdditional.Seqno = 10
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 3, 5, 2, 1, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
 	// seqno 7 sent
 	mutationEvent.Seqno = 7
 	dataSentAdditional.Seqno = 7
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	raiseEventAndTest(commonEvent, nil, true, true, 6, 10, 5, 4, 5, 2, 1, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
 
@@ -2026,7 +2090,8 @@ func TestOSOModeWithCLogger(t *testing.T) {
 
 	// seqno 11 received now.
 	mutationEvent.Seqno = 11
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	raiseEventAndTest(commonEvent, nil, true, false, 11, 11, 1, 0, 10, 0, 0, 5)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 2)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions[1].unsureBufferedCLogSeqnos.seqno_list_1), 1)
@@ -2036,7 +2101,7 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// previous session should close.
 	mutationEvent.Seqno = 9
 	dataSentAdditional.Seqno = 9
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	// check session stat of remaining session
 	raiseEventAndTest(commonEvent, nil, true, false, 11, 11, 1, 0, 10, 0, 0, 10)
 	assert.Equal(len(svc.vbOsoModeSessionDCPTracker[vbno].sessions), 1)
@@ -2069,7 +2134,7 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// this session should close.
 	mutationEvent.Seqno = 11
 	dataSentAdditional.Seqno = 11
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	// there will be no more sessions, therefore just check for throughSeqno
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(11))
@@ -2106,14 +2171,15 @@ func TestOSOModeWithAsyncDataReceived(t *testing.T) {
 
 	// seqno 5 received
 	mutationEvent.Seqno = 5
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
 
 	// seqno 5 sent.
 	mutationEvent.Seqno = 5
 	dataSentAdditional.Seqno = 5
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
 
@@ -2131,14 +2197,15 @@ func TestOSOModeWithAsyncDataReceived(t *testing.T) {
 
 	// seqno 4 received
 	mutationEvent.Seqno = 4
-	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	dataReceivedEventData.Seqno = mutationEvent.Seqno
+	commonEvent = common.NewEvent(common.DataReceived, &dataReceivedEventData, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(0))
 
 	// seqno 4 sent.
 	mutationEvent.Seqno = 4
 	dataSentAdditional.Seqno = 4
-	commonEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	commonEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
 	assert.Equal(svc.GetThroughSeqno(vbno), uint64(5))

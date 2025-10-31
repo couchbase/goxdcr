@@ -1126,7 +1126,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 					// Process the rollback message to see if this is something we should ignore
 					ignoreResponse, helperErr := dcp.vbHandshakeMap[vbno].processRollbackResponse(m.Opaque)
 					if helperErr != nil {
-						dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, m, dcp, nil, helperErr))
+						dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, helperErr))
 					}
 
 					if ignoreResponse {
@@ -1145,7 +1145,11 @@ func (dcp *DcpNozzle) processData() (err error) {
 						if err != nil {
 							return err
 						}
-						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
+						eventData := common.StreamingStartEventData{
+							VBucket:     m.VBucket,
+							FailoverLog: m.FailoverLog,
+						}
+						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, &eventData, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
 
 						vbuuid, _, err := m.FailoverLog.Latest()
@@ -1175,8 +1179,16 @@ func (dcp *DcpNozzle) processData() (err error) {
 					return err
 				}
 			} else if m.IsSystemEvent() {
-				dcp.handleSystemEvent(m)
-				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+				manifestID, err := dcp.handleSystemEvent(m)
+				if err != nil {
+					break
+				}
+				eventData := common.SystemEventReceivedEventData{
+					VBucket:    m.VBucket,
+					Seqno:      m.Seqno,
+					ManifestID: manifestID,
+				}
+				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, &eventData, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 			} else if m.IsSeqnoAdv() {
 				dcp.handleSeqnoAdv(m)
 			} else if m.IsOsoSnapshot() {
@@ -1208,7 +1220,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 							dcp.incCompressedCounterReceived()
 						}
 						dcp.markThroughSeqnoRelatedOsoEvent(m)
-						dcp.RaiseEvent(common.NewEvent(common.DataReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+						dataReceivedEventData := common.DataReceivedEventData{
+							VBucket:       m.VBucket,
+							Seqno:         m.Seqno,
+							Expiry:        m.Expiry,
+							Opcode:        m.Opcode,
+							IsSystemEvent: m.IsSystemEvent(),
+						}
+						dcp.RaiseEvent(common.NewEvent(common.DataReceived, &dataReceivedEventData, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 						dcp.endSeqnoForDcp[m.VBucket].SetSeqno(m.Seqno)
 						wrappedUpr, err := dcp.composeWrappedUprEvent(m)
 						if err != nil {
@@ -1225,7 +1244,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						dcp.incCounterSent()
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
-						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
+						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, nil, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
 						if !dcp.isMainPipeline() {
 							if !dcp.osoRequested && m.Seqno > dcp.backfillTaskEndSeqno[m.VBucket].GetSeqno() {
 								dcp.sendStreamCloseIfNecessary(m.VBucket)
@@ -1233,7 +1252,12 @@ func (dcp *DcpNozzle) processData() (err error) {
 							atomic.CompareAndSwapUint32(dcp.backfillReceivedData[m.VBucket], 0, 1)
 						}
 					case mc.UPR_SNAPSHOT:
-						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+						eventData := common.SnapshotMarkerReceivedEventData{
+							VBucket:      m.VBucket,
+							SnapstartSeq: m.SnapstartSeq,
+							SnapendSeq:   m.SnapendSeq,
+						}
+						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, &eventData, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 					default:
 						dcp.Logger().Debugf("%v Uprevent OpCode=%v, is skipped\n", dcp.Id(), m.Opcode)
 					}
@@ -1293,20 +1317,16 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64, flag uint32) er
 	return err
 }
 
-func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
-	if !event.IsSystemEvent() {
-		dcp.Logger().Warnf("Event %v%v%v is not a system event", base.UdTagBegin, event, base.UdTagEnd)
-		return
-	}
-
+func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) (uint64, error) {
 	manifestId, err := event.GetManifestId()
 	if err != nil {
-		dcp.Logger().Infof("Event %v%v%v unable to get manifest ID err: %v", base.UdTagBegin, event, base.UdTagEnd, err)
-		return
+		dcp.Logger().Errorf("Event %v%v%v unable to get manifest ID err: %v", base.UdTagBegin, event, base.UdTagEnd, err)
+		return 0, err
 	}
 
 	vbno := event.VBucket
 	atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], manifestId)
+	return manifestId, nil
 }
 
 func (dcp *DcpNozzle) handleSeqnoAdv(event *mcc.UprEvent) {
@@ -1319,7 +1339,11 @@ func (dcp *DcpNozzle) handleSeqnoAdv(event *mcc.UprEvent) {
 	// DataReceived + DataSent events. So we mark it as a throughSeqno
 	// related OSO event, incase of a OSO processing.
 	dcp.markThroughSeqnoRelatedOsoEvent(event)
-	dcp.RaiseEvent(common.NewEvent(common.SeqnoAdvReceived, event, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+	eventData := common.SeqnoAdvReceivedEventData{
+		VBucket: event.VBucket,
+		Seqno:   event.Seqno,
+	}
+	dcp.RaiseEvent(common.NewEvent(common.SeqnoAdvReceived, &eventData, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 }
 
 // Only ok situation dcp should receive a streamEnd is if it's a backfill
@@ -2119,12 +2143,12 @@ func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
 
 func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 	return func(vbno uint16, seqno uint64) {
-		m := &mcc.UprEvent{
+		eventData := common.SnapshotMarkerReceivedEventData{
 			VBucket:      vbno,
 			SnapstartSeq: seqno,
 			SnapendSeq:   seqno,
 		}
-		dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+		dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, &eventData, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 	}
 }
 

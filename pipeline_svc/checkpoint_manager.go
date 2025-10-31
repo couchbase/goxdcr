@@ -2721,7 +2721,7 @@ func (*CheckpointManager) ListenerPipelineType() common.ListenerPipelineType {
 func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 	switch event.EventType {
 	case common.StreamingStart:
-		upr_event, ok := event.Data.(*mcc.UprEvent)
+		upr_event, ok := event.Data.(*common.StreamingStartEventData)
 		if ok {
 			flog := upr_event.FailoverLog
 			vbno := upr_event.VBucket
@@ -2740,17 +2740,17 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			}
 		}
 	case common.SnapshotMarkerReceived:
-		upr_event, ok := event.Data.(*mcc.UprEvent)
-		ckmgr.logger.Debugf("Received snapshot vb=%v, start=%v, end=%v\n", upr_event.VBucket, upr_event.SnapstartSeq, upr_event.SnapendSeq)
+		eventData, ok := event.Data.(*common.SnapshotMarkerReceivedEventData)
+		ckmgr.logger.Debugf("Received snapshot vb=%v, start=%v, end=%v\n", eventData.VBucket, eventData.SnapstartSeq, eventData.SnapendSeq)
 		if ok {
-			vbno := upr_event.VBucket
+			vbno := eventData.VBucket
 
 			snapshot_history_obj, ok1 := ckmgr.snapshot_history_map[vbno]
 			if ok1 {
 				// add current snapshot to snapshot history
 				snapshot_history_obj.lock.Lock()
 				defer snapshot_history_obj.lock.Unlock()
-				cur_snapshot := &snapshot{start_seqno: upr_event.SnapstartSeq, end_seqno: upr_event.SnapendSeq}
+				cur_snapshot := &snapshot{start_seqno: eventData.SnapstartSeq, end_seqno: eventData.SnapendSeq}
 				if len(snapshot_history_obj.snapshot_history) < base.MaxLengthSnapshotHistory {
 					snapshot_history_obj.snapshot_history = append(snapshot_history_obj.snapshot_history, cur_snapshot)
 				} else {

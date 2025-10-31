@@ -202,8 +202,6 @@ func (d *DataSentEventAdditional) GetVB() uint16 {
 }
 
 type DataFilteredAdditional struct {
-	Key             string
-	Seqno           uint64
 	ManifestId      uint64
 	FilteringStatus base.FilteringStatusType
 }

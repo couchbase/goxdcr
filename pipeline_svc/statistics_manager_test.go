@@ -228,7 +228,8 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	fakeComponent := &common.Component{}
 	fakeComponent.On("Id").Return(testRouter)
 	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
+	targetVB := base.GetVBucketNo(uprEvent.Key, base.NumberOfVbs)
+	passedEvent.Data = &commonReal.DataFilteredEventData{FilterRelatedCommonEventData: commonReal.FilterRelatedCommonEventData{VBucket: uprEvent.VBucket, Seqno: uprEvent.Seqno, TargetVBToUse: targetVB}, DataType: uprEvent.DataType, Opcode: uprEvent.Opcode}
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
@@ -369,7 +370,8 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	fakeComponent := &common.Component{}
 	fakeComponent.On("Id").Return(testRouter).Once()
 	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
+	targetVB := base.GetVBucketNo(uprEvent.Key, base.NumberOfVbs)
+	passedEvent.Data = &commonReal.DataFilteredEventData{FilterRelatedCommonEventData: commonReal.FilterRelatedCommonEventData{VBucket: uprEvent.VBucket, Seqno: uprEvent.Seqno, TargetVBToUse: targetVB}, DataType: uprEvent.DataType, Opcode: uprEvent.Opcode}
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
@@ -377,6 +379,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	passedEvent.EventType = commonReal.DataReceived
+	passedEvent.Data = &commonReal.DataReceivedEventData{VBucket: uprEvent.VBucket, Seqno: uprEvent.Seqno, Expiry: uprEvent.Expiry, Opcode: uprEvent.Opcode, IsSystemEvent: uprEvent.IsSystemEvent()}
 	fakeComponent.On("Id").Return(testDCPPart)
 	passedEvent.Component = fakeComponent
 
@@ -443,51 +446,37 @@ func TestStatsMgrWithFilteringStats(t *testing.T) {
 	fakeComponent := &common.Component{}
 
 	// Filtering ATR TXN documents
-	fakeComponent.On("Id").Return(testRouter).Once()
+	fakeComponent.On("Id").Return(testRouter)
 	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
-	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnATRDocument}
 
+	targetVB := base.GetVBucketNo(uprEvent.Key, base.NumberOfVbs)
+	passedEvent.Data = &commonReal.DataFilteredEventData{FilterRelatedCommonEventData: commonReal.FilterRelatedCommonEventData{VBucket: uprEvent.VBucket, Seqno: uprEvent.Seqno, TargetVBToUse: targetVB}, DataType: uprEvent.DataType, Opcode: uprEvent.Opcode}
+
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnATRDocument}
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_TXN_ATR_METRIC]).(metrics.Counter).Count())
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	// Filtering client TXN documents
-	fakeComponent.On("Id").Return(testRouter).Once()
-	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnTxnClientRecord}
-
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_CLIENT_TXN_METRIC]).(metrics.Counter).Count())
 	assert.Equal(int64(2), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	// Filtering documents with txn xattrs
-	fakeComponent.On("Id").Return(testRouter).Once()
-	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnTxnsXattr}
-
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_TXN_XATTR_METRIC]).(metrics.Counter).Count())
 	assert.Equal(int64(3), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	// Filtering mobile records
-	fakeComponent.On("Id").Return(testRouter).Once()
-	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnMobileRecord}
-
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_MOBILE_METRIC]).(metrics.Counter).Count())
 	assert.Equal(int64(4), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	// Filtered on User defined filter
-	fakeComponent.On("Id").Return(testRouter).Once()
-	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnUserDefinedFilter}
-
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_USER_DEFINED_METRIC]).(metrics.Counter).Count())
 	assert.Equal(int64(5), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
@@ -770,7 +759,8 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 	fakeComponent := &common.Component{}
 	fakeComponent.On("Id").Return(testRouter)
 	passedEvent.Component = fakeComponent
-	passedEvent.Data = uprEvent
+	targetVB := base.GetVBucketNo(uprEvent.Key, base.NumberOfVbs)
+	passedEvent.Data = &commonReal.DataFilteredEventData{FilterRelatedCommonEventData: commonReal.FilterRelatedCommonEventData{VBucket: uprEvent.VBucket, Seqno: uprEvent.Seqno, TargetVBToUse: targetVB}, DataType: uprEvent.DataType, Opcode: uprEvent.Opcode}
 	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
@@ -884,4 +874,14 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 	//assert.True(ok)
 	//assert.NotNil(counter)
 	//assert.Equal(int64(21), counter.Count())
+}
+
+func TestStatsMgrMetricEventMapping(t *testing.T) {
+	fmt.Println("============== Test case start: TestStatsMgrMetricEventMapping =================")
+	for metricKey := range metricUsesDataFilteredEventData {
+		if _, ok := metricUsesFilterRelatedCommonEventData[metricKey]; ok {
+			t.Errorf("Metric key %s found in both metricUsesDataFilteredEventData and metricUsesFilterRelatedCommonEventData", metricKey)
+		}
+	}
+	fmt.Println("============== Test case end: TestStatsMgrMetricEventMapping =================")
 }

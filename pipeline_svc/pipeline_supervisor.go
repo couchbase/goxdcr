@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -217,13 +216,14 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 			// Raise error so pipeline will restart and take recovery actions
 			pipelineSupervisor.setError(event.Component.Id(), err)
 		} else if pipelineSupervisor.Logger().GetLogLevel() >= log.LogLevelDebug {
-			uprEvent := event.Data.(*mcc.UprEvent)
-			if uprEvent == nil {
+			eventData := event.Data.(*common.FilterRelatedCommonEventData)
+			if eventData == nil {
 				return
 			}
-			uprDumpBytes, err := json.Marshal(*uprEvent)
+
+			dumpBytes, err := json.Marshal(eventData)
 			if err == nil {
-				pipelineSupervisor.Logger().Debugf("Failed filtering uprEvent dump\n%v%v%v\n", base.UdTagBegin, string(uprDumpBytes), base.UdTagEnd)
+				pipelineSupervisor.Logger().Debugf("Failed filtering uprEvent dump\n%v%v%v\n", base.UdTagBegin, string(dumpBytes), base.UdTagEnd)
 			}
 		}
 	default:

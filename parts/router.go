@@ -181,6 +181,9 @@ type Router struct {
 
 	sourceVBs    []uint16
 	allSourceVBs []uint16
+
+	variableVBMode               bool
+	numOfTargetVBsInVariableMode *int
 }
 
 /**
@@ -1620,6 +1623,17 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		sourceVBs:                srcNozzleVBs,
 	}
 
+	if len(router.routingMap) != len(router.sourceVBs) {
+		// Variable VB Mode
+		router.variableVBMode = true
+		vbCt := len(router.routingMap)
+		router.numOfTargetVBsInVariableMode = &vbCt
+	} else {
+		// Standard/Fixed VB Mode
+		router.variableVBMode = false
+		router.numOfTargetVBsInVariableMode = nil
+	}
+
 	router.expDelMode.Set(filterExpDelType)
 
 	startable := true
@@ -1676,8 +1690,10 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	if router.remoteClusterCapability.HasCollectionSupport() {
-		router.collectionsRouting.Init(router.id, downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter, router.GetPart().ResponsibleVBs())
-
+		err = router.collectionsRouting.Init(router.id, downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter, router.GetPart().ResponsibleVBs())
+		if err != nil {
+			return nil, err
+		}
 		modes := spec.Settings.GetCollectionModes()
 		router.collectionModes = CollectionsMgtAtomicType(modes)
 		router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v, filter=%v, collectionMode=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg, modes.String())
@@ -1839,8 +1855,8 @@ func (router *Router) Stop() error {
 	}
 }
 
-func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent, filteringStatus base.FilteringStatusType) interface{} {
-	return DataFilteredAdditional{Seqno: uprEvent.Seqno,
+func (router *Router) getDataFilteredAdditional(filteringStatus base.FilteringStatusType) interface{} {
+	return DataFilteredAdditional{
 		// For filtered document, send the latestSuccessfulManifestId
 		// so that the throughSeqno service can get the most updated manifestId
 		// for checkpointing if there is an overwhelming number of filtered docs
@@ -1881,11 +1897,29 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
+	if router.variableVBMode && router.numOfTargetVBsInVariableMode == nil {
+		return nil, fmt.Errorf("router is in variable-VB mode but numOfTargetVBsInVariableMode is nil")
+	}
+
 	// Deletion/Expiration filter doesn't apply to system scope
 	if wrappedUpr.ColNamespace == nil || wrappedUpr.ColNamespace.ScopeName != base.SystemScopeName {
 		shouldContinue := router.ProcessExpDelTTL(uprEvent)
 		if !shouldContinue {
-			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent, baseFilter.FilteredOnOthers)))
+			eventData := common.DataFilteredEventData{
+				FilterRelatedCommonEventData: common.FilterRelatedCommonEventData{
+					VBucket: uprEvent.VBucket,
+					Seqno:   uprEvent.Seqno,
+				},
+				DataType: uprEvent.DataType,
+				Opcode:   uprEvent.Opcode,
+			}
+			if router.variableVBMode {
+				eventData.TargetVBToUse = base.GetVBucketNo(uprEvent.Key, *router.numOfTargetVBsInVariableMode)
+			} else {
+				eventData.TargetVBToUse = uprEvent.VBucket
+			}
+
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, &eventData, router, nil, router.getDataFilteredAdditional(baseFilter.FilteredOnOthers)))
 			return result, nil
 		}
 	}
@@ -1902,10 +1936,39 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	if !needToReplicate || err != nil {
 		if err != nil {
 			// Let pipeline supervisor do the logging
-			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, router.getDataFilteredAdditional(uprEvent, filteringStatus)))
+			eventData := common.FilterRelatedCommonEventData{
+				VBucket: uprEvent.VBucket,
+				Seqno:   uprEvent.Seqno,
+			}
+			if router.variableVBMode {
+				eventData.TargetVBToUse = base.GetVBucketNo(uprEvent.Key, *router.numOfTargetVBsInVariableMode)
+			} else {
+				eventData.TargetVBToUse = uprEvent.VBucket
+			}
+
+			if router.Logger().GetLogLevel() >= log.LogLevelDebug {
+				// Create a deep copy of the uprEvent object for debugging
+				eventData.DebugUprEvent = uprEvent.Clone()
+			}
+
+			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, &eventData, router, []interface{}{err, errDesc}, router.getDataFilteredAdditional(filteringStatus)))
 		} else {
 			// if data does not need to be replicated, drop it. return empty result
-			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent, filteringStatus)))
+			eventData := common.DataFilteredEventData{
+				FilterRelatedCommonEventData: common.FilterRelatedCommonEventData{
+					VBucket: uprEvent.VBucket,
+					Seqno:   uprEvent.Seqno,
+				},
+				DataType: uprEvent.DataType,
+				Opcode:   uprEvent.Opcode,
+			}
+			if router.variableVBMode {
+				eventData.TargetVBToUse = base.GetVBucketNo(uprEvent.Key, *router.numOfTargetVBsInVariableMode)
+			} else {
+				eventData.TargetVBToUse = uprEvent.VBucket
+			}
+
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, &eventData, router, nil, router.getDataFilteredAdditional(filteringStatus)))
 		}
 		// Let supervisor set the err instead of the router, to minimize pipeline interruption
 		return result, nil
@@ -2328,7 +2391,17 @@ func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
 
 	if expDelMode&base.FilterExpDelStripExpiration > 0 && uprEvent.Opcode == mc.UPR_MUTATION {
 		uprEvent.Expiry = uint32(0)
-		router.RaiseEvent(common.NewEvent(common.ExpiryFieldStripped, uprEvent, router, nil, nil))
+		eventData := common.FilterRelatedCommonEventData{
+			VBucket: uprEvent.VBucket,
+			Seqno:   uprEvent.Seqno,
+		}
+		if router.variableVBMode {
+			eventData.TargetVBToUse = base.GetVBucketNo(uprEvent.Key, *router.numOfTargetVBsInVariableMode)
+		} else {
+			eventData.TargetVBToUse = uprEvent.VBucket
+		}
+
+		router.RaiseEvent(common.NewEvent(common.ExpiryFieldStripped, &eventData, router, nil, nil))
 	}
 
 	return true

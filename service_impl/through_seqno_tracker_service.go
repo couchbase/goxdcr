@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	component "github.com/couchbase/goxdcr/v8/component"
@@ -1196,15 +1195,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	return nil
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) markUprEventAsFiltered(uprEvent *mcc.UprEvent) {
-	if uprEvent == nil {
-		return
-	}
-	seqno := uprEvent.Seqno
-	vbno := uprEvent.VBucket
-	tsTracker.addFilteredSeqno(vbno, seqno)
-}
-
 func (tsTracker *ThroughSeqnoTrackerSvc) markMCRequestAsIgnored(req *base.WrappedMCRequest) {
 	if req == nil {
 		return
@@ -1308,23 +1298,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.DataFiltered:
-		uprEvent := event.Data.(*mcc.UprEvent)
-		vbno := uprEvent.VBucket
-		seqno := uprEvent.Seqno
+		eventData := event.Data.(*common.DataFilteredEventData)
+		vbno := eventData.VBucket
+		seqno := eventData.Seqno
 		manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
-		tsTracker.markUprEventAsFiltered(uprEvent)
+		tsTracker.addFilteredSeqno(vbno, seqno)
 		var tgtVbToUse *uint16
 		if tsTracker.variableVBMode {
-			tgtVb := base.GetVBucketNo(uprEvent.Key, len(tsTracker.variableTgtVbs))
+			tgtVb := eventData.TargetVBToUse
 			tgtVbToUse = &tgtVb
 		}
 		if !processedAsOSO {
-			if tgtVbToUse != nil {
-				tsTracker.addManifestId(*tgtVbToUse, uprEvent.Seqno, manifestId)
-			} else {
-				tsTracker.addManifestId(vbno, uprEvent.Seqno, manifestId)
-			}
+			tsTracker.addManifestId(eventData.TargetVBToUse, eventData.Seqno, manifestId)
 		} else {
 			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 			if done {
@@ -1335,18 +1321,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		err := event.DerivedData[0].(error)
 		// If error is recoverable, do not mark it filtered in order to avoid data loss
 		if !base.FilterErrorIsRecoverable(err) {
-			uprEvent := event.Data.(*mcc.UprEvent)
-			vbno := uprEvent.VBucket
-			seqno := uprEvent.Seqno
+			eventData := event.Data.(*common.FilterRelatedCommonEventData)
+			vbno := eventData.VBucket
+			seqno := eventData.Seqno
 			manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
 			processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 			var tgtVbToUse *uint16
 			if tsTracker.variableVBMode {
-				tgtVb := base.GetVBucketNo(uprEvent.Key, len(tsTracker.variableTgtVbs))
+				tgtVb := eventData.TargetVBToUse
 				tgtVbToUse = &tgtVb
 			}
 			if !processedAsOSO {
-				tsTracker.markUprEventAsFiltered(uprEvent)
+				tsTracker.addFilteredSeqno(vbno, seqno)
 			} else {
 				done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker, tgtVbToUse)
 				if done {
@@ -1403,9 +1389,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.DataReceived:
-		upr_event := event.Data.(*mcc.UprEvent)
-		seqno := upr_event.Seqno
-		vbno := upr_event.VBucket
+		eventData := event.Data.(*common.DataReceivedEventData)
+		seqno := eventData.Seqno
+		vbno := eventData.VBucket
 		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
 		processedAsOso, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOso {
@@ -1417,25 +1403,25 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.SystemEventReceived:
-		uprEvent := event.Data.(*mcc.UprEvent)
-		seqno := uprEvent.Seqno
-		vbno := uprEvent.VBucket
+		eventData := event.Data.(*common.SystemEventReceivedEventData)
+		seqno := eventData.Seqno
+		vbno := eventData.VBucket
+		manifestId := eventData.ManifestID
 		// SystemEventReceived should not be OSO related, because system events tell of a subscriber of a collection creation/drop
 		// When OSO is used, it is only used on a single collection - thus no reason why it would receive an system event
 		// But just in case, have the handler here implemented
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.processGapSeqnos(vbno, seqno)
-			tsTracker.markSystemEvent(uprEvent)
+			tsTracker.addSystemSeqno(vbno, seqno, manifestId)
 		} else {
-			manifestId, _ := uprEvent.GetManifestId()
 			session.MarkManifestReceived(manifestId)
 		}
 	case common.SeqnoAdvReceived:
 		// For SeqnoAdv - handle it as any other mutations that's being passed down
-		uprEvent := event.Data.(*mcc.UprEvent)
-		seqno := uprEvent.Seqno
-		vbno := uprEvent.VBucket
+		eventData := event.Data.(*common.SeqnoAdvReceivedEventData)
+		seqno := eventData.Seqno
+		vbno := eventData.VBucket
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.processGapSeqnos(vbno, seqno)
@@ -1704,17 +1690,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForDoneVBs() (total, totalDone in
 		}
 	}
 	return
-}
-
-func (tsTracker *ThroughSeqnoTrackerSvc) markSystemEvent(uprEvent *mcc.UprEvent) {
-	if uprEvent == nil {
-		return
-	}
-	seqno := uprEvent.Seqno
-	vbno := uprEvent.VBucket
-
-	manifestId, _ := uprEvent.GetManifestId()
-	tsTracker.addSystemSeqno(vbno, seqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqno(vbno uint16, sent_seqno uint64) {
