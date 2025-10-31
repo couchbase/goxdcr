@@ -1527,7 +1527,7 @@ function dumpDebugInfoBeforeExit {
 		getInternalNodeNsServerErrorLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_error.log
 		getInternalNodeMetaKvLog "$clusterName" >${testOutputDir}/node${clusterName}_metakv.log
 
-		if [[ ! -z "${shouldRunCbCollect:-}" ]]; then
+		if [[ -n "${shouldRunCbCollect:-}" && "${shouldRunCbCollect}" != "false" ]]; then
 			runCbCollectInfo "$clusterName" "${testOutputDir}/cbcollect_${clusterName}.zip"
 		fi
 	done
