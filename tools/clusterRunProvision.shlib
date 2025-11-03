@@ -2187,7 +2187,7 @@ function waitForBgJobs {
 	echo "$jobsCnt background jobs were running initially"
 
 	local startedTime=$(date +%s)
-	local maxSecsToWait=1800
+	local maxSecsToWait=600
 
 	while (($jobsCnt > 0)); do
 		sleep 1
