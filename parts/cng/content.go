@@ -7,7 +7,7 @@ import (
 )
 
 type content struct {
-	// The returned Body is always be compressed
+	// The returned Body is always be compressed and without xattrs (if any).
 	Body []byte
 	// Xattrs will be nil if there is no xattr
 	Xattrs map[string][]byte
@@ -33,6 +33,7 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			// If true, then body is not compressed
 			body = req.Req.Body
 		} else {
+			// CNG TODO: check use of datapool
 			body, err = snappy.Decode(nil, req.Req.Body)
 			if err != nil {
 				logger.Errorf("Failed to snappy decode body for key=%s, err=%v",
@@ -54,16 +55,20 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			return c, err
 		}
 
+		// CNG TODO: check use of datapool
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(bodyWithoutXattr)))
 		c.Body = snappy.Encode(cbuf, bodyWithoutXattr)
 		req.NeedToRecompress = false
+		req.Req.DataType |= base.SnappyDataType
 		return c, nil
 	}
 
 	if req.Req.DataType&base.SnappyDataType == 0 {
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(req.Req.Body)))
+		// CNG TODO: check use of datapool
 		c.Body = snappy.Encode(cbuf, req.Req.Body)
 		req.NeedToRecompress = false
+		req.Req.DataType |= base.SnappyDataType
 	} else {
 		c.Body = req.Req.Body
 	}

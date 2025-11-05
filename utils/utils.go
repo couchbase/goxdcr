@@ -2930,13 +2930,27 @@ func (u *Utilities) IsSeriousNetError(err error) bool {
 
 	errStr := err.Error()
 	netError, ok := err.(*net.OpError)
-	return err == syscall.EPIPE ||
+	result := err == syscall.EPIPE ||
 		err == io.EOF ||
 		strings.Contains(errStr, "EOF") ||
 		strings.Contains(errStr, "use of closed network connection") ||
 		strings.Contains(errStr, "connection reset by peer") ||
 		strings.Contains(errStr, "http: can't write HTTP request on broken connection") ||
 		(ok && (!netError.Temporary() && !netError.Timeout()))
+
+	if result {
+		return true
+	}
+
+	// Check for gRPC status errors that indicate connection issues
+	if grpcStatus, ok := status.FromError(err); ok {
+		switch grpcStatus.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded:
+			result = true
+		}
+	}
+
+	return result
 }
 
 // statusCode that requires connections to be dropped and recreated
