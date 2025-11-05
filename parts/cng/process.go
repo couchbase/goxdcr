@@ -18,6 +18,15 @@ func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (er
 	return
 }
 
+// transfer handles the mutation transfer logic
+// It does expect the Trace object to be present in the context.
+// At present it is mainly consists of 2 steps:
+//  1. conflict check (unless optimistic replication is used)
+//  2. push document
+//
+// The entire transfer is retried in case of network errors.
+// In CNG Phase 1 the flow of transfer is documented at:
+// https://docs.google.com/document/d/1aWKUgNo3icXfEX6uZBGWSaQNTJpzRXzePqGzsQA5ZfM/edit?tab=t.0#heading=h.wm68yvvhrnh1
 func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (err error) {
 	trace, err := getTrace(ctx)
 	if err != nil {
@@ -50,7 +59,7 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 
 	isOptimistic := n.isOptimistic(req)
 	trace.optimistic = isOptimistic
-	trace.isDelete = req.Req.Opcode == mc.UPR_DELETION
+	trace.isDelete = req.Req.Opcode == mc.UPR_DELETION || req.Req.Opcode == mc.UPR_EXPIRATION
 	trace.isExpiry = expiry > 0
 
 	if !isOptimistic {
@@ -81,16 +90,17 @@ type conflictCheckRsp struct {
 	exists    bool
 }
 
-func (r conflictCheckRsp) Equal(other conflictCheckRsp) bool {
+func (r *conflictCheckRsp) Equal(other conflictCheckRsp) bool {
 	return r.sourceWon == other.sourceWon && r.reason == other.reason
 }
 
-func (c conflictCheckRsp) String() string {
+func (c *conflictCheckRsp) String() string {
 	return fmt.Sprintf("sourceWon: %v, reason: %v", c.sourceWon, c.reason)
 }
 
 // conflictCheck checks for conflicts and returns true if the source document should be transferred
-// An error returned indicates that the conflict check failed. The caller must check sourceWon only if err is nil
+// An error returned indicates that the conflict check failed.
+// The caller must check sourceWon only if err is nil
 func (n *Nozzle) conflictCheck(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp conflictCheckRsp, err error) {
 	// CNG TODO: check for optimistic replication
 	_, err = n.CheckDocument(ctx, client, req)
@@ -152,6 +162,6 @@ func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
 }
 
 func (n *Nozzle) isOptimistic(req *base.WrappedMCRequest) bool {
-	// CNG TODO: remove hard coded limit of 256 bytes
-	return req.Req.Size() <= 256
+	// CNG TODO: make threshold dynamic i.e. settable at runtime
+	return req.Req.Size() < n.cfg.Tunables.OptimisticThresholdSize
 }

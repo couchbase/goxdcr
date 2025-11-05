@@ -24,10 +24,16 @@ func (b *BandwidthLimitedConn) Write(p []byte) (n int, err error) {
 	allowedBytes := int64(0)
 	toSent := int64(len(p))
 
+	// The function does not return error it returns (bytesCanSend int64, bytesAllowed int64).
+	// In this context we only need the first value.
+	// This is because we are not sending partial buffer.
 	allowedBytes, _ = b.limiter.Throttle(toSent, toSent, toSent)
 	for allowedBytes < toSent {
-		b.logger.Debugf("trottling write, allowedBytes=%v, toSent=%v\n", allowedBytes, toSent)
-		b.limiter.Wait()
+		b.logger.Debugf("throttling write, allowedBytes=%v, toSent=%v\n", allowedBytes, toSent)
+		err = b.limiter.Wait()
+		if err != nil {
+			return 0, err
+		}
 		allowedBytes, _ = b.limiter.Throttle(toSent, toSent, toSent)
 	}
 

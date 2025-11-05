@@ -2,18 +2,13 @@ package cng
 
 import (
 	"fmt"
-	"io"
-	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/couchbase/goxdcr/v8/utils"
 )
 
 type wrapperConn struct {
@@ -53,6 +48,8 @@ type PoolConfig struct {
 	ConnCount     int
 	ConnFn        func() (*base.CngConn, error)
 	RetryInterval int // in milliseconds
+
+	UtilsSvc utils.UtilsIface
 }
 
 func (c *PoolConfig) Validate() error {
@@ -113,7 +110,7 @@ func (p *ConnPool) init() error {
 }
 
 // connect recreates a connection at the specified index in a thread-safe manner
-// This method assumes the pool is already initialized
+// This method assumes the pool is already initialized and pool is locked
 // nwErr (optional) is the error that caused the need to recreate the connection
 // The only reason to pass this is for logging purposes here. The objective is to
 // to print the error under a lock to avoid log flooding from multiple goroutines
@@ -135,7 +132,8 @@ func (p *ConnPool) connect(index int, nwErr error) error {
 
 	wrapper.Close()
 
-	p.logger.Infof("creating connection at index=%d, generation=%d, nwErr=%v", index, gen, nwErr)
+	p.logger.Infof("creating connection at index=%d, retryInterval=%d ms, generation=%d, nwErr=%v",
+		index, p.cfg.RetryInterval, gen, nwErr)
 	// Create new connection
 	newConn, err := p.cfg.ConnFn()
 	if err != nil {
@@ -251,7 +249,7 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
 			}
 
 			// Check if it's a network error that requires connection recreation
-			if !isNetworkError(err) {
+			if !p.cfg.UtilsSvc.IsSeriousNetError(err) {
 				err = fmt.Errorf("non-network error, connIndex=%d, err: %v", index, err)
 				return err
 			}
@@ -265,38 +263,4 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
 			}
 		}
 	}
-}
-
-// isNetworkError checks if an error is a network-related error that requires connection recreation
-// CNG TODO: this function is similar to the one in utils/utils.go. Consider refactoring to avoid code duplication
-func isNetworkError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for common network errors (similar to utils/utils.go)
-	errStr := err.Error()
-	if err == syscall.EPIPE ||
-		err == io.EOF ||
-		strings.Contains(errStr, "EOF") ||
-		strings.Contains(errStr, "use of closed network connection") ||
-		strings.Contains(errStr, "connection reset by peer") ||
-		strings.Contains(errStr, "broken pipe") {
-		return true
-	}
-
-	// Check for net.OpError
-	if netError, ok := err.(*net.OpError); ok {
-		return !netError.Temporary() && !netError.Timeout()
-	}
-
-	// Check for gRPC status errors that indicate connection issues
-	if grpcStatus, ok := status.FromError(err); ok {
-		switch grpcStatus.Code() {
-		case codes.Unavailable, codes.DeadlineExceeded:
-			return true
-		}
-	}
-
-	return false
 }

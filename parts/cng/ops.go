@@ -15,6 +15,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// CheckDocument is a wrapper on the actual CheckDocument RPC call + timeout.
+// It mainly maps req to the input params needed by the RPC, which a lot of boilerplate code.
 func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp *internal_xdcr_v1.CheckDocumentResponse, err error) {
 	revSeqNo, err := req.RevSeqNo()
 	if err != nil {
@@ -40,11 +42,10 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 		Key:        req.OriginalKey,
 		StoreCas:   req.Req.Cas,
 		Revno:      revSeqNo,
-		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION,
+		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION || req.Req.Opcode == mc.UPR_EXPIRATION,
 		ExpiryTime: &expiryTime,
 	}
 
-	// CNG TODO: use context for timeout and cancellation
 	// Return values from CheckDocument RPC
 	// if Mutation:
 	// 	- Document does not exist, err == nil
@@ -71,7 +72,7 @@ type PushDocRsp struct {
 	latency         time.Duration
 }
 
-func (r PushDocRsp) Equal(other PushDocRsp) bool {
+func (r *PushDocRsp) Equal(other PushDocRsp) bool {
 	return r.cas == other.cas &&
 		r.seqNo == other.seqNo &&
 		r.bytesReplicated == other.bytesReplicated &&
@@ -79,7 +80,7 @@ func (r PushDocRsp) Equal(other PushDocRsp) bool {
 		r.conflictReason == other.conflictReason
 }
 
-func (r PushDocRsp) String() string {
+func (r *PushDocRsp) String() string {
 	sbuf := strings.Builder{}
 
 	sbuf.WriteString(fmt.Sprintf("cas=%v, seqNo=%v, bytesRepl=%v, isConflict=%v",
@@ -92,6 +93,9 @@ func (r PushDocRsp) String() string {
 	return sbuf.String()
 }
 
+// PushDocument is a thin wrapper on the actual PushDocument RPC call + timeout.
+// It mainly maps req to the input params needed by the RPC. There is a lot
+// of boilerplate code, hence the need for this wrapper.
 func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp PushDocRsp, err error) {
 	revSeqNo, err := req.RevSeqNo()
 	if err != nil {
@@ -118,10 +122,8 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		CollectionName: req.TgtColNamespace.CollectionName,
 		ContentFlags:   flags,
 		// Use OriginalKey which is the key before any collection prefix is added
-		Key: req.OriginalKey,
-		// CNG TODO: handle binary docs
-		//ContentFlags: uint32(internal_xdcr_v1.ContentType_CONTENT_TYPE_JSON),
-		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION,
+		Key:        req.OriginalKey,
+		IsDeleted:  req.Req.Opcode == mc.UPR_DELETION || req.Req.Opcode == mc.UPR_EXPIRATION,
 		Revno:      revSeqNo,
 		ExpiryTime: &expiryTime,
 		StoreCas:   req.Req.Cas,
@@ -158,9 +160,9 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 	}
 
 	now := time.Now()
-	// CNG TODO: use context for timeout and cancellation
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
 	defer cancel()
+	// See: https://docs.google.com/document/d/1aWKUgNo3icXfEX6uZBGWSaQNTJpzRXzePqGzsQA5ZfM/edit?tab=t.0#heading=h.dnhuz9b2hhsp
 	rpcRsp, err := client.PushDocument(ctxWithTimeout, pushDocReq)
 	rsp.latency = time.Since(now)
 	err = handlePushDocErr(err, &rsp)

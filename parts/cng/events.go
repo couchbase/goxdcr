@@ -43,15 +43,6 @@ func (n *Nozzle) raiseConflictEvent(req *base.WrappedMCRequest, t *Trace, err er
 		}
 		n.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, n, nil, additionalInfo))
 	}
-
-	if t.pushed && t.pushRsp.isConflict {
-		additionalInfo := parts.SentCasChangedEventAdditional{
-			Opcode: opcode,
-		}
-		n.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil,
-			n,
-			nil, additionalInfo))
-	}
 }
 
 // raiseSuccessEvent handles when there is no error and raises relevant events
@@ -87,6 +78,6 @@ func (n *Nozzle) raiseSuccessEvent(req *base.WrappedMCRequest, t *Trace, err err
 		additionalInfo.Commit_time = t.pushRsp.latency
 	}
 
-	evt := common.NewEvent(common.DataSent, nil, n, []any{req.GetSourceVB(), req.Seqno}, additionalInfo)
+	evt := common.NewEvent(common.DataSent, nil, n, nil, additionalInfo)
 	n.RaiseEvent(evt)
 }

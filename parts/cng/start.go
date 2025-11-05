@@ -8,6 +8,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/parts"
 )
 
 func (n *Nozzle) Start(settings metadata.ReplicationSettingsMap) (err error) {
@@ -82,6 +83,10 @@ func (n *Nozzle) initConfig(settings metadata.ReplicationSettingsMap) (err error
 	// CNG TODO: remove this
 	n.cfg.Tunables.InsecureSkipVerify = true
 
+	if val, ok := settings[parts.SETTING_OPTI_REP_THRESHOLD]; ok {
+		n.cfg.Tunables.OptimisticThresholdSize = val.(int)
+	}
+
 	return
 }
 
@@ -99,6 +104,7 @@ func (n *Nozzle) initConnPool() (err error) {
 		ConnCount:     n.cfg.Tunables.ConnCount,
 		ConnFn:        n.newCNGClient,
 		RetryInterval: n.cfg.Tunables.RetryInterval,
+		UtilsSvc:      n.cfg.Services.Utils,
 	}
 
 	n.connPool, err = NewConnPool(n.Logger(), poolCfg)
@@ -130,9 +136,11 @@ func (n *Nozzle) Stop() (err error) {
 	return
 }
 func (n *Nozzle) IsOpen() bool {
+	// CNG TODO: implement proper IsOpen
 	return true
 }
 func (n *Nozzle) Open() (err error) {
+	// CNG TODO: implement proper Open
 	return
 }
 

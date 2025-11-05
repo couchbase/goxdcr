@@ -72,11 +72,14 @@ type Tunables struct {
 	ConnCount          int
 	RetryInterval      int // in milliseconds
 	Deadline           time.Duration
+	// OptimisticThresholdSize is the document size (in bytes)
+	// CNG TODO: make it dynamic i.e. settable at runtime
+	OptimisticThresholdSize int
 }
 
 func (t *Tunables) String() string {
-	return fmt.Sprintf("InsecureSkipVerify=%v, DataChanSize=%d, WorkerCount=%d, ConnCount=%d, RetryInterval=%d, Deadline=%dms",
-		t.InsecureSkipVerify, t.DataChanSize, t.WorkerCount, t.ConnCount, t.RetryInterval, t.Deadline.Milliseconds())
+	return fmt.Sprintf("InsecureSkipVerify=%v, DataChanSize=%d, WorkerCount=%d, ConnCount=%d, RetryInterval=%d, Deadline=%dms, OptimisticThresholdSize=%d",
+		t.InsecureSkipVerify, t.DataChanSize, t.WorkerCount, t.ConnCount, t.RetryInterval, t.Deadline.Milliseconds(), t.OptimisticThresholdSize)
 }
 
 func (t *Tunables) Validate() (err error) {
