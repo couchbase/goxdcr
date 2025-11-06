@@ -52,6 +52,11 @@ func (state *metakvOpState) beginOp(ctx context.Context, op MetakvOp) (context.C
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	// After aquiring the write lock, recheck for ongoing operation
+	if state.activeOp != nil && op != MetakvOpDel {
+		return nil, 0, metadata_svc.RemoteSyncInProgress
+	}
+
 	if state.activeOp != nil {
 		// preempt the ongoing op since the current op is a delete
 		state.activeCancelFunc()
@@ -90,6 +95,10 @@ func (agent *RemoteCngAgent) Start(newRef *metadata.RemoteClusterReference, user
 	if agent == nil {
 		return fmt.Errorf("remoteCngAgent.Start: agent is nil")
 	}
+	if agent.InitDone() {
+		return fmt.Errorf("remoteCngAgent.Start: agent already initialized")
+	}
+
 	if newRef == nil {
 		return fmt.Errorf("RemoteCngAgent.Start: newRef is nil")
 	}
@@ -115,8 +124,9 @@ func (agent *RemoteCngAgent) Start(newRef *metadata.RemoteClusterReference, user
 	}
 
 	if err != nil {
-		agent.logger.Errorf("failed to start remote agent for reference %s: %v", newRef.Name(), err)
-		return fmt.Errorf("failed to start remote agent for reference %s: %w", newRef.Name(), err)
+		err = fmt.Errorf("failed to start remote agent for reference %s: %w", newRef.Name(), err)
+		agent.logger.Error(err.Error())
+		return err
 	}
 
 	// Set agent InitDone to true
@@ -129,6 +139,9 @@ func (agent *RemoteCngAgent) Start(newRef *metadata.RemoteClusterReference, user
 		agent.waitGrp.Add(1)
 		agent.heartbeatManager.setUUID(newRef.Uuid())
 		go agent.runHeartbeatSender()
+
+		agent.waitGrp.Add(1)
+		go agent.printHeartbeatStats()
 	}
 
 	agent.logger.Infof("successfully started remote agent for reference %s", newRef.Name())
@@ -137,9 +150,16 @@ func (agent *RemoteCngAgent) Start(newRef *metadata.RemoteClusterReference, user
 
 // Stop gracefully stops the RemoteCngAgent
 func (agent *RemoteCngAgent) Stop() {
-	close(agent.finCh)
-	// Wait for all the background goroutines to finish
-	agent.waitGrp.Wait()
+	select {
+	case <-agent.finCh:
+		// Agent is already stopped
+		return
+	default:
+		// Close the finCh to signal the agent to stop
+		close(agent.finCh)
+		// Wait for all the background goroutines to finish
+		agent.waitGrp.Wait()
+	}
 }
 
 // InitDone indicates whether the remote agent has been fully initialized
@@ -206,6 +226,7 @@ func (agent *RemoteCngAgent) persistReference(ctx context.Context, op MetakvOp, 
 		defer agent.metakvOpState.mutex.Unlock()
 		if agent.metakvOpState.gen != gen {
 			// Caller no longer owns the operation
+			// This can happen if this "operation" was preempted by a delete operation
 			return
 		}
 		agent.metakvOpState.endOpNolock()
@@ -222,7 +243,8 @@ func (agent *RemoteCngAgent) persistReference(ctx context.Context, op MetakvOp, 
 	}()
 
 	if opErr = agent.runMetakvOp(opCtx, op, key, value, newRef); opErr != nil {
-		agent.logger.Errorf("metakv op %v on key %s failed: %v", op, key, opErr)
+		opErr = fmt.Errorf("metakv op %v on key %s failed: %w", op, key, opErr)
+		agent.logger.Error(opErr.Error())
 		return opErr
 	}
 	agent.logger.Infof("metakv op %v on key %s succeeded", op, key)
@@ -271,7 +293,7 @@ func (agent *RemoteCngAgent) runMetakvOp(ctx context.Context, op MetakvOp, key s
 }
 
 // readAfterWrite performs a read-after-write operation to confirm that the add/set operation succeeded
-// This is requires for two reasons:
+// This is required for two reasons:
 // 1. To ensure read-your-own-write semantics in a distributed metakv environment
 // 2. To retrieve the latest revision number assigned by metakv
 func (agent *RemoteCngAgent) readAfterWrite(key string, incomingRef *metadata.RemoteClusterReference) error {
@@ -341,11 +363,9 @@ func (agent *RemoteCngAgent) updateReference(newRef *metadata.RemoteClusterRefer
 	// These should take priority over any ongoing refresh operation.
 	// Hence we abort any ongoing refresh operation and re-enable it after this operation is done.
 	needToReenable := agent.AbortAnyOngoingRefresh()
-	defer func() {
-		if needToReenable {
-			agent.ReenableRefresh()
-		}
-	}()
+	if needToReenable {
+		defer agent.ReenableRefresh()
+	}
 
 	// For add operations:
 	//   - We always trust the ID of newRef, and rev is ignored since this is a create operation.
@@ -431,22 +451,17 @@ func (agent *RemoteCngAgent) DeleteReference(delFromMetaKv bool) (*metadata.Remo
 	clonedRef := agent.refCache.reference.Clone()
 	agent.refCache.mutex.RUnlock()
 
-	switch delFromMetaKv {
-	case true:
+	if delFromMetaKv {
 		err := agent.DelOp(context.Background())
 		if err != nil {
 			return nil, err
 		}
 		return clonedRef, nil
-	case false:
-		agent.refCache.clear()
-		// call callbacks to nofity the delete op
-		agent.callMetadataChangeCb()
-		return clonedRef, nil
-	default:
-		// Can never happen
-		return nil, fmt.Errorf("invalid delFromMetaKv value: %v", delFromMetaKv)
 	}
+	agent.refCache.clear()
+	// call callbacks to notify the delete op
+	agent.callMetadataChangeCb()
+	return clonedRef, nil
 }
 
 // registerConnErr records a connection error on the remote reference

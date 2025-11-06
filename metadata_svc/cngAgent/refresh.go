@@ -10,6 +10,7 @@ package cngAgent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -33,14 +34,14 @@ func (rs *refreshState) beginOp(ctx context.Context) (context.Context, chan erro
 
 	// If there's an ongoing refresh, the caller should piggy back on its result.
 	// Hence we return a result channel that the caller can wait on.
-	if rs.active > 0 {
+	if rs.active {
 		resultCh := make(chan error, 1)
 		rs.resultCh = append(rs.resultCh, resultCh)
 		return nil, resultCh, metadata_svc.RefreshAlreadyActive
 	}
 
 	// No ongoing refresh, start a new one
-	rs.active = 1
+	rs.active = true
 	cancelContext, cancel := context.WithCancel(ctx)
 	rs.cancelActiveOp = cancel
 	return cancelContext, nil, nil
@@ -51,7 +52,7 @@ func (rs *refreshState) endOp(err *error) {
 	defer rs.mutex.Unlock()
 
 	// If there's no active refresh, nothing to do
-	if rs.active == 0 {
+	if !rs.active {
 		return
 	}
 
@@ -65,7 +66,7 @@ func (rs *refreshState) endOp(err *error) {
 	rs.cancelActiveOp()
 
 	// reset the state
-	rs.active = 0
+	rs.active = false
 	rs.cancelActiveOp = nil
 	rs.resultCh = nil
 
@@ -87,7 +88,7 @@ func (rs *refreshState) abortAnyRefreshOp() (needToReEnable bool) {
 	}
 
 	// If there's no active refresh, nothing to do
-	if rs.active == 0 {
+	if !rs.active {
 		return
 	}
 
@@ -153,7 +154,7 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 	// Ensure context hasn't been canceled before starting
 	select {
 	case <-ctx.Done():
-		return codes.Canceled, ctx.Err()
+		return codes.Canceled, fmt.Errorf("context canceled before attempting with primary credentials: %w", ctx.Err())
 	default:
 	}
 
@@ -170,7 +171,7 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 		// Ensure context hasn't been canceled before retrying with staged credentials
 		select {
 		case <-ctx.Done():
-			return codes.Canceled, ctx.Err()
+			return codes.Canceled, fmt.Errorf("context canceled before attempting with staged credentials: %w", ctx.Err())
 		default:
 		}
 
@@ -256,15 +257,13 @@ func (agent *RemoteCngAgent) Refresh() error {
 	defer agent.refreshState.endOp(&opErr)
 
 	ref, _ := agent.GetReferenceClone(false)
-	refreshSnapShot := NewRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
+	refreshSnapShot := newRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
 	statusCode, opErr = refreshSnapShot.performRefreshOp(opContext)
 
-	// Update health tracker only if the context is not canceled
-	select {
-	case <-opContext.Done():
-		// Refresh op's context was canceled, don't update health tracker.
-		agent.logger.Debugf("%s: skipping health tracker update due to context cancellation", agent.Name())
-	default:
+	if opContext.Err() != nil && errors.Is(opErr, opContext.Err()) {
+		// if the refresh operation failed due to context cancellation, don't update health tracker
+		agent.logger.Warnf("%s: skipping health tracker update due to context cancellation", agent.Name())
+	} else {
 		// Update health tracker based on the outcome of the refresh operation.
 		agent.healthTracker.updateHealth(agent.HostName(), statusCode, opErr)
 	}
@@ -277,7 +276,8 @@ func (agent *RemoteCngAgent) Refresh() error {
 	select {
 	case <-opContext.Done():
 		agent.logger.Infof("%v: refresh operation aborted", agent.Name())
-		return opContext.Err()
+		opErr = fmt.Errorf("refresh operation aborted: %w", opContext.Err())
+		return opErr
 	default:
 	}
 

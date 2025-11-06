@@ -51,7 +51,7 @@ func (agent *RemoteCngAgent) GetManifest(requestOpts *base.GetManifestOpts) (*me
 	}
 	agent.remoteDataProvider.mutex.RUnlock()
 
-	if requestOpts.RestAPIQuery {
+	if !ok && requestOpts.RestAPIQuery {
 		// A manifest request via REST usually comes from the UI to display details.
 		// Since replication to the target bucket probably doesn’t exist yet,
 		// we need a one-time manifest fetch operation.

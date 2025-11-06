@@ -79,7 +79,7 @@ type metakvOpState struct {
 // refreshState manages the state of refresh operations on the remote cluster reference.
 type refreshState struct {
 	// active indicates whether there's an ongoing refresh operation
-	active uint32
+	active bool
 	// cancelActiveOp is the cancel function for the active refresh operation's context
 	cancelActiveOp context.CancelFunc
 	// resultCh denotes list of callers to be notified when the ongoing refresh operation completes
@@ -201,7 +201,7 @@ type refreshSnapShot struct {
 }
 
 // NewRefreshSnapShot is a constructor for refreshSnapShot.
-func NewRefreshSnapShot(ref *metadata.RemoteClusterReference, capability metadata.Capability, services services, logger *log.CommonLogger) *refreshSnapShot {
+func newRefreshSnapShot(ref *metadata.RemoteClusterReference, capability metadata.Capability, services services, logger *log.CommonLogger) *refreshSnapShot {
 	return &refreshSnapShot{
 		// ref is already a clone
 		groundTruthRef:  ref,
