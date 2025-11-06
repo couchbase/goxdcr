@@ -99,7 +99,7 @@ func createTestClusterInfoErrorResponse(code codes.Code, err error) *base.GrpcRe
 // Helper function to setup a refreshSnapShot for testing
 func setupTestRefreshSnapShot(agent *RemoteCngAgent, ref *metadata.RemoteClusterReference) *refreshSnapShot {
 	capability := metadata.Capability{}
-	return NewRefreshSnapShot(ref, capability, agent.services, agent.logger)
+	return newRefreshSnapShot(ref, capability, agent.services, agent.logger)
 }
 
 // ============= Test Cases for refreshState =============
@@ -116,7 +116,7 @@ func TestRefreshState_BeginOp_Success(t *testing.T) {
 	assert.NoError(err)
 	assert.NotNil(opCtx)
 	assert.Nil(resultCh)
-	assert.Equal(uint32(1), rs.active)
+	assert.True(rs.active)
 	assert.NotNil(rs.cancelActiveOp)
 
 	// Cleanup
@@ -185,7 +185,7 @@ func TestRefreshState_EndOp_Success(t *testing.T) {
 	var opErr error
 	rs.endOp(&opErr)
 
-	assert.Equal(uint32(0), rs.active)
+	assert.False(rs.active)
 	assert.Nil(rs.cancelActiveOp)
 	assert.Nil(rs.resultCh)
 
@@ -276,7 +276,7 @@ func TestRefreshState_AbortAnyRefreshOp_WithActiveOp(t *testing.T) {
 		assert.True(needToReEnable)
 		assert.True(rs.isTemporarilyDisabled)
 		assert.Equal(metadata_svc.RefreshAbortAcknowledged, rs.abortState)
-		assert.Equal(uint32(0), rs.active)
+		assert.False(rs.active)
 		assert.Nil(rs.cancelActiveOp)
 		assert.Nil(rs.resultCh)
 	case <-time.After(testTimeout):

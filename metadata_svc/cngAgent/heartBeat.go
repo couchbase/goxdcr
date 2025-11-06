@@ -42,8 +42,8 @@ func (hbt *heartBeatManager) specsReaderReady() bool {
 	return hbt.specsReader != nil
 }
 
-// CanSendHeartbeats checks if the heartbeat manager is allowed to send heartbeats to the remote cluster.
-func (hbt *heartBeatManager) CanSendHeartbeats() bool {
+// heartbeatPreCheck checks if the heartbeat manager is allowed to send heartbeats to the remote cluster.
+func (hbt *heartBeatManager) heartbeatPreCheck() bool {
 	isThisNodeOrchestrator, err := hbt.services.topologySvc.IsOrchestratorNode()
 	if err != nil || !isThisNodeOrchestrator {
 		return false
@@ -102,8 +102,8 @@ func (hbt *heartBeatManager) generateHeartbeatMetadata(clonedRef *metadata.Remot
 	return hbMetadata, nil
 }
 
-// composeHeartBeatRequest composes the heartbeat request for CNG.
-func (hbt *heartBeatManager) composeHeartBeatRequest(metadata *metadata.HeartbeatMetadata, target string) (*peerToPeer.SourceHeartbeatReq, error) {
+// composeHeartbeatRequest composes the heartbeat request for CNG.
+func (hbt *heartBeatManager) composeHeartbeatRequest(metadata *metadata.HeartbeatMetadata, target string) (*peerToPeer.SourceHeartbeatReq, error) {
 	srcStr, err := hbt.services.topologySvc.MyHostAddr()
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (heartbeatStats *heartbeatStats) update(response *base.GrpcResponse[*intern
 // sendHeartbeat sends the heartbeat to the remote cluster.
 func (hbt *heartBeatManager) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata, getGrpcOpts func() *base.GrpcOptions) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
 	grpcOpts := getGrpcOpts()
-	req, err := hbt.composeHeartBeatRequest(hbMetadata, grpcOpts.ConnStr)
+	req, err := hbt.composeHeartbeatRequest(hbMetadata, grpcOpts.ConnStr)
 	if err != nil {
 		return &base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]{
 			Status: status.New(codes.Unknown, err.Error()),
@@ -223,17 +223,13 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 	maxHBIntervalTicker := time.NewTicker(base.SrcHeartbeatMaxInterval())
 	defer maxHBIntervalTicker.Stop()
 
-	// printHeartbeatStatsTicker denotes the interval at which the heartbeat statistics are printed.
-	printHeartbeatStatsTicker := time.NewTicker(base.SrcHeartbeatSummaryInterval)
-	defer printHeartbeatStatsTicker.Stop()
-
 	for {
 		select {
 		case <-agent.finCh:
 			agent.logger.Infof("Heartbeat sender for remote cluster %v is stopped", refName)
 			return
 		case <-minHBIntervalTicker.C:
-			if !agent.heartbeatManager.CanSendHeartbeats() {
+			if !agent.heartbeatManager.heartbeatPreCheck() {
 				agent.logger.Debugf("%v: heartbeat can't be sent yet. Retry in the next interval.", refName)
 				continue
 			}
@@ -259,7 +255,7 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			// delay the next heartbeat by atmost SrcHeartbeatMaxInterval
 			maxHBIntervalTicker.Reset(base.SrcHeartbeatMaxInterval())
 		case <-maxHBIntervalTicker.C:
-			if !agent.heartbeatManager.CanSendHeartbeats() {
+			if !agent.heartbeatManager.heartbeatPreCheck() {
 				agent.logger.Debugf("%v: heartbeat can't be sent yet. Retry in the next interval.", refName)
 				continue
 			}
@@ -272,6 +268,20 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			}
 			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts)
 			agent.heartbeatManager.heartbeatStats.update(response)
+		}
+	}
+}
+
+func (agent *RemoteCngAgent) printHeartbeatStats() {
+	defer agent.waitGrp.Done()
+
+	// printHeartbeatStatsTicker denotes the interval at which the heartbeat statistics are printed.
+	printHeartbeatStatsTicker := time.NewTicker(3 * base.SrcHeartbeatSummaryInterval)
+	defer printHeartbeatStatsTicker.Stop()
+	for {
+		select {
+		case <-agent.finCh:
+			return
 		case <-printHeartbeatStatsTicker.C:
 			agent.heartbeatManager.printHeartbeatStats()
 		}

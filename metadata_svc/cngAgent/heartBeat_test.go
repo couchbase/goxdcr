@@ -258,35 +258,35 @@ func TestHeartBeatManager_SpecsReaderReady_NotNil(t *testing.T) {
 	assert.True(result)
 }
 
-// ============= Test Cases for CanSendHeartbeats =============
+// ============= Test Cases for heartbeatPreCheck =============
 
-func TestHeartBeatManager_CanSendHeartbeats_NotOrchestrator(t *testing.T) {
+func TestHeartBeatManager_heartbeatPreCheck_NotOrchestrator(t *testing.T) {
 	assert := assert.New(t)
 	hbManager, topologyMock, _, _ := createTestHeartbeatManager()
 
 	// Mock topology service to return that this node is not orchestrator
 	topologyMock.On("IsOrchestratorNode").Return(false, nil).Once()
 
-	result := hbManager.CanSendHeartbeats()
+	result := hbManager.heartbeatPreCheck()
 	assert.False(result)
 
 	topologyMock.AssertExpectations(t)
 }
 
-func TestHeartBeatManager_CanSendHeartbeats_TopologyError(t *testing.T) {
+func TestHeartBeatManager_heartbeatPreCheck_TopologyError(t *testing.T) {
 	assert := assert.New(t)
 	hbManager, topologyMock, _, _ := createTestHeartbeatManager()
 
 	// Mock topology service to return error
 	topologyMock.On("IsOrchestratorNode").Return(false, fmt.Errorf("topology error")).Once()
 
-	result := hbManager.CanSendHeartbeats()
+	result := hbManager.heartbeatPreCheck()
 	assert.False(result)
 
 	topologyMock.AssertExpectations(t)
 }
 
-func TestHeartBeatManager_CanSendHeartbeats_SpecsReaderNotReady(t *testing.T) {
+func TestHeartBeatManager_heartbeatPreCheck_SpecsReaderNotReady(t *testing.T) {
 	assert := assert.New(t)
 	hbManager, topologyMock, _, _ := createTestHeartbeatManager()
 
@@ -296,13 +296,13 @@ func TestHeartBeatManager_CanSendHeartbeats_SpecsReaderNotReady(t *testing.T) {
 	// Set specs reader to nil to make it not ready
 	hbManager.specsReader = nil
 
-	result := hbManager.CanSendHeartbeats()
+	result := hbManager.heartbeatPreCheck()
 	assert.False(result)
 
 	topologyMock.AssertExpectations(t)
 }
 
-func TestHeartBeatManager_CanSendHeartbeats_Success(t *testing.T) {
+func TestHeartBeatManager_heartbeatPreCheck_Success(t *testing.T) {
 	assert := assert.New(t)
 	hbManager, topologyMock, _, _ := createTestHeartbeatManager()
 
@@ -311,7 +311,7 @@ func TestHeartBeatManager_CanSendHeartbeats_Success(t *testing.T) {
 
 	// specsReader is set in createTestHeartbeatManager
 
-	result := hbManager.CanSendHeartbeats()
+	result := hbManager.heartbeatPreCheck()
 	assert.True(result)
 
 	topologyMock.AssertExpectations(t)
@@ -510,9 +510,9 @@ func TestHeartBeatManager_GenerateHeartbeatMetadata_Success(t *testing.T) {
 	specsReaderMock.AssertExpectations(t)
 }
 
-// ============= Test Cases for composeHeartBeatRequest =============
+// ============= Test Cases for composeHeartbeatRequest =============
 
-func TestHeartBeatManager_ComposeHeartBeatRequest_HostAddrError(t *testing.T) {
+func TestHeartBeatManager_ComposeHeartbeatRequest_HostAddrError(t *testing.T) {
 	assert := assert.New(t)
 	hbManager, topologyMock, _, _ := createTestHeartbeatManager()
 	metadata := createTestHeartbeatMetadata()
@@ -520,7 +520,7 @@ func TestHeartBeatManager_ComposeHeartBeatRequest_HostAddrError(t *testing.T) {
 	// Mock topology service to return error
 	topologyMock.On("MyHostAddr").Return("", fmt.Errorf("host addr error")).Once()
 
-	req, err := hbManager.composeHeartBeatRequest(metadata, testTargetConnStr)
+	req, err := hbManager.composeHeartbeatRequest(metadata, testTargetConnStr)
 	assert.Error(err)
 	assert.Nil(req)
 	assert.Contains(err.Error(), "host addr error")
@@ -536,7 +536,7 @@ func TestHeartBeatManager_ComposeHeartBeatRequest_Success(t *testing.T) {
 	// Mock topology service
 	topologyMock.On("MyHostAddr").Return(testHostAddr, nil).Once()
 
-	req, err := hbManager.composeHeartBeatRequest(metadata, testTargetConnStr)
+	req, err := hbManager.composeHeartbeatRequest(metadata, testTargetConnStr)
 	assert.NoError(err)
 	assert.NotNil(req)
 
@@ -795,7 +795,7 @@ func TestHeartBeatManager_FullHeartbeatFlow_Integration(t *testing.T) {
 
 	// Set up the full flow mocks
 
-	// 1. CanSendHeartbeats checks
+	// 1. heartbeatPreCheck checks
 	topologyMock.On("IsOrchestratorNode").Return(true, nil).Once()
 
 	// 2. generateHeartbeatMetadata mocks
@@ -828,7 +828,7 @@ func TestHeartBeatManager_FullHeartbeatFlow_Integration(t *testing.T) {
 	// Execute the full flow
 
 	// 1. Check if can send heartbeats
-	canSend := hbManager.CanSendHeartbeats()
+	canSend := hbManager.heartbeatPreCheck()
 	assert.True(canSend)
 
 	// 2. Generate heartbeat metadata
