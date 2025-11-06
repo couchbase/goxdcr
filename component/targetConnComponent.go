@@ -1,6 +1,10 @@
 package Component
 
 import (
+	"errors"
+	"sync/atomic"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -11,8 +15,28 @@ import (
 	"sync"
 )
 
-// RemoteMemcachedComponent is an object to be embedded as another and provides the ability
-// to contact target memcached for specific memcached purposes
+var ErrClientNotFound = errors.New("client not found")
+var ErrPoolClosed = errors.New("pool is closed")
+
+// RemoteMemcachedComponent is an object to be composed with another object to provide the ability
+// to contact target memcached servers.
+//
+// Locking Strategy:
+// This component uses a two-level locking mechanism to protect concurrent access:
+//
+// 1. poolConfigMtx (outer lock): Coordinates pool configuration with client operations.
+//    - RLock: Used during client acquire/release, where we only read or use existing channels.
+//    - Lock: Used when modifying the pool’s channels or structure (reconfiguration, closing,
+//            topology updates).
+//    Using poolConfigMtx.RLock ensures that channels cannot be modified or closed while clients
+//    are being acquired or released.
+//    Using poolConfigMtx.Lock prevents all client operations while the pool is being reconfigured
+//    or shut down.
+
+//  2. KvMemClientsMtx (inner lock): Protects the KvMemClients map. Always acquire this
+//     lock AFTER poolConfigMtx if you need both locks to avoid deadlock.
+//
+// Lock Ordering Rule: poolConfigMtx -> KvMemClientsMtx (*never reverse*)
 type RemoteMemcachedComponent struct {
 	InitConnOnce sync.Once
 	InitConnDone chan bool
@@ -27,11 +51,13 @@ type RemoteMemcachedComponent struct {
 
 	// these fields are used for xmem replication only
 	// memcached clients for retrieval of target bucket stats
-	KvMemClients    map[string]mcc.ClientIface
+	// kvMemClients is a map of server addresses to channels of clients
+	KvMemClients    map[string]chan mcc.ClientIface
 	KvMemClientsMtx sync.RWMutex
 
-	TargetUsername   func() string
-	TargetPassword   func() string
+	// Maximum connections per server
+	MaxConnsPerServer int
+
 	TargetBucketname string
 
 	RefGetter func() *metadata.RemoteClusterReference
@@ -40,30 +66,89 @@ type RemoteMemcachedComponent struct {
 
 	UserAgent string
 
-	AlternateAddressCheck func(reference *metadata.RemoteClusterReference) (bool, error)
+	AlternateAddressCheck func(ref *metadata.RemoteClusterReference) (bool, error)
+
+	// poolConfigMtx serializes pool configuration with client acquire/release operations.
+	poolConfigMtx sync.RWMutex
+	// closed is used to denote if the component is closed
+	closed atomic.Bool
 }
 
-func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string) *RemoteMemcachedComponent {
+func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string, userAgent string, maxConnsPerServer int) *RemoteMemcachedComponent {
 	return &RemoteMemcachedComponent{
-		InitConnOnce:     sync.Once{},
-		InitConnDone:     make(chan bool),
-		FinishCh:         finCh,
-		LoggerImpl:       logger,
-		KvMemClients:     make(map[string]mcc.ClientIface),
-		KvMemClientsMtx:  sync.RWMutex{},
-		Utils:            utils,
-		TargetBucketname: bucketName,
+		InitConnOnce:      sync.Once{},
+		InitConnDone:      make(chan bool),
+		FinishCh:          finCh,
+		LoggerImpl:        logger,
+		KvMemClients:      make(map[string]chan mcc.ClientIface),
+		KvMemClientsMtx:   sync.RWMutex{},
+		Utils:             utils,
+		TargetBucketname:  bucketName,
+		UserAgent:         userAgent,
+		MaxConnsPerServer: maxConnsPerServer,
 	}
 }
 
-func (r *RemoteMemcachedComponent) SetTargetUsernameGetter(getter func() string) *RemoteMemcachedComponent {
-	r.TargetUsername = getter
-	return r
+// reconfigureConnectionPoolNoLock updates the pool to use the new maximum number of connections per server.
+// If the new limit is lower than the current number of active connections,
+// the excess connections are closed and removed.
+// If the new limit is higher, additional connections will be created on-demand during AcquireClient calls.
+// NOTE:
+//   - Caller MUST hold a write lock on poolConfigMtx before calling
+//   - This method acquires a write lock on KvMemClientsMtx internally
+func (r *RemoteMemcachedComponent) reconfigureConnectionPoolNoLock(newMaxConnsPerServer int) {
+	r.KvMemClientsMtx.Lock()
+	defer r.KvMemClientsMtx.Unlock()
+
+	for serverAddr, oldClientChan := range r.KvMemClients {
+		// Create a new channel with the updated capacity
+		newClientChan := make(chan mcc.ClientIface, newMaxConnsPerServer)
+		r.KvMemClients[serverAddr] = newClientChan
+
+		// Close the old channel to signal no more clients will be added
+		close(oldClientChan)
+
+		// Migrate existing clients to the new channel
+		// If the new channel reaches its capacity, close the excess connections
+		for client := range oldClientChan {
+			select {
+			case newClientChan <- client:
+				// Success
+			default:
+				// New pool is full, close the excess connection
+				if err := client.Close(); err != nil {
+					r.LoggerImpl.Warnf("error closing excess connection for %v during reconfiguration: %v", serverAddr, err)
+				}
+			}
+		}
+	}
 }
 
-func (r *RemoteMemcachedComponent) SetTargetPasswordGetter(getter func() string) *RemoteMemcachedComponent {
-	r.TargetPassword = getter
-	return r
+// SetMaxConnectionsPerServer sets the maximum number of connections per server.
+func (r *RemoteMemcachedComponent) SetMaxConnectionsPerServer(max int) {
+	if max < 1 {
+		max = 1
+	}
+
+	// Acquire poolConfigMtx to serialize pool configuration changes
+	r.poolConfigMtx.Lock()
+	defer r.poolConfigMtx.Unlock()
+
+	// Only reconfigure if the value actually changed
+	if r.MaxConnsPerServer == max {
+		return
+	}
+
+	// if the pool is closed, return
+	if r.IsClosed() {
+		r.LoggerImpl.Warnf("SetMaxConnectionsPerServer called on closed pool for bucket %v", r.TargetBucketname)
+		return
+	}
+
+	r.MaxConnsPerServer = max
+
+	// Honor the new max connections per server
+	r.reconfigureConnectionPoolNoLock(max)
 }
 
 func (r *RemoteMemcachedComponent) SetTargetKvVbMapGetter(getter func() (base.KvVBMapType, error)) *RemoteMemcachedComponent {
@@ -73,11 +158,6 @@ func (r *RemoteMemcachedComponent) SetTargetKvVbMapGetter(getter func() (base.Kv
 
 func (r *RemoteMemcachedComponent) SetRefGetter(getter func() *metadata.RemoteClusterReference) *RemoteMemcachedComponent {
 	r.RefGetter = getter
-	return r
-}
-
-func (r *RemoteMemcachedComponent) SetUserAgent(id string) *RemoteMemcachedComponent {
-	r.UserAgent = id
 	return r
 }
 
@@ -101,7 +181,7 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 		if r.RefGetter().IsFullEncryption() {
 			err := r.InitSSLConStrMap()
 			if err != nil {
-				r.LoggerImpl.Errorf("failed to initialize ssl connection string map, err=%v\n", err)
+				r.LoggerImpl.Errorf("failed to initialize ssl connection string map, err=%v", err)
 				r.InitConnErr = err
 				return
 			}
@@ -112,18 +192,28 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 			r.InitConnErr = err
 			return
 		}
-		for server_addr, _ := range targetKvVbMap {
-			client, err := r.GetNewMemcachedClient(server_addr, true /*initializing*/)
+
+		// Acquire poolConfigMtx to ensure no concurrent configuration changes
+		r.poolConfigMtx.RLock()
+		defer r.poolConfigMtx.RUnlock()
+
+		r.KvMemClientsMtx.Lock()
+		defer r.KvMemClientsMtx.Unlock()
+		for server_addr := range targetKvVbMap {
+			clientChan := make(chan mcc.ClientIface, r.MaxConnsPerServer)
+			r.KvMemClients[server_addr] = clientChan
+
+			client, err := r.GetNewMemcachedClient(server_addr)
 			if err != nil {
-				r.LoggerImpl.Errorf("failed to construct memcached client for %v, err=%v\n", server_addr, err)
-				r.InitConnErr = err
-				return
+				r.LoggerImpl.Errorf("failed to construct memcached client for %v, err=%v", server_addr, err)
+				// Continue despite failure - AcquireClient will retry creating connections
+				// on-demand, which handles any transient network errors gracefully
+				continue
 			}
-			r.KvMemClientsMtx.Lock()
-			r.KvMemClients[server_addr] = client
-			r.KvMemClientsMtx.Unlock()
+
+			// Put the initial client into the channel pool
+			clientChan <- client
 		}
-		return
 	})
 
 	r.WaitForInitConnDone()
@@ -131,17 +221,18 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 }
 
 func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
-	connStr, err := r.RefGetter().MyConnectionStr()
+	ref := r.RefGetter()
+	connStr, err := ref.MyConnectionStr()
 	if err != nil {
 		return err
 	}
 
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := r.RefGetter().MyCredentials()
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := ref.MyCredentials()
 	if err != nil {
 		return err
 	}
 
-	useExternal, err := r.AlternateAddressCheck(r.RefGetter())
+	useExternal, err := r.AlternateAddressCheck(ref)
 	if err != nil {
 		return err
 	}
@@ -159,10 +250,10 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 		return err
 	}
 
-	for server_addr, _ := range targetKvVbMap {
+	for server_addr := range targetKvVbMap {
 		ssl_port, ok := ssl_port_map[server_addr]
 		if !ok {
-			return fmt.Errorf("Can't get remote memcached ssl port for %v", server_addr)
+			return fmt.Errorf("can't get remote memcached ssl port for %v", server_addr)
 		}
 		host_name := base.GetHostName(server_addr)
 		ssl_con_str := base.GetHostAddr(host_name, uint16(ssl_port))
@@ -172,35 +263,36 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 	return nil
 }
 
-func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
-	if r.RefGetter().IsFullEncryption() {
-		_, _, _, certificate, san_in_certificate, client_certificate, client_key, err := r.RefGetter().MyCredentials()
+func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string) (mcc.ClientIface, error) {
+	ref := r.RefGetter()
+	username, password, _, certificate, san_in_certificate, client_certificate, client_key, err := ref.MyCredentials()
+	if err != nil {
+		return nil, err
+	}
+	if ref.IsFullEncryption() {
+		ssl_con_str := r.SslConStrMap[server_addr]
+
+		// getTlsConnFunc is a function that creates a tls connection to the given server address
+		getTlsConnFunc := func(_ interface{}) (interface{}, error) {
+			tlsConn, err := base.NewTLSConn(ssl_con_str, username, password, certificate, san_in_certificate, client_certificate, client_key, r.TargetBucketname, r.LoggerImpl)
+			if err != nil {
+				return nil, err
+			}
+			return tlsConn, nil
+		}
+
+		// use exponential backoff to create a tls connection to the given server address
+		tlsConn, err := r.Utils.ExponentialBackoffExecutorWithFinishSignal("RemoteMemcachedComponent: GetNewMemcachedClient", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+			base.RemoteMcRetryFactor, getTlsConnFunc, nil, r.FinishCh)
 		if err != nil {
 			return nil, err
 		}
-		ssl_con_str := r.SslConStrMap[server_addr]
 
-		if !initializing {
-			// if not initializing at replication startup time, retrieve up to date security settings
-			latestTargetClusterRef := r.RefGetter()
-
-			connStr, err := latestTargetClusterRef.MyConnectionStr()
-			if err != nil {
-				return nil, err
-			}
-			// hostAddr not used in full encryption mode
-			_, _, _, err = r.Utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
-				r.TargetUsername(), r.TargetPassword(), certificate, client_certificate, client_key, false /*scramShaEnabled*/, r.LoggerImpl)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return base.NewTLSConn(ssl_con_str, r.TargetUsername(), r.TargetPassword(), certificate, san_in_certificate, client_certificate, client_key, r.TargetBucketname, r.LoggerImpl)
-	} else {
-		return r.Utils.GetRemoteMemcachedConnection(server_addr, r.TargetUsername(), r.TargetPassword(),
-			r.TargetBucketname, r.UserAgent, !r.RefGetter().IsEncryptionEnabled(), /*plain_auth*/
-			base.KeepAlivePeriod, r.LoggerImpl)
+		return tlsConn.(mcc.ClientIface), nil
 	}
+	return r.Utils.GetRemoteMemcachedConnection(server_addr, username, password,
+		r.TargetBucketname, r.UserAgent, !ref.IsEncryptionEnabled(), /*plain_auth*/
+		base.KeepAlivePeriod, r.LoggerImpl)
 }
 
 func (r *RemoteMemcachedComponent) WaitForInitConnDone() {
@@ -212,25 +304,33 @@ func (r *RemoteMemcachedComponent) WaitForInitConnDone() {
 	}
 }
 
-func (r *RemoteMemcachedComponent) CloseConnections() {
-	// Originally this code was part of CheckpointManager which ensured that InitConnections() would have been called
-	// Since refactoring, it is not guaranteed that remComponent.InitConnections() has been called since
-	// now it is possible that no one ever ended up using the targetKVComponent for anything related to
-	// pipelines
-	// Since if InitConnections() is a noop if it has been called,
-	// call InitConnections() here to ensure CloseConnections() will not hang
-	go r.InitConnections()
+func (r *RemoteMemcachedComponent) Close() {
+	// Fast path: check if the component is already closed
+	if r.IsClosed() {
+		return
+	}
 
-	r.WaitForInitConnDone()
+	// Acquire poolConfigMtx to serialize the closing of the component
+	r.poolConfigMtx.Lock()
+	defer r.poolConfigMtx.Unlock()
+
+	if !r.closed.CompareAndSwap(false, true) {
+		// Another goroutine has already closed the component
+		// so we just return
+		return
+	}
+
 	r.KvMemClientsMtx.Lock()
 	defer r.KvMemClientsMtx.Unlock()
-	for server_addr, client := range r.KvMemClients {
-		err := client.Close()
-		if err != nil {
-			r.LoggerImpl.Warnf("error from closing connection for %v is %v\n", server_addr, err)
-		}
+
+	// Drain and close all connections for each server
+	for server_addr := range r.KvMemClients {
+		r.DeleteMemClientsNoLock(server_addr)
 	}
-	r.KvMemClients = make(map[string]mcc.ClientIface)
+}
+
+func (r *RemoteMemcachedComponent) IsClosed() bool {
+	return r.closed.Load()
 }
 
 func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (map[uint16]*mcc.FailoverLog, error) {
@@ -252,19 +352,30 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 	var errMapMtx sync.Mutex
 
 	var waitGrp sync.WaitGroup
-	r.KvMemClientsMtx.RLock()
-	for kvTransient, mccClientTransient := range r.KvMemClients {
-		mccClient := mccClientTransient
-		kv := kvTransient
+
+	// Get all server addresses from the map
+	for server := range kvVbMap {
 		// Get failoverlogs in parallel
 		waitGrp.Add(1)
-		go func() {
+		go func(serverAddr string) {
 			defer waitGrp.Done()
+
+			// Acquire a client from the pool
+			mccClient, err := r.AcquireClient(serverAddr)
+			if err != nil {
+				errMapMtx.Lock()
+				errMap[serverAddr] = err
+				errMapMtx.Unlock()
+				return
+			}
+			// Ensure we return the client to the pool
+			defer r.ReleaseClient(serverAddr, mccClient)
+
 			feed, err := mccClient.NewUprFeed()
 			defer feed.Close()
 			if err != nil {
 				errMapMtx.Lock()
-				errMap[kv] = err
+				errMap[serverAddr] = err
 				errMapMtx.Unlock()
 				return
 			}
@@ -272,30 +383,29 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 			err = feed.UprOpen(r.UserAgent, 0, base.UprFeedBufferSize)
 			if err != nil {
 				errMapMtx.Lock()
-				errMap[kv] = err
+				errMap[serverAddr] = err
 				errMapMtx.Unlock()
 				return
 			}
 
-			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[kv])
+			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[serverAddr])
 			if err != nil {
 				errMapMtx.Lock()
-				errMap[kv] = err
+				errMap[serverAddr] = err
 				errMapMtx.Unlock()
 				return
 			}
 
 			failoverLogsMapMtx.Lock()
-			failoverLogsMap[kv] = failoverLogs
+			failoverLogsMap[serverAddr] = failoverLogs
 			failoverLogsMapMtx.Unlock()
-		}()
+		}(server)
 	}
-	r.KvMemClientsMtx.RUnlock()
 	waitGrp.Wait()
 
 	if len(errMap) > 0 {
 		r.LoggerImpl.Errorf("err getting failoverlogs from target %v", errMap)
-		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+		return nil, errors.New(base.FlattenErrorMap(errMap))
 	}
 
 	// We shouldn't have conflicting VBs since each target KV should own non-intersecting VBs
@@ -334,7 +444,7 @@ func (r *RemoteMemcachedComponent) GetVbMaxCasMap() (base.HighSeqnosMapType, err
 	waitGrp.Wait()
 
 	if len(errMap) > 0 {
-		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+		return nil, errors.New(base.FlattenErrorMap(errMap))
 	}
 
 	return nodeMaxCasMap, nil
@@ -344,39 +454,32 @@ func (r *RemoteMemcachedComponent) getMaxCasWithRetry(serverAddr string, vbnos [
 	defer waitGrp.Done()
 
 	vbSeqnoMap := make(map[uint16]uint64)
+	var currentClient mcc.ClientIface
+
 	maxCasOp := func(param interface{}) (interface{}, error) {
 		var err error
-		r.KvMemClientsMtx.RLock()
-		client, ok := r.KvMemClients[serverAddr]
-		r.KvMemClientsMtx.RUnlock()
-		if !ok {
-			// memcached connection may have been closed in previous retries. create a new one
-			client, err = r.GetNewMemcachedClient(serverAddr, false /*initializing*/)
-			if err != nil {
-				r.LoggerImpl.Warnf("Retrieval of maxCas stats failed. serverAddr=%v, vbnos=%v\n", serverAddr, vbnos)
-				return nil, err
-			} else {
-				r.KvMemClientsMtx.Lock()
-				r.KvMemClients[serverAddr] = client
-				r.KvMemClientsMtx.Unlock()
-			}
+
+		// Acquire a client from the pool
+		currentClient, err = r.AcquireClient(serverAddr)
+		if err != nil {
+			r.LoggerImpl.Warnf("Retrieval of maxCas stats failed. serverAddr=%v, vbnos=%v", serverAddr, vbnos)
+			return nil, err
 		}
 
-		r.KvMemClientsMtx.Lock()
-		vbSeqnoMapReturned, vbsUnableToParse, err := r.Utils.GetMaxCasStatsForVBs(vbnos, client, nil, &vbSeqnoMap)
+		vbSeqnoMapReturned, vbsUnableToParse, err := r.Utils.GetMaxCasStatsForVBs(vbnos, currentClient, nil, &vbSeqnoMap)
 		if err != nil {
 			if err == base.ErrorNoVbSpecified {
 				err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)
 			}
-			err1 := client.Close()
-			if err1 != nil {
-				r.LoggerImpl.Warnf("error from closing connection for %v is %v\n", serverAddr, err1)
+			// Connection is broken, delete it instead of returning to pool
+			if err := currentClient.Close(); err != nil {
+				r.LoggerImpl.Warnf("error closing connection for %v: %v", serverAddr, err)
 			}
-			delete(r.KvMemClients, serverAddr)
-			r.KvMemClientsMtx.Unlock()
 			return nil, err
 		}
-		r.KvMemClientsMtx.Unlock()
+
+		// release client to pool
+		r.ReleaseClient(serverAddr, currentClient)
 
 		vbSeqnoMap = vbSeqnoMapReturned
 		if len(vbsUnableToParse) > 0 {
@@ -390,7 +493,7 @@ func (r *RemoteMemcachedComponent) getMaxCasWithRetry(serverAddr string, vbnos [
 		base.RemoteMcRetryFactor, maxCasOp, nil, finCh)
 
 	if opErr != nil {
-		r.LoggerImpl.Errorf("Retrieval of maxCas stats failed after %v retries. serverAddr=%v, vbnos=%v\n",
+		r.LoggerImpl.Errorf("Retrieval of maxCas stats failed after %v retries. serverAddr=%v, vbnos=%v",
 			base.MaxRemoteMcRetry, serverAddr, vbnos)
 		errMapMtx.Lock()
 		errMap[serverAddr] = opErr
@@ -399,5 +502,192 @@ func (r *RemoteMemcachedComponent) getMaxCasWithRetry(serverAddr string, vbnos [
 		casMapMtx.Lock()
 		casMap[serverAddr] = &vbSeqnoMap
 		casMapMtx.Unlock()
+	}
+}
+
+// getClientChannel gets the channel pool for a server
+func (r *RemoteMemcachedComponent) getClientChannel(serverAddr string) (chan mcc.ClientIface, bool) {
+	r.KvMemClientsMtx.RLock()
+	defer r.KvMemClientsMtx.RUnlock()
+
+	clientChan, exists := r.KvMemClients[serverAddr]
+	return clientChan, exists
+}
+
+// createClientChannel creates a new channel pool for a server
+// Returns the existing channel if one already exists
+func (r *RemoteMemcachedComponent) createClientChannel(serverAddr string) chan mcc.ClientIface {
+	r.KvMemClientsMtx.Lock()
+	defer r.KvMemClientsMtx.Unlock()
+
+	// Check if it already exists
+	if clientChan, exists := r.KvMemClients[serverAddr]; exists {
+		return clientChan
+	}
+
+	// Create new buffered channel
+	clientChan := make(chan mcc.ClientIface, r.MaxConnsPerServer)
+	r.KvMemClients[serverAddr] = clientChan
+	return clientChan
+}
+
+// AcquireClient acquires a client from the pool for the given server.
+// It tries to draw from the channel pool first.
+// If none available, it creates a new connection.
+// Caller MUST call ReleaseClient to return the client to the pool when done.
+func (r *RemoteMemcachedComponent) AcquireClient(serverAddr string) (mcc.ClientIface, error) {
+	// Hold poolConfigMtx.RLock to prevent pool reconfiguration during client operations
+	r.poolConfigMtx.RLock()
+	defer r.poolConfigMtx.RUnlock()
+
+	// if the pool is closed, return an error
+	if r.IsClosed() {
+		return nil, fmt.Errorf("failed to acquire client from the pool for bucket %v: %w", r.TargetBucketname, ErrPoolClosed)
+	}
+
+	// First, try to get existing channel
+	clientChan, exists := r.getClientChannel(serverAddr)
+
+	// If channel doesn't exist, create it
+	if !exists {
+		clientChan = r.createClientChannel(serverAddr)
+	}
+
+	// Try to get a client from the pool (non-blocking)
+	select {
+	case client := <-clientChan:
+		return client, nil
+	default:
+		// No client available in pool, create a new one
+		client, err := r.GetNewMemcachedClient(serverAddr)
+		if err != nil {
+			return nil, err
+		}
+		return client, nil
+	}
+}
+
+// ReleaseClient returns a client to the pool for the given server.
+// If the channel buffer is full, the connection is closed and discarded.
+// If the client is nil, this is a no-op.
+func (r *RemoteMemcachedComponent) ReleaseClient(serverAddr string, client mcc.ClientIface) {
+	if client == nil {
+		return
+	}
+
+	// Hold poolConfigMtx.RLock to prevent pool reconfiguration during client operations
+	r.poolConfigMtx.RLock()
+	defer r.poolConfigMtx.RUnlock()
+
+	// if the pool is closed, just close the client and return
+	if r.IsClosed() {
+		if err := client.Close(); err != nil {
+			r.LoggerImpl.Warnf("error closing client for %v on bucket %v: %v", serverAddr, r.TargetBucketname, err)
+		}
+		return
+	}
+
+	clientChan, exists := r.getClientChannel(serverAddr)
+	if !exists {
+		// server is no longer in the target kvVbMap, close the client
+		r.LoggerImpl.Infof("releasing client for removed server %v, closing connection", serverAddr)
+		if err := client.Close(); err != nil {
+			r.LoggerImpl.Warnf("error closing client for removed server %v: %v", serverAddr, err)
+		}
+		return
+	}
+
+	// Try to return the client to the pool (non-blocking)
+	select {
+	case clientChan <- client:
+		// Successfully returned to pool
+	default:
+		// Pool is at capacity, close the excess connection
+		if err := client.Close(); err != nil {
+			r.LoggerImpl.Warnf("error closing excess connection to %v: %v", serverAddr, err)
+		}
+	}
+}
+
+// DeleteMemClientsNoLock removes all connections for a server.
+// NOTE:
+//   - Caller MUST hold a write lock on KvMemClientsMtx before calling
+func (r *RemoteMemcachedComponent) DeleteMemClientsNoLock(serverAddr string) {
+	clientChan, exists := r.KvMemClients[serverAddr]
+	if !exists {
+		return
+	}
+
+	// Drain and close all connections for the server
+	close(clientChan)
+
+	for client := range clientChan {
+		err := client.Close()
+		if err != nil {
+			r.LoggerImpl.Warnf("remoteMemComponent: error closing connection for %v: %v", serverAddr, err)
+		}
+	}
+	delete(r.KvMemClients, serverAddr)
+
+	r.LoggerImpl.Infof("removed connection for server %v", serverAddr)
+}
+
+// MonitorTopology monitors the topology of the target cluster and removes
+// connections for servers that are no longer in the target kvVbMap
+func (r *RemoteMemcachedComponent) MonitorTopology() {
+	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.FinishCh:
+			return
+		case <-ticker.C:
+			serversToDelete, err := r.collectObsoleteServers()
+			if err != nil {
+				r.LoggerImpl.Warnf("failed to identify obsolete servers: %v", err)
+				continue
+			}
+			// if there are servers to delete, delete them
+			if len(serversToDelete) > 0 {
+				// Acquire poolConfigMtx.Lock to safely remove servers while blocking
+				// all client operations, ensuring no one is using channels we're closing
+				r.poolConfigMtx.Lock()
+				r.removeServers(serversToDelete)
+				r.poolConfigMtx.Unlock()
+			}
+		}
+	}
+}
+
+// collectObsoleteServers returns a list of servers that are no longer in the target kvVbMap.
+func (r *RemoteMemcachedComponent) collectObsoleteServers() ([]string, error) {
+	// fetch the target kvVbMap
+	targetKvVbMap, err := r.TargetKvVbMap()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch target kvVbMap: %w", err)
+	}
+
+	// collect the servers that are no longer in the target kvVbMap
+	serversToDelete := make([]string, 0)
+
+	r.KvMemClientsMtx.RLock()
+	defer r.KvMemClientsMtx.RUnlock()
+
+	for serverAddr := range r.KvMemClients {
+		if _, exists := targetKvVbMap[serverAddr]; !exists {
+			serversToDelete = append(serversToDelete, serverAddr)
+		}
+	}
+	return serversToDelete, nil
+}
+
+// removeServers deletes a list of servers from the pool
+func (r *RemoteMemcachedComponent) removeServers(servers []string) {
+	r.KvMemClientsMtx.Lock()
+	defer r.KvMemClientsMtx.Unlock()
+
+	for _, serverAddr := range servers {
+		r.DeleteMemClientsNoLock(serverAddr)
 	}
 }

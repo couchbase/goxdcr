@@ -3029,6 +3029,64 @@ func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) RunAndReturn(run func(map[s
 	return _c
 }
 
+// GetFailoverLog provides a mock function with given fields: conn
+func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverLogMapType, error) {
+	ret := _m.Called(conn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFailoverLog")
+	}
+
+	var r0 base.FailoverLogMapType
+	var r1 error
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface) (base.FailoverLogMapType, error)); ok {
+		return rf(conn)
+	}
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface) base.FailoverLogMapType); ok {
+		r0 = rf(conn)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.FailoverLogMapType)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface) error); ok {
+		r1 = rf(conn)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetFailoverLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFailoverLog'
+type UtilsIface_GetFailoverLog_Call struct {
+	*mock.Call
+}
+
+// GetFailoverLog is a helper method to define mock.On call
+//   - conn memcached.ClientIface
+func (_e *UtilsIface_Expecter) GetFailoverLog(conn interface{}) *UtilsIface_GetFailoverLog_Call {
+	return &UtilsIface_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", conn)}
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) Run(run func(conn memcached.ClientIface)) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(memcached.ClientIface))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) Return(_a0 base.FailoverLogMapType, _a1 error) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface) (base.FailoverLogMapType, error)) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap
 func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, []uint16, error) {
 	ret := _m.Called(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
@@ -5191,6 +5249,65 @@ func (_c *UtilsIface_GetTerseInfo_Call) RunAndReturn(run func(string, string, st
 	return _c
 }
 
+// GetVBucketStats provides a mock function with given fields: requestOpts, conn
+func (_m *UtilsIface) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface) (base.VBucketStatsMap, error) {
+	ret := _m.Called(requestOpts, conn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVBucketStats")
+	}
+
+	var r0 base.VBucketStatsMap
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)); ok {
+		return rf(requestOpts, conn)
+	}
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) base.VBucketStatsMap); ok {
+		r0 = rf(requestOpts, conn)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.VBucketStatsMap)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*base.VBucketStatsRequest, memcached.ClientIface) error); ok {
+		r1 = rf(requestOpts, conn)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetVBucketStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVBucketStats'
+type UtilsIface_GetVBucketStats_Call struct {
+	*mock.Call
+}
+
+// GetVBucketStats is a helper method to define mock.On call
+//   - requestOpts *base.VBucketStatsRequest
+//   - conn memcached.ClientIface
+func (_e *UtilsIface_Expecter) GetVBucketStats(requestOpts interface{}, conn interface{}) *UtilsIface_GetVBucketStats_Call {
+	return &UtilsIface_GetVBucketStats_Call{Call: _e.mock.On("GetVBucketStats", requestOpts, conn)}
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) Run(run func(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface)) *UtilsIface_GetVBucketStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*base.VBucketStatsRequest), args[1].(memcached.ClientIface))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) Return(_a0 base.VBucketStatsMap, _a1 error) *UtilsIface_GetVBucketStats_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) RunAndReturn(run func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)) *UtilsIface_GetVBucketStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVbucketsMaxCas provides a mock function with given fields: bucketInfo
 func (_m *UtilsIface) GetVbucketsMaxCas(bucketInfo map[string]interface{}) ([]interface{}, error) {
 	ret := _m.Called(bucketInfo)
@@ -5985,9 +6102,9 @@ func (_c *UtilsIface_ParseClientCertOutput_Call) RunAndReturn(run func(map[strin
 	return _c
 }
 
-// ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, high_seqno_and_vbuuid_map
-func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
-	ret := _m.Called(vbnos, stats_map, high_seqno_and_vbuuid_map)
+// ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, output
+func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string) {
+	ret := _m.Called(vbnos, stats_map, output)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ParseHighSeqnoAndVBUuidFromStats")
@@ -5995,19 +6112,19 @@ func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map
 
 	var r0 []uint16
 	var r1 map[uint16]string
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16][]uint64) ([]uint16, map[uint16]string)); ok {
-		return rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)); ok {
+		return rf(vbnos, stats_map, output)
 	}
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16][]uint64) []uint16); ok {
-		r0 = rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
+		r0 = rf(vbnos, stats_map, output)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, map[uint16][]uint64) map[uint16]string); ok {
-		r1 = rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) map[uint16]string); ok {
+		r1 = rf(vbnos, stats_map, output)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(map[uint16]string)
@@ -6025,14 +6142,14 @@ type UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call struct {
 // ParseHighSeqnoAndVBUuidFromStats is a helper method to define mock.On call
 //   - vbnos []uint16
 //   - stats_map map[string]string
-//   - high_seqno_and_vbuuid_map map[uint16][]uint64
-func (_e *UtilsIface_Expecter) ParseHighSeqnoAndVBUuidFromStats(vbnos interface{}, stats_map interface{}, high_seqno_and_vbuuid_map interface{}) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	return &UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call{Call: _e.mock.On("ParseHighSeqnoAndVBUuidFromStats", vbnos, stats_map, high_seqno_and_vbuuid_map)}
+//   - output base.VBucketStatsMap
+func (_e *UtilsIface_Expecter) ParseHighSeqnoAndVBUuidFromStats(vbnos interface{}, stats_map interface{}, output interface{}) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+	return &UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call{Call: _e.mock.On("ParseHighSeqnoAndVBUuidFromStats", vbnos, stats_map, output)}
 }
 
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Run(run func(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Run(run func(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16), args[1].(map[string]string), args[2].(map[uint16][]uint64))
+		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
 	})
 	return _c
 }
@@ -6042,7 +6159,7 @@ func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Return(_a0 []uint16,
 	return _c
 }
 
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run func([]uint16, map[string]string, map[uint16][]uint64) ([]uint16, map[uint16]string)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6103,6 +6220,66 @@ func (_c *UtilsIface_ParseHighSeqnoStat_Call) Return(_a0 []uint16, _a1 error) *U
 }
 
 func (_c *UtilsIface_ParseHighSeqnoStat_Call) RunAndReturn(run func([]uint16, map[string]string, map[uint16]uint64) ([]uint16, error)) *UtilsIface_ParseHighSeqnoStat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ParseMaxCasStat provides a mock function with given fields: vbnos, statsMap, output
+func (_m *UtilsIface) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error) {
+	ret := _m.Called(vbnos, statsMap, output)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParseMaxCasStat")
+	}
+
+	var r0 []uint16
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)); ok {
+		return rf(vbnos, statsMap, output)
+	}
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
+		r0 = rf(vbnos, statsMap, output)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) error); ok {
+		r1 = rf(vbnos, statsMap, output)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_ParseMaxCasStat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseMaxCasStat'
+type UtilsIface_ParseMaxCasStat_Call struct {
+	*mock.Call
+}
+
+// ParseMaxCasStat is a helper method to define mock.On call
+//   - vbnos []uint16
+//   - statsMap map[string]string
+//   - output base.VBucketStatsMap
+func (_e *UtilsIface_Expecter) ParseMaxCasStat(vbnos interface{}, statsMap interface{}, output interface{}) *UtilsIface_ParseMaxCasStat_Call {
+	return &UtilsIface_ParseMaxCasStat_Call{Call: _e.mock.On("ParseMaxCasStat", vbnos, statsMap, output)}
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) Run(run func(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseMaxCasStat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) Return(_a0 []uint16, _a1 error) *UtilsIface_ParseMaxCasStat_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)) *UtilsIface_ParseMaxCasStat_Call {
 	_c.Call.Return(run)
 	return _c
 }

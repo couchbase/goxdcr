@@ -4003,3 +4003,214 @@ func (opts *GetManifestOpts) Validate() error {
 	}
 	return nil
 }
+
+// FailoverEntry is a single entry in the failover log
+type FailoverEntry struct {
+	// Uuid is a Unique ID for a particular history of mutations
+	Uuid uint64
+	//  HighSeqno is the the sequence number at which 'this' Uuid took ownership of the vbucket
+	HighSeqno uint64
+}
+
+// Clone clones the FailoverEntry
+func (fe *FailoverEntry) Clone() *FailoverEntry {
+	return &FailoverEntry{
+		Uuid:      fe.Uuid,
+		HighSeqno: fe.HighSeqno,
+	}
+}
+
+// DeepCopyFailoverEntryList deep copies a list of FailoverEntrys
+func DeepCopyFailoverEntryList(list []*FailoverEntry) []*FailoverEntry {
+	if list == nil {
+		return nil
+	}
+	clonedList := make([]*FailoverEntry, len(list))
+	for i, entry := range list {
+		clonedList[i] = entry.Clone()
+	}
+	return clonedList
+}
+
+// FailoverLog is a list of FailoverEntrys
+type FailoverLog struct {
+	// NumEntries is the number of entries in the failover log
+	NumEntries uint64
+	// LogTable is the table of failover entries
+	// The entries are stored in descending order of time i.e the newest entry is at the first index
+	// and the oldest entry is at the last index
+	LogTable []*FailoverEntry
+	// NumErraneousEntriesErased is the number of entries that have been erased from the failover log
+	// For more information on when KV removes entries from the failover log, see
+	//  1. https://couchbase.slack.com/archives/CFJDXSGUA/p1755012722540999
+	//  2. https://src.couchbase.org/source/xref/8.0.0/kv_engine/engines/ep/src/failover-table.cc?r=974b8bf34b82ebb5fa6a5b563eeef245623a7b51#412-427
+	NumErraneousEntriesErased uint64
+}
+
+// GetEntry returns the entry at the given index
+func (fl *FailoverLog) GetEntry(index uint64) (*FailoverEntry, error) {
+	if index >= fl.NumEntries {
+		return nil, fmt.Errorf("index %d out of range for failover log with %d entries", index, fl.NumEntries)
+	}
+	return fl.LogTable[index], nil
+}
+
+// SetEntry sets the entry at the given index
+func (fl *FailoverLog) SetEntry(index uint64, entry *FailoverEntry) error {
+	if index >= fl.NumEntries {
+		return fmt.Errorf("index %d out of range for failover log with %d entries", index, fl.NumEntries)
+	}
+	fl.LogTable[index] = entry
+	return nil
+}
+
+// Clone clones the FailoverLog
+func (fl *FailoverLog) Clone() *FailoverLog {
+	return &FailoverLog{
+		NumEntries:                fl.NumEntries,
+		LogTable:                  DeepCopyFailoverEntryList(fl.LogTable),
+		NumErraneousEntriesErased: fl.NumErraneousEntriesErased,
+	}
+}
+
+// FailoverLogMapType is a map of vbucket number to FailoverLog
+type FailoverLogMapType map[uint16]*FailoverLog
+
+// BucketFailoverLog is a struct that encapsulates the bucket failover log
+type BucketFailoverLog struct {
+	// FailoverLogMap is a map of vbucket number to FailoverLog
+	FailoverLogMap FailoverLogMapType
+	// Mutex is used to protect the FailoverLog map
+	Mutex sync.RWMutex
+}
+
+// LoadFrom loads the failover logs for the given vbuckets from another BucketFailoverLog into the current BucketFailoverLog
+func (bfl *BucketFailoverLog) LoadFrom(vbList []uint16, other FailoverLogMapType) {
+	bfl.Mutex.Lock()
+	defer bfl.Mutex.Unlock()
+
+	for _, vbno := range vbList {
+		log, ok := other[vbno]
+		if !ok {
+			continue
+		}
+		bfl.FailoverLogMap[vbno] = log.Clone()
+	}
+}
+
+// GetFailoverLog returns the FailoverLog for a given vbucket number
+func (bfl *BucketFailoverLog) GetFailoverLog(vbno uint16) (*FailoverLog, error) {
+	bfl.Mutex.RLock()
+	defer bfl.Mutex.RUnlock()
+	log, ok := bfl.FailoverLogMap[vbno]
+	if !ok {
+		return nil, fmt.Errorf("vbno %v not found in bucket failover log", vbno)
+	}
+	return log, nil
+}
+
+// SetFailoverLog sets the FailoverLog for a given vbucket number
+func (bfl *BucketFailoverLog) SetFailoverLog(vbno uint16, log *FailoverLog) {
+	bfl.Mutex.Lock()
+	defer bfl.Mutex.Unlock()
+	bfl.FailoverLogMap[vbno] = log
+}
+
+// VBucketStats is a struct that encapsulates the vbucket statistics
+type VBucketStats struct {
+	// Uuid denotes the current vbucket uuid
+	Uuid uint64
+	// HighSeqno denotes the current high sequence number for the vbucket
+	HighSeqno uint64
+	// MaxCas denotes the current max CAS for the vbucket
+	MaxCas uint64
+}
+
+// VBucketStatsMap is a map of vbucket number to VBucketStats
+type VBucketStatsMap map[uint16]*VBucketStats
+
+// BucketVBStats is a struct that encapsulates the vbucket statistics for a bucket
+type BucketVBStats struct {
+	// VBStatsMap is a map of vbucket number to VBucketStats
+	VBStatsMap VBucketStatsMap
+	// Mutex is used to protect the 'VBStatsMap'
+	Mutex sync.RWMutex
+}
+
+// GetVBStats returns the VBucketStats for a given vbucket number
+func (vbm *BucketVBStats) GetVBStats(vbno uint16) (*VBucketStats, error) {
+	vbm.Mutex.RLock()
+	defer vbm.Mutex.RUnlock()
+	stats, ok := vbm.VBStatsMap[vbno]
+	if !ok {
+		return nil, fmt.Errorf("vbno %v not found in vbucket stats map", vbno)
+	}
+	return stats, nil
+}
+
+// SetVBStats sets the VBucketStats for a given vbucket number
+func (vbm *BucketVBStats) SetVBStats(vbno uint16, stats *VBucketStats) {
+	vbm.Mutex.Lock()
+	defer vbm.Mutex.Unlock()
+	vbm.VBStatsMap[vbno] = stats
+}
+
+// LoadFrom loads the VBucketStats for the given vbuckets from VBucketStatsMap into the current BucketVBStats
+func (vbm *BucketVBStats) LoadFrom(vbList []uint16, other VBucketStatsMap) {
+	vbm.Mutex.Lock()
+	defer vbm.Mutex.Unlock()
+
+	for _, vbno := range vbList {
+		if stats, ok := other[vbno]; ok {
+			vbm.VBStatsMap[vbno] = &VBucketStats{
+				Uuid:      stats.Uuid,
+				HighSeqno: stats.HighSeqno,
+				MaxCas:    stats.MaxCas,
+			}
+		}
+	}
+}
+
+type VBucketStatsRequest struct {
+	// VBuckets is the list of vbucket numbers for which the VBucketStats are requested
+	VBuckets []uint16
+	// MaxCasOnly is a flag to indicate if only the max CAS should be returned for the vbuckets in the list
+	MaxCasOnly bool
+	// finCh is used to denote the end of the lifecycle of the VBucketStatsRequest
+	FinCh chan bool
+}
+
+// Validate validates the VBucketStatsRequest
+func (req *VBucketStatsRequest) Validate() error {
+	if req == nil {
+		return errors.New("VBucketStatsRequest is nil")
+	}
+	if len(req.VBuckets) == 0 {
+		return errors.New("VBuckets is empty in VBucketStatsRequest")
+	}
+	if req.FinCh == nil {
+		return errors.New("FinCh is nil in VBucketStatsRequest")
+	}
+	return nil
+}
+
+type FailoverLogRequest struct {
+	// VBuckets is the list of vbuckets for which the FailoverLog is requested
+	VBuckets []uint16
+	// finCh is used to denote the end of the lifecycle of the FailoverLogRequest
+	FinCh chan bool
+}
+
+// Validate validates the FailoverLogRequest
+func (req *FailoverLogRequest) Validate() error {
+	if req == nil {
+		return errors.New("FailoverLogRequest is nil")
+	}
+	if len(req.VBuckets) == 0 {
+		return errors.New("VBuckets is empty in FailoverLogRequest")
+	}
+	if req.FinCh == nil {
+		return errors.New("FinCh is nil in FailoverLogRequest")
+	}
+	return nil
+}

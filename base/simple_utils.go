@@ -780,6 +780,15 @@ func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) 
 	}
 }
 
+func WaitForTimeoutOrContextDone(wait_time time.Duration, ctxDone <-chan struct{}) {
+	ticker := time.NewTicker(wait_time)
+	defer ticker.Stop()
+	select {
+	case <-ctxDone:
+	case <-ticker.C:
+	}
+}
+
 // check if a specified data type contains xattr
 func HasXattr(dataType uint8) bool {
 	return dataType&PROTOCOL_BINARY_DATATYPE_XATTR > 0
@@ -2728,4 +2737,16 @@ func IsURL(hostname string) bool {
 // isCngURL checks if the hostname provided is a cng URL
 func IsCngURL(hostname string) bool {
 	return strings.HasPrefix(hostname, CouchbaseCngUri)
+}
+
+// ConvertUint16ToUint32 converts a list of uint16 to a list of uint32
+func ConvertUint16ToUint32(vblist []uint16) []uint32 {
+	if vblist == nil {
+		return nil
+	}
+	result := make([]uint32, len(vblist))
+	for i, vb := range vblist {
+		result[i] = uint32(vb)
+	}
+	return result
 }

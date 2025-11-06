@@ -261,7 +261,7 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	return unableToParseVBs, nil
 }
 
-func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, maxCasStatsMap map[uint16]uint64) ([]uint16, error) {
+func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error) {
 	var unableToParseVBs []uint16
 	if len(vbnos) == 0 {
 		return nil, base.ErrorNoVbSpecified
@@ -280,7 +280,9 @@ func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, 
 			u.logger_utils.Errorf("maxCas stats for vbno=%v in stats map is not a valid uint64. maxCas=%v", vbno, maxCasStr)
 			unableToParseVBs = append(unableToParseVBs, vbno)
 		}
-		maxCasStatsMap[vbno] = maxCas
+		output[vbno] = &base.VBucketStats{
+			MaxCas: maxCas,
+		}
 	}
 	if len(unableToParseVBs) == len(vbnos) {
 		return nil, fmt.Errorf("All Requested VBs %v were not able to be parsed from statsMap %v", vbnos, statsMap)
@@ -291,7 +293,7 @@ func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, 
 }
 
 // convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
-func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
+func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string) {
 	invalidVbnos := make([]uint16, 0)
 	warnings := make(map[uint16]string)
 	for _, vbno := range vbnos {
@@ -331,7 +333,10 @@ func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map m
 			continue
 		}
 
-		high_seqno_and_vbuuid_map[vbno] = []uint64{high_seqno, vbuuid}
+		output[vbno] = &base.VBucketStats{
+			HighSeqno: high_seqno,
+			Uuid:      vbuuid,
+		}
 	}
 
 	return invalidVbnos, warnings
@@ -3536,7 +3541,13 @@ func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface, s
 	if err != nil {
 		return nil, nil, err
 	}
-	unableToBeParsedVBs, err := u.ParseMaxCasStat(vbnos, *statsMap, *vbMaxCasMap)
+	// Darshan TODO: This function should be removed later
+	// temp modify it avoid compilation error
+	vbMaxCasMapType := make(base.VBucketStatsMap)
+	unableToBeParsedVBs, _ := u.ParseMaxCasStat(vbnos, *statsMap, vbMaxCasMapType)
+	for vbno, vbStats := range vbMaxCasMapType {
+		(*vbMaxCasMap)[vbno] = vbStats.MaxCas
+	}
 	return *vbMaxCasMap, unableToBeParsedVBs, nil
 }
 
@@ -3830,4 +3841,126 @@ func (u *Utilities) GetTerseInfo(localConnStr string, username, password string,
 	}
 
 	return clusterInfo, nil
+}
+
+// handleFailoverLogResponse handles the response from the failover log STAT command
+// The KV STAT request is a server-side streaming request, meaning the response consists of
+// a stream of key-value pairs. Each response packet represents one key-value pair, and
+// handleFailoverLogResponse is invoked for each such packet.
+//
+// The following keys are expected to appear in the response, in this order:
+//  1. vb_<vbucket_number>:num_entries - number of entries in the failover log
+//  2. vb_<vbucket_number>:num_erroneous_entries_erased - number of erroneous entries erased from the failover log
+//  3. vb_<vbucket_number>:<entry_index>:id - ID of the entry
+//  4. vb_<vbucket_number>:<entry_index>:seq - sequence number of the entry
+//
+// Documentation:
+//  1. https://github.com/couchbase/kv_engine/blob/26a32229a4e475207976d57b5a3dafbcb6032296/engines/ep/docs/stats.org#26-vbucket-failover-stats
+//  2. https://src.couchbase.org/source/xref/8.0.0/kv_engine/engines/ep/src/failover-table.cc?r=974b8bf34b82ebb5fa6a5b563eeef245623a7b51#284-316
+func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMap base.FailoverLogMapType) {
+	keyStr := string(key)
+
+	var vbno uint16
+	var subKey string
+	if n, err := fmt.Sscanf(keyStr, "vb_%d:%s", &vbno, &subKey); err != nil || n != 2 {
+		u.logger_utils.Warnf("invalid key format %s (got %d parts): %v", keyStr, n, err)
+		return
+	}
+
+	// Handle keys describing the failover log for the given vbucket
+	switch subKey {
+	case base.FailoverLogNumEntriesKey:
+		numEntries, err := strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return
+		}
+		vbFailoverLogMap[vbno] = &base.FailoverLog{
+			NumEntries: numEntries,
+			LogTable:   make([]*base.FailoverEntry, numEntries),
+		}
+		return
+
+	case base.FailoverLogNumErroneousEntriesErasedKey:
+		failoverLog, ok := vbFailoverLogMap[vbno]
+		if !ok {
+			return
+		}
+		numErroneousEntriesErased, err := strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return
+		}
+		failoverLog.NumErraneousEntriesErased = numErroneousEntriesErased
+		return
+	}
+
+	// Handle per-entry keys
+	var entryIndex uint64
+	var entryKey string
+	if n, err := fmt.Sscanf(subKey, "%d:%s", &entryIndex, &entryKey); err != nil || n != 2 {
+		return
+	}
+
+	failoverLog, ok := vbFailoverLogMap[vbno]
+	if !ok {
+		return
+	}
+
+	switch entryKey {
+	case base.FailoverLogEntryIdKey:
+		uuid, err := strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return
+		}
+		entry := &base.FailoverEntry{Uuid: uuid}
+		if err := failoverLog.SetEntry(entryIndex, entry); err != nil {
+			u.logger_utils.Warnf("failed to set entry for %s: %v", keyStr, err)
+		}
+		return
+	case base.FailoverLogEntrySeqnoKey:
+		seqno, err := strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return
+		}
+		entry, err := failoverLog.GetEntry(entryIndex)
+		if err != nil {
+			u.logger_utils.Warnf("failed to get entry for %s: %v", keyStr, err)
+			return
+		}
+		entry.HighSeqno = seqno
+		return
+	}
+}
+
+// GetFailoverLog fetches the failover log from the cluster associated with the given connection
+func (u *Utilities) GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, error) {
+	vbFailoverLogMap := make(base.FailoverLogMapType)
+	handleResponse := func(key, value []byte) {
+		u.handleFailoverLogResponse(key, value, vbFailoverLogMap)
+	}
+	err := conn.StatsFunc(base.FAILOVER_LOG_STAT_NAME, handleResponse)
+	if err != nil {
+		return nil, err
+	}
+	return vbFailoverLogMap, nil
+}
+
+func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface) (base.VBucketStatsMap, error) {
+	output := make(base.VBucketStatsMap)
+
+	statsKey := base.VBUCKET_SEQNO_STAT_NAME
+	if requestOpts.MaxCasOnly {
+		statsKey = base.VBUCKET_DETAILS_NAME
+	}
+
+	resp, err := conn.StatsMap(statsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if requestOpts.MaxCasOnly {
+		u.ParseMaxCasStat(requestOpts.VBuckets, resp, output)
+	} else {
+		u.ParseHighSeqnoAndVBUuidFromStats(requestOpts.VBuckets, resp, output)
+	}
+	return output, nil
 }

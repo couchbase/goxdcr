@@ -469,9 +469,23 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 
 	finCh := make(chan bool, 1)
 
+	// Darshan TODO: to be removed once the remote memcached component is removed
+	heloUserAgent := base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("CkptMgr", "", target_bucket_name))
+
 	ckmgr := &CheckpointManager{
-		CheckpointManagerInjector:         NewCheckpointManagerInjector(),
-		AbstractComponent:                 component.NewAbstractComponentWithLogger(base.CheckpointMgrId, logger),
+		CheckpointManagerInjector: NewCheckpointManagerInjector(),
+		AbstractComponent:         component.NewAbstractComponentWithLogger(base.CheckpointMgrId, logger),
+		RemoteMemcachedComponent: component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
+			target_bucket_name, heloUserAgent, base.DefaultConnectionSize).SetTargetKvVbMapGetter(
+			func() (base.KvVBMapType, error) {
+				return target_kv_vb_map, nil
+			}).SetRefGetter(
+			func() *metadata.RemoteClusterReference {
+				return target_cluster_ref
+			}).SetAlternateAddressChecker(
+			func(ref *metadata.RemoteClusterReference) (bool, error) {
+				return remote_cluster_svc.ShouldUseAlternateAddress(ref)
+			}),
 		pipeline:                          nil,
 		pipelineReinitHash:                "",
 		checkpoints_svc:                   checkpoints_svc,
@@ -504,24 +518,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		variableVBMode:                    variableVBMode,
 		backfillCollections:               make(map[uint16][]uint32),
 	}
-
-	ckmgr.RemoteMemcachedComponent = component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
-		target_bucket_name).SetTargetKvVbMapGetter(
-		func() (base.KvVBMapType, error) {
-			return target_kv_vb_map, nil
-		}).SetTargetUsernameGetter(
-		func() string {
-			return target_username
-		}).SetTargetPasswordGetter(
-		func() string {
-			return target_password
-		}).SetRefGetter(
-		func() *metadata.RemoteClusterReference {
-			return target_cluster_ref
-		}).SetAlternateAddressChecker(
-		func(ref *metadata.RemoteClusterReference) (bool, error) {
-			return remote_cluster_svc.ShouldUseAlternateAddress(ref)
-		})
 
 	for _, vbno := range ckmgr.getMyVBs() {
 		ckmgr.backfillCollections[vbno] = make([]uint32, 0)
@@ -780,8 +776,6 @@ var ckmgrIterationId uint32
 
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
-	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
-	ckmgr.SetUserAgent(base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("CkptMgr", spec.SourceBucketName, spec.TargetBucketName)))
 	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId(), base.GetIterationId(&ckmgrIterationId))
 }
 
@@ -835,9 +829,15 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 		if _, found := serverClientStatsMap[serverAddr]; !found {
 			continue
 		}
-		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], highSeqnoAndVbUuidMap)
+		output := make(base.VBucketStatsMap)
+		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], output)
 		invalidVbNos = append(invalidVbNos, invalidVbnosSubset...)
 		serverWarningsMap[serverAddr] = warnings
+		// Darshan TODO: This is a temporary fix to avoid compilation errors
+		// The entire function will be refactored or removed in the upcoming PRs
+		for vbno, stats := range output {
+			highSeqnoAndVbUuidMap[vbno] = []uint64{stats.HighSeqno, stats.Uuid}
+		}
 	}
 	if len(invalidVbNos) > 0 {
 		ckmgr.logger.Warnf("Can't find high seqno or vbuuid for vbnos=%v in stats map or are in invalid format. Target topology may have changed.\n", invalidVbNos)
@@ -860,32 +860,23 @@ func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, 
 
 	statMapOp := func(param interface{}) (interface{}, error) {
 		var err error
-		ckmgr.KvMemClientsMtx.RLock()
-		client, ok := ckmgr.KvMemClients[serverAddr]
-		ckmgr.KvMemClientsMtx.RUnlock()
-		if !ok {
-			// memcached connection may have been closed in previous retries. create a new one
-			client, err = ckmgr.GetNewMemcachedClient(serverAddr, false /*initializing*/)
-			if err != nil {
-				ckmgr.logger.Warnf("Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", serverAddr, vbnos)
-				return nil, err
-			} else {
-				ckmgr.KvMemClientsMtx.Lock()
-				ckmgr.KvMemClients[serverAddr] = client
-				ckmgr.KvMemClientsMtx.Unlock()
-			}
+		// Acquire a client from the pool (will create new one if pool is empty)
+		client, err := ckmgr.AcquireClient(serverAddr)
+		if err != nil {
+			ckmgr.logger.Warnf("Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", serverAddr, vbnos)
+			return nil, err
 		}
 
 		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 		if err != nil {
 			ckmgr.logger.Warnf("Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", serverAddr, vbnos, err)
-			clientCloseErr := client.Close()
-			if clientCloseErr != nil {
-				ckmgr.logger.Warnf("error from closing connection for %v is %v\n", serverAddr, err)
+			// Connection is broken, delete it instead of returning to pool
+			if err := client.Close(); err != nil {
+				ckmgr.logger.Warnf("error closing connection for %v: %v", serverAddr, err)
 			}
-			ckmgr.KvMemClientsMtx.Lock()
-			delete(ckmgr.KvMemClients, serverAddr)
-			ckmgr.KvMemClientsMtx.Unlock()
+		} else {
+			// Success - return client to pool
+			ckmgr.ReleaseClient(serverAddr, client)
 		}
 		return nil, err
 	}
@@ -917,7 +908,7 @@ func (ckmgr *CheckpointManager) Stop() error {
 	close(ckmgr.finish_ch)
 
 	//close the connections
-	ckmgr.CloseConnections()
+	ckmgr.Close()
 
 	ckmgr.wait_grp.Wait()
 	return nil

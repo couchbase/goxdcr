@@ -118,7 +118,8 @@ type UtilsIface interface {
 	GetTerseInfo(localConnStr string, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
 
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error)
-	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string)
+	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string)
+	ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error)
 
 	// Cluster related utilities
 	GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error)
@@ -187,6 +188,8 @@ type UtilsIface interface {
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{})
 	VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error
+	GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, error)
+	GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface) (base.VBucketStatsMap, error)
 
 	// Collections related utilities
 	GetCollectionsManifest(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error)
