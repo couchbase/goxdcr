@@ -53,21 +53,57 @@ var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, n
 func init() {
 	// Add development settings to the main configuration map
 	devSettings := map[string]*SettingsConfig{
-		DevMainPipelineSendDelay:                  XDCRDevMainPipelineSendDelayConfig, // TODO
-		DevBackfillPipelineSendDelay:              XDCRDevBackfillPipelineSendDelayConfig,
-		DevMainPipelineRollbackTo0VB:              XDCRDevMainPipelineRollbackConfig,
-		DevBackfillRollbackTo0VB:                  XDCRDevBackfillPipelineRollbackConfig,
-		DevCkptMgrForceGCWaitSec:                  XDCRDevCkptGcWaitConfig,
-		DevColManifestSvcDelaySec:                 XDCRDevColManifestSvcDelayConfig,
-		DevNsServerPortSpecifier:                  XDCRDevNsServerPortSpecifierConfig,
-		DevBackfillReplUpdateDelay:                XDCRDevBackfillReplUpdateDelayConfig,
-		DevCasDriftForceDocKey:                    XDCRDevCasDriftForceDocConfig,
-		DevPreCheckCasDriftForceVbKey:             XDCRDevPreCheckCasDriftForceVBConfig,
-		DevPreCheckMaxCasErrorInjection:           XDCRDevPreCheckMaxCasErrorInjectionConfig,
-		DevBackfillReqHandlerStartOnceDelay:       XDCRDevBackfillReqHandlerStartOnceDelayConfig,
+		// DevMainPipelineDelay is used to inject delay (in ms) in main replication pipeline for testing purposes
+		// It enforces a delay between each document send
+		DevMainPipelineSendDelay: XDCRDevMainPipelineSendDelayConfig, // TODO
+
+		// DevBackfillPipelineDelay is used to inject delay (in ms) in backfill replication pipeline for testing purposes
+		// It enforces a delay between each document send
+		DevBackfillPipelineSendDelay: XDCRDevBackfillPipelineSendDelayConfig,
+
+		// DevMainPipelineRollbackTo0VB is used to force main replication pipeline to rollback to vb 0 for testing purposes
+		// The setting takes a VB number, and upon receiving the VB, simulates a rollback to 0 from DCP
+		DevMainPipelineRollbackTo0VB: XDCRDevMainPipelineRollbackConfig,
+
+		// DevBackfillRollbackTo0VB is used to force backfill replication pipeline to rollback to vb 0 for testing purposes
+		// The setting takes a VB number, and upon receiving the VB, simulates a rollback to 0 from DCP
+		DevBackfillRollbackTo0VB: XDCRDevBackfillPipelineRollbackConfig,
+
+		// DevCkptMgrForceGCWaitSec is used to inject a wait time (in seconds) to simulate the time it takes to
+		// acquire a stop-the-world lock
+		DevCkptMgrForceGCWaitSec: XDCRDevCkptGcWaitConfig,
+
+		// DevColManifestSvcDelaySec is used to inject delay (in seconds) in the collection manifest service
+		// Before calling the callback
+		// DevNsServerPortSpecifier is used to specify a custom port for ns_server to ensure the delay
+		// only applies to a specific goxdcr process in a cluster_run environment
+		DevColManifestSvcDelaySec: XDCRDevColManifestSvcDelayConfig,
+		DevNsServerPortSpecifier:  XDCRDevNsServerPortSpecifierConfig,
+
+		// DevBackfillReplUpdateDelay is used to inject delay (in ms) in backfill replication
+		// spec update process to simulate a busy system
+		DevBackfillReplUpdateDelay: XDCRDevBackfillReplUpdateDelayConfig,
+
+		// DevCasDriftForceDocKey is used to force cas drift check to be performed on a specific document key
+		DevCasDriftForceDocKey: XDCRDevCasDriftForceDocConfig,
+
+		// DevPreCheckCasDriftForceVbKey is used to force cas drift pre-check to be performed on a specific vb
+		DevPreCheckCasDriftForceVbKey: XDCRDevPreCheckCasDriftForceVBConfig,
+
+		// DevPreCheckMaxCasErrorInjection is used to inject max cas error during pre-check phase
+		DevPreCheckMaxCasErrorInjection: XDCRDevPreCheckMaxCasErrorInjectionConfig,
+
+		// DevBackfillReqHandlerStartOnceDelay is used to inject delay (in secs) before starting backfill req handler
+		DevBackfillReqHandlerStartOnceDelay: XDCRDevBackfillReqHandlerStartOnceDelayConfig,
+
+		// DevBackfillReqHandlerHandleVBTaskDoneHang is used to inject a hang in HandleVBTaskDone to simulate slow running system
 		DevBackfillReqHandlerHandleVBTaskDoneHang: XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig,
-		DevBackfillUnrecoverableErrorInj:          XDCRDevBackfillUnrecoverableErrorInjConfig,
-		DevBackfillMgrVbsTasksDoneNotifierDelay:   XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
+
+		// DevBackfillUnrecoverableErrorInj is used to inject an unrecoverable error during backfill processing for testing purposes
+		DevBackfillUnrecoverableErrorInj: XDCRDevBackfillUnrecoverableErrorInjConfig,
+
+		// DevBackfillMgrVbsTasksDoneNotifierDelay is used to inject delay in backfill mgr's notifier for vb tasks done
+		DevBackfillMgrVbsTasksDoneNotifierDelay: XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
 	}
 
 	// Merge the dev settings into the main configuration map
