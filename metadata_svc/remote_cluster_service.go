@@ -2339,18 +2339,8 @@ func (agent *RemoteClusterAgent) getTerseBucketInfo(ref *metadata.RemoteClusterR
 func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) *component.RemoteMemcachedComponent {
 	userAgentStr := fmt.Sprintf("RemoteClusterAgent_%v", atomic.AddUint64(&agentCounter, 1))
 	heloUserAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("RmtAgent %s", bucketName))
-	remoteMemcachedComponent := component.NewRemoteMemcachedComponent(agent.logger, agent.agentFinCh, agent.utils, bucketName)
-	remoteMemcachedComponent.SetTargetUsernameGetter(func() string {
-		agent.waitForRefreshEnabled()
-		agent.refMtx.RLock()
-		defer agent.refMtx.RUnlock()
-		return agent.reference.UserName()
-	}).SetTargetPasswordGetter(func() string {
-		agent.waitForRefreshEnabled()
-		agent.refMtx.RLock()
-		defer agent.refMtx.RUnlock()
-		return agent.reference.Password()
-	}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+	remoteMemcachedComponent := component.NewRemoteMemcachedComponent(agent.logger, agent.agentFinCh, agent.utils, bucketName, heloUserAgentStr, base.DefaultConnectionSize)
+	remoteMemcachedComponent.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
 		agent.waitForRefreshEnabled()
 
 		agent.refMtx.RLock()
@@ -2416,9 +2406,9 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		agent.refMtx.RLock()
 		defer agent.refMtx.RUnlock()
 		return agent.reference.Clone()
-	}).SetAlternateAddressChecker(func(reference *metadata.RemoteClusterReference) (bool, error) {
+	}).SetAlternateAddressChecker(func(_ *metadata.RemoteClusterReference) (bool, error) {
 		return agent.UsesAlternateAddress()
-	}).SetUserAgent(heloUserAgentStr)
+	})
 
 	return remoteMemcachedComponent
 }
@@ -2558,7 +2548,7 @@ func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) erro
 	if agent.bucketRefCnt[bucketName] == uint32(0) {
 		remComponent := agent.targetKVComponents[bucketName]
 		if remComponent != nil {
-			go remComponent.CloseConnections()
+			go remComponent.Close()
 			delete(agent.targetKVComponents, bucketName)
 		}
 		delete(agent.bucketManifestGetters, bucketName)

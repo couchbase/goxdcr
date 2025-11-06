@@ -2769,11 +2769,11 @@ func (_c *UtilsIface_GetDataUsageTrackingCtx_Call) RunAndReturn(run func() *util
 	return _c
 }
 
-// GetDefaultPoolInfoUsingHttps provides a mock function with given fields: hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, context
-func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, context ...*utils.Context) (map[string]interface{}, int, error) {
-	_va := make([]interface{}, len(context))
-	for _i := range context {
-		_va[_i] = context[_i]
+// GetDefaultPoolInfoUsingHttps provides a mock function with given fields: hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, _a7
+func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, _a7 ...*utils.Context) (map[string]interface{}, int, error) {
+	_va := make([]interface{}, len(_a7))
+	for _i := range _a7 {
+		_va[_i] = _a7[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
@@ -2788,10 +2788,10 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, usernam
 	var r1 int
 	var r2 error
 	if rf, ok := ret.Get(0).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger, ...*utils.Context) (map[string]interface{}, int, error)); ok {
-		return rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, context...)
+		return rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, _a7...)
 	}
 	if rf, ok := ret.Get(0).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger, ...*utils.Context) map[string]interface{}); ok {
-		r0 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, context...)
+		r0 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, _a7...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -2799,13 +2799,13 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, usernam
 	}
 
 	if rf, ok := ret.Get(1).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger, ...*utils.Context) int); ok {
-		r1 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, context...)
+		r1 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, _a7...)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
 	if rf, ok := ret.Get(2).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger, ...*utils.Context) error); ok {
-		r2 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, context...)
+		r2 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, _a7...)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2826,13 +2826,13 @@ type UtilsIface_GetDefaultPoolInfoUsingHttps_Call struct {
 //   - clientCertificate []byte
 //   - clientKey []byte
 //   - logger *log.CommonLogger
-//   - context ...*utils.Context
-func (_e *UtilsIface_Expecter) GetDefaultPoolInfoUsingHttps(hostHttpsAddr interface{}, username interface{}, password interface{}, certificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}, context ...interface{}) *UtilsIface_GetDefaultPoolInfoUsingHttps_Call {
+//   - _a7 ...*utils.Context
+func (_e *UtilsIface_Expecter) GetDefaultPoolInfoUsingHttps(hostHttpsAddr interface{}, username interface{}, password interface{}, certificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}, _a7 ...interface{}) *UtilsIface_GetDefaultPoolInfoUsingHttps_Call {
 	return &UtilsIface_GetDefaultPoolInfoUsingHttps_Call{Call: _e.mock.On("GetDefaultPoolInfoUsingHttps",
-		append([]interface{}{hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger}, context...)...)}
+		append([]interface{}{hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger}, _a7...)...)}
 }
 
-func (_c *UtilsIface_GetDefaultPoolInfoUsingHttps_Call) Run(run func(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, context ...*utils.Context)) *UtilsIface_GetDefaultPoolInfoUsingHttps_Call {
+func (_c *UtilsIface_GetDefaultPoolInfoUsingHttps_Call) Run(run func(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, _a7 ...*utils.Context)) *UtilsIface_GetDefaultPoolInfoUsingHttps_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*utils.Context, len(args)-7)
 		for i, a := range args[7:] {
@@ -2855,11 +2855,11 @@ func (_c *UtilsIface_GetDefaultPoolInfoUsingHttps_Call) RunAndReturn(run func(st
 	return _c
 }
 
-// GetDefaultPoolInfoUsingScramSha provides a mock function with given fields: hostAddr, username, password, logger, context
-func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username string, password string, logger *log.CommonLogger, context ...*utils.Context) (map[string]interface{}, int, error) {
-	_va := make([]interface{}, len(context))
-	for _i := range context {
-		_va[_i] = context[_i]
+// GetDefaultPoolInfoUsingScramSha provides a mock function with given fields: hostAddr, username, password, logger, _a4
+func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username string, password string, logger *log.CommonLogger, _a4 ...*utils.Context) (map[string]interface{}, int, error) {
+	_va := make([]interface{}, len(_a4))
+	for _i := range _a4 {
+		_va[_i] = _a4[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, hostAddr, username, password, logger)
@@ -2874,10 +2874,10 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username 
 	var r1 int
 	var r2 error
 	if rf, ok := ret.Get(0).(func(string, string, string, *log.CommonLogger, ...*utils.Context) (map[string]interface{}, int, error)); ok {
-		return rf(hostAddr, username, password, logger, context...)
+		return rf(hostAddr, username, password, logger, _a4...)
 	}
 	if rf, ok := ret.Get(0).(func(string, string, string, *log.CommonLogger, ...*utils.Context) map[string]interface{}); ok {
-		r0 = rf(hostAddr, username, password, logger, context...)
+		r0 = rf(hostAddr, username, password, logger, _a4...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
@@ -2885,13 +2885,13 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username 
 	}
 
 	if rf, ok := ret.Get(1).(func(string, string, string, *log.CommonLogger, ...*utils.Context) int); ok {
-		r1 = rf(hostAddr, username, password, logger, context...)
+		r1 = rf(hostAddr, username, password, logger, _a4...)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
 	if rf, ok := ret.Get(2).(func(string, string, string, *log.CommonLogger, ...*utils.Context) error); ok {
-		r2 = rf(hostAddr, username, password, logger, context...)
+		r2 = rf(hostAddr, username, password, logger, _a4...)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2909,13 +2909,13 @@ type UtilsIface_GetDefaultPoolInfoUsingScramSha_Call struct {
 //   - username string
 //   - password string
 //   - logger *log.CommonLogger
-//   - context ...*utils.Context
-func (_e *UtilsIface_Expecter) GetDefaultPoolInfoUsingScramSha(hostAddr interface{}, username interface{}, password interface{}, logger interface{}, context ...interface{}) *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call {
+//   - _a4 ...*utils.Context
+func (_e *UtilsIface_Expecter) GetDefaultPoolInfoUsingScramSha(hostAddr interface{}, username interface{}, password interface{}, logger interface{}, _a4 ...interface{}) *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call {
 	return &UtilsIface_GetDefaultPoolInfoUsingScramSha_Call{Call: _e.mock.On("GetDefaultPoolInfoUsingScramSha",
-		append([]interface{}{hostAddr, username, password, logger}, context...)...)}
+		append([]interface{}{hostAddr, username, password, logger}, _a4...)...)}
 }
 
-func (_c *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call) Run(run func(hostAddr string, username string, password string, logger *log.CommonLogger, context ...*utils.Context)) *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call {
+func (_c *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call) Run(run func(hostAddr string, username string, password string, logger *log.CommonLogger, _a4 ...*utils.Context)) *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*utils.Context, len(args)-4)
 		for i, a := range args[4:] {
@@ -3132,6 +3132,64 @@ func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) Return(_a0 string, _a1 int,
 }
 
 func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) RunAndReturn(run func(map[string]interface{}, bool) (string, int, error)) *UtilsIface_GetExternalMgtHostAndPort_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFailoverLog provides a mock function with given fields: conn
+func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverLogMapType, error) {
+	ret := _m.Called(conn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFailoverLog")
+	}
+
+	var r0 base.FailoverLogMapType
+	var r1 error
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface) (base.FailoverLogMapType, error)); ok {
+		return rf(conn)
+	}
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface) base.FailoverLogMapType); ok {
+		r0 = rf(conn)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.FailoverLogMapType)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface) error); ok {
+		r1 = rf(conn)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetFailoverLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFailoverLog'
+type UtilsIface_GetFailoverLog_Call struct {
+	*mock.Call
+}
+
+// GetFailoverLog is a helper method to define mock.On call
+//   - conn memcached.ClientIface
+func (_e *UtilsIface_Expecter) GetFailoverLog(conn interface{}) *UtilsIface_GetFailoverLog_Call {
+	return &UtilsIface_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", conn)}
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) Run(run func(conn memcached.ClientIface)) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(memcached.ClientIface))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) Return(_a0 base.FailoverLogMapType, _a1 error) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface) (base.FailoverLogMapType, error)) *UtilsIface_GetFailoverLog_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3392,11 +3450,11 @@ func (_c *UtilsIface_GetHostNamesFromBucketInfo_Call) RunAndReturn(run func(map[
 	return _c
 }
 
-// GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, context
-func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, context ...*utils.Context) (*http.Client, error) {
-	_va := make([]interface{}, len(context))
-	for _i := range context {
-		_va[_i] = context[_i]
+// GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, _a9
+func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, _a9 ...*utils.Context) (*http.Client, error) {
+	_va := make([]interface{}, len(_a9))
+	for _i := range _a9 {
+		_va[_i] = _a9[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair)
@@ -3410,10 +3468,10 @@ func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech,
 	var r0 *http.Client
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate, ...*utils.Context) (*http.Client, error)); ok {
-		return rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, context...)
+		return rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, _a9...)
 	}
 	if rf, ok := ret.Get(0).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate, ...*utils.Context) *http.Client); ok {
-		r0 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, context...)
+		r0 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, _a9...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*http.Client)
@@ -3421,7 +3479,7 @@ func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech,
 	}
 
 	if rf, ok := ret.Get(1).(func(string, base.HttpAuthMech, []byte, bool, []byte, []byte, string, *log.CommonLogger, []tls.Certificate, ...*utils.Context) error); ok {
-		r1 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, context...)
+		r1 = rf(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair, _a9...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3444,13 +3502,13 @@ type UtilsIface_GetHttpClient_Call struct {
 //   - ssl_con_str string
 //   - logger *log.CommonLogger
 //   - clientCertKeyPair []tls.Certificate
-//   - context ...*utils.Context
-func (_e *UtilsIface_Expecter) GetHttpClient(username interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, ssl_con_str interface{}, logger interface{}, clientCertKeyPair interface{}, context ...interface{}) *UtilsIface_GetHttpClient_Call {
+//   - _a9 ...*utils.Context
+func (_e *UtilsIface_Expecter) GetHttpClient(username interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, ssl_con_str interface{}, logger interface{}, clientCertKeyPair interface{}, _a9 ...interface{}) *UtilsIface_GetHttpClient_Call {
 	return &UtilsIface_GetHttpClient_Call{Call: _e.mock.On("GetHttpClient",
-		append([]interface{}{username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair}, context...)...)}
+		append([]interface{}{username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger, clientCertKeyPair}, _a9...)...)}
 }
 
-func (_c *UtilsIface_GetHttpClient_Call) Run(run func(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, context ...*utils.Context)) *UtilsIface_GetHttpClient_Call {
+func (_c *UtilsIface_GetHttpClient_Call) Run(run func(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, _a9 ...*utils.Context)) *UtilsIface_GetHttpClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*utils.Context, len(args)-9)
 		for i, a := range args[9:] {
@@ -5336,11 +5394,11 @@ func (_c *UtilsIface_GetStringSettingFromSettings_Call) RunAndReturn(run func(me
 	return _c
 }
 
-// GetTLSTrackedTransport provides a mock function with given fields: tr, context
-func (_m *UtilsIface) GetTLSTrackedTransport(tr *http.Transport, context ...*utils.Context) http.RoundTripper {
-	_va := make([]interface{}, len(context))
-	for _i := range context {
-		_va[_i] = context[_i]
+// GetTLSTrackedTransport provides a mock function with given fields: tr, _a1
+func (_m *UtilsIface) GetTLSTrackedTransport(tr *http.Transport, _a1 ...*utils.Context) http.RoundTripper {
+	_va := make([]interface{}, len(_a1))
+	for _i := range _a1 {
+		_va[_i] = _a1[_i]
 	}
 	var _ca []interface{}
 	_ca = append(_ca, tr)
@@ -5353,7 +5411,7 @@ func (_m *UtilsIface) GetTLSTrackedTransport(tr *http.Transport, context ...*uti
 
 	var r0 http.RoundTripper
 	if rf, ok := ret.Get(0).(func(*http.Transport, ...*utils.Context) http.RoundTripper); ok {
-		r0 = rf(tr, context...)
+		r0 = rf(tr, _a1...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(http.RoundTripper)
@@ -5370,13 +5428,13 @@ type UtilsIface_GetTLSTrackedTransport_Call struct {
 
 // GetTLSTrackedTransport is a helper method to define mock.On call
 //   - tr *http.Transport
-//   - context ...*utils.Context
-func (_e *UtilsIface_Expecter) GetTLSTrackedTransport(tr interface{}, context ...interface{}) *UtilsIface_GetTLSTrackedTransport_Call {
+//   - _a1 ...*utils.Context
+func (_e *UtilsIface_Expecter) GetTLSTrackedTransport(tr interface{}, _a1 ...interface{}) *UtilsIface_GetTLSTrackedTransport_Call {
 	return &UtilsIface_GetTLSTrackedTransport_Call{Call: _e.mock.On("GetTLSTrackedTransport",
-		append([]interface{}{tr}, context...)...)}
+		append([]interface{}{tr}, _a1...)...)}
 }
 
-func (_c *UtilsIface_GetTLSTrackedTransport_Call) Run(run func(tr *http.Transport, context ...*utils.Context)) *UtilsIface_GetTLSTrackedTransport_Call {
+func (_c *UtilsIface_GetTLSTrackedTransport_Call) Run(run func(tr *http.Transport, _a1 ...*utils.Context)) *UtilsIface_GetTLSTrackedTransport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]*utils.Context, len(args)-1)
 		for i, a := range args[1:] {
@@ -5589,6 +5647,65 @@ func (_c *UtilsIface_GetTrackedTransport_Call) Return(_a0 http.RoundTripper) *Ut
 }
 
 func (_c *UtilsIface_GetTrackedTransport_Call) RunAndReturn(run func(...*utils.Context) http.RoundTripper) *UtilsIface_GetTrackedTransport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVBucketStats provides a mock function with given fields: requestOpts, conn
+func (_m *UtilsIface) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface) (base.VBucketStatsMap, error) {
+	ret := _m.Called(requestOpts, conn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVBucketStats")
+	}
+
+	var r0 base.VBucketStatsMap
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)); ok {
+		return rf(requestOpts, conn)
+	}
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) base.VBucketStatsMap); ok {
+		r0 = rf(requestOpts, conn)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.VBucketStatsMap)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*base.VBucketStatsRequest, memcached.ClientIface) error); ok {
+		r1 = rf(requestOpts, conn)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetVBucketStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVBucketStats'
+type UtilsIface_GetVBucketStats_Call struct {
+	*mock.Call
+}
+
+// GetVBucketStats is a helper method to define mock.On call
+//   - requestOpts *base.VBucketStatsRequest
+//   - conn memcached.ClientIface
+func (_e *UtilsIface_Expecter) GetVBucketStats(requestOpts interface{}, conn interface{}) *UtilsIface_GetVBucketStats_Call {
+	return &UtilsIface_GetVBucketStats_Call{Call: _e.mock.On("GetVBucketStats", requestOpts, conn)}
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) Run(run func(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface)) *UtilsIface_GetVBucketStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*base.VBucketStatsRequest), args[1].(memcached.ClientIface))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) Return(_a0 base.VBucketStatsMap, _a1 error) *UtilsIface_GetVBucketStats_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetVBucketStats_Call) RunAndReturn(run func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)) *UtilsIface_GetVBucketStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6458,9 +6575,9 @@ func (_c *UtilsIface_ParseClientCertOutput_Call) RunAndReturn(run func(map[strin
 	return _c
 }
 
-// ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, high_seqno_and_vbuuid_map
-func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
-	ret := _m.Called(vbnos, stats_map, high_seqno_and_vbuuid_map)
+// ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, output
+func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string) {
+	ret := _m.Called(vbnos, stats_map, output)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ParseHighSeqnoAndVBUuidFromStats")
@@ -6468,19 +6585,19 @@ func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map
 
 	var r0 []uint16
 	var r1 map[uint16]string
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16][]uint64) ([]uint16, map[uint16]string)); ok {
-		return rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)); ok {
+		return rf(vbnos, stats_map, output)
 	}
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16][]uint64) []uint16); ok {
-		r0 = rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
+		r0 = rf(vbnos, stats_map, output)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, map[uint16][]uint64) map[uint16]string); ok {
-		r1 = rf(vbnos, stats_map, high_seqno_and_vbuuid_map)
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) map[uint16]string); ok {
+		r1 = rf(vbnos, stats_map, output)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(map[uint16]string)
@@ -6498,14 +6615,14 @@ type UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call struct {
 // ParseHighSeqnoAndVBUuidFromStats is a helper method to define mock.On call
 //   - vbnos []uint16
 //   - stats_map map[string]string
-//   - high_seqno_and_vbuuid_map map[uint16][]uint64
-func (_e *UtilsIface_Expecter) ParseHighSeqnoAndVBUuidFromStats(vbnos interface{}, stats_map interface{}, high_seqno_and_vbuuid_map interface{}) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	return &UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call{Call: _e.mock.On("ParseHighSeqnoAndVBUuidFromStats", vbnos, stats_map, high_seqno_and_vbuuid_map)}
+//   - output base.VBucketStatsMap
+func (_e *UtilsIface_Expecter) ParseHighSeqnoAndVBUuidFromStats(vbnos interface{}, stats_map interface{}, output interface{}) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+	return &UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call{Call: _e.mock.On("ParseHighSeqnoAndVBUuidFromStats", vbnos, stats_map, output)}
 }
 
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Run(run func(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Run(run func(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16), args[1].(map[string]string), args[2].(map[uint16][]uint64))
+		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
 	})
 	return _c
 }
@@ -6515,7 +6632,7 @@ func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Return(_a0 []uint16,
 	return _c
 }
 
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run func([]uint16, map[string]string, map[uint16][]uint64) ([]uint16, map[uint16]string)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
+func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6576,6 +6693,66 @@ func (_c *UtilsIface_ParseHighSeqnoStat_Call) Return(_a0 []uint16, _a1 error) *U
 }
 
 func (_c *UtilsIface_ParseHighSeqnoStat_Call) RunAndReturn(run func([]uint16, map[string]string, map[uint16]uint64) ([]uint16, error)) *UtilsIface_ParseHighSeqnoStat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ParseMaxCasStat provides a mock function with given fields: vbnos, statsMap, output
+func (_m *UtilsIface) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error) {
+	ret := _m.Called(vbnos, statsMap, output)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParseMaxCasStat")
+	}
+
+	var r0 []uint16
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)); ok {
+		return rf(vbnos, statsMap, output)
+	}
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
+		r0 = rf(vbnos, statsMap, output)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) error); ok {
+		r1 = rf(vbnos, statsMap, output)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_ParseMaxCasStat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseMaxCasStat'
+type UtilsIface_ParseMaxCasStat_Call struct {
+	*mock.Call
+}
+
+// ParseMaxCasStat is a helper method to define mock.On call
+//   - vbnos []uint16
+//   - statsMap map[string]string
+//   - output base.VBucketStatsMap
+func (_e *UtilsIface_Expecter) ParseMaxCasStat(vbnos interface{}, statsMap interface{}, output interface{}) *UtilsIface_ParseMaxCasStat_Call {
+	return &UtilsIface_ParseMaxCasStat_Call{Call: _e.mock.On("ParseMaxCasStat", vbnos, statsMap, output)}
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) Run(run func(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseMaxCasStat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) Return(_a0 []uint16, _a1 error) *UtilsIface_ParseMaxCasStat_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_ParseMaxCasStat_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)) *UtilsIface_ParseMaxCasStat_Call {
 	_c.Call.Return(run)
 	return _c
 }

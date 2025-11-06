@@ -47,6 +47,17 @@ type BucketTopologySvc interface {
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 }
 
+type BucketStatsProvider interface {
+	// Init initializes the bucket stats provider
+	Init() error
+	// Close closes the bucket stats provider
+	Close() error
+	// GetFailoverLog returns the failover log for the bucket
+	GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error)
+	// GetVBucketStats returns the vbucket stats for the bucket
+	GetVBucketStats(requestOpts *base.VBucketStatsRequest) (*base.BucketVBStats, base.ErrorMap, error)
+}
+
 type Notification interface {
 	IsSourceNotification() bool
 	Clone(numOfReaders int) interface{}

@@ -26,6 +26,38 @@ type GrpcStreamManager[Resp any] interface {
 // VBucketInfoResponse is a map of vBucket number to vBucket info response
 type VBucketInfoResponse map[uint32]*internal_xdcr_v1.GetVbucketInfoResponse_VbucketState
 
+func (vbr VBucketInfoResponse) GetBucketFailoverLog() *base.BucketFailoverLog {
+	bucketFailoverLog := &base.BucketFailoverLog{FailoverLogMap: make(base.FailoverLogMapType)}
+	for vbno, vbInfo := range vbr {
+		numEntries := uint64(len(vbInfo.GetHistory()))
+		vbFailoverLog := &base.FailoverLog{
+			NumEntries: numEntries,
+			LogTable:   make([]*base.FailoverEntry, numEntries),
+		}
+		for i, entry := range vbInfo.GetHistory() {
+			vbFailoverLog.LogTable[i] = &base.FailoverEntry{
+				Uuid:      entry.GetUuid(),
+				HighSeqno: entry.GetSeqno(),
+			}
+		}
+		bucketFailoverLog.SetFailoverLog(uint16(vbno), vbFailoverLog)
+	}
+	return bucketFailoverLog
+}
+
+func (vbr VBucketInfoResponse) GetBucketVBStats() *base.BucketVBStats {
+	bucketVBStats := &base.BucketVBStats{VBStatsMap: make(base.VBucketStatsMap)}
+	for vbno, value := range vbr {
+		vbStats := &base.VBucketStats{
+			Uuid:      value.GetUuid(),
+			HighSeqno: value.GetHighSeqno(),
+			MaxCas:    value.GetMaxCas(),
+		}
+		bucketVBStats.SetVBStats(uint16(vbno), vbStats)
+	}
+	return bucketVBStats
+}
+
 // HandlerCache is a generic cache for storing the latest value received from the underlying stream
 type HandlerCache[Resp any] struct {
 	// currVal denotes the latest value received from the underlying stream

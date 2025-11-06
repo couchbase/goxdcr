@@ -426,6 +426,7 @@ const (
 	VBUCKET_DETAILS_NAME               = "vbucket-details"
 	MAXCAS_CONST                       = ":max_cas"
 	VBUCKET_MAXCAS_STAT_KEY_FORMAT     = VBUCKET_PREFIX + "%v" + MAXCAS_CONST
+	FAILOVER_LOG_STAT_NAME             = "failovers"
 )
 
 var ErrorsStatsKey = "Errors"
@@ -2058,6 +2059,14 @@ const (
 	StatsMgrId        string = "StatsMgr"
 	TimeCommiting     string = "time_commiting"
 	Vbno              string = "vbno"
+)
+
+// Failover log related constants
+const (
+	FailoverLogNumEntriesKey                = "num_entries"
+	FailoverLogNumErroneousEntriesErasedKey = "num_erroneous_entries_erased"
+	FailoverLogEntryIdKey                   = "id"
+	FailoverLogEntrySeqnoKey                = "seq"
 )
 
 const MaxValueLenForLogging = 512
