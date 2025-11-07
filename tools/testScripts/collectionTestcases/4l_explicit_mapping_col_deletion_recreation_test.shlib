@@ -58,6 +58,7 @@ function runTestCase {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
 	echo "Setting explicit mapping to true and creating explicit mapping rules"

@@ -100,7 +100,9 @@ function runTestCase {
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	seedInjectMainPipelineDelay "C2" "B2" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
 	runDataLoad

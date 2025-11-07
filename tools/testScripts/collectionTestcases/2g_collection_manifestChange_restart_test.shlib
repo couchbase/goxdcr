@@ -78,6 +78,7 @@ function runTestCase {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 
 	echo "Waiting 30sec for documents to replicate"
 	sleep 30

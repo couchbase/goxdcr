@@ -91,6 +91,7 @@ function runTestCase {
 	sleep 1
 
 	createBucketReplication "C1" "B1" "C2" "B2" MigrationReplProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
 	echo "Waiting for changes_left to go down to 0..."

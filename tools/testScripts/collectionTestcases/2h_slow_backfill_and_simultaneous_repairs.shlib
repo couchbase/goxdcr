@@ -78,6 +78,7 @@ function runTestCase {
 	# Also since we have a huge delay there will be mutations unprocessed by the Pipeline
 	# when backfill pipeline restarts.
 	createBucketReplication "C1" "B1" "C2" "B2" BackfillHangLooseDelayProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 	echo "Waiting 5 seconds before checking item count first pass"

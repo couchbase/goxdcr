@@ -95,6 +95,7 @@ function runTestCase {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplSlowProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
 	echo "Waiting 15 seconds before checking item count first pass"

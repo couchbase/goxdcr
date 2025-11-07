@@ -55,6 +55,7 @@ function man() {
 	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>        : Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
 	echo "-s <path/to/mobileImportSimBin> "
 	echo "OR --mobileImportSimDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
+	echo "--seed[=<randomSeed>]                             : Specify a random seed to be used for tests that require randomness. If no seed is provided, a random one will be generated."
 }
 
 CONSTANTS_DEV_FILE="../../base/constants_dev.go"
@@ -100,6 +101,7 @@ testsToRun=$tests
 OVERRIDE_MOBILE=0
 OVERRIDE_CRMODE=""
 OVERRIDE_ECCV=0
+RANDOM_SEED_ARG=""
 
 optspec="hompf:r:c:x:-:s:"
 while getopts "$optspec" optchar; do
@@ -132,6 +134,12 @@ while getopts "$optspec" optchar; do
 			;;
 		production)
 			productionTestsOnly=1
+			;;
+		seed)
+			RANDOM_SEED_ARG=$(openssl rand -hex 8)
+			;;
+		seed=*)
+			RANDOM_SEED_ARG="${OPTARG#*=}"
 			;;
 		help)
 			man $0
@@ -244,6 +252,14 @@ if (($overrideMode == 1)) && [ "$crMode" == "" ] && (($mobileMode == 0)) && (($e
 	exit 1
 fi
 
+if [[ -n "${RANDOM_SEED_ARG:-}" ]]; then
+	if (($productionTestsOnly == 1)); then
+		echo "ERRO: --production and --seed cannot be used together"
+		exit 1
+	fi
+	echo "INFO: Using random seed argument: $RANDOM_SEED_ARG"
+fi
+
 if [ "$from" != "" ]; then
 	fromTestCaseNumber=$(find ${testCasesDirectory:-}/${from}_*)
 	if [[ -z "$fromTestCaseNumber" ]]; then
@@ -286,6 +302,9 @@ if [[ -z "$testCaseNumber" ]]; then
 		if (($overrideMode == 0)); then
 			echo ""
 			echo "INFO: Running test - ${testCasesDirectory:-}/$testcase"
+			if [[ -n "$RANDOM_SEED_ARG" ]]; then
+				echo "INFO: Using random seed argument: $RANDOM_SEED_ARG"
+			fi
 
 			date
 			runTestCase

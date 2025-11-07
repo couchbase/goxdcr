@@ -83,6 +83,7 @@ function runTestCase {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplPropertiesWithFilterExp
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 	sleep 3
 	setCustomManifestRefreshInterval "C1"
 

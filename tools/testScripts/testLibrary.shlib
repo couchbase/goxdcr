@@ -47,6 +47,9 @@ VAGRANT_LOG_DIR="/opt/couchbase/var/lib/couchbase/logs"
 GETHIGHSEQNO_COLID_DNE="getHighSeqno could not find collection ID"
 REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline"
 
+# Dev Injection Globals
+SEED_INJ_MAX_MAIN_DELAY_MS=500
+
 # These should be imported after clusterRunProvision script
 
 function checkItemCnt {
@@ -2842,4 +2845,51 @@ function vagrantGetPprof {
 	idx="$(getClusterIdx "$clusterName")"
 
 	${VSSH[$idx]} "curl -s http://localhost:9998/debug/pprof/$pprofType?debug=1"
+}
+
+function seedInjectMainPipelineDelay {
+	local clusterName=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local maxDelayMs=$5
+
+	local seedArg="${RANDOM_SEED_ARG:-}"
+
+	# Derive seed if not provided
+	if [[ -z "${seedArg:-}" ]]; then
+		return 0
+	fi
+
+	local seedDec
+	if [[ "$seedArg" =~ ^0[xX][0-9a-fA-F]+$ ]]; then
+		seedDec=$((16#${seedArg#0[xX]}))
+	elif [[ "$seedArg" =~ ^[0-9]+$ ]]; then
+		seedDec=$seedArg
+	else
+		# Simple hash from string
+		# It converts the input string in seedArg into a deterministic unsigned 32-bit decimal integer:
+		# echo -n outputs the raw bytes of the string (no trailing newline).
+		# od -An -tu4 dumps those bytes as unsigned 32-bit integers (tu4), suppressing addresses (-An).
+		# tr -d ' ' removes spaces from od output.
+		# head -n1 takes the first 32-bit word. Result is a simple numeric hash used as a seed when the string is not a hex or pure numeric value.
+		seedDec=$(echo -n "$seedArg" | od -An -tu4 | tr -d ' ' | head -n1)
+		if [[ -z "${seedDec:-}" ]]; then
+			return 0
+		fi
+		if ((seedDec < 0)); then
+			# convert to positive
+			seedDec=$((-1 * seedDec))
+		fi
+	fi
+
+	if ((maxDelayMs <= 0)); then
+		return 0
+	fi
+
+	local delayMs=$((seedDec % maxDelayMs))
+
+	echo "Seeding main pipeline of $clusterName/$sourceBucket/$targetCluster/$targetBucket delay of $delayMs ms using seed $seedDec (arg: $seedArg) with maxDelayMs $maxDelayMs"
+	setReplicationSettings "$clusterName" "$sourceBucket" "$targetCluster" "$targetBucket" "xdcrDevMainSendDelayMs=$delayMs"
+	sleep 5
 }

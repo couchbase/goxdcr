@@ -173,6 +173,7 @@ function runTestCase {
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	# For test 2a, do not inject backup since this is a high-throughput test
 	printGlobalScopeAndCollectionInfo
 
 	echo "Sleep 20 seconds before starting I/O for manifest to be pulled"
