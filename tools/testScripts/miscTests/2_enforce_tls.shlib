@@ -387,7 +387,7 @@ xpinK6Zd/GBYfkcMBUebaTBzsW8S1C+t8kO28etCx0+X
 -----END CERTIFICATE-----
 "
 
-	remoteClusterCert=$(CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9001/pools/default/certificate)
+	remoteClusterCert="$(getRootCertificates 9001)"
 
 	# Prepend cert1 to the CA from target to make sure we have multiple certs in the test
 	CAs="${cert1}${remoteClusterCert}"

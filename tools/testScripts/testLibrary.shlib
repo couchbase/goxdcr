@@ -1322,7 +1322,7 @@ function changeRemoteClusterReferenceToSecure {
 
 	# Get the target cluster's root certificate if not provided
 	if [[ -z "${remoteClusterCert:-}" ]]; then
-		remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$targetHost:$targetPort/pools/default/certificate)
+		remoteClusterCert=$(getRootCertificates $targetPort)
 	fi
 
 	echo "Change remote cluster reference from $source to $target ($targetHost:$targetPort) to SECURE"

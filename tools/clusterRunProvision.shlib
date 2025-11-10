@@ -3220,7 +3220,7 @@ function createSecureRemoteClusterReference {
 
 	# Get the target cluster's root certificate if not provided
 	if [[ -z "${remoteClusterCert:-}" ]]; then
-		remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$targetPort/pools/default/certificate)
+		remoteClusterCert="$(getRootCertificates $targetPort)"
 	fi
 
 	if [[ -z "${clientCertFile:-}" ]]; then
@@ -3280,7 +3280,7 @@ function editSecureRemoteClusterReference {
 
 	# Get the target cluster's root certificate if not provided
 	if [[ -z "${remoteClusterCert:-}" ]]; then
-		remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$targetPort/pools/default/certificate)
+		remoteClusterCert="$(getRootCertificates $targetPort)"
 	fi
 
 	if [[ -z "${clientCertFile:-}" ]]; then
@@ -3896,4 +3896,13 @@ function runConnectionPreCheckClientCerts {
 		return 1
 	fi
 	echo "Connection precheck passed successfully"
+}
+
+function getRootCertificates {
+	if (($(checkJQ) != 0)); then
+		echo "Cannot run without jq" >&2
+		exit 1
+	fi
+
+	curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$1/pools/default/trustedCAs | jq -r '.[].pem'
 }

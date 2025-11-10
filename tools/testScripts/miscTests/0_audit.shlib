@@ -73,7 +73,7 @@ function runTestCase {
 
 	echo "== Test audit log for authentication error creating remote cluster ref with full encryption =="
 	echo "Use source cluster's root certificate which should be invalid for target"
-	sourceClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/certificate)
+	sourceClusterCert="$(getRootCertificates 9000)"
 	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 		-d secureType=full --data-urlencode "certificate=${sourceClusterCert}"
 	grepAuditFile 16394 3
