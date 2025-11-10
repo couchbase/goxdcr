@@ -59,7 +59,6 @@ type CheckpointManager struct {
 	CheckpointManagerInjector
 
 	*component.AbstractComponent
-	*component.RemoteMemcachedComponent
 
 	pipeline common.Pipeline
 	// obtained from the replication-spec when the CheckpointManager was attached to its corresponding pipeline
@@ -180,6 +179,9 @@ type CheckpointManager struct {
 	// this CheckpointManager instance.
 	backfillCollections    map[uint16][]uint32
 	backfillCollectionsMtx sync.RWMutex
+
+	// UserAgent for the checkpoint manager
+	userAgent string
 }
 
 type checkpointSyncHelper struct {
@@ -469,23 +471,9 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 
 	finCh := make(chan bool, 1)
 
-	// Darshan TODO: to be removed once the remote memcached component is removed
-	heloUserAgent := base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("CkptMgr", "", target_bucket_name))
-
 	ckmgr := &CheckpointManager{
-		CheckpointManagerInjector: NewCheckpointManagerInjector(),
-		AbstractComponent:         component.NewAbstractComponentWithLogger(base.CheckpointMgrId, logger),
-		RemoteMemcachedComponent: component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
-			target_bucket_name, heloUserAgent, base.DefaultConnectionSize).SetTargetKvVbMapGetter(
-			func() (base.KvVBMapType, error) {
-				return target_kv_vb_map, nil
-			}).SetRefGetter(
-			func() *metadata.RemoteClusterReference {
-				return target_cluster_ref
-			}).SetAlternateAddressChecker(
-			func(ref *metadata.RemoteClusterReference) (bool, error) {
-				return remote_cluster_svc.ShouldUseAlternateAddress(ref)
-			}),
+		CheckpointManagerInjector:         NewCheckpointManagerInjector(),
+		AbstractComponent:                 component.NewAbstractComponentWithLogger(base.CheckpointMgrId, logger),
 		pipeline:                          nil,
 		pipelineReinitHash:                "",
 		checkpoints_svc:                   checkpoints_svc,
@@ -676,27 +664,12 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 		return err
 	}
 
-	//initialize connections
-	ckmgr.wait_grp.Add(1)
-	go ckmgr.initConnBg()
-
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
 
 	go ckmgr.periodicMerger()
 	return nil
-}
-
-func (ckmgr *CheckpointManager) initConnBg() {
-	initInBg := func() error {
-		return ckmgr.InitConnections()
-	}
-	defer ckmgr.wait_grp.Done()
-	execErr := base.ExecWithTimeout(initInBg, base.TimeoutRuntimeContextStart, ckmgr.Logger())
-	if execErr != nil {
-		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, fmt.Errorf("Ckmgr %v initConnection error %v", ckmgr.pipeline.FullTopic(), execErr)))
-	}
 }
 
 func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSettingsMap) error {
@@ -776,123 +749,12 @@ var ckmgrIterationId uint32
 
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
+	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
+	ckmgr.userAgent = base.ComposeHELOMsgKey(base.ComposeUserAgentWithBucketNames("CkptMgr", spec.SourceBucketName, spec.TargetBucketName))
 	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId(), base.GetIterationId(&ckmgrIterationId))
 }
 
-// If periodicMode is false, there should not be any error returned
-// getHighSeqnoAndVBUuidFromTarget returns a map containg all VBs from the target where
-// the key is a vbno, and the values are 2 numbers:
-// 1. highSeqno for this VB
-// 2. Vbuuid for this VB
-func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool, periodicMode bool) (map[uint16][]uint64, error) {
-	ckmgr.WaitForInitConnDone()
-
-	// get singular access to run to prevent concurrent calls into this function
-	switch periodicMode {
-	case true:
-		// Periodic mode means that if a previous ckpt wasn't completed yet, don't queue up as this could be a case
-		// where targets are slow... and a bunch of go-routines can build up into a long unordered queue
-		select {
-		case <-ckmgr.getHighSeqnoAndVBUuidFromTargetCh:
-			defer func() {
-				ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
-			}()
-		default:
-			return nil, errorPrevCheckpointInProgress
-		}
-	case false:
-		// Non-Periodic mode means that this ckpt operation must be completed at all costs. Wait for access
-		<-ckmgr.getHighSeqnoAndVBUuidFromTargetCh
-		defer func() {
-			ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
-		}()
-	}
-
-	serverClientStatsMap := make(map[string]base.StringStringMap)
-	var serverClientStatsMapMtx sync.RWMutex
-	var waitGrp sync.WaitGroup
-	kvVbMap, err := ckmgr.TargetKvVbMap()
-	if err != nil {
-		return nil, err
-	}
-	for serverAddr, vbnos := range kvVbMap {
-		waitGrp.Add(1)
-		go ckmgr.getTargetKVStatsMapWithRetry(serverAddr, vbnos, fin_ch, serverClientStatsMap, &serverClientStatsMapMtx, &waitGrp)
-	}
-	waitGrp.Wait()
-
-	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
-	highSeqnoAndVbUuidMap := make(base.HighSeqnoAndVbUuidMap)
-	invalidVbNos := make([]uint16, 0)
-	serverWarningsMap := make(map[string]map[uint16]string)
-	for serverAddr, vbnos := range kvVbMap {
-		if _, found := serverClientStatsMap[serverAddr]; !found {
-			continue
-		}
-		output := make(base.VBucketStatsMap)
-		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], output)
-		invalidVbNos = append(invalidVbNos, invalidVbnosSubset...)
-		serverWarningsMap[serverAddr] = warnings
-		// Darshan TODO: This is a temporary fix to avoid compilation errors
-		// The entire function will be refactored or removed in the upcoming PRs
-		for vbno, stats := range output {
-			highSeqnoAndVbUuidMap[vbno] = []uint64{stats.HighSeqno, stats.Uuid}
-		}
-	}
-	if len(invalidVbNos) > 0 {
-		ckmgr.logger.Warnf("Can't find high seqno or vbuuid for vbnos=%v in stats map or are in invalid format. Target topology may have changed.\n", invalidVbNos)
-		ckmgr.logger.Debugf("Warnings encountered during getHighSeqnoAndVBUuidFromTarget are: %v", serverWarningsMap)
-	}
-	diffMap := highSeqnoAndVbUuidMap.Diff(ckmgr.lastHighSeqnoVbUuidMap)
-	if len(diffMap) > 0 {
-		ckmgr.logger.Infof("highSeqnoAndVbUuidMap=%v\n", highSeqnoAndVbUuidMap)
-	}
-	ckmgr.lastHighSeqnoVbUuidMap = highSeqnoAndVbUuidMap
-	return highSeqnoAndVbUuidMap, nil
-}
-
-// checkpointing cannot be done without high seqno and vbuuid from target
-// if retrieval of such stats fails, retry
-func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, vbnos []uint16, fin_ch chan bool,
-	serverClientStatsMap map[string]base.StringStringMap, serverClientStatsMapMtx *sync.RWMutex, waitGrp *sync.WaitGroup) {
-	defer waitGrp.Done()
-	var stats_map map[string]string
-
-	statMapOp := func(param interface{}) (interface{}, error) {
-		var err error
-		// Acquire a client from the pool (will create new one if pool is empty)
-		client, err := ckmgr.AcquireClient(serverAddr)
-		if err != nil {
-			ckmgr.logger.Warnf("Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", serverAddr, vbnos)
-			return nil, err
-		}
-
-		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
-		if err != nil {
-			ckmgr.logger.Warnf("Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", serverAddr, vbnos, err)
-			// Connection is broken, delete it instead of returning to pool
-			if err := client.Close(); err != nil {
-				ckmgr.logger.Warnf("error closing connection for %v: %v", serverAddr, err)
-			}
-		} else {
-			// Success - return client to pool
-			ckmgr.ReleaseClient(serverAddr, client)
-		}
-		return nil, err
-	}
-
-	_, opErr := ckmgr.utils.ExponentialBackoffExecutorWithFinishSignal("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
-		base.RemoteMcRetryFactor, statMapOp, nil, fin_ch)
-
-	if opErr != nil {
-		ckmgr.logger.Errorf("Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n",
-			base.MaxRemoteMcRetry, serverAddr, vbnos)
-	} else {
-		serverClientStatsMapMtx.Lock()
-		serverClientStatsMap[serverAddr] = stats_map
-		serverClientStatsMapMtx.Unlock()
-	}
-}
+// Darshan TODO: In future commits, the high seqno and vbuuid will be fetched from the remoteOps service once it is introduced.
 
 func (ckmgr *CheckpointManager) IsStopped() bool {
 	select {
@@ -906,9 +768,6 @@ func (ckmgr *CheckpointManager) IsStopped() bool {
 func (ckmgr *CheckpointManager) Stop() error {
 	//send signal to checkpoiting routine to exit
 	close(ckmgr.finish_ch)
-
-	//close the connections
-	ckmgr.Close()
 
 	ckmgr.wait_grp.Wait()
 	return nil
@@ -999,12 +858,8 @@ func (ckmgr *CheckpointManager) getMyVBs() []uint16 {
 }
 
 func (ckmgr *CheckpointManager) getMyTgtVBs() []uint16 {
-	targetKvVbMap, err := ckmgr.TargetKvVbMap()
-	if err != nil {
-		ckmgr.logger.Errorf("Unable to get targetKvVbMap: %v", err)
-		return []uint16{}
-	}
-	return base.GetVbListFromKvVbMap(targetKvVbMap)
+	// Darshan TODO: Implement me
+	return []uint16{}
 }
 
 func (ckmgr *CheckpointManager) isVariableVBMode() bool {
@@ -2152,11 +2007,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential modification
 	ckmgr.statsMgr.HandleLatestThroughSeqnos(vbSeqnoMap.Clone())
 	// get high seqno and vbuuid for all vbuckets in the pipeline
-	high_seqno_and_vbuuid_map, err = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, false)
-	if err != nil {
-		// Note that per design this call should try not to fail so if err returned above, something is wrong
-		return
-	}
+	// Darshan TODO: init the high seqno and vbuuid map
 
 	//divide the workload to several getter and run the getter parallelly
 	vb_list := ckmgr.getMyVBs()
@@ -2274,8 +2125,8 @@ func (ckmgr *CheckpointManager) gatherCkptData(fin_ch chan bool, through_seqno_m
 	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential races
 	ckmgr.statsMgr.HandleLatestThroughSeqnos(vbSeqnoMap.Clone())
 	// get high seqno and vbuuid for all vbuckets in the pipeline
-	high_seqno_and_vbuuid_map, err := ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, true)
-	return through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map, err
+	// Darshan TODO: init the high seqno and vbuuid map
+	return through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map, nil
 }
 
 func (ckmgr *CheckpointManager) isCheckpointAllowed() bool {
@@ -3297,7 +3148,8 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbMainCkptsMap, nodeVbBackfillCkptsMap}, srcFailoverLogs)
 	vbsThatNeedTargetFailoverlogs := findVbsThatNeedTargetFailoverLogs(filteredMaps)
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
-		tgtFailoverLogs, err = ckmgr.GetOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
+		// Darshan TODO: get the target failover logs
+		tgtFailoverLogs = make(map[uint16]*mcc.FailoverLog)
 		if err != nil {
 			ckmgr.logger.Warnf("unable to get failoverlog from target(s) %v - using pre_replicate", err)
 			filteredMaps = ckmgr.filterInvalidCkptsBasedOnPreReplicate(filteredMaps)
@@ -3765,7 +3617,7 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 	}
 
 	//GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
-	client, err := ckmgr.utils.GetMemcachedConnection(memcachedAddr, spec.SourceBucketName, ckmgr.UserAgent, 0, ckmgr.logger)
+	client, err := ckmgr.utils.GetMemcachedConnection(memcachedAddr, spec.SourceBucketName, ckmgr.userAgent, 0, ckmgr.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -3773,7 +3625,7 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 	if err != nil {
 		return nil, err
 	}
-	err = feed.UprOpen(ckmgr.UserAgent, uint32(0), base.UprFeedBufferSize)
+	err = feed.UprOpen(ckmgr.userAgent, uint32(0), base.UprFeedBufferSize)
 	if err != nil {
 		return nil, err
 	}
