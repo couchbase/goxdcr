@@ -665,13 +665,13 @@ func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.Failove
 	defer cancel()
 
 	provider.utils.CngGetVbucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]{
+		Context: ctx,
 		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
 			BucketName:     provider.bucketName,
 			VbucketIds:     base.ConvertUint16ToUint32(requestOpts.VBuckets),
 			IncludeHistory: &includeHistory,
 			IncludeMaxCas:  &includeMaxCas,
 		},
-		Context: ctx,
 	}, streamHandler)
 
 	result, err := streamHandler.GetResult()
@@ -702,13 +702,13 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 	defer cancel()
 
 	provider.utils.CngGetVbucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]{
+		Context: ctx,
 		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
 			BucketName:     provider.bucketName,
 			VbucketIds:     base.ConvertUint16ToUint32(requestOpts.VBuckets),
 			IncludeHistory: &includeHistory,
 			IncludeMaxCas:  &includeMaxCas,
 		},
-		Context: ctx,
 	}, streamHandler)
 
 	result, err := streamHandler.GetResult()
