@@ -61,7 +61,7 @@ type ClusterBucketStatsProvider struct {
 	// cancelCtx is used to cancel all active operations
 	cancelCtx context.CancelFunc
 	// mutex is used to protect the operations
-	mutex sync.RWMutex
+	mutex sync.Mutex
 }
 
 // NewClusterBucketStatsProvider is the constructor for ClusterBucketStatsProvider
@@ -84,8 +84,8 @@ func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remote
 // Init the ClusterBucketStatsProvider
 func (provider *ClusterBucketStatsProvider) Init() error {
 	var initErr error
-	userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
 	provider.initDoneOnce.Do(func() {
+		userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
 		provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.maxConnectionsPerServer)
 		provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
 			ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
@@ -168,9 +168,6 @@ func (provider *ClusterBucketStatsProvider) canStartOp() error {
 	if !provider.InitDone() {
 		return errors.New("ClusterBucketStatsProvider is not initialized")
 	}
-
-	provider.mutex.RLock()
-	defer provider.mutex.RUnlock()
 
 	// check if the provider is already closed
 	if provider.isClosed() {
@@ -546,7 +543,7 @@ type CngBucketStatsProvider struct {
 	// logger provides access to the logger
 	logger *log.CommonLogger
 	// getGrpcOpts denotes the function to fetch the gRPC options
-	getGrpcOpts func() *base.GrpcOptions
+	getGrpcOpts func() (*base.GrpcOptions, error)
 	// cngConn is the connection to the CNG server
 	// Darshan TODO: use the global connection pool instead of creating a new connection here
 	// This TODO is a placeholder until we have the conn pool checked in
@@ -566,7 +563,7 @@ type CngBucketStatsProvider struct {
 }
 
 // NewCngBucketStatsProvider is the constructor for CngBucketStatsProvider
-func NewCngBucketStatsProvider(bucketName string, utils utils.UtilsIface, logger *log.CommonLogger, getGrpcOpts func() *base.GrpcOptions) *CngBucketStatsProvider {
+func NewCngBucketStatsProvider(bucketName string, utils utils.UtilsIface, logger *log.CommonLogger, getGrpcOpts func() (*base.GrpcOptions, error)) *CngBucketStatsProvider {
 	context, cancelCtx := context.WithCancel(context.Background())
 	return &CngBucketStatsProvider{
 		bucketName:  bucketName,
@@ -583,7 +580,11 @@ func NewCngBucketStatsProvider(bucketName string, utils utils.UtilsIface, logger
 func (provider *CngBucketStatsProvider) Init() error {
 	var initErr error
 	provider.initDoneOnce.Do(func() {
-		grpcOpts := provider.getGrpcOpts()
+		grpcOpts, err := provider.getGrpcOpts()
+		if err != nil {
+			initErr = fmt.Errorf("failed to get gRPC options: %w", err)
+			return
+		}
 		provider.cngConn, initErr = base.NewCngConn(grpcOpts)
 	})
 

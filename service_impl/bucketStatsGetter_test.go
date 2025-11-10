@@ -680,13 +680,13 @@ func TestCngBucketStatsProvider_NewCngBucketStatsProvider(t *testing.T) {
 
 	utils := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utils, logger, getGrpcOpts)
@@ -711,13 +711,13 @@ func TestCngBucketStatsProvider_Close_Success(t *testing.T) {
 
 	utils := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utils, logger, getGrpcOpts)
@@ -745,13 +745,13 @@ func TestCngBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 
 	utilsMockObj := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
@@ -821,13 +821,13 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 
 	utilsMockObj := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
@@ -891,13 +891,13 @@ func TestCngBucketStatsProvider_GetFailoverLog_Error(t *testing.T) {
 
 	utilsMockObj := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
@@ -934,13 +934,13 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 
 	utilsMockObj := &utilsMock.UtilsIface{}
 	logger := createTestLogger()
-	getGrpcOpts := func() *base.GrpcOptions {
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
 		return &base.GrpcOptions{
 			ConnStr:        "localhost:18098",
 			UseTLS:         false,
 			GetCredentials: nil,
 			CaCert:         nil,
-		}
+		}, nil
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
