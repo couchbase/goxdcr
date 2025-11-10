@@ -159,6 +159,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapObjGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
+	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 	utils.On("GetCrossClusterVersioningFromBucketInfo", mock.Anything).Return(false, nil)
 	utils.On("GetVersionPruningWindowHrs", mock.Anything).Return(0, nil)
 	highSeqnosMap := make(map[uint16]uint64)

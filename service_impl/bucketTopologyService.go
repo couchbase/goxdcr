@@ -62,23 +62,30 @@ type BucketTopologyService struct {
 	tgtBucketWatchersCnt map[string]int
 	tgtBucketWatchersMtx sync.RWMutex
 
+	// Key is targetClusterUUID+bucketName
+	tgtBucketStatsProviders    map[string]service_def.BucketStatsProvider
+	tgtBucketStatsProvidersCnt map[string]int
+	tgtBucketStatsProvidersMtx sync.RWMutex
+
 	streamApiGetter streamApiWatcher.StreamApiGetterFunc
 }
 
 func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc,
 	securitySvc service_def.SecuritySvc, streamApiGetter streamApiWatcher.StreamApiGetterFunc) (*BucketTopologyService, error) {
 	b := &BucketTopologyService{
-		remClusterSvc:        remClusterSvc,
-		xdcrCompTopologySvc:  xdcrCompTopologySvc,
-		logger:               log.NewLogger("BucketTopologySvc", loggerContext),
-		utils:                utils,
-		srcBucketWatchers:    map[string]*BucketTopologySvcWatcher{},
-		srcBucketWatchersCnt: map[string]int{},
-		tgtBucketWatchers:    map[string]*BucketTopologySvcWatcher{},
-		tgtBucketWatchersCnt: map[string]int{},
-		refreshInterval:      refreshInterval,
-		securitySvc:          securitySvc,
-		streamApiGetter:      streamApiGetter,
+		remClusterSvc:              remClusterSvc,
+		xdcrCompTopologySvc:        xdcrCompTopologySvc,
+		logger:                     log.NewLogger("BucketTopologySvc", loggerContext),
+		utils:                      utils,
+		srcBucketWatchers:          map[string]*BucketTopologySvcWatcher{},
+		srcBucketWatchersCnt:       map[string]int{},
+		tgtBucketWatchers:          map[string]*BucketTopologySvcWatcher{},
+		tgtBucketWatchersCnt:       map[string]int{},
+		tgtBucketStatsProviders:    map[string]service_def.BucketStatsProvider{},
+		tgtBucketStatsProvidersCnt: map[string]int{},
+		refreshInterval:            refreshInterval,
+		securitySvc:                securitySvc,
+		streamApiGetter:            streamApiGetter,
 	}
 	remClusterSvc.SetBucketTopologySvc(b)
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
@@ -92,7 +99,7 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 
 	var waitGrp sync.WaitGroup
 	for _, spec := range specs {
-		waitGrp.Add(2)
+		waitGrp.Add(3)
 		specCpy := spec.Clone()
 		go func() {
 			defer waitGrp.Done()
@@ -134,6 +141,27 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 			}
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
+			}
+		}()
+		go func() {
+			defer waitGrp.Done()
+			retryStatsOp := func() error {
+				statsProvider, err := b.getOrCreateTargetStatsProvider(specCpy)
+				if err != nil {
+					b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
+					return err
+				}
+				err = statsProvider.Init()
+				if err != nil {
+					b.logger.Errorf("statsProvider.Init has error: %v", err)
+					return err
+				}
+				return nil
+			}
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
 			if retryErr != nil {
 				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
 			}
@@ -428,6 +456,72 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 	return watcher, nil
 }
 
+// Note that the "getCredentials" function and the "getGrpcOpts" functions are just temporary placeholders until we have the global connection pool checked in
+// Once we have the global connection pool checked in, we can remove these functions.
+func (b *BucketTopologyService) getCredentials(spec *metadata.ReplicationSpecification) *base.Credentials {
+	remoteRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		b.logger.Errorf("failed to get credentials for spec %v: unable to retrieve remote cluster reference, err=%w", spec.Id, err)
+		return nil
+	}
+	return &remoteRef.Credentials
+}
+
+// To be removed once the global connection pool checked in
+func (b *BucketTopologyService) getGrpcOpts(spec *metadata.ReplicationSpecification) (*base.GrpcOptions, error) {
+	remoteRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gRPC options for spec %v: unable to retrieve remote cluster reference, err=%w", spec.Id, err)
+	}
+	connStr, err := remoteRef.MyConnectionStr()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gRPC options for spec %v: unable to retrieve connection string, err=%w", spec.Id, err)
+	}
+	getCredentials := func() *base.Credentials {
+		return b.getCredentials(spec)
+	}
+	grpcOpts, _ := base.NewGrpcOptionsSecure(connStr, getCredentials, remoteRef.Certificates())
+	return grpcOpts, nil
+}
+
+func (b *BucketTopologyService) getOrCreateTargetStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsProvider, error) {
+	b.tgtBucketStatsProvidersMtx.Lock()
+	defer b.tgtBucketStatsProvidersMtx.Unlock()
+
+	providerKey := getTargetWatcherKey(spec)
+	provider, exists := b.tgtBucketStatsProviders[providerKey]
+	if exists {
+		// If the provider already exists, increment the reference count and return the provider
+		b.tgtBucketStatsProvidersCnt[providerKey]++
+		return provider, nil
+	}
+	// If the provider does not exist, create a new one
+
+	// Retrieve the remote cluster reference
+	remoteRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create target stats provider for spec %v: unable to retrieve remote cluster reference, err=%w", spec.Id, err)
+	}
+
+	// Based on the remote type, create the appropriate provider
+	switch remoteRef.GetRemoteType() {
+	case metadata.RemoteTypeCbCluster:
+		provider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger)
+	case metadata.RemoteTypeCng:
+		provider = NewCngBucketStatsProvider(spec.TargetBucketName, b.utils, b.logger, func() (*base.GrpcOptions, error) {
+			return b.getGrpcOpts(spec)
+		})
+	default:
+		return nil, fmt.Errorf("unsupported remote type %v for spec %v", remoteRef.GetRemoteType(), spec.Id)
+	}
+
+	// Store the provider in the map and increment the reference count
+	b.tgtBucketStatsProviders[providerKey] = provider
+	b.tgtBucketStatsProvidersCnt[providerKey]++
+
+	return provider, nil
+}
+
 func (b *BucketTopologyService) getRemoteMaxCasUpdater(spec *metadata.ReplicationSpecification, maxCasGetter service_def.MaxVBCasStatsGetter, watcher *BucketTopologySvcWatcher) func() error {
 	maxCasGetterFunc := func() error {
 		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) { //By default it is set false
@@ -623,6 +717,15 @@ func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpe
 	}
 	b.tgtBucketWatchersMtx.Unlock()
 
+	b.tgtBucketStatsProvidersMtx.Lock()
+	b.tgtBucketStatsProvidersCnt[getTargetWatcherKey(spec)]--
+	if b.tgtBucketStatsProvidersCnt[getTargetWatcherKey(spec)] == 0 {
+		err = b.tgtBucketStatsProviders[getTargetWatcherKey(spec)].Close()
+		delete(b.tgtBucketStatsProviders, getTargetWatcherKey(spec))
+		delete(b.tgtBucketStatsProvidersCnt, getTargetWatcherKey(spec))
+	}
+	b.tgtBucketStatsProvidersMtx.Unlock()
+
 	return err
 }
 
@@ -675,7 +778,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 	if oldSpec == nil && newSpec != nil {
 		var waitGrp sync.WaitGroup
-		waitGrp.Add(2)
+		waitGrp.Add(3)
 
 		go func() {
 			defer waitGrp.Done()
@@ -720,6 +823,29 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 				panic(fmt.Sprintf("Bucket Topology service (remote) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
 			}
 		}()
+
+		go func() {
+			defer waitGrp.Done()
+			retryStatsOp := func() error {
+				statsProvider, err := b.getOrCreateTargetStatsProvider(newSpec)
+				if err != nil {
+					b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
+					return err
+				}
+				err = statsProvider.Init()
+				if err != nil {
+					b.logger.Errorf("statsProvider.Init has error: %v", err)
+					return err
+				}
+				return nil
+			}
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemoteStats",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+			}
+		}()
+
 		waitGrp.Wait()
 		b.logger.Infof("Registered bucket monitor for %v", newSpec.Id)
 	} else if oldSpec != nil && newSpec == nil {
