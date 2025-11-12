@@ -109,7 +109,7 @@ func (n *Nozzle) initConnPool() (err error) {
 
 	n.connPool, err = NewConnPool(n.Logger(), poolCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create connection pool: %v", err)
+		return fmt.Errorf("failed to create connection pool: %w", err)
 	}
 	return
 }

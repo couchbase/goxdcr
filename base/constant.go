@@ -1622,9 +1622,9 @@ const (
 
 	// CNG TODO: change this number
 	DefaultCNGQueueSize     = 1000
-	DefaultCNGWorkerCount   = 1
+	DefaultCNGWorkerCount   = 500
 	DefaultCNGRetryInterval = 5000 // in milliseconds
-	DefaultCNGConnCount     = 1    // Default number of connections in pool
+	DefaultCNGConnCount     = 2    // Default number of connections in pool
 	DefaultCNGRPCDeadline   = 5000 // in milliseconds
 
 )

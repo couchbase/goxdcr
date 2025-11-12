@@ -52,11 +52,11 @@ func (n *Nozzle) newCNGClient() (conn *base.CngConn, err error) {
 		return nil, err
 	}
 
-	n.Logger().Infof("connecting at %v\n", n.cfg.Replication.SNGAddr)
+	n.Logger().Infof("connecting at %v\n", n.cfg.Replication.CNGAddr)
 	getCreds := func() *base.Credentials {
 		return &creds
 	}
-	opts, err := base.NewGrpcOptions(n.cfg.Replication.SNGAddr, getCreds, cngCert, n.cfg.Tunables.InsecureSkipVerify)
+	opts, err := base.NewGrpcOptions(n.cfg.Replication.CNGAddr, getCreds, cngCert, n.cfg.Tunables.InsecureSkipVerify)
 	if err != nil {
 		return nil, err
 	}

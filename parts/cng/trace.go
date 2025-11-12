@@ -26,6 +26,9 @@ type Trace struct {
 	// isDelete indicates whether the mutation is a deletion
 	isDelete bool
 
+	// retryCount indicates how many times the mutation transfer was retried
+	retryCount uint64
+
 	// commitTime is the time taken for from DCP to processing completion
 	commitTime time.Duration
 

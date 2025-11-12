@@ -1,11 +1,12 @@
 package cng
 
+import "time"
+
 const (
-	// CNG TODO: change this number
-	DefaultDataChanSize  = 1000
-	DefaultWorkerCount   = 1
-	DefaultRetryInterval = 5000 // in milliseconds
-	DefaultPoolSize      = 1    // Default number of connections in pool
+
+	// ProcessRetryInterval is the interval to wait before retrying processing a request
+	// This is different from the backoff time for retryable errors
+	ProcessRetryInterval = 1000 * time.Millisecond
 
 	ConflictReasonSuccess    = "SUCCESS"
 	ConflictReasonDocMissing = "DOC_MISSING"

@@ -44,6 +44,9 @@ type OutNozzle interface {
 
 	SetConflictLogger(interface{}) error
 	GetConflictLogger() interface{}
+
+	// PrintStatusSummary prints the nozzle status summary
+	PrintStatusSummary()
 }
 
 type SourceNozzle interface {

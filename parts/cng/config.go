@@ -18,7 +18,7 @@ type Config struct {
 
 type ReplicationConfig struct {
 	CRMode            base.ConflictResolutionMode
-	SNGAddr           string
+	CNGAddr           string
 	SourceClusterUUID string
 	SourceBucketName  string
 	SourceBucketUUID  string
@@ -29,8 +29,8 @@ type ReplicationConfig struct {
 }
 
 func (rc *ReplicationConfig) Validate() error {
-	if rc.SNGAddr == "" {
-		return fmt.Errorf("SNGAddr is empty")
+	if rc.CNGAddr == "" {
+		return fmt.Errorf("CNGAddr is empty")
 	}
 	if rc.SourceClusterUUID == "" {
 		return fmt.Errorf("SourceClusterUUID is empty")
