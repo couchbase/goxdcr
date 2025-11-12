@@ -339,6 +339,30 @@
         ],
         "stability": "committed"
     },
+    "xdcr_cng_col_not_found_total": {
+        "type": "counter",
+        "help": "Number of times a document failed to be replicated because the target collection was not found",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_cng_scope_not_found_total": {
+        "type": "counter",
+        "help": "Number of times a document failed to be replicated because the target scope was not found",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_data_merge_failed_bytes": {
         "type": "counter",
         "help": "Amount of data failed to merge as part of Source custom conflict-resolution",
@@ -925,6 +949,198 @@
             "pipelineType"
         ],
         "notes": "Represents the number of docs which were in conflict, but it's target CAS changed before fetching target body for further processing for conflict logging or merging of the conflicting source and target docs.",
+        "stability": "internal"
+    },
+    "xdcr_grpc_aborted_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that were aborted",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_already_exists_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed because resource already exists. A resource could be a document, collection, scope, or bucket",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_cancelled_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that were cancelled",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_data_loss_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to data loss",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_deadline_exceeded_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to deadline exceeded",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_failed_precondition_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to failed precondition",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_internal_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to internal error",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_invalid_argument_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to invalid argument",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_not_found_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed because resource was not found. A resource could be a document, collection, scope, or bucket",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_out_of_range_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to out of range error",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_permission_denied_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to permission denied",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_resource_exhausted_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to resource exhausted",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_unauthenticated_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed due to authentication failure",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_unavailable_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed because service is unavailable",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_unimplemented_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that failed because operation is unimplemented",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "internal"
+    },
+    "xdcr_grpc_unknown_total": {
+        "type": "counter",
+        "help": "Number of GRPC requests that returned unknown error",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
         "stability": "internal"
     },
     "xdcr_guardrail_data_size_total": {

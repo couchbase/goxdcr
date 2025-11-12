@@ -743,7 +743,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			Replication: cng.ReplicationConfig{
 				CRMode: sourceCRMode,
 				// CNG TODO: HARDCODED
-				SNGAddr:           "127.0.0.1:18070",
+				CNGAddr:           "127.0.0.1:18098",
 				SourceBucketName:  spec.SourceBucketName,
 				SourceClusterUUID: sourceClusterUUID,
 				SourceBucketUUID:  spec.SourceBucketUUID,

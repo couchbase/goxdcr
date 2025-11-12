@@ -158,6 +158,28 @@ const (
 	TARGET_TMPFAIL_METRIC        = "target_tmpfail"
 	TARGET_UNKNOWN_STATUS_METRIC = "target_unknown_status"
 
+	// CNG specific Metrics
+	CNG_COLLECTION_NOT_FOUND_METRIC = "cng_col_not_found"
+	CNG_SCOPE_NOT_FOUND_METRIC      = "cng_scope_not_found"
+
+	// GRPC counter metrics
+	GRPC_CANCELLED_METRIC           = "grpc_cancelled"
+	GRPC_UNKNOWN_METRIC             = "grpc_unknown"
+	GRPC_INVALID_ARGUMENT_METRIC    = "grpc_invalid_argument"
+	GRPC_DEADLINE_EXCEEDED_METRIC   = "grpc_deadline_exceeded"
+	GRPC_NOT_FOUND_METRIC           = "grpc_not_found"
+	GRPC_ALREADY_EXISTS_METRIC      = "grpc_already_exists"
+	GRPC_PERMISSION_DENIED_METRIC   = "grpc_permission_denied"
+	GRPC_RESOURCE_EXHAUSTED_METRIC  = "grpc_resource_exhausted"
+	GRPC_FAILED_PRECONDITION_METRIC = "grpc_failed_precondition"
+	GRPC_ABORTED_METRIC             = "grpc_aborted"
+	GRPC_OUT_OF_RANGE_METRIC        = "grpc_out_of_range"
+	GRPC_UNIMPLEMENTED_METRIC       = "grpc_unimplemented"
+	GRPC_INTERNAL_METRIC            = "grpc_internal"
+	GRPC_UNAVAILABLE_METRIC         = "grpc_unavailable"
+	GRPC_DATA_LOSS_METRIC           = "grpc_data_loss"
+	GRPC_UNAUTHENTICATED_METRIC     = "grpc_unauthenticated"
+
 	DOCS_CLONED_METRIC     = "docs_cloned"
 	DELETION_CLONED_METRIC = "deletion_cloned"
 
@@ -210,6 +232,25 @@ const (
 	// Consts for accumulative number of replications
 	TOTAL_REPLICATIONS_COUNT = "number_of_replications"
 )
+
+var GRPC_METRICS_LIST = []string{
+	GRPC_CANCELLED_METRIC,
+	GRPC_UNKNOWN_METRIC,
+	GRPC_INVALID_ARGUMENT_METRIC,
+	GRPC_DEADLINE_EXCEEDED_METRIC,
+	GRPC_NOT_FOUND_METRIC,
+	GRPC_ALREADY_EXISTS_METRIC,
+	GRPC_PERMISSION_DENIED_METRIC,
+	GRPC_RESOURCE_EXHAUSTED_METRIC,
+	GRPC_FAILED_PRECONDITION_METRIC,
+	GRPC_ABORTED_METRIC,
+	GRPC_OUT_OF_RANGE_METRIC,
+	GRPC_UNIMPLEMENTED_METRIC,
+	GRPC_INTERNAL_METRIC,
+	GRPC_UNAVAILABLE_METRIC,
+	GRPC_DATA_LOSS_METRIC,
+	GRPC_UNAUTHENTICATED_METRIC,
+}
 
 const (
 	PrometheusXDCRPrefix = "xdcr"
@@ -1773,6 +1814,154 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The total number of replications that exists to replicate to a particular target cluster",
 		Stability:    Committed,
 		Labels:       RemoteClusterSpecificLabels,
+	},
+
+	// CNG Specific Metrics
+	CNG_COLLECTION_NOT_FOUND_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of times a document failed to be replicated because the target collection was not found",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	CNG_SCOPE_NOT_FOUND_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of times a document failed to be replicated because the target scope was not found",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+
+	// GRPC error code specific metrics
+	GRPC_CANCELLED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that were cancelled",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_UNKNOWN_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that returned unknown error",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_INVALID_ARGUMENT_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to invalid argument",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_DEADLINE_EXCEEDED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to deadline exceeded",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_NOT_FOUND_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed because resource was not found. A resource could be a document, collection, scope, or bucket",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_ALREADY_EXISTS_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed because resource already exists. A resource could be a document, collection, scope, or bucket",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_PERMISSION_DENIED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to permission denied",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_RESOURCE_EXHAUSTED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to resource exhausted",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_FAILED_PRECONDITION_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to failed precondition",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_ABORTED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that were aborted",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_OUT_OF_RANGE_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to out of range error",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_UNIMPLEMENTED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed because operation is unimplemented",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_INTERNAL_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to internal error",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_UNAVAILABLE_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed because service is unavailable",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_DATA_LOSS_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to data loss",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	GRPC_UNAUTHENTICATED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCngSupportPhase1,
+		Description:  "Number of GRPC requests that failed due to authentication failure",
+		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 }
 

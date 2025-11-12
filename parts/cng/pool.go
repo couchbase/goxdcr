@@ -95,6 +95,11 @@ func NewConnPool(logger *log.CommonLogger, cfg *PoolConfig) (pool *ConnPool, err
 
 // Initialize creates all connections in the pool
 func (p *ConnPool) init() error {
+	if p == nil {
+		err := fmt.Errorf("connection pool is nil")
+		return err
+	}
+
 	p.poolLock.Lock()
 	defer p.poolLock.Unlock()
 
@@ -115,6 +120,11 @@ func (p *ConnPool) init() error {
 // The only reason to pass this is for logging purposes here. The objective is to
 // to print the error under a lock to avoid log flooding from multiple goroutines
 func (p *ConnPool) connect(index int, nwErr error) error {
+	if p == nil {
+		err := fmt.Errorf("connection pool is nil")
+		return err
+	}
+
 	if index < 0 || index >= len(p.clients) {
 		return fmt.Errorf("connection index %d out of range", index)
 	}
@@ -146,6 +156,11 @@ func (p *ConnPool) connect(index int, nwErr error) error {
 }
 
 func (p *ConnPool) callFn(w *wrapperConn, fn func(client XDCRClient) error) error {
+	if p == nil {
+		err := fmt.Errorf("connection pool is nil")
+		return err
+	}
+
 	w.rw.RLock()
 	defer w.rw.RUnlock()
 	if w.conn == nil {
@@ -169,6 +184,11 @@ func (p *ConnPool) Close() {
 // closeAllConnUnsafe closes all connections in the pool without acquiring the pool lock
 // This method should be called only when the pool lock is already held
 func (p *ConnPool) closeAllConnUnsafe() (err error) {
+	if p == nil {
+		err = fmt.Errorf("connection pool is nil")
+		return
+	}
+
 	for _, w := range p.clients {
 		w.rw.Lock()
 		if w.conn != nil {
@@ -184,6 +204,11 @@ func (p *ConnPool) closeAllConnUnsafe() (err error) {
 // If the new count is less than the current count, excess connections are closed
 // This method is thread-safe
 func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
+	if p == nil {
+		err = fmt.Errorf("connection pool is nil")
+		return
+	}
+
 	if newCount <= 0 {
 		newCount = 1
 	}
@@ -205,7 +230,7 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 			p.clients = append(p.clients, wrapper)
 			err = p.connect(i, nil)
 			if err != nil {
-				return fmt.Errorf("failed to create connection %d: %v", i, err)
+				return fmt.Errorf("failed to create connection %d: %w", i, err)
 			}
 		}
 	} else {
@@ -229,7 +254,14 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 // If the error returned by fn is a network error, the connection is recreated and fn is retried.
 // The callback function fn should be thread-safe and idempotent since it may be called multiple times
 // in case of network errors.
-func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
+// The method returns PoolCallStat which contains statistics about the call, e.g., number of retries
+// The stats should be used even if an error is returned
+func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, err error) {
+	if p == nil {
+		err = fmt.Errorf("connection pool is nil")
+		return
+	}
+
 	p.poolLock.RLock()
 	defer p.poolLock.RUnlock()
 
@@ -240,27 +272,34 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) error {
 	for {
 		select {
 		case <-p.shutdown:
-			return fmt.Errorf("connection pool is shutting down or already closed")
+			err = fmt.Errorf("connection pool is shutting down or already closed")
+			return
 		default:
 			// First attempt
-			err := p.callFn(wrapper, fn)
+			err = p.callFn(wrapper, fn)
 			if err == nil {
-				return nil
+				return
 			}
 
 			// Check if it's a network error that requires connection recreation
 			if !p.cfg.UtilsSvc.IsSeriousNetError(err) {
-				err = fmt.Errorf("non-network error, connIndex=%d, err: %v", index, err)
-				return err
+				err = fmt.Errorf("non-network error, connIndex=%d, err: %w", index, err)
+				return
 			}
 
 			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
+			st.RetryCount++
 			// Attempt to recreate the connection
 			err = p.connect(int(index), err)
 			if err != nil {
 				// If recreation fails, return the original error
-				return fmt.Errorf("network error: %v", err)
+				err = fmt.Errorf("network error: %w", err)
+				return
 			}
 		}
 	}
+}
+
+type PoolCallStat struct {
+	RetryCount uint64
 }

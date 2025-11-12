@@ -12,9 +12,17 @@ import (
 )
 
 func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (err error) {
-	err = n.connPool.WithConn(func(client XDCRClient) (err error) {
+	trace, err := getTrace(ctx)
+	if err != nil {
+		return
+	}
+
+	callStat, err := n.connPool.WithConn(func(client XDCRClient) (err error) {
 		return n.transfer(ctx, client, req)
 	})
+
+	trace.retryCount = callStat.RetryCount
+
 	return
 }
 

@@ -180,6 +180,28 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FILTERED_CLOG_METRIC:           service_def.MetricTypeCounter,
 	service_def.GET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
 	service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:      service_def.MetricTypeCounter,
+
+	// CNG metrics
+	service_def.CNG_COLLECTION_NOT_FOUND_METRIC: service_def.MetricTypeCounter,
+	service_def.CNG_SCOPE_NOT_FOUND_METRIC:      service_def.MetricTypeCounter,
+
+	//GRPC metrics
+	service_def.GRPC_CANCELLED_METRIC:           service_def.MetricTypeCounter,
+	service_def.GRPC_UNKNOWN_METRIC:             service_def.MetricTypeCounter,
+	service_def.GRPC_INVALID_ARGUMENT_METRIC:    service_def.MetricTypeCounter,
+	service_def.GRPC_DEADLINE_EXCEEDED_METRIC:   service_def.MetricTypeCounter,
+	service_def.GRPC_NOT_FOUND_METRIC:           service_def.MetricTypeCounter,
+	service_def.GRPC_ALREADY_EXISTS_METRIC:      service_def.MetricTypeCounter,
+	service_def.GRPC_PERMISSION_DENIED_METRIC:   service_def.MetricTypeCounter,
+	service_def.GRPC_RESOURCE_EXHAUSTED_METRIC:  service_def.MetricTypeCounter,
+	service_def.GRPC_FAILED_PRECONDITION_METRIC: service_def.MetricTypeCounter,
+	service_def.GRPC_ABORTED_METRIC:             service_def.MetricTypeCounter,
+	service_def.GRPC_OUT_OF_RANGE_METRIC:        service_def.MetricTypeCounter,
+	service_def.GRPC_UNIMPLEMENTED_METRIC:       service_def.MetricTypeCounter,
+	service_def.GRPC_INTERNAL_METRIC:            service_def.MetricTypeCounter,
+	service_def.GRPC_UNAVAILABLE_METRIC:         service_def.MetricTypeCounter,
+	service_def.GRPC_DATA_LOSS_METRIC:           service_def.MetricTypeCounter,
+	service_def.GRPC_UNAUTHENTICATED_METRIC:     service_def.MetricTypeCounter,
 }
 
 func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, srcvb uint16) base.VBCountMetric {
@@ -592,18 +614,13 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 		//log parts summary
 		outNozzle_parts := stats_mgr.pipeline.Targets()
 		for _, part := range outNozzle_parts {
-			if stats_mgr.pipeline.Specification().GetReplicationSpec().Settings.RepType == metadata.ReplicationTypeXmem {
-				// CNG TODO: need to set replication Type as CNG
-				switch nozzle := part.(type) {
-				case *parts.XmemNozzle:
-					nozzle.PrintStatusSummary()
-				case *cng.Nozzle:
-					nozzle.PrintStatusSummary()
-				}
-
-			} else {
-				part.(*parts.CapiNozzle).PrintStatusSummary()
+			nozzle, ok := part.(common.OutNozzle)
+			if !ok {
+				// this log should never be printed ideally
+				stats_mgr.logger.Warnf("%v Unable to cast part to OutNozzle when printing status summary", stats_mgr.pipeline.InstanceId())
+				continue
 			}
+			nozzle.PrintStatusSummary()
 		}
 		dcp_parts := stats_mgr.pipeline.Sources()
 		for _, part := range dcp_parts {
@@ -1586,6 +1603,10 @@ type outNozzleCollector struct {
 	component_map map[string]map[string]interface{}
 
 	vbMetricHelper *VbBasedMetricHelper
+
+	// indicates whether CNG nozzle is used in the pipeline
+	// This is populated during Mount()
+	isCNG bool
 }
 
 func (outNozzle_collector *outNozzleCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
@@ -1608,6 +1629,10 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
+		// determine if CNG nozzle is used in the pipeline
+		// For CNG pipleine, there should only only one instance
+		_, outNozzle_collector.isCNG = part.(*cng.Nozzle)
+
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
 		size_rep_queue := metrics.NewCounter()
 		registry.Register(service_def.SIZE_REP_QUEUE_METRIC, size_rep_queue)
@@ -1770,6 +1795,11 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.GET_DOCS_CAS_CHANGED_METRIC] = getCasChanged
 		metric_map[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC] = subdocCmdDocsSkipped
 
+		if outNozzle_collector.isCNG {
+			outNozzle_collector.registerGRPCMetrics(registry, metric_map)
+			outNozzle_collector.registerCNGMetrics(registry, metric_map)
+		}
+
 		listOfTargetVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(listOfTargetVBs, part.Id())
 		outNozzle_collector.component_map[part.Id()] = metric_map
@@ -1793,6 +1823,25 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TrueConflictsEventListener, outNozzle_collector)
 
 	return nil
+}
+
+// register gRPC related metrics for outNozzle
+func (c *outNozzleCollector) registerGRPCMetrics(registry metrics.Registry, metric_map map[string]interface{}) {
+	for _, metricName := range service_def.GRPC_METRICS_LIST {
+		grpcMetric := metrics.NewCounter()
+		registry.Register(metricName, grpcMetric)
+		metric_map[metricName] = grpcMetric
+	}
+}
+
+func (c *outNozzleCollector) registerCNGMetrics(registry metrics.Registry, metric_map map[string]interface{}) {
+	counter := metrics.NewCounter()
+	registry.Register(service_def.CNG_COLLECTION_NOT_FOUND_METRIC, counter)
+	metric_map[service_def.CNG_COLLECTION_NOT_FOUND_METRIC] = counter
+
+	counter = metrics.NewCounter()
+	registry.Register(service_def.CNG_SCOPE_NOT_FOUND_METRIC, counter)
+	metric_map[service_def.CNG_SCOPE_NOT_FOUND_METRIC] = counter
 }
 
 func (outNozzle_collector *outNozzleCollector) Id() string {
@@ -2025,16 +2074,64 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		}
 
 	case common.DataSentFailed:
-		responseCode, ok := event.Data.(mc.Status)
-		if !ok {
-			return nil
-		}
-		switch responseCode {
-		case mc.TMPFAIL:
-			metricMap[service_def.TARGET_TMPFAIL_METRIC].(metrics.Counter).Inc(1)
+		_, ok := event.Component.(*cng.Nozzle)
+		if !ok { // XMem nozzle & Capi nozzle
+			responseCode, ok := event.Data.(mc.Status)
+			if !ok {
+				return nil
+			}
+			switch responseCode {
+			case mc.TMPFAIL:
+				metricMap[service_def.TARGET_TMPFAIL_METRIC].(metrics.Counter).Inc(1)
 
-		case mc.EACCESS:
-			metricMap[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
+			case mc.EACCESS:
+				metricMap[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
+			}
+		} else {
+			errorCode := event.Data.(cng.CNGErrorCode)
+			// Note: there is no default case here.
+			// cng.ERR_UNKNOWN already accounts for error which cannot be
+			// categorized and for that a different event is raised (DataSentFailedUnknownStatus).
+			switch errorCode {
+			case cng.ERR_COLLECTION_NOT_FOUND:
+				metricMap[service_def.CNG_COLLECTION_NOT_FOUND_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_SCOPE_NOT_FOUND:
+				metricMap[service_def.CNG_SCOPE_NOT_FOUND_METRIC].(metrics.Counter).Inc(1)
+
+			// GRPC related errors
+			case cng.ERR_GRPC_CANCELLED:
+				metricMap[service_def.GRPC_CANCELLED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_UNKNOWN:
+				metricMap[service_def.GRPC_UNKNOWN_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_INVALID_ARGUMENT:
+				metricMap[service_def.GRPC_INVALID_ARGUMENT_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_DEADLINE_EXCEEDED:
+				metricMap[service_def.GRPC_DEADLINE_EXCEEDED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_NOT_FOUND:
+				metricMap[service_def.GRPC_NOT_FOUND_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_ALREADY_EXISTS:
+				metricMap[service_def.GRPC_ALREADY_EXISTS_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_PERMISSION_DENIED:
+				metricMap[service_def.GRPC_PERMISSION_DENIED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_RESOURCE_EXHAUSTED:
+				metricMap[service_def.GRPC_RESOURCE_EXHAUSTED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_FAILED_PRECONDITION:
+				metricMap[service_def.GRPC_FAILED_PRECONDITION_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_ABORTED:
+				metricMap[service_def.GRPC_ABORTED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_OUT_OF_RANGE:
+				metricMap[service_def.GRPC_OUT_OF_RANGE_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_UNIMPLEMENTED:
+				metricMap[service_def.GRPC_UNIMPLEMENTED_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_INTERNAL:
+				metricMap[service_def.GRPC_INTERNAL_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_UNAVAILABLE:
+				metricMap[service_def.GRPC_UNAVAILABLE_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_DATA_LOSS:
+				metricMap[service_def.GRPC_DATA_LOSS_METRIC].(metrics.Counter).Inc(1)
+			case cng.ERR_GRPC_UNAUTHENTICATED:
+				metricMap[service_def.GRPC_UNAUTHENTICATED_METRIC].(metrics.Counter).Inc(1)
+			}
 		}
 
 	case common.SourceSyncXattrRemoved:

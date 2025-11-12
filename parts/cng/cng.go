@@ -7,6 +7,7 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	_ "github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	"github.com/couchbase/goxdcr/v8/service_def"
@@ -24,7 +25,8 @@ const (
 
 type Nozzle struct {
 	parts.AbstractPart
-	cfg Config
+	cfg   Config
+	stats *Stats
 
 	upstreamObjRecycler func(any)
 	connPool            *ConnPool
@@ -45,11 +47,11 @@ func New(id string, loggerContext *log.LoggerContext, cfg Config) (n *Nozzle, er
 	}
 
 	if err = cfg.Replication.Validate(); err != nil {
-		err = fmt.Errorf("Replication config validation failed: %v", err)
+		err = fmt.Errorf("Replication config validation failed: %w", err)
 		return
 	}
 	if err = cfg.Services.Validate(); err != nil {
-		err = fmt.Errorf("Services validation failed: %v", err)
+		err = fmt.Errorf("Services validation failed: %w", err)
 		return
 	}
 
@@ -63,6 +65,7 @@ func New(id string, loggerContext *log.LoggerContext, cfg Config) (n *Nozzle, er
 		AbstractPart: parts.NewAbstractPartWithLogger(id, logger),
 		cfg:          cfg,
 		stopCh:       make(chan struct{}),
+		stats:        NewStats(),
 	}
 
 	return
@@ -83,6 +86,23 @@ func (n *Nozzle) Receive(data any) error {
 		return fmt.Errorf("Invalid data type %T, expected *base.WrappedMCRequest", data)
 	}
 
+	enqueued := true
+	// try to enqueue without blocking first
+	select {
+	case n.dataCh <- req:
+		return nil
+	case <-n.stopCh:
+		return fmt.Errorf("Nozzle %v is stopping", n.Id())
+	default:
+		enqueued = false
+		n.stats.IncEnqueueBlocked(1)
+	}
+
+	if enqueued {
+		return nil
+	}
+
+	// try again, blocking this time
 	select {
 	case n.dataCh <- req:
 		return nil
@@ -119,4 +139,11 @@ func (n *Nozzle) SetBandwidthThrottler(bandwidthThrottler service_def.BandwidthT
 }
 
 func (n *Nozzle) PrintStatusSummary() {
+	if n.State() == common.Part_Running {
+		n.stats.SetItemsInQueue(uint64(len(n.dataCh)))
+
+		n.Logger().Infof("Nozzle stats: %v", n.stats.String())
+	} else {
+		n.Logger().Infof("Nozzle state: %v", n.State())
+	}
 }
