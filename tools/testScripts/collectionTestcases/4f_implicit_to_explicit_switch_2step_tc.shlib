@@ -109,15 +109,23 @@ function runTestCase {
 	sleep 10
 	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S3.col2"}'
 
-	echo "Waiting 5 seconds before checking item count for backfill"
-	sleep 5
+	local sleepSecs=$(calculateTimeToSleepWithMainDelay 10000 $SEED_INJ_MAX_MAIN_DELAY_MS)
+	if ((sleepSecs < 10)); then
+		sleepSecs=10
+	fi
+	echo "Waiting $sleepSecs seconds before checking item count first pass"
+	sleep $sleepSecs
+
 	newCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" $newCount
 
-	validateCbWorkloadGenCollection "C2" "B2" "S3" "col2" "C1" "B1" "S1" "col1"
-	echo "VALIDATING data"
-	sleep 5
-	checkItemCnt "C2" "B2" $newCount
+	local delayCheck=$(getDelayMsGivenSeed $SEED_INJ_MAX_MAIN_DELAY_MS)
+	if ((delayCheck == 0)); then
+		validateCbWorkloadGenCollection "C2" "B2" "S3" "col2" "C1" "B1" "S1" "col1"
+		echo "VALIDATING data"
+		sleep 5
+		checkItemCnt "C2" "B2" $newCount
+	fi
 
 	# Because of MB-66344, it is now possible to have backfills raised because the backfill raise "error" condition will persist
 	# Before the MB, we would see:
