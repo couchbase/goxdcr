@@ -195,9 +195,7 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	var dataSentAdditional parts.DataSentEventAdditional
 	dataSentAdditional.VBucket = 1
 
-	var manifestAdditional parts.ManifestAdditional
-	manifestAdditional.ManifestId = 1
-	manifestAdditional.RecycleFunc = func(obj interface{}) {}
+	manifestAdditional := uint64(1)
 
 	mutationEvent.Seqno = 1
 	dataReceivedEventData := common.DataReceivedEventData{VBucket: mutationEvent.VBucket, Seqno: mutationEvent.Seqno, Expiry: mutationEvent.Expiry, Opcode: mutationEvent.Opcode, IsSystemEvent: mutationEvent.IsSystemEvent()}
@@ -250,14 +248,28 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 		Seqno: 5,
 		Req:   &gomemcached.MCRequest{VBucket: 1},
 	}
-	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData := common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	ignoreEvent := common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	oldIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
 
 	wrappedMCR.Seqno = 6
-	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData = common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	ignoreEvent = common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	oldIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
@@ -299,21 +311,42 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 
 	wrappedMCR.Seqno = 8
 	wrappedMCR.Req = &gomemcached.MCRequest{VBucket: 1}
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData = common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	commonEvent = common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(8), through_seqno)
 
 	wrappedMCR.Seqno = 10
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData = common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	commonEvent = common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	//	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(8), through_seqno)
 
 	wrappedMCR.Seqno = 9
-	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData = common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	commonEvent = common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(10), through_seqno)
@@ -1330,9 +1363,7 @@ func TestVariableVBSent(t *testing.T) {
 
 	var dataSentAdditional parts.DataSentEventAdditional
 	dataSentAdditional.VBucket = 1
-	var manifestAdditional parts.ManifestAdditional
-	manifestAdditional.ManifestId = 1
-	manifestAdditional.RecycleFunc = func(obj interface{}) {}
+	manifestAdditional := uint64(1)
 
 	// First let VB 1 replicate to VB 1
 	mutationEvent.Seqno = 1
@@ -1399,15 +1430,28 @@ func TestVariableVBSent(t *testing.T) {
 		Seqno: 5,
 		Req:   &gomemcached.MCRequest{VBucket: 1},
 	}
-
-	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData := common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	ignoreEvent := common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	oldIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
 
 	wrappedMCR.Seqno = 6
-	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, manifestAdditional)
+	eventData = common.DataNotReplicatedEventData{
+		Seqno:        wrappedMCR.Seqno,
+		SourceVB:     wrappedMCR.GetSourceVB(),
+		TargetVB:     wrappedMCR.Req.VBucket,
+		Cloned:       wrappedMCR.Cloned,
+		ClonedSyncCh: wrappedMCR.ClonedSyncCh,
+	}
+	ignoreEvent = common.NewEvent(common.DataNotReplicated, &eventData, nil, nil, manifestAdditional)
 	oldIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
 	assert.Nil(svc.ProcessEvent(ignoreEvent))
 	newIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()

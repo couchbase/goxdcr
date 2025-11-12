@@ -3051,6 +3051,9 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 		vbucket = eventData.VBucket
 		seqno = eventData.Seqno
 	case metricKey == service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
+		if len(event.DerivedData) < 3 {
+			return errors.New("missing sufficient elements in DerivedData array")
+		}
 		vbucket = event.DerivedData[1].(uint16)
 		seqno = event.DerivedData[2].(uint64)
 	default:

@@ -115,7 +115,6 @@ const (
 	// 2. conflict logging stats and events.
 	CLogDocsWritten ComponentEventType = iota
 	CLogWriteStatus ComponentEventType = iota
-
 	// data which was supposed to be replicated using
 	// a subdoc command, but could not be because it reached
 	// the maximum operations limit.
@@ -166,6 +165,14 @@ type FilterRelatedCommonEventData struct {
 type SeqnoAdvReceivedEventData struct {
 	VBucket uint16
 	Seqno   uint64
+}
+
+type DataNotReplicatedEventData struct {
+	Seqno        uint64
+	SourceVB     uint16
+	TargetVB     uint16
+	Cloned       bool
+	ClonedSyncCh chan bool
 }
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

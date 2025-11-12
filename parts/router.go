@@ -1681,8 +1681,15 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	ignoreRequestFunc := func(req *base.WrappedMCRequest) {
-		ignoreEvent := common.NewEvent(common.DataNotReplicated, req, router, nil, router.getManifestAdditional())
-		router.RaiseEvent(ignoreEvent)
+		eventData := common.DataNotReplicatedEventData{
+			Seqno:        req.Seqno,
+			SourceVB:     req.GetSourceVB(),
+			TargetVB:     req.Req.VBucket,
+			Cloned:       req.Cloned,
+			ClonedSyncCh: req.ClonedSyncCh,
+		}
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, &eventData, router, nil, atomic.LoadUint64(&router.lastSuccessfulManifestId)))
+		router.recycleDataObj(req)
 	}
 
 	fatalErrorFunc := func(err error, data interface{}) {
@@ -1865,13 +1872,6 @@ func (router *Router) getDataFilteredAdditional(filteringStatus base.FilteringSt
 	}
 }
 
-func (router *Router) getManifestAdditional() interface{} {
-	return ManifestAdditional{
-		ManifestId:  atomic.LoadUint64(&router.lastSuccessfulManifestId),
-		RecycleFunc: router.recycleDataObj,
-	}
-}
-
 // Implementation of the routing algorithm
 // Currently doing static dispatching based on vbucket number.
 func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
@@ -1992,10 +1992,26 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 
 	if raiseDataNotReplicatedColDNE {
 		err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
-		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, router.getManifestAdditional()))
+		eventData := common.DataNotReplicatedEventData{
+			Seqno:        mcRequest.Seqno,
+			SourceVB:     mcRequest.GetSourceVB(),
+			TargetVB:     mcRequest.Req.VBucket,
+			Cloned:       mcRequest.Cloned,
+			ClonedSyncCh: mcRequest.ClonedSyncCh,
+		}
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, &eventData, router, []interface{}{err}, atomic.LoadUint64(&router.lastSuccessfulManifestId)))
+		router.recycleDataObj(mcRequest)
 		return result, nil
 	} else if raiseDataNotReplicatedCasDrift {
-		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected, mcRequest.Req.VBucket, mcRequest.Seqno}, router.getManifestAdditional()))
+		eventData := common.DataNotReplicatedEventData{
+			Seqno:        mcRequest.Seqno,
+			SourceVB:     mcRequest.GetSourceVB(),
+			TargetVB:     mcRequest.Req.VBucket,
+			Cloned:       mcRequest.Cloned,
+			ClonedSyncCh: mcRequest.ClonedSyncCh,
+		}
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, &eventData, router, []interface{}{base.ErrorCasPoisoningDetected, mcRequest.Req.VBucket, mcRequest.Seqno}, atomic.LoadUint64(&router.lastSuccessfulManifestId)))
+		router.recycleDataObj(mcRequest)
 		eventMap := base.NewEventsMap()
 		keyToLog := string(wrappedUpr.UprEvent.Key)
 		// The key for eventsMap doesn't matter - it will get re-keyed

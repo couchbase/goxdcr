@@ -1195,15 +1195,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	return nil
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) markMCRequestAsIgnored(req *base.WrappedMCRequest) {
-	if req == nil {
-		return
-	}
-	seqno := req.Seqno
-	vbno := req.GetSourceVB()
-	tsTracker.addIgnoredSeqno(vbno, seqno)
-}
-
 // Implement ComponentEventListener
 func (tsTracker *ThroughSeqnoTrackerSvc) OnEvent(event *common.Event) {
 	tsTracker.ProcessEvent(event)
@@ -1441,26 +1432,23 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			}
 		}
 	case common.DataNotReplicated:
-		wrappedMcr := event.Data.(*base.WrappedMCRequest)
-		manifestInfo := event.OtherInfos.(parts.ManifestAdditional)
-		vbno := wrappedMcr.GetSourceVB()
-		seqno := wrappedMcr.Seqno
-		manifestAddn := event.OtherInfos.(parts.ManifestAdditional)
-		recycler := manifestAddn.RecycleFunc
+		eventData := event.Data.(*common.DataNotReplicatedEventData)
+		manifestID := event.OtherInfos.(uint64)
+		vbno := eventData.SourceVB
+		seqno := eventData.Seqno
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		var tgtVbToUse *uint16
 		if tsTracker.variableVBMode {
-			tgtVbToUse = &wrappedMcr.Req.VBucket
+			tgtVbToUse = &eventData.TargetVB
 		}
 		if !processedAsOSO {
-			tsTracker.markMCRequestAsIgnored(wrappedMcr)
+			tsTracker.addIgnoredSeqno(vbno, seqno)
 		} else {
-			done := session.MarkSeqnoProcessed(vbno, seqno, manifestInfo.ManifestId, tsTracker, tgtVbToUse)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestID, tsTracker, tgtVbToUse)
 			if done {
 				tsTracker.HandleDoneSession(vbno, session)
 			}
 		}
-		recycler(wrappedMcr)
 	case common.StreamingEnd:
 		// this event is only raised for backfill pipelines.
 		vbno, ok := event.Data.(uint16)
@@ -2489,13 +2477,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 		vbno = event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno = event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 	case common.DataNotReplicated:
-		wrappedMcr := event.Data.(*base.WrappedMCRequest)
-		if wrappedMcr.Cloned == true {
+		eventData := event.Data.(*common.DataNotReplicatedEventData)
+		if eventData.Cloned {
 			cloned = true
-			syncCh = wrappedMcr.ClonedSyncCh
+			syncCh = eventData.ClonedSyncCh
 		}
-		vbno = wrappedMcr.GetSourceVB()
-		seqno = wrappedMcr.Seqno
+		vbno = eventData.SourceVB
+		seqno = eventData.Seqno
 	default:
 		panic("Implement me")
 	}
