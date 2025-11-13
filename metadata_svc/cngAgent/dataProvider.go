@@ -30,9 +30,6 @@ func (agent *RemoteCngAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.Ge
 	collectionsWatcher.Start()
 	defer collectionsWatcher.Stop()
 	res := collectionsWatcher.GetResult()
-	if res == nil {
-		return nil, fmt.Errorf("failed to get manifest for the target bucket %v", requestOpts.BucketName)
-	}
 	return res, nil
 }
 

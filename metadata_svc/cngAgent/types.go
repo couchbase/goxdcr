@@ -148,7 +148,7 @@ type heartBeatManager struct {
 
 type remoteDataProvider struct {
 	// bucketManifestWatcher maps the bucket name to the bucket manifest watcher
-	bucketManifestWatcher map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]
+	bucketManifestWatcher map[string]cngWatcher.GrpcStreamManager[*metadata.CollectionsManifest]
 	// mutex protects "this" struct from concurrent access
 	mutex sync.RWMutex
 	// refCount tracks the number of references to a target bucket
@@ -231,7 +231,7 @@ func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, u
 			logger:      logger,
 		},
 		remoteDataProvider: &remoteDataProvider{
-			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]),
+			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManager[*metadata.CollectionsManifest]),
 			refCount:              make(map[string]uint32),
 		},
 	}

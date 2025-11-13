@@ -79,7 +79,7 @@ func createTestRemoteCngAgent() (*RemoteCngAgent, *utilsMock.UtilsIface, *servic
 			logger:      logger,
 		},
 		remoteDataProvider: &remoteDataProvider{
-			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManagerIface[*metadata.CollectionsManifest]),
+			bucketManifestWatcher: make(map[string]cngWatcher.GrpcStreamManager[*metadata.CollectionsManifest]),
 			refCount:              make(map[string]uint32),
 		},
 	}

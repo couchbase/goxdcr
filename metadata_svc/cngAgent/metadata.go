@@ -9,6 +9,7 @@
 package cngAgent
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -144,7 +145,7 @@ func (agent *RemoteCngAgent) UnRegisterBucketRefresh(bucketName string) error {
 
 	_, ok := agent.remoteDataProvider.refCount[bucketName]
 	if !ok {
-		return base.ErrorInvalidInput
+		return fmt.Errorf("unRegisterBucketRefresh() called for bucket %v but it is not registered", bucketName)
 	}
 
 	if agent.remoteDataProvider.refCount[bucketName] > uint32(0) {
