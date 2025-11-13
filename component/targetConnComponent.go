@@ -264,7 +264,7 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 				return
 			}
 
-			err = feed.UprOpen(r.UserAgent, 0, base.MaxDCPConnectionBufferSize)
+			err = feed.UprOpen(r.UserAgent, 0, base.UprFeedBufferSize)
 			if err != nil {
 				errMapMtx.Lock()
 				errMap[kv] = err

@@ -559,6 +559,7 @@ func (stats_mgr *StatisticsManager) logStats() error {
 			}
 		}
 	}
+	return nil
 }
 
 func (stats_mgr *StatisticsManager) updateStatsOnce() error {

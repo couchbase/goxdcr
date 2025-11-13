@@ -58,8 +58,8 @@ func NewAsyncComponentEventListenerImpl(id, fullTopic string, logger_context *lo
 	return al
 }
 
-func NewDefaultAsyncComponentEventListenerImpl(id, fullTopic string, logger_context *log.LoggerContext, componentEventsChanSize int) *AsyncComponentEventListenerImpl {
-	return NewAsyncComponentEventListenerImpl(id, fullTopic, logger_context, componentEventsChanSize)
+func NewDefaultAsyncComponentEventListenerImpl(id, fullTopic string, logger_context *log.LoggerContext) *AsyncComponentEventListenerImpl {
+	return NewAsyncComponentEventListenerImpl(id, fullTopic, logger_context, base.EventChanSize)
 }
 
 func (l *AsyncComponentEventListenerImpl) isClosed() bool {
@@ -204,10 +204,9 @@ func (l *AsyncComponentEventListenerImpl) Id() string {
 }
 
 func (l *AsyncComponentEventListenerImpl) PrintStatusSummary() {
-	eventChanLen, eventChanCap := len(l.event_chan), cap(l.event_chan)
-
-	if eventChanLen > (eventChanCap*base.ThresholdPercentForEventChanSizeLogging)/100 {
-		l.logger.Infof("%v chan size = %v ", l.id, eventChanLen)
+	event_chan_size := len(l.event_chan)
+	if event_chan_size > base.ThresholdForEventChanSizeLogging {
+		l.logger.Infof("%v chan size = %v ", l.id, event_chan_size)
 	}
 }
 

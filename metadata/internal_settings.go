@@ -71,6 +71,21 @@ const (
 	MaxNumOfMetakvRetriesKey = "MaxNumOfMetakvRetries"
 	// interval between metakv retries
 	RetryIntervalMetakvKey = "RetryIntervalMetakv"
+
+	// In order for dcp flow control to work correctly, the number of mutations in dcp buffer
+	// should be no larger than the size of the dcp data channel.
+	// This way we can ensure that gomemcached is never blocked on writing to data channel,
+	// and thus can always respond to dcp commands such as NOOP
+	// In other words, the following three parameters should be selected such that
+	// MinimumMutationSize * UprFeedDataChanLength >= UprFeedBufferSize
+	// where MinimumMutationSize is the minimum size of a SetMeta/DelMeta mutation,
+	// a DCP mutation has size 54 + key + body. 60 should be a safe value to use
+
+	// length of data channel between dcp nozzle and gomemcached
+	UprFeedDataChanLengthKey = "UprFeedDataChanLength"
+	// dcp flow control buffer size (number of bytes)
+	UprFeedBufferSizeKey = "UprFeedBufferSize"
+
 	// max retry for xmem operations like batch send, resend, etc.
 	XmemMaxRetryKey = "XmemMaxRetry"
 	// xmem write time out for writing to network connection (seconds)
@@ -316,6 +331,8 @@ var ReplSpecCheckIntervalConfig = &SettingsConfig{15, &Range{1, 3600}}
 var MemStatsLogIntervalConfig = &SettingsConfig{120, &Range{1, 3600}}
 var MaxNumOfMetakvRetriesConfig = &SettingsConfig{4, &Range{0, 100}}
 var RetryIntervalMetakvConfig = &SettingsConfig{500, &Range{1, 60000}}
+var UprFeedDataChanLengthConfig = &SettingsConfig{20000, &Range{1, math.MaxInt32}}
+var UprFeedBufferSizeConfig = &SettingsConfig{1024 * 1024, &Range{1, math.MaxInt32}}
 var XmemMaxRetryConfig = &SettingsConfig{5, &Range{0, 1000}}
 var XmemWriteTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
 var XmemReadTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
@@ -456,6 +473,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MemStatsLogIntervalKey:                        MemStatsLogIntervalConfig,
 	MaxNumOfMetakvRetriesKey:                      MaxNumOfMetakvRetriesConfig,
 	RetryIntervalMetakvKey:                        RetryIntervalMetakvConfig,
+	UprFeedDataChanLengthKey:                      UprFeedDataChanLengthConfig,
+	UprFeedBufferSizeKey:                          UprFeedBufferSizeConfig,
 	XmemMaxRetryKey:                               XmemMaxRetryConfig,
 	XmemWriteTimeoutKey:                           XmemWriteTimeoutConfig,
 	XmemReadTimeoutKey:                            XmemReadTimeoutConfig,
@@ -750,10 +769,3 @@ func (os *V1InternalSettings) HandleUpgrade() {
 		os.MaxCheckpointRecordsToReadVariableVB = MaxCheckpointRecordsToReadVariableVBConfig.defaultValue.(int)
 	}
 }
-
-const ( // deprecated internal-settings
-	DeprecatedUprFeedDataChanLengthKey = "UprFeedDataChanLength" // replaced by replication-setting DCPFeedDataChanLengthKey
-	DeprecatedUprFeedBufferSizeKey     = "UprFeedBufferSize"     // replaced by replication-setting DCPConnectionBufferSizeKey
-)
-
-var DeprecatedInternalSettings = [...]string{DeprecatedUprFeedDataChanLengthKey, DeprecatedUprFeedBufferSizeKey}
