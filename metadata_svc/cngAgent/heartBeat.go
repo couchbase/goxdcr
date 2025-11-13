@@ -268,6 +268,10 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			}
 			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts)
 			agent.heartbeatManager.heartbeatStats.update(response)
+
+			// delay the next heartbeat by atleast SrcHeartbeatMinInterval
+			minHBIntervalTicker.Reset(base.SrcHeartbeatMinInterval)
+
 		}
 	}
 }

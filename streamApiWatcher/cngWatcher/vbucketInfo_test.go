@@ -14,9 +14,7 @@ func TestVbucketInfoHandler_OnMessage(t *testing.T) {
 	assert := assert.New(t)
 
 	// Create handler
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewVbucketInfoHandler(doneCh, errorCh)
+	handler := NewVbucketInfoHandler()
 	var maxCas uint64 = 200
 	// Create test message
 	vbInfo1 := &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{
@@ -54,46 +52,31 @@ func TestVbucketInfoHandler_OnMessage(t *testing.T) {
 func TestVbucketInfoHandler_OnError(t *testing.T) {
 	assert := assert.New(t)
 
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewVbucketInfoHandler(doneCh, errorCh)
+	handler := NewVbucketInfoHandler()
 
 	testErr := fmt.Errorf("test error")
 
 	// Call OnError in goroutine
 	go handler.OnError(testErr)
 
-	// Check that error is received
-	select {
-	case err := <-errorCh:
-		assert.Equal(testErr, err)
-	case <-time.After(5 * time.Second):
-		assert.Fail("Expected error but timed out")
-	}
-
-	// Check that error channel is closed
-	select {
-	case _, open := <-errorCh:
-		assert.False(open, "Error channel should be closed")
-	case <-time.After(1 * time.Second):
-		assert.Fail("Error channel should be closed")
-	}
+	result, err := handler.GetResult()
+	assert.Error(err)
+	assert.Equal("error occured while fetching vbucket info: test error", err.Error())
+	assert.Nil(result)
 }
 
 // Test VbucketInfoHandler OnComplete functionality
 func TestVbucketInfoHandler_OnComplete(t *testing.T) {
 	assert := assert.New(t)
 
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewVbucketInfoHandler(doneCh, errorCh)
+	handler := NewVbucketInfoHandler()
 
 	// Call OnComplete in goroutine
 	go handler.OnComplete()
 
 	// Check that done channel is closed
 	select {
-	case <-doneCh:
+	case <-handler.cache.initDone:
 		// Success - channel is closed
 	case <-time.After(5 * time.Second):
 		assert.Fail("Expected done channel to be closed but timed out")
@@ -104,9 +87,7 @@ func TestVbucketInfoHandler_OnComplete(t *testing.T) {
 func TestVbucketInfoHandler_GetResultBlocking(t *testing.T) {
 	assert := assert.New(t)
 
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewVbucketInfoHandler(doneCh, errorCh)
+	handler := NewVbucketInfoHandler()
 
 	// GetResult should block until first message is received
 	done := make(chan bool)
@@ -119,7 +100,7 @@ func TestVbucketInfoHandler_GetResultBlocking(t *testing.T) {
 
 	// Wait a bit to ensure GetResult is blocking
 	select {
-	case <-done:
+	case <-handler.cache.initDone:
 		assert.Fail("GetResult should be blocking")
 	case <-time.After(100 * time.Millisecond):
 		// Good - GetResult is blocking
@@ -140,7 +121,7 @@ func TestVbucketInfoHandler_GetResultBlocking(t *testing.T) {
 
 	// Now GetResult should complete
 	select {
-	case <-done:
+	case <-handler.cache.initDone:
 		result, err := handler.GetResult()
 		assert.NoError(err)
 		assert.NotNil(result)
@@ -154,9 +135,7 @@ func TestVbucketInfoHandler_GetResultBlocking(t *testing.T) {
 func TestVbucketInfoHandler_GetResultError(t *testing.T) {
 	assert := assert.New(t)
 
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewVbucketInfoHandler(doneCh, errorCh)
+	handler := NewVbucketInfoHandler()
 
 	// Send an error to the error channel
 	go handler.OnError(fmt.Errorf("test error"))

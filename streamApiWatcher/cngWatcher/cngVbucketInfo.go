@@ -24,9 +24,12 @@ func (vbh *VbucketInfoHandler) OnError(err error) {
 
 // OnComplete is called when the stream completes successfully
 func (vbh *VbucketInfoHandler) OnComplete() {
+	// The GetVbucketInfo rpc a short lived streaming rpc. It streams vBucketInfo responses for
+	// all the requested vBucketIds. Once the server has streamed all the vBucketInfo responses, it
+	// closes the stream.
+	// Once the stream is closed, we close the initDone channel here to unblock any waiting GetResult() calls
+	// indicating the the result is now ready to consume.
 	close(vbh.cache.initDone)
-
-	close(vbh.doneCh)
 }
 
 // GetResult returns the result of the handler

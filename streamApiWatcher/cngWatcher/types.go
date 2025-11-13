@@ -12,9 +12,9 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-// GrpcStreamManagerIface defines an interface for managing/orchestrating streaming gRPC calls
+// GrpcStreamManager defines an interface for managing/orchestrating streaming gRPC calls
 // Mainly used to manage the lifecycle of long running streaming gRPC calls
-type GrpcStreamManagerIface[Resp any] interface {
+type GrpcStreamManager[Resp any] interface {
 	// Start starts the streaming gRPC call
 	Start()
 	// Stop stops the streaming gRPC call
@@ -23,7 +23,7 @@ type GrpcStreamManagerIface[Resp any] interface {
 	GetResult() Resp
 }
 
-// VBucketInfoResponse represents the response from the GetVbucketInfo stream
+// VBucketInfoResponse is a map of vBucket number to vBucket info response
 type VBucketInfoResponse map[uint32]*internal_xdcr_v1.GetVbucketInfoResponse_VbucketState
 
 // HandlerCache is a generic cache for storing the latest value received from the underlying stream
@@ -54,20 +54,6 @@ type VbucketInfoRequestOpts struct {
 type VbucketInfoHandler struct {
 	// cache denotes the cache of the VbucketInfoHandler
 	cache HandlerCache[VBucketInfoResponse]
-	// doneCh to signal that the stream has completed
-	doneCh chan struct{}
-	// errorCh to signal that an error has occurred
-	errorCh chan error
-}
-
-// WatchCollectionsHandler processes events from a gRPC WatchCollections stream.
-// It handles incoming messages, errors, and stream completion, caching the latest
-// response for retrieval.
-type WatchCollectionsHandler struct {
-	// cache denotes the cache of the WatchCollectionsHandler
-	cache HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]
-	// doneCh to signal that the stream has completed
-	doneCh chan struct{}
 	// errorCh to signal that an error has occurred
 	errorCh chan error
 }
@@ -76,10 +62,12 @@ type WatchCollectionsHandler struct {
 type WatchCollectionsOpState struct {
 	// active denotes whether the operation is active
 	active bool
-	// handler denotes the handler for the current active stream
-	handler *WatchCollectionsHandler
 	// activeOpCancelFunc denotes the cancellation function for the current active stream
 	activeOpCancelFunc context.CancelCauseFunc
+	// doneCh denotes the signal to indicate that the stream operation has completed
+	doneCh chan struct{}
+	// errorCh to signal that the stream rpc has terminated with an error
+	errorCh chan error
 	// mutex protects the opState from concurrent access
 	mutex sync.RWMutex
 }
@@ -93,12 +81,10 @@ type CollectionsWatcher struct {
 	getGrpcOpts func() *base.GrpcOptions
 	// opState denotes the state of the watch collections operation
 	opState WatchCollectionsOpState
+	// cache denotes the cache of the CollectionsWatcher
+	cache HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]
 	// finCh denotes the signal to terminate the watcher
 	finCh chan struct{}
-	// rpcInitDone denotes the signal to indicate that the stream request has been initialized
-	rpcInitDone chan struct{}
-	// rpcInitDoneOnce ensures that the rpcInitDone channel is closed only once
-	rpcInitDoneOnce sync.Once
 	// utils service here is used to issue the stream request
 	utils utils.CngUtils
 	// logger for logging
@@ -120,10 +106,13 @@ type CollectionsWatcher struct {
 }
 
 // NewCollectionsWatcher creates a new CollectionsWatcher
-func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptions, utils utils.CngUtils, waitTime time.Duration, backoffFactor int, maxWaitTime time.Duration, retry bool, logger *log.CommonLogger) GrpcStreamManagerIface[*metadata.CollectionsManifest] {
+func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptions, utils utils.CngUtils, waitTime time.Duration, backoffFactor int, maxWaitTime time.Duration, retry bool, logger *log.CommonLogger) GrpcStreamManager[*metadata.CollectionsManifest] {
 	return &CollectionsWatcher{
-		bucketName:    bucketName,
-		getGrpcOpts:   getGrpcOpts,
+		bucketName:  bucketName,
+		getGrpcOpts: getGrpcOpts,
+		cache: HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]{
+			initDone: make(chan struct{}),
+		},
 		utils:         utils,
 		waitTime:      waitTime,
 		backoffFactor: backoffFactor,
@@ -131,29 +120,16 @@ func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptio
 		retry:         retry,
 		logger:        logger,
 		finCh:         make(chan struct{}),
-		rpcInitDone:   make(chan struct{}),
 	}
 }
 
 // NewVbucketInfoHandler creates a new VbucketInfoHandler
-func NewVbucketInfoHandler(doneCh chan struct{}, errorCh chan error) *VbucketInfoHandler {
+func NewVbucketInfoHandler() *VbucketInfoHandler {
 	return &VbucketInfoHandler{
 		cache: HandlerCache[VBucketInfoResponse]{
 			currVal:  make(VBucketInfoResponse),
 			initDone: make(chan struct{}),
 		},
-		doneCh:  doneCh,
-		errorCh: errorCh,
-	}
-}
-
-// NewWatchCollectionsHandler is the constructor for WatchCollectionsHandler
-func NewWatchCollectionsHandler(doneCh chan struct{}, errorCh chan error) *WatchCollectionsHandler {
-	return &WatchCollectionsHandler{
-		cache: HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]{
-			initDone: make(chan struct{}),
-		},
-		doneCh:  doneCh,
-		errorCh: errorCh,
+		errorCh: make(chan error, 1),
 	}
 }

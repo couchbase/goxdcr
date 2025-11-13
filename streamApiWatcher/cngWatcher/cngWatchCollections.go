@@ -11,41 +11,52 @@ import (
 )
 
 // OnMessage is called when a new message is received from the stream
-func (wch *WatchCollectionsHandler) OnMessage(msg *internal_xdcr_v1.WatchCollectionsResponse) {
-	wch.cache.mutex.Lock()
-	defer wch.cache.mutex.Unlock()
+func (cw *CollectionsWatcher) OnMessage(msg *internal_xdcr_v1.WatchCollectionsResponse) {
+	cw.cache.mutex.Lock()
+	defer cw.cache.mutex.Unlock()
 
-	wch.cache.currVal = msg
+	cw.cache.currVal = msg
 
 	// When the first message is received, we close the initDone channel
-	wch.cache.once.Do(func() {
-		close(wch.cache.initDone)
+	cw.cache.once.Do(func() {
+		close(cw.cache.initDone)
 	})
 }
 
 // OnError is called if an error occurs during streaming
-func (wch *WatchCollectionsHandler) OnError(err error) {
-	wch.errorCh <- err
+func (cw *CollectionsWatcher) OnError(err error) {
+	cw.opState.mutex.RLock()
+	defer cw.opState.mutex.RUnlock()
 
-	// Close initDone to unblock any waiting GetResult() calls
-	wch.cache.once.Do(func() {
-		close(wch.cache.initDone)
-	})
+	if !cw.opState.active {
+		// this should never happen
+		cw.logger.Errorf("CollectionsWatcher: OnError() called for bucket %v when the operation is not active", cw.bucketName)
+		return
+	}
 
-	close(wch.errorCh)
+	if cw.opState.errorCh != nil {
+		cw.opState.errorCh <- err
+		close(cw.opState.errorCh)
+	}
 }
 
 // OnComplete is called when the stream completes successfully
-func (wch *WatchCollectionsHandler) OnComplete() {
-	close(wch.doneCh)
-}
+func (cw *CollectionsWatcher) OnComplete() {
+	cw.opState.mutex.RLock()
+	defer cw.opState.mutex.RUnlock()
 
-// GetResult returns the result of the handler
-func (wch *WatchCollectionsHandler) GetResult() *internal_xdcr_v1.WatchCollectionsResponse {
-	<-wch.cache.initDone
-	wch.cache.mutex.RLock()
-	defer wch.cache.mutex.RUnlock()
-	return wch.cache.currVal
+	if !cw.opState.active {
+		// this should never happen
+		cw.logger.Errorf("CollectionsWatcher: OnComplete() called for bucket %v when the operation is not active", cw.bucketName)
+		return
+	}
+
+	cw.logger.Infof("watch collections stream for bucket %v completed", cw.bucketName)
+
+	if cw.opState.doneCh != nil {
+		// close the done channel to denote that the stream operation has completed
+		close(cw.opState.doneCh)
+	}
 }
 
 var ErrWatchCollectionsAlreadyActive error = errors.New("watch collections stream already active")
@@ -59,13 +70,12 @@ func (opState *WatchCollectionsOpState) beginOp(ctx context.Context) (context.Co
 	}
 
 	opState.active = true
+	opState.doneCh = make(chan struct{})
+	opState.errorCh = make(chan error, 1)
 	cancelContext, cancelWithCause := context.WithCancelCause(ctx)
 	opState.activeOpCancelFunc = cancelWithCause
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	opState.handler = NewWatchCollectionsHandler(doneCh, errorCh)
 
-	return cancelContext, doneCh, errorCh, nil
+	return cancelContext, opState.doneCh, opState.errorCh, nil
 }
 
 // cancelOp cancels the watch collections operation
@@ -91,7 +101,8 @@ func (opState *WatchCollectionsOpState) endOp() {
 
 	opState.active = false
 	opState.activeOpCancelFunc = nil
-	opState.handler = nil
+	opState.doneCh = nil
+	opState.errorCh = nil
 }
 
 // getStreamRequest constructs the gRPC request for the WatchCollections operation
@@ -121,12 +132,7 @@ func (cw *CollectionsWatcher) run() {
 		}
 
 		streamReq := cw.getStreamRequest(ctx, cw.bucketName)
-		cw.opState.mutex.RLock()
-		go cw.utils.CngWatchCollections(cw.cngConn.Client(), streamReq, cw.opState.handler)
-		cw.opState.mutex.RUnlock()
-		cw.rpcInitDoneOnce.Do(func() {
-			close(cw.rpcInitDone)
-		})
+		go cw.utils.CngWatchCollections(cw.cngConn.Client(), streamReq, cw)
 
 		select {
 		case <-cw.finCh:
@@ -187,22 +193,22 @@ func (cw *CollectionsWatcher) Stop() {
 }
 
 // GetResult retrieves the latest manifest from the CollectionsWatcher.
-// It returns nil if the watcher is inactive — for example, after a failed stream closes and before a new one starts,
-// or if the cache was never initialized and the stream failed.
-// When the watcher is active, it returns the latest manifest.
+// If the CollectionsWatcher has not received any manifest yet, it returns the default manifest.
 func (cw *CollectionsWatcher) GetResult() *metadata.CollectionsManifest {
-	<-cw.rpcInitDone
-
-	cw.opState.mutex.RLock()
-	defer cw.opState.mutex.RUnlock()
-	if !cw.opState.active {
-		return nil
+	var resp *internal_xdcr_v1.WatchCollectionsResponse
+	select {
+	case <-cw.cache.initDone:
+		cw.cache.mutex.RLock()
+		resp = cw.cache.currVal
+		cw.cache.mutex.RUnlock()
+	default:
+		// if we haven't received the first message yet, return the default manifest
+		cw.logger.Infof("CollectionsWatcher for bucket %v has not received any manifest yet, returning default manifest", cw.bucketName)
+		ret := metadata.NewDefaultCollectionsManifest()
+		return &ret
 	}
 
-	resp := cw.opState.handler.GetResult()
-	if resp == nil {
-		return nil
-	}
+	// load the manifest from the WatchCollectionsResponse
 	manifest := &metadata.CollectionsManifest{}
 	manifest.LoadFromWatchCollectionsResp(resp)
 	return manifest

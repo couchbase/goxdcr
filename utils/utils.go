@@ -3823,6 +3823,7 @@ func grpcServerStreamCall[Req, Resp any](
 ) {
 	stream, err := rpc(request.Context, request.Request)
 	if err != nil {
+		err = fmt.Errorf("error calling rpc: %w", err)
 		handler.OnError(err)
 		return
 	}
@@ -3831,6 +3832,7 @@ func grpcServerStreamCall[Req, Resp any](
 	// A receipt of the header indicates that the server has accepted the request and
 	// is ready to send messages
 	if _, err := stream.Header(); err != nil {
+		err = fmt.Errorf("error reading stream header: %w", err)
 		handler.OnError(err)
 		return
 	}
@@ -3847,14 +3849,19 @@ func grpcServerStreamCall[Req, Resp any](
 				handler.OnComplete()
 				return
 			}
-			if errors.Is(err, context.Canceled) {
+			// Check for cancellation - gRPC wraps context.Canceled in a status error
+			st, _ := status.FromError(err)
+			if strings.Contains(st.Message(), context.Canceled.Error()) || st.Code() == codes.Canceled {
 				// Check if the cancellation was caused by user action
 				if isUserTriggeredCancellation(context.Cause(streamCtx)) {
+					// A user-initiated cancellation occurs when XDCR intentionally ends the stream—for example,
+					//  when all replications for the target bucket are deleted and the stream is no longer needed.
+					// This should be treated as a successful completion of the stream.
 					handler.OnComplete()
 					return
 				}
 			}
-			// Other errors (timeout, connection breakdown, application errors etc.)
+			// any other errors (timeout, connection breakdown, application errors etc.) should be treated as errors on the client side and retried.
 			handler.OnError(err)
 			return
 		}

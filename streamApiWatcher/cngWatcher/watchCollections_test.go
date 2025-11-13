@@ -45,127 +45,6 @@ func getTestGrpcOptions() *base.GrpcOptions {
 	}
 }
 
-// Test WatchCollectionsHandler OnMessage functionality
-func TestWatchCollectionsHandler_OnMessage(t *testing.T) {
-	assert := assert.New(t)
-
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewWatchCollectionsHandler(doneCh, errorCh)
-
-	// Create test message
-	msg := &internal_xdcr_v1.WatchCollectionsResponse{
-		ManifestUid: 123,
-		Scopes: []*internal_xdcr_v1.WatchCollectionsResponse_Scope{
-			{
-				ScopeId:   456,
-				ScopeName: "_default",
-				Collections: []*internal_xdcr_v1.WatchCollectionsResponse_Collection{
-					{
-						CollectionId:   789,
-						CollectionName: "_default",
-					},
-				},
-			},
-		},
-	}
-
-	// Call OnMessage
-	handler.OnMessage(msg)
-
-	// Get result and verify
-	result := handler.GetResult()
-	assert.NotNil(result)
-	assert.Equal(msg, result)
-}
-
-// Test WatchCollectionsHandler OnError functionality
-func TestWatchCollectionsHandler_OnError(t *testing.T) {
-	assert := assert.New(t)
-
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewWatchCollectionsHandler(doneCh, errorCh)
-
-	testErr := fmt.Errorf("watch collections error")
-
-	// Call OnError in goroutine
-	go handler.OnError(testErr)
-
-	// Check that error is received
-	select {
-	case err := <-errorCh:
-		assert.Equal(testErr, err)
-	case <-time.After(5 * time.Second):
-		assert.Fail("Expected error but timed out")
-	}
-}
-
-// Test WatchCollectionsHandler OnComplete functionality
-func TestWatchCollectionsHandler_OnComplete(t *testing.T) {
-	assert := assert.New(t)
-
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewWatchCollectionsHandler(doneCh, errorCh)
-
-	// Call OnComplete in goroutine
-	go handler.OnComplete()
-
-	// Check that done channel is closed
-	select {
-	case <-doneCh:
-		// Success - channel is closed
-	case <-time.After(5 * time.Second):
-		assert.Fail("Expected done channel to be closed but timed out")
-	}
-}
-
-// Test WatchCollectionsHandler first message closes initDone
-func TestWatchCollectionsHandler_FirstMessageInitDone(t *testing.T) {
-	assert := assert.New(t)
-
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewWatchCollectionsHandler(doneCh, errorCh)
-
-	// GetResult should block until first message
-	done := make(chan bool)
-	go func() {
-		result := handler.GetResult()
-		assert.NotNil(result)
-		done <- true
-	}()
-
-	// Ensure GetResult is blocking
-	select {
-	case <-done:
-		assert.Fail("GetResult should be blocking")
-	case <-time.After(100 * time.Millisecond):
-		// Good
-	}
-
-	// Send first message
-	msg1 := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 1}
-	handler.OnMessage(msg1)
-
-	// GetResult should now complete
-	select {
-	case <-done:
-		// Success
-	case <-time.After(5 * time.Second):
-		assert.Fail("GetResult should have completed")
-	}
-
-	// Send second message - should update cache
-	msg2 := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 2}
-	handler.OnMessage(msg2)
-
-	// GetResult should return latest message immediately
-	result := handler.GetResult()
-	assert.Equal(msg2, result)
-}
-
 // Test CollectionsWatcher construction
 func TestCollectionsWatcher_NewCollectionsWatcher(t *testing.T) {
 	assert := assert.New(t)
@@ -198,7 +77,7 @@ func TestCollectionsWatcher_StartStopMock(t *testing.T) {
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
 		// Simulate stream behavior
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 
 		// Send a test message
 		go func() {
@@ -252,7 +131,7 @@ func TestCollectionsWatcher_ErrorHandling(t *testing.T) {
 	// Mock the CngWatchCollections method to fail first, then succeed
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 		callCount++
 
 		if callCount == 1 {
@@ -315,7 +194,7 @@ func TestCollectionsWatcher_UserInitiatedCancellation(t *testing.T) {
 	// Mock the CngWatchCollections method to run successfully but not complete immediately
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 
 		// Send a message and keep the stream running
 		go func() {
@@ -370,7 +249,7 @@ func TestCollectionsWatcher_CancellationDuringRetryWait(t *testing.T) {
 	// Mock the CngWatchCollections method to always fail
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 
 		// Always fail immediately to trigger retry logic
 		go func() {
@@ -383,7 +262,7 @@ func TestCollectionsWatcher_CancellationDuringRetryWait(t *testing.T) {
 		bucketName,
 		getTestGrpcOptions,
 		mockUtils,
-		500*time.Millisecond, // Longer wait time so we can cancel during retry wait
+		1*time.Second, // Longer wait time so we can cancel during retry wait
 		2,
 		2*time.Second,
 		true,
@@ -408,8 +287,8 @@ func TestCollectionsWatcher_CancellationDuringRetryWait(t *testing.T) {
 	mockUtils.AssertExpectations(t)
 }
 
-// Test race condition: GetResult() called when watcher is inactive (after stream fails, before retry)
-func TestCollectionsWatcher_GetResult_RaceCondition_InactiveWatcher(t *testing.T) {
+// Test race condition: GetResult() called when stream is in retry wait (after stream fails, before retry)
+func TestCollectionsWatcher_GetResult_RaceCondition_RetryWait(t *testing.T) {
 	assert := assert.New(t)
 
 	mockUtils := setupMockUtils()
@@ -419,11 +298,11 @@ func TestCollectionsWatcher_GetResult_RaceCondition_InactiveWatcher(t *testing.T
 	// Mock to fail initially, then succeed but not immediately
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 		failureCount++
 
 		if failureCount == 1 {
-			// First call fails immediately - this will cause watcher to become inactive
+			// First call fails immediately - this will cause stream to retry
 			go func() {
 				time.Sleep(10 * time.Millisecond)
 				handler.OnError(fmt.Errorf("initial connection error"))
@@ -457,9 +336,10 @@ func TestCollectionsWatcher_GetResult_RaceCondition_InactiveWatcher(t *testing.T
 	time.Sleep(50 * time.Millisecond)
 
 	// During this window, the watcher should be inactive (after failure, before retry connects)
-	// GetResult should return nil because watcher is inactive
+	// GetResult should return default manifest because no message has been received yet
 	result := watcher.GetResult()
-	assert.Nil(result, "GetResult should return nil when watcher is inactive between stream failure and retry")
+	assert.NotNil(result, "GetResult should return default manifest when no message received yet")
+	assert.Equal(uint64(0), result.Uid(), "Default manifest should have UID 0")
 
 	// Wait for retry to succeed
 	time.Sleep(300 * time.Millisecond)
@@ -484,7 +364,7 @@ func TestCollectionsWatcher_GetResult_RaceCondition_CacheNeverInitialized(t *tes
 	// Mock to always fail before sending any message
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 		// Fail immediately without sending any message (cache never initialized)
 		go func() {
 			time.Sleep(10 * time.Millisecond)
@@ -508,11 +388,12 @@ func TestCollectionsWatcher_GetResult_RaceCondition_CacheNeverInitialized(t *tes
 	// Wait for failure to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	// GetResult should return nil because:
+	// GetResult should return default manifest because:
 	// 1. The cache was never initialized (no message was ever received)
 	// 2. The stream failed
 	result := watcher.GetResult()
-	assert.Nil(result, "GetResult should return nil when cache was never initialized due to early stream failure")
+	assert.NotNil(result, "GetResult should return default manifest when cache was never initialized")
+	assert.Equal(uint64(0), result.Uid(), "Default manifest should have UID 0")
 
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
@@ -528,7 +409,7 @@ func TestCollectionsWatcher_GetResult_ConcurrentAccess(t *testing.T) {
 	callCount := 0
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 		callCount++
 
 		go func() {
@@ -575,19 +456,68 @@ func TestCollectionsWatcher_GetResult_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Some calls might return nil (during inactive periods), others might return manifest
+	// Some calls might return default manifest (during inactive periods), others might return the actual manifest
 	// The important thing is that there are no race conditions or panics
 	var successfulResults int
 	for _, result := range results {
-		if result != nil {
+		assert.NotNil(result, "GetResult should always return a manifest (default or actual)")
+		if result.Uid() == 777 {
 			successfulResults++
-			assert.Equal(uint64(777), result.Uid())
 		}
 	}
 
 	// At least some results should be successful once the stream stabilizes
-	assert.True(successfulResults > 0, "At least some concurrent GetResult calls should succeed")
+	assert.True(successfulResults > 0, "At least some concurrent GetResult calls should return the actual manifest")
 
+	watcher.Stop()
+	mockUtils.AssertExpectations(t)
+}
+
+func TestCollectionsWatcher_GetResult_OnRetryWait(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("retryWaitTest", log.DefaultLoggerContext)
+
+	failureCount := 0
+	// Mock to fail
+	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Run(func(args mock.Arguments) {
+		handler := args.Get(2).(*CollectionsWatcher)
+		failureCount++
+		time.Sleep(10 * time.Millisecond)
+		handler.OnError(fmt.Errorf("initial connection error"))
+	})
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		100*time.Millisecond, // Wait time for retry
+		2,
+		1*time.Second,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Initialize the cache with a message
+	msg := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 999}
+	watcher.OnMessage(msg)
+
+	// Start the watcher - the underlying stream will constantly fail and retry
+	watcher.Start()
+
+	// Wait for the stream to be retried before getting the result
+	time.Sleep(3 * time.Second)
+
+	// assert the stream has been retried
+	assert.Greater(failureCount, 1)
+
+	// assert the result is the message we initialized the cache with
+	result := watcher.GetResult()
+	assert.Equal(uint64(999), result.Uid())
+
+	// stop the watcher
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
 }
@@ -640,49 +570,6 @@ func TestWatchCollectionsOpState_EndOp_NotActive(t *testing.T) {
 	assert.False(t, opState.active)
 }
 
-// Test handler GetResult returning nil in CollectionsWatcher.GetResult()
-func TestCollectionsWatcher_GetResult_HandlerReturnsNil(t *testing.T) {
-	assert := assert.New(t)
-
-	mockUtils := setupMockUtils()
-	logger := log.NewLogger("handlerNilTest", log.DefaultLoggerContext)
-
-	// Create a custom handler that will return nil from GetResult
-	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
-
-		// Trigger initDone without setting currVal (simulate error scenario)
-		go func() {
-			time.Sleep(10 * time.Millisecond)
-			handler.OnError(fmt.Errorf("error after init"))
-		}()
-	})
-
-	watcher := NewCollectionsWatcher(
-		bucketName,
-		getTestGrpcOptions,
-		mockUtils,
-		500*time.Millisecond,
-		2,
-		1*time.Second,
-		true,
-		logger,
-	).(*CollectionsWatcher)
-
-	watcher.Start()
-
-	// Wait for stream to be established and fail
-	time.Sleep(100 * time.Millisecond)
-
-	// The handler's GetResult() returns nil, so watcher's GetResult() should return nil
-	result := watcher.GetResult()
-	assert.Nil(result, "GetResult should return nil when handler returns nil response")
-
-	watcher.Stop()
-	mockUtils.AssertExpectations(t)
-}
-
 // Test retry behavior - watcher should not retry after first error
 func TestCollectionsWatcher_Retry_False_NoRetryOnError(t *testing.T) {
 	assert := assert.New(t)
@@ -693,7 +580,7 @@ func TestCollectionsWatcher_Retry_False_NoRetryOnError(t *testing.T) {
 	callCount := 0
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 		callCount++
 
 		// Always fail to test retry behavior
@@ -726,55 +613,6 @@ func TestCollectionsWatcher_Retry_False_NoRetryOnError(t *testing.T) {
 	mockUtils.AssertExpectations(t)
 }
 
-// Test concurrent Start/Stop operations
-func TestCollectionsWatcher_ConcurrentStartStop(t *testing.T) {
-	mockUtils := setupMockUtils()
-	logger := log.NewLogger("concurrentStartStopTest", log.DefaultLoggerContext)
-
-	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
-
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			msg := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 555}
-			handler.OnMessage(msg)
-			time.Sleep(200 * time.Microsecond)
-			handler.OnComplete()
-		}()
-	})
-
-	watcher := NewCollectionsWatcher(
-		bucketName,
-		getTestGrpcOptions,
-		mockUtils,
-		50*time.Millisecond,
-		2,
-		1*time.Second,
-		true,
-		logger,
-	).(*CollectionsWatcher)
-
-	// Launch multiple Start operations concurrently
-	// Only one should actually start the watcher
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			watcher.Start()
-		}()
-	}
-
-	time.Sleep(50 * time.Millisecond)
-	watcher.Stop()
-
-	wg.Wait()
-
-	// Should not panic and should handle concurrent operations gracefully
-	mockUtils.AssertExpectations(t)
-}
-
 // Test minDuration helper function
 func TestMinDuration(t *testing.T) {
 	assert := assert.New(t)
@@ -784,51 +622,6 @@ func TestMinDuration(t *testing.T) {
 	assert.Equal(1*time.Second, minDuration(2*time.Second, 1*time.Second))
 	assert.Equal(1*time.Second, minDuration(1*time.Second, 1*time.Second))
 	assert.Equal(0*time.Second, minDuration(0*time.Second, 1*time.Second))
-}
-
-// Test WatchCollectionsHandler OnError closes initDone
-func TestWatchCollectionsHandler_OnError_ClosesInitDone(t *testing.T) {
-	assert := assert.New(t)
-
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 1)
-	handler := NewWatchCollectionsHandler(doneCh, errorCh)
-
-	// GetResult should block until initDone is closed
-	done := make(chan bool)
-	go func() {
-		result := handler.GetResult()
-		// Result should be nil since no message was sent
-		assert.Nil(result)
-		done <- true
-	}()
-
-	// Ensure GetResult is blocking
-	select {
-	case <-done:
-		assert.Fail("GetResult should be blocking")
-	case <-time.After(50 * time.Millisecond):
-		// Good
-	}
-
-	// OnError should close initDone and unblock GetResult
-	go handler.OnError(fmt.Errorf("test error"))
-
-	// GetResult should now complete
-	select {
-	case <-done:
-		// Success
-	case <-time.After(1 * time.Second):
-		assert.Fail("GetResult should have completed after OnError")
-	}
-
-	// Verify error was sent
-	select {
-	case err := <-errorCh:
-		assert.Error(err)
-	default:
-		assert.Fail("Error should have been sent to errorCh")
-	}
 }
 
 // Test LoadFromWatchCollectionsResp path with actual manifest data
@@ -841,7 +634,7 @@ func TestCollectionsWatcher_GetResult_WithManifestData(t *testing.T) {
 	// Mock with realistic manifest data
 	mockUtils.On("CngWatchCollections", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Run(func(args mock.Arguments) {
-		handler := args.Get(2).(*WatchCollectionsHandler)
+		handler := args.Get(2).(*CollectionsWatcher)
 
 		go func() {
 			time.Sleep(50 * time.Millisecond)
@@ -903,4 +696,458 @@ func TestCollectionsWatcher_GetResult_WithManifestData(t *testing.T) {
 
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
+}
+
+// Test CollectionsWatcher OnMessage method
+func TestCollectionsWatcher_OnMessage(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("testOnMessage", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Create test message
+	msg := &internal_xdcr_v1.WatchCollectionsResponse{
+		ManifestUid: 123,
+		Scopes: []*internal_xdcr_v1.WatchCollectionsResponse_Scope{
+			{
+				ScopeId:   456,
+				ScopeName: "_default",
+			},
+		},
+	}
+
+	// Call OnMessage
+	watcher.OnMessage(msg)
+
+	// Verify the message is cached
+	select {
+	case <-watcher.cache.initDone:
+		// initDone should be closed
+	case <-time.After(1 * time.Second):
+		assert.Fail("initDone should be closed after OnMessage")
+	}
+
+	watcher.cache.mutex.RLock()
+	assert.Equal(msg, watcher.cache.currVal)
+	watcher.cache.mutex.RUnlock()
+}
+
+// Test CollectionsWatcher OnError method
+func TestCollectionsWatcher_OnError(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("testOnError", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	testErr := fmt.Errorf("test error")
+
+	// Initialize the opState with an errorCh
+	watcher.opState.mutex.Lock()
+	watcher.opState.active = true
+	watcher.opState.errorCh = make(chan error, 1)
+	errorCh := watcher.opState.errorCh
+	watcher.opState.mutex.Unlock()
+
+	// Call OnError in goroutine
+	go watcher.OnError(testErr)
+
+	// Check that error is received
+	select {
+	case err := <-errorCh:
+		assert.Equal(testErr, err)
+	case <-time.After(1 * time.Second):
+		assert.Fail("Expected error but timed out")
+	}
+}
+
+// Test CollectionsWatcher OnComplete method
+func TestCollectionsWatcher_OnComplete(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("testOnComplete", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Initialize the opState with a doneCh
+	watcher.opState.mutex.Lock()
+	watcher.opState.active = true
+	watcher.opState.doneCh = make(chan struct{})
+	doneCh := watcher.opState.doneCh
+	watcher.opState.mutex.Unlock()
+
+	// Call OnComplete in goroutine
+	go watcher.OnComplete()
+
+	// Check that done channel is closed
+	select {
+	case <-doneCh:
+		// Success - channel is closed
+	case <-time.After(1 * time.Second):
+		assert.Fail("Expected done channel to be closed but timed out")
+	}
+}
+
+// Test race condition: Concurrent OnMessage calls
+func TestCollectionsWatcher_OnMessage_ConcurrentAccess(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("concurrentOnMessage", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Launch multiple concurrent OnMessage calls
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			msg := &internal_xdcr_v1.WatchCollectionsResponse{
+				ManifestUid: uint32(idx),
+			}
+			watcher.OnMessage(msg)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify no race conditions occurred and cache was updated
+	watcher.cache.mutex.RLock()
+	assert.NotNil(watcher.cache.currVal)
+	watcher.cache.mutex.RUnlock()
+
+	// Verify initDone is closed
+	select {
+	case <-watcher.cache.initDone:
+		// Success
+	default:
+		assert.Fail("initDone should be closed after concurrent OnMessage calls")
+	}
+}
+
+// Test race condition: Concurrent GetResult calls
+func TestCollectionsWatcher_GetResult_RaceDetection(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("getResultRace", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Send a message to initialize the cache
+	msg := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 555}
+	watcher.OnMessage(msg)
+
+	// Launch multiple concurrent GetResult calls
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := watcher.GetResult()
+			assert.NotNil(result)
+			assert.Equal(uint64(555), result.Uid())
+		}()
+	}
+
+	wg.Wait()
+	// If no race condition, test passes
+}
+
+// Test race condition: Concurrent GetResult and OnMessage
+func TestCollectionsWatcher_GetResult_OnMessage_Concurrent(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("getResultOnMessageRace", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Send initial message
+	msg := &internal_xdcr_v1.WatchCollectionsResponse{ManifestUid: 100}
+	watcher.OnMessage(msg)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	// Launch concurrent OnMessage calls
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 25; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				newMsg := &internal_xdcr_v1.WatchCollectionsResponse{
+					ManifestUid: uint32(101 + idx),
+				}
+				watcher.OnMessage(newMsg)
+			}(i)
+		}
+	}()
+
+	// Launch concurrent GetResult calls
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 25; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				result := watcher.GetResult()
+				assert.NotNil(result)
+			}()
+		}
+	}()
+	wg.Wait()
+
+	// Verify no race condition occurred and we got a valid manifest
+	// Due to concurrent execution, we can't predict which message will be last
+	// but it should be one of the messages we sent (UID between 100 and 124)
+	result := watcher.GetResult()
+	assert.NotNil(result)
+	uid := result.Uid()
+	assert.Greater(uid, uint64(100), "UID should be at least 100")
+	assert.LessOrEqual(uid, uint64(124), "UID should be at most 124")
+
+	// If no race condition, test passes
+}
+
+// Test race condition: OpState concurrent access
+func TestWatchCollectionsOpState_ConcurrentAccess(t *testing.T) {
+	assert := assert.New(t)
+
+	opState := &WatchCollectionsOpState{}
+
+	var wg sync.WaitGroup
+
+	// First, start an operation
+	ctx, doneCh, errorCh, err := opState.beginOp(context.Background())
+	assert.NoError(err)
+	assert.NotNil(ctx)
+	assert.NotNil(doneCh)
+	assert.NotNil(errorCh)
+
+	// Launch concurrent cancelOp calls
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			opState.cancelOp()
+		}()
+	}
+
+	// Launch concurrent status reads
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			opState.mutex.RLock()
+			_ = opState.active
+			opState.mutex.RUnlock()
+		}()
+	}
+
+	wg.Wait()
+
+	// Clean up
+	opState.endOp()
+
+	// Verify state is clean
+	assert.False(opState.active)
+}
+
+// Test GetResult returns default manifest immediately without blocking
+func TestCollectionsWatcher_GetResult_DefaultManifest(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("defaultManifestTest", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// GetResult should return default manifest immediately without blocking
+	done := make(chan bool)
+	go func() {
+		result := watcher.GetResult()
+		assert.NotNil(result)
+		assert.Equal(uint64(0), result.Uid())
+		done <- true
+	}()
+
+	// Should complete quickly without blocking
+	select {
+	case <-done:
+		// Success - returned default manifest immediately
+	case <-time.After(100 * time.Millisecond):
+		assert.Fail("GetResult should return default manifest immediately")
+	}
+}
+
+// Test that multiple GetResult calls without messages return default manifest
+func TestCollectionsWatcher_GetResult_MultipleCallsDefaultManifest(t *testing.T) {
+	assert := assert.New(t)
+
+	mockUtils := setupMockUtils()
+	logger := log.NewLogger("multipleDefaultManifest", log.DefaultLoggerContext)
+
+	watcher := NewCollectionsWatcher(
+		bucketName,
+		getTestGrpcOptions,
+		mockUtils,
+		defaultWaitTime,
+		backoffFactor,
+		maxWaitTime,
+		true,
+		logger,
+	).(*CollectionsWatcher)
+
+	// Multiple calls should all return default manifest
+	for i := 0; i < 5; i++ {
+		result := watcher.GetResult()
+		assert.NotNil(result)
+		assert.Equal(uint64(0), result.Uid())
+	}
+}
+
+// Test race condition: beginOp and endOp concurrent access
+func TestWatchCollectionsOpState_BeginEnd_ConcurrentAccess(t *testing.T) {
+	assert := assert.New(t)
+
+	opState := &WatchCollectionsOpState{}
+
+	// Start an operation
+	ctx, doneCh, errorCh, err := opState.beginOp(context.Background())
+	assert.NoError(err)
+	assert.NotNil(ctx)
+	assert.NotNil(doneCh)
+	assert.NotNil(errorCh)
+
+	var wg sync.WaitGroup
+
+	// Try to begin another operation (should fail)
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _, err := opState.beginOp(context.Background())
+			assert.Error(err)
+			assert.Equal(ErrWatchCollectionsAlreadyActive, err)
+		}()
+	}
+
+	wg.Wait()
+
+	// End the operation
+	opState.endOp()
+	assert.False(opState.active)
+
+	// Now beginOp should succeed
+	ctx2, doneCh2, errorCh2, err2 := opState.beginOp(context.Background())
+	assert.NoError(err2)
+	assert.NotNil(ctx2)
+	assert.NotNil(doneCh2)
+	assert.NotNil(errorCh2)
+
+	opState.endOp()
+}
+
+// Test context cancellation propagation
+func TestCollectionsWatcher_ContextCancellation(t *testing.T) {
+	assert := assert.New(t)
+
+	opState := &WatchCollectionsOpState{}
+
+	// Begin operation
+	ctx, doneCh, errorCh, err := opState.beginOp(context.Background())
+	assert.NoError(err)
+	assert.NotNil(ctx)
+	assert.NotNil(doneCh)
+	assert.NotNil(errorCh)
+
+	// Cancel the operation
+	opState.cancelOp()
+
+	// Wait a bit for cancellation to propagate
+	time.Sleep(50 * time.Millisecond)
+
+	// Context should be cancelled
+	select {
+	case <-ctx.Done():
+		// Success - context is cancelled
+		cause := context.Cause(ctx)
+		assert.Equal(base.ErrorUserInitiatedStreamRpcCancellation, cause)
+	default:
+		assert.Fail("Context should be cancelled after cancelOp")
+	}
+
+	// Clean up
+	opState.endOp()
 }

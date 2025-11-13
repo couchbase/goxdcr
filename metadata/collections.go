@@ -475,14 +475,16 @@ func (c *CollectionsManifest) LoadFromWatchCollectionsResp(resp *internal_xdcr_v
 	c.uid = uint64(resp.GetManifestUid())
 	c.scopes = make(ScopesMap)
 	for _, scopeVal := range resp.GetScopes() {
-		scope := Scope{}
-		scope.Uid = scopeVal.GetScopeId()
-		scope.Name = scopeVal.GetScopeName()
-		scope.Collections = make(CollectionsMap)
+		scope := Scope{
+			Uid:         scopeVal.GetScopeId(),
+			Name:        scopeVal.GetScopeName(),
+			Collections: make(CollectionsMap),
+		}
 		for _, collVal := range scopeVal.GetCollections() {
-			collection := Collection{}
-			collection.Uid = collVal.GetCollectionId()
-			collection.Name = collVal.GetCollectionName()
+			collection := Collection{
+				Uid:  collVal.GetCollectionId(),
+				Name: collVal.GetCollectionName(),
+			}
 			scope.Collections[collection.Name] = collection
 		}
 		c.scopes[scope.Name] = scope
