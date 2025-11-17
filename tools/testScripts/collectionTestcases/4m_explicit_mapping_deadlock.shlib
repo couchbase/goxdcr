@@ -60,7 +60,7 @@ function cleanupTestCaseInternalSettings {
 
 function runTestCase {
 	echo "==============================================================================="
-	echo "Running explicit mapping test case - add new mapping when pipeline is suspended"
+	echo "Running explicit mapping test case - add new mapping when vbtaskdone is slow"
 	echo "==============================================================================="
 	testForClusterRun
 	if (($? != 0)); then
