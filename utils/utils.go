@@ -47,6 +47,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbaselabs/gojsonsm"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
