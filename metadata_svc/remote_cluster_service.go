@@ -28,6 +28,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 	"github.com/couchbase/goxdcr/v8/utils"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"google.golang.org/grpc/codes"
@@ -4561,8 +4562,58 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 
 	if agentDataProvider, ok := agent.(RemoteClusterAgentBucketOps); ok {
 		return agentDataProvider.GetBucketInfoGetter(bucketName)
+	} else {
+		// Darshan TODO: This is just a placeholder logic until bucketTopologySvc is changed to support CNG
+		// Will be removed after bucketTopologySvc is changed to support CNG
+		return func() (map[string]interface{}, bool, string, error) {
+			// targetBucketInfo, useExternal, connStr, nil
+			ref, _ := agent.GetReferenceClone(false)
+			connStr, err := ref.MyConnectionStr()
+			if err != nil {
+				return nil, false, "", err
+			}
+			useExternal, err := agent.UsesAlternateAddress()
+			if err != nil {
+				return nil, false, "", err
+			}
+			grpcOpts, _ := base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return ref.Credentials.Clone() }, base.DeepCopyByteArray(ref.Certificates()))
+			cngConn, err := base.NewCngConn(grpcOpts)
+			if err != nil {
+				return nil, false, "", err
+			}
+			defer cngConn.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
+			defer cancel()
+			request := &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
+				Context: ctx,
+				Request: &internal_xdcr_v1.GetBucketInfoRequest{
+					BucketName: bucketName,
+				},
+			}
+			response := service.utils.CngGetBucketInfo(cngConn.Client(), request)
+			if response.Code() != codes.OK {
+				return nil, false, "", fmt.Errorf("failed to get bucket info for bucket %v. err=%s statusCode=%v", bucketName, response.Message(), response.Code())
+			}
+			conflictResolutionType := response.Response().ConflictResolutionType
+			var conflictResolutionTypeStr string
+			switch conflictResolutionType {
+			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_TIMESTAMP:
+				conflictResolutionTypeStr = base.ConflictResolutionType_Lww
+			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_SEQUENCE_NUMBER:
+				conflictResolutionTypeStr = base.ConflictResolutionType_Seqno
+			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_CUSTOM:
+				conflictResolutionTypeStr = base.ConflictResolutionType_Custom
+			}
+			return map[string]interface{}{
+				base.UUIDKey:                         response.Response().BucketUuid,
+				base.NumVBucketsKey:                  response.Response().NumVbuckets,
+				base.ConflictResolutionTypeKey:       conflictResolutionTypeStr,
+				base.EnableCrossClusterVersioningKey: response.Response().CrossClusterVersioningEnabled,
+			}, useExternal, connStr, nil
+		}, nil
 	}
-	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
+	// Darshan TODO: Uncomment this once bucketTopologySvc is changed to support CNG
+	//return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
 }
 
 // GetMaxVBStatsGetter is consumed by the bucket topology service's remote watcher to fetch the max cas
@@ -4582,8 +4633,56 @@ func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClu
 
 	if agentDataProvider, ok := agent.(RemoteClusterAgentBucketOps); ok {
 		return agentDataProvider.GetMaxCasGetter(bucketName)
+	} else {
+		// Darshan TODO: This is just a placeholder logic until bucketTopologySvc is changed to support CNG
+		// Will be removed after bucketTopologySvc is changed to support CNG
+		return func() (base.HighSeqnosMapType, error) {
+			// maxCasStats, nil
+			ref, _ := agent.GetReferenceClone(false)
+			connStr, err := ref.MyConnectionStr()
+			if err != nil {
+				return nil, err
+			}
+			grpcOpts, _ := base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return ref.Credentials.Clone() }, base.DeepCopyByteArray(ref.Certificates()))
+			cngConn, err := base.NewCngConn(grpcOpts)
+			if err != nil {
+				return nil, err
+			}
+			defer cngConn.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
+			defer cancel()
+			includeMaxCas := true
+			includeHistory := false
+			vbucketIds := make([]uint32, 0)
+			for i := uint32(0); i < 128; i++ {
+				vbucketIds = append(vbucketIds, i)
+			}
+			request := &base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]{
+				Context: ctx,
+				Request: &internal_xdcr_v1.GetVbucketInfoRequest{
+					BucketName:     bucketName,
+					IncludeMaxCas:  &includeMaxCas,
+					IncludeHistory: &includeHistory,
+					VbucketIds:     vbucketIds,
+				},
+			}
+			vbucketInfoHandler := cngWatcher.NewVbucketInfoHandler()
+			service.utils.CngGetVbucketInfo(cngConn.Client(), request, vbucketInfoHandler)
+			vbucketInfoResponse, err := vbucketInfoHandler.GetResult()
+			if err != nil {
+				return nil, err
+			}
+			retVal := make(base.HighSeqnosMapType)
+			maxCasStats := make(map[uint16]uint64)
+			for vbucketId, vbInfo := range vbucketInfoResponse {
+				maxCasStats[uint16(vbucketId)] = vbInfo.GetMaxCas()
+			}
+			retVal[connStr] = &maxCasStats
+			return retVal, nil
+		}, nil
 	}
-	return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
+	// Darshan TODO: Uncomment this once bucketTopologySvc is changed to support CNG
+	//return nil, fmt.Errorf("%v: the remote agent of type %T does not implement RemoteClusterAgentDataProvider", ref.Name(), agent)
 }
 
 func (service *RemoteClusterService) SetBucketTopologySvc(svc service_def.BucketTopologySvc) {

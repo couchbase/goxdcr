@@ -79,7 +79,7 @@ IF (BUILD_ENTERPRISE)
 ENDIF ()
 
 # Unit tests for each individual goxdcr module
-foreach (unitTestModule backfill_manager base base/conflictlog base/filter conflictlog crMeta factory hlv metadata metadata_svc parts peerToPeer pipeline pipeline_svc pipeline_manager pipeline_utils service_impl streamApiWatcher utils base/iopool service_impl/throttlerSvcImpl)
+foreach (unitTestModule backfill_manager base base/conflictlog base/filter conflictlog crMeta factory hlv metadata metadata_svc parts peerToPeer pipeline pipeline_svc pipeline_manager pipeline_utils service_impl streamApiWatcher utils base/iopool service_impl/throttlerSvcImpl metadata_svc/cngAgent streamApiWatcher/cngWatcher)
   GoTest (TARGET goxdcr-go-test-${unitTestModule}
   PACKAGE github.com/couchbase/goxdcr/v8/${unitTestModule}
   GOARGS -short

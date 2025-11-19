@@ -280,7 +280,7 @@ func (agent *RemoteCngAgent) printHeartbeatStats() {
 	defer agent.waitGrp.Done()
 
 	// printHeartbeatStatsTicker denotes the interval at which the heartbeat statistics are printed.
-	printHeartbeatStatsTicker := time.NewTicker(3 * base.SrcHeartbeatSummaryInterval)
+	printHeartbeatStatsTicker := time.NewTicker(5 * base.SrcHeartbeatMaxInterval())
 	defer printHeartbeatStatsTicker.Stop()
 	for {
 		select {

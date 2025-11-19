@@ -1302,7 +1302,10 @@ func TestGrpcServerStreamCallRpcFailure(t *testing.T) {
 
 	// Set up mock expectations for error
 	rpcErr := status.Error(codes.Unauthenticated, "authentication failed")
-	handler.On("OnError", rpcErr).Return().Once()
+	// The implementation wraps the error with fmt.Errorf, so we need to match the wrapped error
+	handler.On("OnError", mock.MatchedBy(func(err error) bool {
+		return errors.Is(err, rpcErr)
+	})).Return().Once()
 
 	// Mock RPC function that fails
 	mockRPC := func(ctx context.Context, request *internal_xdcr_v1.GetClusterInfoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[internal_xdcr_v1.GetClusterInfoResponse], error) {
@@ -1329,7 +1332,10 @@ func TestGrpcServerStreamCallHeaderFailure(t *testing.T) {
 
 	// Set up mock expectations for header error
 	headerErr := status.Error(codes.Unknown, "xyz")
-	handler.On("OnError", headerErr).Return().Once()
+	// The implementation wraps the error with fmt.Errorf, so we need to match the wrapped error
+	handler.On("OnError", mock.MatchedBy(func(err error) bool {
+		return errors.Is(err, headerErr)
+	})).Return().Once()
 
 	// Mock stream client that fails on header
 	mockClient := &MockStreamClient{
