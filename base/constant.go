@@ -643,6 +643,7 @@ var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
+var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 0, 1}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}

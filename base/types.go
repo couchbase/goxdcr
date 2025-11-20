@@ -1533,6 +1533,16 @@ func (a *FilterExpDelType) IsSkipBinarySet() bool {
 	return *a&FilterSkipBinary > 0
 }
 
+// TODO: MB-69470
+func (a *FilterExpDelType) IsFilterDeletionsWithFESet() bool {
+	return false
+}
+
+// TODO: MB-69470
+func (a *FilterExpDelType) IsFilterExpirationsWithFESet() bool {
+	return false
+}
+
 func (a *FilterExpDelType) SetStripExpiration(setVal bool) {
 	curValue := *a&FilterExpDelStripExpiration > 0
 	if curValue != setVal {
@@ -1566,6 +1576,14 @@ func (a *FilterExpDelType) SetSkipBinary(setVal bool) {
 	if curValue != setVal {
 		*a ^= 1 << filterExpDelSkipBinaryN
 	}
+}
+
+// TODO: MB-69470
+func (a *FilterExpDelType) SetFilterDeletionsWithFE(setVal bool) {
+}
+
+// TODO: MB-69470
+func (a *FilterExpDelType) SetFilterExpirationsWithFE(setVal bool) {
 }
 
 func (a FilterExpDelType) String() string {
