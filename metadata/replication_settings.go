@@ -140,6 +140,12 @@ const (
 
 	// Developer options for troubleshooting
 	DevReplOptsKey = base.DevReplOptsKey
+
+	// FilterDeletionsWithFEKey represents filtering of deletions based on filter expression.
+	FilterDeletionsWithFEKey = base.FilterDeletionsWithFEKey
+
+	// FilterExpirationsWithFEKey represents filtering of expirations based on filter expression.
+	FilterExpirationsWithFEKey = base.FilterExpirationsWithFEKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -288,6 +294,16 @@ var ComponentEventsChanLengthConfig = &SettingsConfig{base.MaxEventChanSize, &Ra
 
 var DevReplOptsConfig = &SettingsConfig{"", nil}
 
+// The following settings when turned on, the scope of the filter expression will be limited to be key based only in the first
+// version of the release.
+var (
+	// filterDeletionsWithFEConfig is defined that by default, filter expression will not be applied on deletions.
+	filterDeletionsWithFEConfig = &SettingsConfig{false, nil}
+
+	// filterExpirationsWithFEConfig is defined that by default, filter expression will not be applied on expirations.
+	filterExpirationsWithFEConfig = &SettingsConfig{false, nil}
+)
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -346,8 +362,9 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 	DCPFlowControlThrottleKey:            DCPFlowControlThrottleConfig,
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
-
-	DevReplOptsKey: DevReplOptsConfig,
+	DevReplOptsKey:                       DevReplOptsConfig,
+	FilterDeletionsWithFEKey:             filterDeletionsWithFEConfig,
+	FilterExpirationsWithFEKey:           filterExpirationsWithFEConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1550,6 +1567,20 @@ func (s *ReplicationSettings) GetCLogReattemptDuration() time.Duration {
 
 func (s *ReplicationSettings) GetHlvBasedShortCircuitToggle() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(DisableHlvBasedShortCircuitKey)
+	toggle := val.(bool)
+	return toggle
+}
+
+// GetFilterDeletionsWithFE returns the value of the FilterDeletionsWithFE setting in s.
+func (s *ReplicationSettings) GetFilterDeletionsWithFE() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(FilterDeletionsWithFEKey)
+	toggle := val.(bool)
+	return toggle
+}
+
+// GetFilterExpirationsWithFE returns the value of the FilterExpirationsWithFE setting in s.
+func (s *ReplicationSettings) GetFilterExpirationsWithFE() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(FilterExpirationsWithFEKey)
 	toggle := val.(bool)
 	return toggle
 }

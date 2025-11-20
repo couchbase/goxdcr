@@ -126,6 +126,8 @@ const (
 	DCPFlowControlThrottleKey         = base.DCPFlowControlThrottleKey
 	ComponentEventsChanLengthKey      = base.ComponentEventsChanLengthKey
 	DevReplOptsKey                    = base.DevReplOptsKey
+	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
+	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
 )
 
 // constants for parsing create/change/view replication response
@@ -266,6 +268,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DCPFlowControlThrottleKey:         metadata.DCPFlowControlThrottleKey,
 	ComponentEventsChanLengthKey:      metadata.ComponentEventsChanLengthKey,
 	DevReplOptsKey:                    metadata.DevReplOptsKey,
+	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
+	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -337,6 +341,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DCPFlowControlThrottleKey:            DCPFlowControlThrottleKey,
 	metadata.ComponentEventsChanLengthKey:         ComponentEventsChanLengthKey,
 	metadata.DevReplOptsKey:                       DevReplOptsKey,
+	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
+	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
