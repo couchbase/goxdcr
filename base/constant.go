@@ -632,7 +632,14 @@ var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 var VersionForMobileSupport = ServerVersion{7, 6, 6}
-var VersionForCasPoisonDetection = ServerVersion{7, 6, 3}
+var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
+var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
+var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
+var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
+var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
+var VersionForSeamlessCredsChangeSupport = ServerVersion{8, 1, 0}
+var VersionForMetadataStatsSupport = ServerVersion{8, 1, 0}
+var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{7, 6, 10}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}

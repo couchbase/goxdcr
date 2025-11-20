@@ -1654,6 +1654,24 @@ func (service *ReplicationSpecService) SetManifestsGetter(getter service_def.Man
 	service.manifestsGetter = getter
 }
 
+// ValidateSpecSettings validates the input settings, which will be stored against a replication specification.
+func (service *ReplicationSpecService) ValidateSpecSettings(settings *metadata.ReplicationSettings) (base.ErrorMap, error) {
+	if settings == nil {
+		return nil, fmt.Errorf("empty settings cannot be validated")
+	}
+
+	errorMap := make(base.ErrorMap)
+
+	// Validation of deletion filters will need the entire spec settings (default settings + input settings) to be
+	// validated together. Therefore it's validated here instead of ValidateReplicationSettings.
+	validateDeletionFilterExprForTombstones(settings, false, service.xdcr_comp_topology_svc, errorMap)
+	if len(errorMap) > 0 {
+		return errorMap, nil
+	}
+
+	return nil, nil
+}
+
 func (service *ReplicationSpecService) waitForManifestGetter() {
 	var manifestGetterFound bool
 	for !manifestGetterFound {
@@ -1687,4 +1705,92 @@ func (service *ReplicationSpecService) getManifests(sourceBucket string, targetB
 	}
 
 	return &metadata.CollectionsManifestPair{Source: srcManifest, Target: tgtManifest}, nil
+}
+
+// validateDeletionFilterExprForTombstones validates if the input settings is a valid config for evaluation
+// of filter expression on tombstones (deletions/expirations).
+// If filterDeletionWithExpression or filterExpirationWithExpression is true, then:
+// 1. filterDeletion must be true if filterDeletionWithExpression is true.
+// 2. filterExpiration must be true if filterExpirationWithExpression is true.
+// 3. Filter expression is mandatory.
+// 4. Cluster should be atleast 8.1.0 and filter expression must be key-only.
+func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSettings, isDefaultSettings bool, xdcrCompTopology service_def.XDCRCompTopologySvc, errorMap base.ErrorMap) {
+	if errorMap == nil {
+		errorMap = make(base.ErrorMap)
+	}
+
+	var (
+		filterExpression        = settings.GetFilterExpression()
+		expDelMode              = settings.GetExpDelMode()
+		filterDeletion          = expDelMode.IsSkipDeletesSet()
+		filterExpiration        = expDelMode.IsSkipExpirationSet()
+		filterDeletionsWithFE   = expDelMode.IsFilterDeletionsWithFESet()
+		filterExpirationsWithFE = expDelMode.IsFilterExpirationsWithFESet()
+	)
+
+	// If neither toggle is enabled, nothing to validate
+	if !filterDeletionsWithFE && !filterExpirationsWithFE {
+		return
+	}
+
+	// filterDeletion must be true if filterDeletionWithExpression is true
+	if filterDeletionsWithFE && !filterDeletion {
+		errorMap[metadata.FilterDeletionsWithFEKey] = fmt.Errorf("%s must be true when %s is true", metadata.FilterDelKey, metadata.FilterDeletionsWithFEKey)
+		return
+	}
+
+	// filterExpiration must be true if filterExpirationWithExpression is true
+	if filterExpirationsWithFE && !filterExpiration {
+		errorMap[metadata.FilterExpirationsWithFEKey] = fmt.Errorf("%s must be true when %s is true", metadata.FilterExpKey, metadata.FilterExpirationsWithFEKey)
+		return
+	}
+
+	errKey := metadata.FilterDeletionsWithFEKey
+	if !filterDeletionsWithFE {
+		errKey = metadata.FilterExpirationsWithFEKey
+	}
+
+	clusterCompat, err := xdcrCompTopology.MyClusterCompatibility()
+	if err != nil {
+		errorMap[errKey] = fmt.Errorf("error getting cluster compatibility: %w", err)
+		return
+	}
+
+	if isDefaultSettings {
+		// filterExpression cannot be changed for default settings and therefore we will not validate it.
+		// See ImmutableDefaultSettings for more details.
+		// However check cluster compatibility to avoid settings change in mixed mode.
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr) {
+			errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded atleast to atleast %s when either %s or %s is true",
+				base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
+			return
+		}
+
+		return
+	}
+
+	// Validate the filter expression given that filter expressions should be evaluated on tombstones too.
+	if len(filterExpression) == 0 {
+		// Empty filter expression will be considered not acceptable when user has opted in for tombstone filters based on
+		// filter expression.
+		errorMap[errKey] = fmt.Errorf("filterExpression is mandatory when either %s or %s is true",
+			metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
+		return
+	}
+
+	// The filter expression must be key-only from 8.1.0. There might be support for body and xattrs based
+	// in future versions, but not right now.
+	switch {
+	case base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr):
+		// Filter expression must be key only
+		if !base.FilterOnlyContainsKeyExpression(filterExpression) {
+			errorMap[errKey] = fmt.Errorf("filterExpression should be referencing only the document key when either %s or %s is true",
+				metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
+			return
+		}
+	default:
+		errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded atleast to atleast %s when either %s or %s is true",
+			base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
+		return
+	}
 }

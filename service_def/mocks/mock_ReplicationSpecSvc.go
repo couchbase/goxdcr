@@ -1140,6 +1140,64 @@ func (_c *ReplicationSpecSvc_ValidateReplicationSettings_Call) RunAndReturn(run 
 	return _c
 }
 
+// ValidateSpecSettings provides a mock function with given fields: settings
+func (_m *ReplicationSpecSvc) ValidateSpecSettings(settings *metadata.ReplicationSettings) (base.ErrorMap, error) {
+	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSpecSettings")
+	}
+
+	var r0 base.ErrorMap
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSettings) (base.ErrorMap, error)); ok {
+		return rf(settings)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSettings) base.ErrorMap); ok {
+		r0 = rf(settings)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.ErrorMap)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSettings) error); ok {
+		r1 = rf(settings)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ReplicationSpecSvc_ValidateSpecSettings_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateSpecSettings'
+type ReplicationSpecSvc_ValidateSpecSettings_Call struct {
+	*mock.Call
+}
+
+// ValidateSpecSettings is a helper method to define mock.On call
+//   - settings *metadata.ReplicationSettings
+func (_e *ReplicationSpecSvc_Expecter) ValidateSpecSettings(settings interface{}) *ReplicationSpecSvc_ValidateSpecSettings_Call {
+	return &ReplicationSpecSvc_ValidateSpecSettings_Call{Call: _e.mock.On("ValidateSpecSettings", settings)}
+}
+
+func (_c *ReplicationSpecSvc_ValidateSpecSettings_Call) Run(run func(settings *metadata.ReplicationSettings)) *ReplicationSpecSvc_ValidateSpecSettings_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSettings))
+	})
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_ValidateSpecSettings_Call) Return(_a0 base.ErrorMap, _a1 error) *ReplicationSpecSvc_ValidateSpecSettings_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_ValidateSpecSettings_Call) RunAndReturn(run func(*metadata.ReplicationSettings) (base.ErrorMap, error)) *ReplicationSpecSvc_ValidateSpecSettings_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewReplicationSpecSvc creates a new instance of ReplicationSpecSvc. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewReplicationSpecSvc(t interface {

@@ -64,4 +64,10 @@ type ReplicationSpecSvc interface {
 	SetMetadataChangeHandlerCallback(id string, callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority)
 
 	SetManifestsGetter(getter ManifestsGetter)
+
+	// ValidateSpecSettings validates the input settings, which will be stored against a replication specification.
+	// It will cover the validations which cannot be fully validated in ValidateReplicationSettings, because ValidateReplicationSettings
+	// just validates the settings input from the frontend. On the other hand, ValidateSpecSettings validates the settings which is
+	// a combination of both default settings and settings input from the frontend.
+	ValidateSpecSettings(settings *metadata.ReplicationSettings) (base.ErrorMap, error)
 }

@@ -1618,7 +1618,7 @@ func FilterOnlyContainsKeyExpression(expression string) bool {
 	// 1. META().id {=/</<=/>/>=} somethingExact
 	// 2. NOT 1.
 	// 3. REGEXP_CONTAINS(META().id, "regex")
-	// 4. NOT 4.
+	// 4. NOT 3.
 	// 5. Any combination of the above connected with AND or OR
 	// If any parenthesis are used, then too bad...
 	return singleAwesomeKeyOnlyRegex.MatchString(expression)
