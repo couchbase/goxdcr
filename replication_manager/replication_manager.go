@@ -815,6 +815,12 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		return errorMap, nil, nil
 	}
 
+	// Final validation on the settings to be stored in the spec
+	errorMap, err = replication_mgr.repl_spec_svc.ValidateSpecSettings(replSpec.Settings)
+	if err != nil || len(errorMap) > 0 {
+		return errorMap, err, nil
+	}
+
 	// If nonfilter-settings invoked this change, take this opportunity to fix stale infos if there is an existing expression present
 	if !filterSettingsChanged(changedSettingsMap, filterExpression) && len(filterExpression) > 0 && filterVersion < base.FilterVersionAdvanced {
 		settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
@@ -993,6 +999,12 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		return nil, errorMap, nil, nil
 	}
 	spec.Settings = replSettings
+
+	// Final validation on the settings to be stored in the spec
+	errorMap, err = replication_mgr.repl_spec_svc.ValidateSpecSettings(spec.Settings)
+	if err != nil || len(errorMap) > 0 {
+		return nil, errorMap, err, nil
+	}
 
 	if justValidate {
 		return spec, nil, nil, warnings

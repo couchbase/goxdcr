@@ -10,11 +10,13 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"sync"
 )
 
 var DefaultReplicationSettingsKey = "DefaultReplicationSettings"
@@ -39,6 +41,23 @@ func (repl_settings_svc *ReplicationSettingsSvc) GetDefaultReplicationSettings()
 	defer repl_settings_svc.replicationSettingsMtx.Unlock()
 
 	return repl_settings_svc.getReplicationSettings(true /*populateDefault*/)
+}
+
+// validateDefaultSettings validates the input settings, which will be used as default settings for replication
+// specifications.
+func (repl_settings_svc *ReplicationSettingsSvc) validateDefaultSettings(settings *metadata.ReplicationSettings) (base.ErrorMap, error) {
+	if settings == nil {
+		return nil, fmt.Errorf("empty settings cannot be validated")
+	}
+
+	errorMap := make(base.ErrorMap)
+
+	validateDeletionFilterExprForTombstones(settings, true, repl_settings_svc.xdcr_topology_svc, errorMap)
+	if len(errorMap) > 0 {
+		return errorMap, nil
+	}
+
+	return nil, nil
 }
 
 // getter for replication settings
@@ -97,6 +116,11 @@ func (repl_settings_svc *ReplicationSettingsSvc) UpdateDefaultReplicationSetting
 	}
 
 	if len(changedSettingMap) > 0 {
+		errorsMap, err = repl_settings_svc.validateDefaultSettings(replicationSettings)
+		if err != nil || len(errorsMap) > 0 {
+			return nil, errorsMap, err
+		}
+
 		err := repl_settings_svc.setDefaultReplicationSettings(replicationSettings)
 		if err != nil {
 			repl_settings_svc.logger.Warnf("Error updating default replication settings. err=%v\n", err)

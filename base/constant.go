@@ -648,6 +648,7 @@ var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
 var VersionForSeamlessCredsChangeSupport = ServerVersion{8, 1, 0}
 var VersionForMetadataStatsSupport = ServerVersion{8, 1, 0}
+var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 1, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
