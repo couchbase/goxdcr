@@ -108,6 +108,8 @@ const (
 	GenericServicesLogLevelKey        = metadata.GenericServicesLogLevelKey
 	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
 	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
+	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
+	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
 )
 
 // constants for parsing create/change/view replication response
@@ -238,6 +240,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	GenericServicesLogLevelKey:        metadata.GenericServicesLogLevelKey,
 	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
 	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
+	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
+	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -310,6 +314,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.GenericServicesLogLevelKey:           GenericServicesLogLevelKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
+	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
+	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

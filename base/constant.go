@@ -1736,3 +1736,15 @@ const IsPipelineReinitStreamKey = "isPipelineReinitStream"
 var PipelineReinitStreamDelaySec = 3 * time.Second
 
 const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
+
+// The following toggles will be off by default (i.e. false) and replication's filter expression
+// will not be applied to tombstones. With the toggle on, the filter expression will be strictly
+// validated to be key-based only for the first version of this release. Any filter expression which
+// references the document body or xattrs will not be allowed to be configured.
+const (
+	// FilterDeletionsWithFEKey is a toggle to enable filter expression based filtering on deletions.
+	FilterDeletionsWithFEKey string = "filterDeletionsWithExpression"
+
+	// FilterExpirationsWithFEKey is a toggle to enable filter expression based filtering on expirations.
+	FilterExpirationsWithFEKey string = "filterExpirationsWithExpression"
+)
