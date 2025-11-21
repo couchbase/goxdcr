@@ -3733,8 +3733,7 @@ func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface, s
 	if err != nil {
 		return nil, nil, err
 	}
-	// Darshan TODO: This function should be removed later
-	// temp modify it avoid compilation error
+
 	vbMaxCasMapType := make(base.VBucketStatsMap)
 	unableToBeParsedVBs, _ := u.ParseMaxCasStat(vbnos, *statsMap, vbMaxCasMapType)
 	for vbno, vbStats := range vbMaxCasMapType {
@@ -4124,19 +4123,30 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 }
 
 // GetFailoverLog fetches the failover log from the cluster associated with the given connection
-func (u *Utilities) GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, error) {
+func (u *Utilities) GetFailoverLog(conn mcc.ClientIface, dataTransferCtx *Context) (base.FailoverLogMapType, error) {
 	vbFailoverLogMap := make(base.FailoverLogMapType)
 	handleResponse := func(key, value []byte) {
 		u.handleFailoverLogResponse(key, value, vbFailoverLogMap)
 	}
-	err := conn.StatsFunc(base.FAILOVER_LOG_STAT_NAME, handleResponse)
+
+	clientCtx := &mcc.ClientContext{
+		DataTransferInfo: &mcc.DataTransferInfo{},
+	}
+
+	err := conn.StatsFunc(base.FAILOVER_LOG_STAT_NAME, handleResponse, clientCtx)
+
+	if dataTransferCtx != nil {
+		// Load the data transfer info into the context for the caller to use.
+		dataTransferCtx.LoadDataTransferInfo(int64(clientCtx.DataTransferInfo.DataSent), int64(clientCtx.DataTransferInfo.DataReceived))
+	}
+
 	if err != nil {
 		return nil, err
 	}
 	return vbFailoverLogMap, nil
 }
 
-func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface) (base.VBucketStatsMap, error) {
+func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface, dataTransferCtx *Context) (base.VBucketStatsMap, error) {
 	output := make(base.VBucketStatsMap)
 
 	statsKey := base.VBUCKET_SEQNO_STAT_NAME
@@ -4144,7 +4154,11 @@ func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn 
 		statsKey = base.VBUCKET_DETAILS_NAME
 	}
 
-	resp, err := conn.StatsMap(statsKey)
+	clientCtx := &mcc.ClientContext{
+		DataTransferInfo: &mcc.DataTransferInfo{},
+	}
+
+	resp, err := conn.StatsMap(statsKey, clientCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -4154,6 +4168,12 @@ func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn 
 	} else {
 		u.ParseHighSeqnoAndVBUuidFromStats(requestOpts.VBuckets, resp, output)
 	}
+
+	if dataTransferCtx != nil {
+		// Load the data transfer info into the context for the caller to use.
+		dataTransferCtx.LoadDataTransferInfo(int64(clientCtx.DataTransferInfo.DataSent), int64(clientCtx.DataTransferInfo.DataReceived))
+	}
+
 	return output, nil
 }
 

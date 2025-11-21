@@ -9,16 +9,19 @@
 package service_def
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/capi_utils"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
+	"google.golang.org/grpc/codes"
 )
 
 var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing support on older node")
@@ -54,21 +57,70 @@ func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_
 		remoteClusterSvc: remote_cluster_svc,
 	}
 
-	err := remoteBucket.refresh_internal(false)
+	err := remoteBucket.Refresh(false)
 	return remoteBucket, err
 }
 
-func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
+func (remoteBucket *RemoteBucketInfo) Refresh(full bool) error {
 	if remoteBucket.RemoteClusterRef == nil && !full {
 		remoteClusterRef, err := remoteBucket.remoteClusterSvc.RemoteClusterByRefName(remoteBucket.RemoteClusterRefName, false)
 		if err != nil {
 			remoteBucket.logger.Errorf("Failed to get remote cluster reference with refName=%v, err=%v\n", remoteBucket.RemoteClusterRefName, err)
 			return err
 		}
-
 		remoteBucket.RemoteClusterRef = remoteClusterRef
 	}
+	switch remoteBucket.RemoteClusterRef.GetRemoteType() {
+	case metadata.RemoteTypeCng:
+		return remoteBucket.refreshCngInternal()
+	case metadata.RemoteTypeCbCluster:
+		return remoteBucket.refreshInternal()
+	default:
+		return fmt.Errorf("unsupported remote type %v", remoteBucket.RemoteClusterRef.GetRemoteType())
+	}
+}
 
+func (remoteBucket *RemoteBucketInfo) refreshCngInternal() error {
+	connStr, err := remoteBucket.RemoteClusterRef.MyConnectionStr()
+	if err != nil {
+		return err
+	}
+	grpcOpts, err := base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return &remoteBucket.RemoteClusterRef.Credentials }, remoteBucket.RemoteClusterRef.Certificates())
+	if err != nil {
+		return err
+	}
+	// Darshan TODO: use the global connection pool instead of creating a new connection here
+	// This TODO is a placeholder until we have the conn pool checked in
+	cngConn, err := base.NewCngConn(grpcOpts)
+	if err != nil {
+		return err
+	}
+	defer cngConn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
+	defer cancel()
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
+		Context: ctx,
+		Request: &internal_xdcr_v1.GetBucketInfoRequest{
+			BucketName: remoteBucket.BucketName,
+		},
+	}
+	response := remoteBucket.utils.CngGetBucketInfo(cngConn.Client(), request)
+	if response.Code() != codes.OK {
+		return fmt.Errorf("failed to get bucket info for bucket %v. err=%s statusCode=%v", remoteBucket.BucketName, response.Message(), response.Code())
+	}
+	targetBucketInfo := response.Response()
+
+	remoteBucket.UUID = targetBucketInfo.GetBucketUuid()
+
+	// CNG only supports clusters with version >= 7.5.2 which supports xdcrCheckpointing
+	remoteBucket.Capabilities = []string{"xdcrCheckpointing"}
+
+	return nil
+}
+
+func (remoteBucket *RemoteBucketInfo) refreshInternal() error {
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := remoteBucket.RemoteClusterRef.MyCredentials()
 	if err != nil {
 		return err

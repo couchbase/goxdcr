@@ -3136,9 +3136,9 @@ func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) RunAndReturn(run func(map[s
 	return _c
 }
 
-// GetFailoverLog provides a mock function with given fields: conn
-func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverLogMapType, error) {
-	ret := _m.Called(conn)
+// GetFailoverLog provides a mock function with given fields: conn, dataTransferCtx
+func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface, dataTransferCtx *utils.Context) (base.FailoverLogMapType, error) {
+	ret := _m.Called(conn, dataTransferCtx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFailoverLog")
@@ -3146,19 +3146,19 @@ func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverL
 
 	var r0 base.FailoverLogMapType
 	var r1 error
-	if rf, ok := ret.Get(0).(func(memcached.ClientIface) (base.FailoverLogMapType, error)); ok {
-		return rf(conn)
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface, *utils.Context) (base.FailoverLogMapType, error)); ok {
+		return rf(conn, dataTransferCtx)
 	}
-	if rf, ok := ret.Get(0).(func(memcached.ClientIface) base.FailoverLogMapType); ok {
-		r0 = rf(conn)
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface, *utils.Context) base.FailoverLogMapType); ok {
+		r0 = rf(conn, dataTransferCtx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.FailoverLogMapType)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(memcached.ClientIface) error); ok {
-		r1 = rf(conn)
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface, *utils.Context) error); ok {
+		r1 = rf(conn, dataTransferCtx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3173,13 +3173,14 @@ type UtilsIface_GetFailoverLog_Call struct {
 
 // GetFailoverLog is a helper method to define mock.On call
 //   - conn memcached.ClientIface
-func (_e *UtilsIface_Expecter) GetFailoverLog(conn interface{}) *UtilsIface_GetFailoverLog_Call {
-	return &UtilsIface_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", conn)}
+//   - dataTransferCtx *utils.Context
+func (_e *UtilsIface_Expecter) GetFailoverLog(conn interface{}, dataTransferCtx interface{}) *UtilsIface_GetFailoverLog_Call {
+	return &UtilsIface_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", conn, dataTransferCtx)}
 }
 
-func (_c *UtilsIface_GetFailoverLog_Call) Run(run func(conn memcached.ClientIface)) *UtilsIface_GetFailoverLog_Call {
+func (_c *UtilsIface_GetFailoverLog_Call) Run(run func(conn memcached.ClientIface, dataTransferCtx *utils.Context)) *UtilsIface_GetFailoverLog_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(memcached.ClientIface))
+		run(args[0].(memcached.ClientIface), args[1].(*utils.Context))
 	})
 	return _c
 }
@@ -3189,7 +3190,7 @@ func (_c *UtilsIface_GetFailoverLog_Call) Return(_a0 base.FailoverLogMapType, _a
 	return _c
 }
 
-func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface) (base.FailoverLogMapType, error)) *UtilsIface_GetFailoverLog_Call {
+func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface, *utils.Context) (base.FailoverLogMapType, error)) *UtilsIface_GetFailoverLog_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5651,9 +5652,9 @@ func (_c *UtilsIface_GetTrackedTransport_Call) RunAndReturn(run func(...*utils.C
 	return _c
 }
 
-// GetVBucketStats provides a mock function with given fields: requestOpts, conn
-func (_m *UtilsIface) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface) (base.VBucketStatsMap, error) {
-	ret := _m.Called(requestOpts, conn)
+// GetVBucketStats provides a mock function with given fields: requestOpts, conn, dataTransferCtx
+func (_m *UtilsIface) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface, dataTransferCtx *utils.Context) (base.VBucketStatsMap, error) {
+	ret := _m.Called(requestOpts, conn, dataTransferCtx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetVBucketStats")
@@ -5661,19 +5662,19 @@ func (_m *UtilsIface) GetVBucketStats(requestOpts *base.VBucketStatsRequest, con
 
 	var r0 base.VBucketStatsMap
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)); ok {
-		return rf(requestOpts, conn)
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface, *utils.Context) (base.VBucketStatsMap, error)); ok {
+		return rf(requestOpts, conn, dataTransferCtx)
 	}
-	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface) base.VBucketStatsMap); ok {
-		r0 = rf(requestOpts, conn)
+	if rf, ok := ret.Get(0).(func(*base.VBucketStatsRequest, memcached.ClientIface, *utils.Context) base.VBucketStatsMap); ok {
+		r0 = rf(requestOpts, conn, dataTransferCtx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.VBucketStatsMap)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*base.VBucketStatsRequest, memcached.ClientIface) error); ok {
-		r1 = rf(requestOpts, conn)
+	if rf, ok := ret.Get(1).(func(*base.VBucketStatsRequest, memcached.ClientIface, *utils.Context) error); ok {
+		r1 = rf(requestOpts, conn, dataTransferCtx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -5689,13 +5690,14 @@ type UtilsIface_GetVBucketStats_Call struct {
 // GetVBucketStats is a helper method to define mock.On call
 //   - requestOpts *base.VBucketStatsRequest
 //   - conn memcached.ClientIface
-func (_e *UtilsIface_Expecter) GetVBucketStats(requestOpts interface{}, conn interface{}) *UtilsIface_GetVBucketStats_Call {
-	return &UtilsIface_GetVBucketStats_Call{Call: _e.mock.On("GetVBucketStats", requestOpts, conn)}
+//   - dataTransferCtx *utils.Context
+func (_e *UtilsIface_Expecter) GetVBucketStats(requestOpts interface{}, conn interface{}, dataTransferCtx interface{}) *UtilsIface_GetVBucketStats_Call {
+	return &UtilsIface_GetVBucketStats_Call{Call: _e.mock.On("GetVBucketStats", requestOpts, conn, dataTransferCtx)}
 }
 
-func (_c *UtilsIface_GetVBucketStats_Call) Run(run func(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface)) *UtilsIface_GetVBucketStats_Call {
+func (_c *UtilsIface_GetVBucketStats_Call) Run(run func(requestOpts *base.VBucketStatsRequest, conn memcached.ClientIface, dataTransferCtx *utils.Context)) *UtilsIface_GetVBucketStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.VBucketStatsRequest), args[1].(memcached.ClientIface))
+		run(args[0].(*base.VBucketStatsRequest), args[1].(memcached.ClientIface), args[2].(*utils.Context))
 	})
 	return _c
 }
@@ -5705,7 +5707,7 @@ func (_c *UtilsIface_GetVBucketStats_Call) Return(_a0 base.VBucketStatsMap, _a1 
 	return _c
 }
 
-func (_c *UtilsIface_GetVBucketStats_Call) RunAndReturn(run func(*base.VBucketStatsRequest, memcached.ClientIface) (base.VBucketStatsMap, error)) *UtilsIface_GetVBucketStats_Call {
+func (_c *UtilsIface_GetVBucketStats_Call) RunAndReturn(run func(*base.VBucketStatsRequest, memcached.ClientIface, *utils.Context) (base.VBucketStatsMap, error)) *UtilsIface_GetVBucketStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

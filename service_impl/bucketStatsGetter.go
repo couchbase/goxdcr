@@ -203,14 +203,14 @@ func (provider *ClusterBucketStatsProvider) getServerListFromVbList(ctx context.
 }
 
 // getFailoverLogFromServer is a helper function to get the failover log from a specific server
-func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server string) (base.FailoverLogMapType, error) {
+func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server string, dataTransferCtx *utils.Context) (base.FailoverLogMapType, error) {
 	// Acquire a client from the pool
 	client, err := provider.remoteMemcachedComponent.AcquireClient(server)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := provider.utils.GetFailoverLog(client)
+	resp, err := provider.utils.GetFailoverLog(client, dataTransferCtx)
 	if err != nil {
 		if provider.utils.IsSeriousNetError(err) {
 			// Connection is broken due to network error, close it instead of returning to pool
@@ -230,7 +230,7 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server stri
 }
 
 // getFailoverLogFromServerWithRetry is a helper function to get the failover log from a specific server with retry
-func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ctx context.Context, server string) (base.FailoverLogMapType, error) {
+func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ctx context.Context, server string, dataTransferCtx *utils.Context) (base.FailoverLogMapType, error) {
 	waitTime := base.RemoteMcRetryWaitTime
 	var err error
 	var result base.FailoverLogMapType
@@ -240,7 +240,7 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ct
 			err = fmt.Errorf("getFailoverLogFromServerWithRetry: aborting %w", ctx.Err())
 			provider.logger.Warnf(err.Error())
 		default:
-			result, err = provider.getFailoverLogFromServer(server)
+			result, err = provider.getFailoverLogFromServer(server, dataTransferCtx)
 		}
 		if err == nil {
 			return result, nil
@@ -256,7 +256,7 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ct
 }
 
 // GetFailoverLog returns the failover log of the target bucket
-func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error) {
+func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.FailoverLogRequest, dataTransferCtx *utils.Context) (*base.BucketFailoverLog, base.ErrorMap, error) {
 	if err := requestOpts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("GetFailoverLog: invalid request options: %w", err)
 	}
@@ -302,7 +302,7 @@ func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.Fai
 		wg.Add(1)
 		go func(serverAddr string) {
 			defer wg.Done()
-			resp, err := provider.getFailoverLogFromServerWithRetry(reqCtx, serverAddr)
+			resp, err := provider.getFailoverLogFromServerWithRetry(reqCtx, serverAddr, dataTransferCtx)
 			if err != nil {
 				mutex.Lock()
 				errMap[serverAddr] = err
@@ -341,14 +341,14 @@ func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.Fai
 }
 
 // getVBucketStatsFromServer is a helper function to get the vbucket stats from a specific server
-func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServer(requestOpts *base.VBucketStatsRequest, server string) (base.VBucketStatsMap, error) {
+func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServer(requestOpts *base.VBucketStatsRequest, server string, dataTransferCtx *utils.Context) (base.VBucketStatsMap, error) {
 	// Acquire a client from the pool
 	client, err := provider.remoteMemcachedComponent.AcquireClient(server)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := provider.utils.GetVBucketStats(requestOpts, client)
+	resp, err := provider.utils.GetVBucketStats(requestOpts, client, dataTransferCtx)
 	if err != nil {
 		if provider.utils.IsSeriousNetError(err) {
 			// Connection is broken due to network error, delete it instead of returning to pool
@@ -368,7 +368,7 @@ func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServer(requestOpt
 }
 
 // getVBucketStatsFromServerWithRetry is a helper function to get the vbucket stats from a specific server with retry
-func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServerWithRetry(ctx context.Context, requestOpts *base.VBucketStatsRequest, server string) (base.VBucketStatsMap, error) {
+func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServerWithRetry(ctx context.Context, requestOpts *base.VBucketStatsRequest, server string, dataTransferCtx *utils.Context) (base.VBucketStatsMap, error) {
 	waitTime := base.RemoteMcRetryWaitTime
 	var err error
 	var result base.VBucketStatsMap
@@ -378,7 +378,7 @@ func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServerWithRetry(c
 			err = fmt.Errorf("getVBucketStatsFromServerWithRetry: aborting %w", ctx.Err())
 			provider.logger.Warnf(err.Error())
 		default:
-			result, err = provider.getVBucketStatsFromServer(requestOpts, server)
+			result, err = provider.getVBucketStatsFromServer(requestOpts, server, dataTransferCtx)
 		}
 		if err == nil {
 			return result, nil
@@ -394,7 +394,7 @@ func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServerWithRetry(c
 }
 
 // GetVBucketStats returns the vbucket stats of the target bucket
-func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucketStatsRequest) (*base.BucketVBStats, base.ErrorMap, error) {
+func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucketStatsRequest, dataTransferCtx *utils.Context) (*base.BucketVBStats, base.ErrorMap, error) {
 	if err := requestOpts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("invalid request options: %w", err)
 	}
@@ -440,7 +440,7 @@ func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VB
 		wg.Add(1)
 		go func(serverAddr string) {
 			defer wg.Done()
-			resp, err := provider.getVBucketStatsFromServerWithRetry(reqCtx, requestOpts, serverAddr)
+			resp, err := provider.getVBucketStatsFromServerWithRetry(reqCtx, requestOpts, serverAddr, dataTransferCtx)
 			if err != nil {
 				mutex.Lock()
 				errMap[serverAddr] = err
@@ -647,7 +647,7 @@ func (provider *CngBucketStatsProvider) canStartOp() error {
 }
 
 // GetFailoverLog returns the failover log of the target bucket via CNG
-func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error) {
+func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.FailoverLogRequest, dataTransferCtx *utils.Context) (*base.BucketFailoverLog, base.ErrorMap, error) {
 	if err := requestOpts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("GetFailoverLog: invalid request options: %w", err)
 	}
@@ -684,7 +684,7 @@ func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.Failove
 }
 
 // GetVBucketStats returns the vbucket stats of the target bucket via CNG
-func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucketStatsRequest) (*base.BucketVBStats, base.ErrorMap, error) {
+func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucketStatsRequest, dataTransferCtx *utils.Context) (*base.BucketVBStats, base.ErrorMap, error) {
 	if err := requestOpts.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("GetVBucketStats: invalid request options: %w", err)
 	}
