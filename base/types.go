@@ -4064,6 +4064,15 @@ func (fl *FailoverLog) SetEntry(index uint64, entry *FailoverEntry) error {
 	return nil
 }
 
+// GetLatestUUID returns the latest UUID from the failover log
+// If the failover log is empty, it returns 0 - This should never happen
+func (fl *FailoverLog) GetLatestUUID() uint64 {
+	if fl.NumEntries == 0 {
+		return 0
+	}
+	return fl.LogTable[0].Uuid
+}
+
 // Clone clones the FailoverLog
 func (fl *FailoverLog) Clone() *FailoverLog {
 	return &FailoverLog{
@@ -4073,8 +4082,45 @@ func (fl *FailoverLog) Clone() *FailoverLog {
 	}
 }
 
+// ToMcFailoverLog converts the FailoverLog to a mcc.FailoverLog
+func (fl *FailoverLog) ToMcFailoverLog() *mcc.FailoverLog {
+	if fl == nil {
+		return nil
+	}
+	ret := make(mcc.FailoverLog, len(fl.LogTable))
+	for i, entry := range fl.LogTable {
+		ret[i] = [2]uint64{entry.Uuid, entry.HighSeqno}
+	}
+	return &ret
+}
+
 // FailoverLogMapType is a map of vbucket number to FailoverLog
 type FailoverLogMapType map[uint16]*FailoverLog
+
+// Clone clones the FailoverLogMapType
+func (flm FailoverLogMapType) Clone() FailoverLogMapType {
+	if flm == nil {
+		return nil
+	}
+
+	clonedMap := make(FailoverLogMapType)
+	for vbno, log := range flm {
+		clonedMap[vbno] = log.Clone()
+	}
+	return clonedMap
+}
+
+// ToMcFailoverLogMap converts the FailoverLogMapType to a map of vbucket to mcc.FailoverLog
+func (flm FailoverLogMapType) ToMcFailoverLogMap() map[uint16]*mcc.FailoverLog {
+	if flm == nil {
+		return nil
+	}
+	ret := make(map[uint16]*mcc.FailoverLog)
+	for vbno, log := range flm {
+		ret[vbno] = log.ToMcFailoverLog()
+	}
+	return ret
+}
 
 // BucketFailoverLog is a struct that encapsulates the bucket failover log
 type BucketFailoverLog struct {
@@ -4126,6 +4172,17 @@ type VBucketStats struct {
 	MaxCas uint64
 }
 
+// IsSame checks if the VBucketStats is the same as the other VBucketStats
+func (vs *VBucketStats) IsSame(other *VBucketStats) bool {
+	if vs == nil {
+		return other == nil
+	}
+	if other == nil {
+		return false
+	}
+	return vs.Uuid == other.Uuid && vs.HighSeqno == other.HighSeqno && vs.MaxCas == other.MaxCas
+}
+
 // VBucketStatsMap is a map of vbucket number to VBucketStats
 type VBucketStatsMap map[uint16]*VBucketStats
 
@@ -4171,6 +4228,31 @@ func (vbm *BucketVBStats) LoadFrom(vbList []uint16, other VBucketStatsMap) {
 	}
 }
 
+// Diff returns the difference between the current BucketVBStats and the other BucketVBStats
+func (vbm *BucketVBStats) Diff(other *BucketVBStats) VBucketStatsMap {
+	if vbm == nil {
+		return nil
+	}
+	if other == nil {
+		return vbm.VBStatsMap
+	}
+
+	vbm.Mutex.RLock()
+	defer vbm.Mutex.RUnlock()
+
+	diffMap := make(VBucketStatsMap)
+	for vbno, stats := range vbm.VBStatsMap {
+		if otherStats, ok := other.VBStatsMap[vbno]; !ok {
+			diffMap[vbno] = stats
+		} else {
+			if !stats.IsSame(otherStats) {
+				diffMap[vbno] = stats
+			}
+		}
+	}
+	return diffMap
+}
+
 type VBucketStatsRequest struct {
 	// VBuckets is the list of vbucket numbers for which the VBucketStats are requested
 	VBuckets []uint16
@@ -4213,4 +4295,20 @@ func (req *FailoverLogRequest) Validate() error {
 		return errors.New("FinCh is nil in FailoverLogRequest")
 	}
 	return nil
+}
+
+// CommitOpaque is a struct that encapsulates the uuid, seqno pair for a checkpoint
+type CommitOpaque struct {
+	// Uuid to be checked against the failover log
+	Uuid uint64
+	// Seqno to be checked against the failover log
+	Seqno uint64
+}
+
+// NewCommitOpaque is the constructor for CommitOpaque
+func NewCommitOpaque(uuid uint64, seqno uint64) *CommitOpaque {
+	return &CommitOpaque{
+		Uuid:  uuid,
+		Seqno: seqno,
+	}
 }

@@ -3541,8 +3541,7 @@ func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface, s
 	if err != nil {
 		return nil, nil, err
 	}
-	// Darshan TODO: This function should be removed later
-	// temp modify it avoid compilation error
+
 	vbMaxCasMapType := make(base.VBucketStatsMap)
 	unableToBeParsedVBs, _ := u.ParseMaxCasStat(vbnos, *statsMap, vbMaxCasMapType)
 	for vbno, vbStats := range vbMaxCasMapType {

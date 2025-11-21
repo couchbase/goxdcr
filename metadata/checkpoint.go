@@ -1999,7 +1999,7 @@ func (targetVBUuid *TargetVBUuid) Clone() TargetVBOpaque {
 	return &TargetVBUuid{Target_vb_uuid: targetVBUuid.Target_vb_uuid}
 }
 
-type GlobalTargetVbUuids map[uint16][]uint64
+type GlobalTargetVbUuids base.VBucketStatsMap
 
 // Note this function includes the header size of the map and the value slice
 func (g *GlobalTargetVbUuids) Size() int {
@@ -2009,9 +2009,8 @@ func (g *GlobalTargetVbUuids) Size() int {
 	mapSize := unsafe.Sizeof(*g) // size of the map header
 
 	for key, value := range *g {
-		mapSize += unsafe.Sizeof(key)      // Size of the key
-		mapSize += unsafe.Sizeof(value)    // Size of the slice header
-		mapSize += uintptr(len(value)) * 8 // Size of the underlying slice data
+		mapSize += unsafe.Sizeof(key)    // Size of the key
+		mapSize += unsafe.Sizeof(*value) // Size of the underlying VBucketStats struct
 	}
 	return int(mapSize)
 }
@@ -2048,11 +2047,11 @@ func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
 	for vb, latestTargetVBTimestamp := range lastFetchedTargetOpaque {
 		latestTargetVbUuid := latestTargetVBTimestamp.Target_vb_opaque.Value().(uint64)
 
-		currentKnownSeqnoAndVbuuid, ok := (*g)[vb]
+		currentKnownVBStats, ok := (*g)[vb]
 		if !ok {
 			return false
 		}
-		currentKnownVbUuid := currentKnownSeqnoAndVbuuid[1]
+		currentKnownVbUuid := currentKnownVBStats.Uuid
 
 		if currentKnownVbUuid != latestTargetVbUuid {
 			return false
@@ -2061,32 +2060,17 @@ func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
 	return true
 }
 
-// SameAs is the actual method to compare between two objects of the same type in this case
-func (g *GlobalTargetVbUuids) SameAs(other *GlobalTargetVbUuids) bool {
-	if g == nil || other == nil {
-		return g == nil && other == nil
-	}
-
-	if len(*g) != len(*other) {
-		return false
-	}
-
-	uuidMap := base.HighSeqnoAndVbUuidMap(*g)
-	diffOutput := uuidMap.Diff(base.HighSeqnoAndVbUuidMap(*other))
-	return len(diffOutput) == 0
-}
-
 func (g *GlobalTargetVbUuids) ToGlobalTimestamp() *GlobalTimestamp {
 	if g == nil {
 		return nil
 	}
 
 	gts := make(GlobalTimestamp)
-	for vb, pair := range *g {
+	for vb, vbStats := range *g {
 		gts[vb] = &GlobalVBTimestamp{
 			TargetVBTimestamp: TargetVBTimestamp{
-				Target_vb_opaque: &TargetVBUuid{pair[1]},
-				Target_Seqno:     pair[0],
+				Target_vb_opaque: &TargetVBUuid{vbStats.Uuid},
+				Target_Seqno:     vbStats.HighSeqno,
 			},
 		}
 	}

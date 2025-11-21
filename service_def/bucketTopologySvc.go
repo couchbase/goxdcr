@@ -45,17 +45,27 @@ type BucketTopologySvc interface {
 	RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
+
+	// GetRemoteBucketStatsProvider returns the remote bucket stats provider for the given specification
+	GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (BucketStatsOps, error)
 }
 
+// BucketStatsOps is the interface for the bucket stats operations
+type BucketStatsOps interface {
+	// GetFailoverLog returns the failover log for the bucket
+	GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error)
+	// GetVBucketStats returns the vbucket stats for the bucket
+	GetVBucketStats(requestOpts *base.VBucketStatsRequest) (*base.BucketVBStats, base.ErrorMap, error)
+}
+
+// BucketStatsProvider is the interface for the bucket stats provider
 type BucketStatsProvider interface {
 	// Init initializes the bucket stats provider
 	Init() error
 	// Close closes the bucket stats provider
 	Close() error
-	// GetFailoverLog returns the failover log for the bucket
-	GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error)
-	// GetVBucketStats returns the vbucket stats for the bucket
-	GetVBucketStats(requestOpts *base.VBucketStatsRequest) (*base.BucketVBStats, base.ErrorMap, error)
+	// Embeds BucketStatsOps to expose all bucket stats operation methods
+	BucketStatsOps
 }
 
 type Notification interface {

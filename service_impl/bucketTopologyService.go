@@ -1200,6 +1200,18 @@ func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketN
 	return watcher.RegisterGarbageCollect(specId, vbno, requestId, gcFunc, timeToFire)
 }
 
+func (b *BucketTopologyService) GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsOps, error) {
+	b.tgtBucketStatsProvidersMtx.RLock()
+	defer b.tgtBucketStatsProvidersMtx.RUnlock()
+
+	providerKey := getTargetWatcherKey(spec)
+	provider, exists := b.tgtBucketStatsProviders[providerKey]
+	if !exists {
+		return nil, fmt.Errorf("remote bucket stats provider not found for spec %v", spec.Id)
+	}
+	return provider, nil
+}
+
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string

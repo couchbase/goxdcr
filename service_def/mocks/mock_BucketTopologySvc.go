@@ -26,6 +26,64 @@ func (_m *BucketTopologySvc) EXPECT() *BucketTopologySvc_Expecter {
 	return &BucketTopologySvc_Expecter{mock: &_m.Mock}
 }
 
+// GetRemoteBucketStatsProvider provides a mock function with given fields: spec
+func (_m *BucketTopologySvc) GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsOps, error) {
+	ret := _m.Called(spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteBucketStatsProvider")
+	}
+
+	var r0 service_def.BucketStatsOps
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) (service_def.BucketStatsOps, error)); ok {
+		return rf(spec)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) service_def.BucketStatsOps); ok {
+		r0 = rf(spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(service_def.BucketStatsOps)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) error); ok {
+		r1 = rf(spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// BucketTopologySvc_GetRemoteBucketStatsProvider_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRemoteBucketStatsProvider'
+type BucketTopologySvc_GetRemoteBucketStatsProvider_Call struct {
+	*mock.Call
+}
+
+// GetRemoteBucketStatsProvider is a helper method to define mock.On call
+//   - spec *metadata.ReplicationSpecification
+func (_e *BucketTopologySvc_Expecter) GetRemoteBucketStatsProvider(spec interface{}) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+	return &BucketTopologySvc_GetRemoteBucketStatsProvider_Call{Call: _e.mock.On("GetRemoteBucketStatsProvider", spec)}
+}
+
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Run(run func(spec *metadata.ReplicationSpecification)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSpecification))
+	})
+	return _c
+}
+
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Return(_a0 service_def.BucketStatsOps, _a1 error) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) RunAndReturn(run func(*metadata.ReplicationSpecification) (service_def.BucketStatsOps, error)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RegisterGarbageCollect provides a mock function with given fields: specId, srcBucketName, vbno, requestId, gcFunc, timeToFire
 func (_m *BucketTopologySvc) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
 	ret := _m.Called(specId, srcBucketName, vbno, requestId, gcFunc, timeToFire)
