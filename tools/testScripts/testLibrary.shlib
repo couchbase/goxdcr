@@ -48,7 +48,7 @@ GETHIGHSEQNO_COLID_DNE="getHighSeqno could not find collection ID"
 REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline"
 
 # Dev Injection Globals
-SEED_INJ_MAX_MAIN_DELAY_MS=500
+SEED_INJ_MAX_MAIN_DELAY_MS=200
 
 # These should be imported after clusterRunProvision script
 
@@ -2847,18 +2847,13 @@ function vagrantGetPprof {
 	${VSSH[$idx]} "curl -s http://localhost:9998/debug/pprof/$pprofType?debug=1"
 }
 
-function seedInjectMainPipelineDelay {
-	local clusterName=$1
-	local sourceBucket=$2
-	local targetCluster=$3
-	local targetBucket=$4
-	local maxDelayMs=$5
-
+function getDelayMsGivenSeed {
+	local maxDelayMs=$1
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
 	# Derive seed if not provided
 	if [[ -z "${seedArg:-}" ]]; then
-		return 0
+		echo 0
 	fi
 
 	local seedDec
@@ -2875,7 +2870,7 @@ function seedInjectMainPipelineDelay {
 		# head -n1 takes the first 32-bit word. Result is a simple numeric hash used as a seed when the string is not a hex or pure numeric value.
 		seedDec=$(echo -n "$seedArg" | od -An -tu4 | tr -d ' ' | head -n1)
 		if [[ -z "${seedDec:-}" ]]; then
-			return 0
+			echo 0
 		fi
 		if ((seedDec < 0)); then
 			# convert to positive
@@ -2884,12 +2879,46 @@ function seedInjectMainPipelineDelay {
 	fi
 
 	if ((maxDelayMs <= 0)); then
-		return 0
+		echo 0
 	fi
 
 	local delayMs=$((seedDec % maxDelayMs))
+	echo "$delayMs"
+}
 
-	echo "Seeding main pipeline of $clusterName/$sourceBucket/$targetCluster/$targetBucket delay of $delayMs ms using seed $seedDec (arg: $seedArg) with maxDelayMs $maxDelayMs"
+function seedInjectMainPipelineDelay {
+	local clusterName=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local maxDelayMs=$5
+
+	local delayMs
+	delayMs=$(getDelayMsGivenSeed "$maxDelayMs")
+	if ((delayMs <= 0)); then
+		return
+	fi
+
+	echo "Seeding main pipeline of $clusterName/$sourceBucket/$targetCluster/$targetBucket delay of $delayMs ms"
 	setReplicationSettings "$clusterName" "$sourceBucket" "$targetCluster" "$targetBucket" "xdcrDevMainSendDelayMs=$delayMs"
 	sleep 5
+}
+
+function calculateTimeToSleepWithMainDelay {
+	local numberOfItemsToTransfer=$1
+	local maxMs=$2
+	local delayMs
+	delayMs=$(getDelayMsGivenSeed "$maxMs")
+
+	if (($delayMs <= 0)); then
+		echo 0
+		return
+	fi
+
+	# 2 because there are 2 nozzles
+	echo "Calculating sleep time with delayMs=$delayMs for $numberOfItemsToTransfer items" >&2
+	local totalDelayMs=$((numberOfItemsToTransfer * delayMs / 2))
+	local sleepSecs=$((totalDelayMs / 1000))
+	echo "Total delay ms is $totalDelayMs, sleep seconds is $sleepSecs" >&2
+	echo "$sleepSecs"
 }

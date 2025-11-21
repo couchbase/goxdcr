@@ -98,8 +98,12 @@ function runTestCase {
 	echo "VALIDATING Data..."
 	validateCbWorkloadGenCollection "C2" "B2" "S3" "col3" "C1" "B1" "S1" "col1"
 
-	echo "Waiting 5 seconds before checking item count first pass"
-	sleep 5
+	local sleepSecs=$(calculateTimeToSleepWithMainDelay $targetCheckCount $SEED_INJ_MAX_MAIN_DELAY_MS)
+	if ((sleepSecs < 10)); then
+		sleepSecs=10
+	fi
+	echo "Waiting $sleepSecs seconds before checking item count first pass"
+	sleep $sleepSecs
 	checkItemCnt "C1" "B1" $checkCount
 	checkItemCnt "C2" "B2" $targetCheckCount
 
@@ -110,8 +114,10 @@ function runTestCase {
 	echo "Changing explicit mapping - new target collection should now receive backfill"
 	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S2.col2":"S3.col2"}'
 
-	echo "Waiting 60 seconds before checking item count for backfill"
-	sleep 60
+	# Because this is backfill pipeline, the backfill pipeline is not delayed
+	sleepSecs=10
+	echo "Waiting $sleepSecs seconds before checking item count for backfill"
+	sleep $sleepSecs
 	checkItemCnt "C2" "B2" $checkCount
 
 	# Backfill should have been raised
