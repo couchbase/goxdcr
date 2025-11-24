@@ -75,10 +75,11 @@ func init() {
 
 		// DevColManifestSvcDelaySec is used to inject delay (in seconds) in the collection manifest service
 		// Before calling the callback
+		DevColManifestSvcDelaySec: XDCRDevColManifestSvcDelayConfig,
+
 		// DevNsServerPortSpecifier is used to specify a custom port for ns_server to ensure the delay
 		// only applies to a specific goxdcr process in a cluster_run environment
-		DevColManifestSvcDelaySec: XDCRDevColManifestSvcDelayConfig,
-		DevNsServerPortSpecifier:  XDCRDevNsServerPortSpecifierConfig,
+		DevNsServerPortSpecifier: XDCRDevNsServerPortSpecifierConfig,
 
 		// DevBackfillReplUpdateDelay is used to inject delay (in ms) in backfill replication
 		// spec update process to simulate a busy system
