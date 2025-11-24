@@ -94,6 +94,7 @@ differBin=""
 differSh=""
 mutationDir=""
 mutationDiffResults=""
+mutationDiffResultsEnc=""
 productionTestsOnly=0
 tests=$(ls ${testCasesDirectory:-} | sort)
 testsToRun=$tests
@@ -211,6 +212,9 @@ elif [ "$xdcrDifferDir" != "" ] && [[ -z ${VSSH:-} ]]; then
 
 	mutationDir="$xdcrDifferDir/outputs/mutationDiff"
 	mutationDiffResults="$mutationDir/mutationDiffDetails"
+	# For decrypting results, we need to sit at the differ binary and have a relative path to the
+	# encrypted file
+	mutationDiffResultsEnc="./outputs/mutationDiff/mutationDiffDetails.enc"
 else
 	# Since morpheus, xdcrDiffer is part of the build
 	if [[ -z ${VSSH:-} ]]; then
@@ -223,6 +227,9 @@ else
 
 		mutationDir="$installBinDir/outputs/mutationDiff"
 		mutationDiffResults="$mutationDir/mutationDiffDetails"
+		# For decrypting results, we need to sit at the differ binary and have a relative path to the
+		# encrypted file
+		mutationDiffResultsEnc="./outputs/mutationDiff/mutationDiffDetails.enc"
 	fi
 fi
 

@@ -1034,6 +1034,67 @@ function runXdcrDiffer {
 	return $retVal
 }
 
+# Encrypted version of runXdcrDiffer.
+# Usage:
+#   runXdcrDifferEncrypted <srcCluster> <srcBucket> <tgtCluster> <tgtBucket> <encryptionPassphrase> [extraOpts1] [extraOpts2]
+# Adds -x (encryption) and supplies the passphrase twice via expect prompts.
+function runXdcrDifferEncrypted {
+	local srcCluster=$1
+	local srcPort=${CLUSTER_NAME_PORT_MAP[$srcCluster]:-}
+	local srcBucket=$2
+	local tgtCluster=$3
+	local tgtBucket=$4
+	local encryptionPassphrase=$5
+	local extraOpts1=${6:-}
+	local extraOpts2=${7:-}
+	local opts1Flag=""
+	local opts2Flag=""
+
+	if [[ -z "$srcCluster" || -z "$srcBucket" || -z "$tgtCluster" || -z "$tgtBucket" || -z "$encryptionPassphrase" ]]; then
+		echo "runXdcrDifferEncrypted: missing required arguments (srcCluster srcBucket tgtCluster tgtBucket encryptionPassphrase)" >&2
+		return 1
+	fi
+
+	if [[ -n "${extraOpts1:-}" ]]; then
+		opts1Flag="$(xdcrDifferParseOpts "$extraOpts1")"
+	fi
+	if [[ -n "${extraOpts2:-}" ]]; then
+		opts2Flag="$(xdcrDifferParseOpts "$extraOpts2")"
+	fi
+
+	if ! command -v expect >/dev/null 2>&1; then
+		echo "expect command not found; please install expect to use runXdcrDifferEncrypted" >&2
+		return 1
+	fi
+
+	pushd $(pwd) >/dev/null 2>&1 || return 1
+	cd "$xdcrDifferDir" || {
+		echo "Failed to cd to xdcrDifferDir=$xdcrDifferDir" >&2
+		popd >/dev/null 2>&1
+		return 1
+	}
+
+	# Export only the passphrase for expect; avoid exposing other variables unnecessarily.
+	export PASSPHRASE_FOR_XDCR_DIFF="$encryptionPassphrase"
+
+	expect <<EOF
+set timeout -1
+spawn $differSh -x -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c "$opts1Flag" "$opts2Flag"
+expect {
+	"Enter encryption passphrase:" { send -- "\$env(PASSPHRASE_FOR_XDCR_DIFF)\r"; exp_continue }
+	"Enter the same encryption passphrase again:" { send -- "\$env(PASSPHRASE_FOR_XDCR_DIFF)\r"; exp_continue }
+	eof {}
+}
+set exit_status [lindex [wait] 3]
+exit \$exit_status
+EOF
+	local retVal=$?
+	# Clean up exported passphrase
+	unset PASSPHRASE_FOR_XDCR_DIFF
+	popd >/dev/null 2>&1
+	return $retVal
+}
+
 function runXdcrDifferValidateNoDiff {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -1052,6 +1113,30 @@ function runXdcrDifferValidateNoDiff {
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
+		exit 1
+	fi
+}
+
+function runXdcrDifferValidateNoDiffEnc {
+	local srcCluster=$1
+	local srcBucket=$2
+	local tgtCluster=$3
+	local tgtBucket=$4
+	local encryptionPassphrase=$5
+
+	local retVal
+
+	runXdcrDifferEncrypted "C1" "B1" "C2" "B2" "$encryptionPassphrase" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Running Differ encrypted mode returned non-0 exit code"
+		exit 1
+	fi
+
+	validateDifferResultsEnc "$encryptionPassphrase" 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed to validate encrypted differ results with no diff"
 		exit 1
 	fi
 }
@@ -1080,9 +1165,10 @@ function validateDifferResults {
 	local expectedMissingTgtCnt=$3
 	local expectedDeletedSrcCnt=${4:-}
 	local expectedDeletedTgtCnt=${5:-}
+	local resultOutput
 
 	if [[ ! -f "$mutationDiffResults" ]]; then
-		echo "Error: Unable to find mutation results file: $mutationDiffResults"
+		echo "Error: Unable to find mutation results file: $mutationDiffResults" >&2
 		return 1
 	fi
 
@@ -1159,6 +1245,65 @@ function validateDifferResultsInternal {
 	return $retVal
 }
 
+function differDecryptFile {
+	local encryptionPassphrase=$1
+	local fileToDecrypt=$2
+	local resultOutput
+
+	pushd $(pwd) >/dev/null 2>&1 || return 1
+	cd "$xdcrDifferDir" || {
+		echo "Failed to cd to xdcrDifferDir=$xdcrDifferDir" >&2
+		popd >/dev/null 2>&1
+		return 1
+	}
+
+	if [[ ! -f "$fileToDecrypt" ]]; then
+		echo "Error: Unable to find file: $fileToDecrypt" >&2
+		popd >/dev/null 2>&1
+		return 1
+	fi
+
+	local tmpFile
+	tmpFile=$(mktemp)
+
+	export PASSPHRASE_FOR_XDCR_DIFF="$encryptionPassphrase"
+
+	expect <<EOF >"$tmpFile"
+ set timeout -1
+ log_user 0
+ spawn $differBin -encryptionPassphrase -decrypt $fileToDecrypt
+ expect {
+ 	"Enter encryption passphrase:" { send -- "\$env(PASSPHRASE_FOR_XDCR_DIFF)\r"; exp_continue }
+ 	"Enter the same encryption passphrase again:" { send -- "\$env(PASSPHRASE_FOR_XDCR_DIFF)\r"; log_user 1; exp_continue }
+ 	eof {}
+ }
+ set exit_status [lindex [wait] 3]
+ exit \$exit_status
+EOF
+
+	cat "$tmpFile"
+	rm $tmpFile
+}
+
+function validateDifferResultsEnc {
+	local encryptionPassphrase=$1
+	local expectedMismatchCnt=$2
+	local expectedMissingSrcCnt=$3
+	local expectedMissingTgtCnt=$4
+	local expectedDeletedSrcCnt=${5:-}
+	local expectedDeletedTgtCnt=${6:-}
+	local resultOutput
+
+	resultOutput=$(differDecryptFile "testPassphrase" "$mutationDiffResultsEnc")
+	validateDifferResultsInternal "$resultOutput" "$expectedMismatchCnt" "$expectedMissingSrcCnt" "$expectedMissingTgtCnt"
+	retVal=$?
+
+	if (($retVal != 0)); then
+		echo "Failed to decrypt" >&2
+	fi
+	return $retVal
+}
+
 function checkDifferLogItemCount {
 	local srcOrTgt=$1
 	local itemCnt=$2
@@ -1167,6 +1312,24 @@ function checkDifferLogItemCount {
 	local expected="$srcOrTgt bucket item count including tombstones is $itemCnt (excluding $filteredCnt filtered mutations)"
 
 	found=$(grep -c "$expected" $logFile)
+	if (($found == 0)); then
+		echo "Did not find the line: \"$expected\" from the file $logFile"
+		exit 1
+	fi
+	echo "Found the line: $expected"
+}
+
+function checkDifferLogItemCountEnc {
+	local srcOrTgt=$1
+	local itemCnt=$2
+	local filteredCnt=$3
+	local encryptionPassphrase=$4
+	local logFile="./outputs/xdcrDiffer.log.enc"
+	local expected="$srcOrTgt bucket item count including tombstones is $itemCnt (excluding $filteredCnt filtered mutations)"
+	local resultOutput
+
+	resultOutput=$(differDecryptFile "$encryptionPassphrase" "$logFile")
+	found=$(echo "$resultOutput" | grep -c "$expected")
 	if (($found == 0)); then
 		echo "Did not find the line: \"$expected\" from the file $logFile"
 		exit 1
@@ -1839,7 +2002,6 @@ EOF
 		echo "NODE CLIENT CERT for $clusterName: ${CLIENT_CERT_MAP[$clusterName]}"
 		echo "NODE CLIENT KEY for $clusterName: ${CLIENT_KEY_MAP[$clusterName]}"
 	done
-
 }
 
 # Usage: pass the node log to this function
@@ -2139,6 +2301,7 @@ function validatePrometheusStatsNon0 {
 	local prometheusStatsName=$4
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
 	local prometheusOut
+
 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
 
 	local count
@@ -2155,7 +2318,7 @@ function validatePrometheusStatsNon0 {
 function validatePrometheusSourceNodesCnt {
 	local node=$1
 	local expectedCnt=$2
-	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$node]:-}
 	local prometheusOut
 	local idleSleepCnt=0
 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
