@@ -55,8 +55,8 @@ type services struct {
 type referenceCache struct {
 	// reference denotes the current active reference
 	reference metadata.RemoteClusterReference
-	// history denotes the previous reference - before the last update
-	history metadata.RemoteClusterReference
+	// oldRef denotes the previous reference - before the last update
+	oldRef metadata.RemoteClusterReference
 	// refDeletedFromMetakv indicates whether the reference has been deleted from metakv
 	refDeletedFromMetakv bool
 	// mutex to protect 'this' struct from concurrent access
@@ -191,8 +191,8 @@ var _ metadata_svc.RemoteAgentIface = &RemoteCngAgent{}
 
 // refreshSnapShot encapsulates the working(transient) state of a remote cluster during refresh operation.
 type refreshSnapShot struct {
-	groundTruthRef        *metadata.RemoteClusterReference
-	workingRef            *metadata.RemoteClusterReference
+	refOrig               *metadata.RemoteClusterReference
+	refCache              *metadata.RemoteClusterReference
 	knownCapability       metadata.Capability
 	currentCapability     metadata.Capability
 	promoteStageToPrimary bool
@@ -204,8 +204,8 @@ type refreshSnapShot struct {
 func newRefreshSnapShot(ref *metadata.RemoteClusterReference, capability metadata.Capability, services services, logger *log.CommonLogger) *refreshSnapShot {
 	return &refreshSnapShot{
 		// ref is already a clone
-		groundTruthRef:  ref,
-		workingRef:      ref.Clone(),
+		refOrig:         ref,
+		refCache:        ref.Clone(),
 		knownCapability: capability,
 		services:        services,
 		logger:          logger,
