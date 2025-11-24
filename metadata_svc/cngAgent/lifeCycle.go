@@ -23,7 +23,7 @@ import (
 func (refCache *referenceCache) update(newRef *metadata.RemoteClusterReference) {
 	refCache.mutex.Lock()
 	defer refCache.mutex.Unlock()
-	refCache.history.LoadFrom(&refCache.reference)
+	refCache.oldRef.LoadFrom(&refCache.reference)
 	refCache.reference.LoadFrom(newRef)
 }
 
@@ -31,7 +31,7 @@ func (refCache *referenceCache) update(newRef *metadata.RemoteClusterReference) 
 func (refCache *referenceCache) clear() {
 	refCache.mutex.Lock()
 	defer refCache.mutex.Unlock()
-	refCache.history.LoadFrom(&refCache.reference)
+	refCache.oldRef.LoadFrom(&refCache.reference)
 	refCache.reference.Clear()
 	refCache.refDeletedFromMetakv = true
 }
@@ -422,12 +422,12 @@ func (agent *RemoteCngAgent) callMetadataChangeCb() {
 	var id string
 
 	agent.refCache.mutex.RLock()
-	if agent.refCache.reference.IsEmpty() && !agent.refCache.history.IsEmpty() {
-		id = agent.refCache.history.Id()
+	if agent.refCache.reference.IsEmpty() && !agent.refCache.oldRef.IsEmpty() {
+		id = agent.refCache.oldRef.Id()
 	} else {
 		id = agent.refCache.reference.Id()
 	}
-	oldRef := agent.refCache.history.Clone()
+	oldRef := agent.refCache.oldRef.Clone()
 	ref := agent.refCache.reference.Clone()
 	agent.refCache.mutex.RUnlock()
 

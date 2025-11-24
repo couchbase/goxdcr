@@ -428,7 +428,7 @@ func TestRefreshSnapShot_PerformRefreshOp_BothCredentialsFail(t *testing.T) {
 
 	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
 	assert.Error(err)
-	assert.Contains(err.Error(), "failed to contact target with both credentials")
+	assert.Contains(err.Error(), "authentication failed with both primary and staged credentials")
 	assert.Equal(codes.Unauthenticated, statusCode)
 	assert.False(refreshSnapshot.promoteStageToPrimary)
 
@@ -478,7 +478,7 @@ func TestRefreshSnapShot_IsPersistenceRequired_NoChanges(t *testing.T) {
 	ref := createTestRemoteClusterReferenceWithCreds()
 	refreshSnapshot := setupTestRefreshSnapShot(agent, ref)
 
-	// No changes made to workingRef
+	// No changes made to refCache
 	assert.False(refreshSnapshot.isPersistenceRequired())
 }
 
@@ -489,8 +489,8 @@ func TestRefreshSnapShot_IsPersistenceRequired_WithChanges(t *testing.T) {
 	ref := createTestRemoteClusterReferenceWithStagedCreds()
 	refreshSnapshot := setupTestRefreshSnapShot(agent, ref)
 
-	// Modify workingRef to simulate credential promotion
-	refreshSnapshot.workingRef.PromoteStageCredsToPrimary()
+	// Modify refCache to simulate credential promotion
+	refreshSnapshot.refCache.PromoteStageCredsToPrimary()
 
 	assert.True(refreshSnapshot.isPersistenceRequired())
 }

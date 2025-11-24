@@ -64,7 +64,7 @@ func (agent *RemoteCngAgent) GetReferenceClone(refresh bool) (*metadata.RemoteCl
 		if err := agent.Refresh(); err != nil {
 			// Log the error and return the last known reference
 			agent.logger.Warnf("%v: GetReferenceClone encountered error during refresh: %v", agent.Name(), err)
-			return getClone(), err
+			return getClone(), nil
 		}
 	}
 

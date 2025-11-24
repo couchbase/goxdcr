@@ -125,12 +125,12 @@ func TestReferenceCache_Update(t *testing.T) {
 	// Test initial update
 	cache.update(ref1)
 	assert.True(cache.reference.IsSame(ref1))
-	assert.True(cache.history.IsEmpty())
+	assert.True(cache.oldRef.IsEmpty())
 
 	// Test second update - history should contain previous reference
 	cache.update(ref2)
 	assert.True(cache.reference.IsSame(ref2))
-	assert.True(cache.history.IsSame(ref1))
+	assert.True(cache.oldRef.IsSame(ref1))
 }
 
 func TestReferenceCache_Clear(t *testing.T) {
@@ -147,7 +147,7 @@ func TestReferenceCache_Clear(t *testing.T) {
 	cache.clear()
 	assert.True(cache.reference.IsEmpty())
 	assert.True(cache.refDeletedFromMetakv)
-	assert.True(cache.history.IsSame(ref))
+	assert.True(cache.oldRef.IsSame(ref))
 }
 
 func TestReferenceCache_ConcurrentAccess(t *testing.T) {

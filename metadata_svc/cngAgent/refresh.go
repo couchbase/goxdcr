@@ -117,16 +117,32 @@ func (rs *refreshState) reenableRefresh() {
 	rs.abortState = metadata_svc.RefreshAbortNotRequested
 }
 
+// buildRefreshError creates an appropriate error message based on the gRPC status code
+func buildRefreshError(refName string, code codes.Code, responseErr error, bothCredsFailed bool) error {
+	switch code {
+	case codes.Unauthenticated:
+		if bothCredsFailed {
+			return fmt.Errorf("%v: authentication failed with both primary and staged credentials. err=%w", refName, responseErr)
+		}
+		return fmt.Errorf("%v: authentication failed: invalid credentials. err=%w", refName, responseErr)
+	default:
+		if bothCredsFailed {
+			return fmt.Errorf("%v: failed to contact target with both credentials: status=%v, err=%w", refName, code, responseErr)
+		}
+		return fmt.Errorf("%v: failed to contact target: status=%v, err=%w", refName, code, responseErr)
+	}
+}
+
 // performRefreshOp performs the actual refresh operation to contact the remote cluster
 func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, error) {
-	connStr, err := r.workingRef.MyConnectionStr()
+	connStr, err := r.refCache.MyConnectionStr()
 	if err != nil {
 		return codes.FailedPrecondition, fmt.Errorf("failed to get connection string: %w", err)
 	}
 
 	// Helper function to create grpcOpts for a given credential
 	createGrpcOpts := func(creds base.Credentials) (*base.GrpcOptions, error) {
-		return base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return creds.Clone() }, base.DeepCopyByteArray(r.workingRef.Certificates()))
+		return base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return creds.Clone() }, base.DeepCopyByteArray(r.refCache.Certificates()))
 	}
 
 	// Helper function to perform the RPC
@@ -159,14 +175,14 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 	}
 
 	// Try with primary credentials first
-	grpcOpts, err := createGrpcOpts(r.workingRef.Credentials)
+	grpcOpts, err := createGrpcOpts(r.refCache.Credentials)
 	if err != nil {
 		return codes.Internal, fmt.Errorf("failed to construct grpcOpts with primary credentials: %w", err)
 	}
 
 	clusterInfoResponse := callClusterInfo(grpcOpts)
-	if clusterInfoResponse.Code() == codes.Unauthenticated && r.workingRef.HasStagedCreds() {
-		r.logger.Infof("%v: authentication failed with primary credentials: %w. Retrying with staged credentials", r.workingRef.Name(), clusterInfoResponse.Err())
+	if clusterInfoResponse.Code() == codes.Unauthenticated && r.refCache.HasStagedCreds() {
+		r.logger.Infof("%v: authentication failed with primary credentials: %w. Retrying with staged credentials", r.refCache.Name(), clusterInfoResponse.Err())
 
 		// Ensure context hasn't been canceled before retrying with staged credentials
 		select {
@@ -176,7 +192,7 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 		}
 
 		// Retry with staged credentials
-		grpcOpts, err = createGrpcOpts(*r.workingRef.StagedCredentials)
+		grpcOpts, err = createGrpcOpts(*r.refCache.StagedCredentials)
 		if err != nil {
 			return codes.Internal, fmt.Errorf("failed to construct grpcOpts with staged credentials: %w", err)
 		}
@@ -186,25 +202,25 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 			r.promoteStageToPrimary = true
 		} else {
 			// Both primary and staged credentials failed
-			r.logger.Infof("%v: failed with staged credentials. statusCode=%v err=%v", r.workingRef.Name(), clusterInfoResponse.Code(), clusterInfoResponse.Err())
-			return clusterInfoResponse.Code(), fmt.Errorf("%v: failed to contact target with both credentials", r.workingRef.Name())
+			r.logger.Infof("%v: failed with staged credentials. statusCode=%v err=%v", r.refCache.Name(), clusterInfoResponse.Code(), clusterInfoResponse.Err())
+			return clusterInfoResponse.Code(), buildRefreshError(r.refCache.Name(), clusterInfoResponse.Code(), clusterInfoResponse.Err(), true)
 		}
 	}
 
 	if clusterInfoResponse.Code() != codes.OK {
-		return clusterInfoResponse.Code(), fmt.Errorf("failed to contact target: status=%v, err=%w", clusterInfoResponse.Code(), clusterInfoResponse.Err())
+		return clusterInfoResponse.Code(), buildRefreshError(r.refCache.Name(), clusterInfoResponse.Code(), clusterInfoResponse.Err(), false)
 	}
 
 	// Validate cluster UUID
-	if r.workingRef.Uuid() != clusterInfoResponse.Response().GetClusterUuid() {
-		r.logger.Errorf("%v: cluster UUID mismatch. cached=%v, actual=%v", r.workingRef.Name(), r.workingRef.Uuid(), clusterInfoResponse.Response().GetClusterUuid())
+	if r.refCache.Uuid() != clusterInfoResponse.Response().GetClusterUuid() {
+		r.logger.Errorf("%v: cluster UUID mismatch. cached=%v, actual=%v", r.refCache.Name(), r.refCache.Uuid(), clusterInfoResponse.Response().GetClusterUuid())
 		return clusterInfoResponse.Code(), metadata_svc.UUIDMismatchError
 	}
 
 	// Promote staged credentials if needed
 	if r.promoteStageToPrimary {
-		r.workingRef.PromoteStageCredsToPrimary()
-		r.logger.Infof("Preparing to promote staged credentials to primary in remote cluster reference %v.", r.workingRef.Name())
+		r.refCache.PromoteStageCredsToPrimary()
+		r.logger.Infof("Preparing to promote staged credentials to primary in remote cluster reference %v.", r.refCache.Name())
 	}
 
 	// Update capability
@@ -214,8 +230,7 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 }
 
 func (r *refreshSnapShot) isPersistenceRequired() bool {
-	return !r.groundTruthRef.IsEssentiallySame(r.workingRef)
-
+	return !r.refOrig.IsEssentiallySame(r.refCache)
 }
 
 func (agent *RemoteCngAgent) runPeriodicRefresh() {
@@ -257,8 +272,8 @@ func (agent *RemoteCngAgent) Refresh() error {
 	defer agent.refreshState.endOp(&opErr)
 
 	ref, _ := agent.GetReferenceClone(false)
-	refreshSnapShot := newRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
-	statusCode, opErr = refreshSnapShot.performRefreshOp(opContext)
+	snapShot := newRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
+	statusCode, opErr = snapShot.performRefreshOp(opContext)
 
 	if opContext.Err() != nil && errors.Is(opErr, opContext.Err()) {
 		// if the refresh operation failed due to context cancellation, don't update health tracker
@@ -281,17 +296,17 @@ func (agent *RemoteCngAgent) Refresh() error {
 	default:
 	}
 
-	if refreshSnapShot.isPersistenceRequired() {
-		updateErr := agent.SetOp(opContext, refreshSnapShot.workingRef)
+	if snapShot.isPersistenceRequired() {
+		updateErr := agent.SetOp(opContext, snapShot.refCache)
 		if updateErr != nil {
 			opErr = fmt.Errorf("failed to persist updated reference during refresh: %w", updateErr)
 			return opErr
 		}
-		if refreshSnapShot.promoteStageToPrimary {
+		if snapShot.promoteStageToPrimary {
 			agent.services.uiLog.Write(fmt.Sprintf("Promoted staged credentials to primary on remote cluster \"%s\".", agent.Name()))
 		}
-		agent.logger.Infof("%v: Refresh has sucessfully commited changes. Original: %v New: %v",
-			refreshSnapShot.groundTruthRef.CloneAndRedact(), refreshSnapShot.workingRef.CloneAndRedact())
+		agent.logger.Infof("%v: Refresh has successfully committed changes. Original: %v New: %v",
+			snapShot.refOrig.CloneAndRedact(), snapShot.refCache.CloneAndRedact())
 	} else {
 		agent.logger.Infof("%v: Refresh completed successfully with no actual changes", agent.Name())
 	}
