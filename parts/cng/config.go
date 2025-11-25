@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -18,7 +19,6 @@ type Config struct {
 
 type ReplicationConfig struct {
 	CRMode            base.ConflictResolutionMode
-	CNGAddr           string
 	SourceClusterUUID string
 	SourceBucketName  string
 	SourceBucketUUID  string
@@ -26,12 +26,24 @@ type ReplicationConfig struct {
 	TargetClusterUUID string
 	TargetBucketName  string
 	TargetBucketUUID  string
+
+	vbUUIDMap map[uint16]string
+}
+
+func (rc *ReplicationConfig) SetVBUUIDMap(m map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse) (err error) {
+	rc.vbUUIDMap = make(map[uint16]string)
+	for vbNo, info := range m {
+		if info == nil || len(info.Vbuckets) == 0 {
+			err = fmt.Errorf("no vbucket info found for vbucket %v", vbNo)
+			return
+		}
+		rc.vbUUIDMap[vbNo] = fmt.Sprintf("%s", info.Vbuckets[0].GetUuid())
+	}
+
+	return nil
 }
 
 func (rc *ReplicationConfig) Validate() error {
-	if rc.CNGAddr == "" {
-		return fmt.Errorf("CNGAddr is empty")
-	}
 	if rc.SourceClusterUUID == "" {
 		return fmt.Errorf("SourceClusterUUID is empty")
 	}

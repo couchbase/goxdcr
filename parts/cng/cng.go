@@ -55,6 +55,11 @@ func New(id string, loggerContext *log.LoggerContext, cfg Config) (n *Nozzle, er
 		return
 	}
 
+	if len(cfg.Replication.vbUUIDMap) == 0 {
+		err = fmt.Errorf("VBUUID map is empty in replication config")
+		return
+	}
+
 	loggerContext.AddMoreContext(map[string]string{
 		"id": id,
 	})

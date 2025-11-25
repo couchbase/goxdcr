@@ -35,14 +35,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
-const (
-	XDCRCheckpointing string = "xdcrCheckpointing"
-	CheckpointMgrId   string = "CheckpointMgr"
-	StatsMgrId        string = "StatsMgr"
-	TimeCommiting     string = "time_commiting"
-	Vbno              string = "vbno"
-)
-
 var CHECKPOINT_INTERVAL = "checkpoint_interval"
 
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
@@ -478,25 +470,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	finCh := make(chan bool, 1)
 
 	ckmgr := &CheckpointManager{
-		CheckpointManagerInjector: NewCheckpointManagerInjector(),
-		AbstractComponent:         component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
-		RemoteMemcachedComponent: component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
-			target_bucket_name).SetTargetKvVbMapGetter(
-			func() (base.KvVBMapType, error) {
-				return target_kv_vb_map, nil
-			}).SetTargetUsernameGetter(
-			func() string {
-				return target_username
-			}).SetTargetPasswordGetter(
-			func() string {
-				return target_password
-			}).SetRefGetter(
-			func() *metadata.RemoteClusterReference {
-				return target_cluster_ref
-			}).SetAlternateAddressChecker(
-			func(ref *metadata.RemoteClusterReference) (bool, error) {
-				return remote_cluster_svc.ShouldUseAlternateAddress(ref)
-			}),
+		CheckpointManagerInjector:         NewCheckpointManagerInjector(),
+		AbstractComponent:                 component.NewAbstractComponentWithLogger(base.CheckpointMgrId, logger),
 		pipeline:                          nil,
 		pipelineReinitHash:                "",
 		checkpoints_svc:                   checkpoints_svc,
@@ -529,6 +504,24 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		variableVBMode:                    variableVBMode,
 		backfillCollections:               make(map[uint16][]uint32),
 	}
+
+	ckmgr.RemoteMemcachedComponent = component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
+		target_bucket_name).SetTargetKvVbMapGetter(
+		func() (base.KvVBMapType, error) {
+			return target_kv_vb_map, nil
+		}).SetTargetUsernameGetter(
+		func() string {
+			return target_username
+		}).SetTargetPasswordGetter(
+		func() string {
+			return target_password
+		}).SetRefGetter(
+		func() *metadata.RemoteClusterReference {
+			return target_cluster_ref
+		}).SetAlternateAddressChecker(
+		func(ref *metadata.RemoteClusterReference) (bool, error) {
+			return remote_cluster_svc.ShouldUseAlternateAddress(ref)
+		})
 
 	for _, vbno := range ckmgr.getMyVBs() {
 		ckmgr.backfillCollections[vbno] = make([]uint32, 0)
@@ -1031,7 +1024,7 @@ func (ckmgr *CheckpointManager) checkCkptCapability() {
 	support_ckpt := false
 	bk_capabilities := ckmgr.remote_bucket.Capabilities
 	for _, c := range bk_capabilities {
-		if c == XDCRCheckpointing {
+		if c == base.XDCRCheckpointing {
 			support_ckpt = true
 			break
 		}

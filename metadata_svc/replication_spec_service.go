@@ -238,7 +238,20 @@ func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorM
 		return "", 0, "", errors.New("XDCRTopologySvc.MyConnectionStr() returned empty string")
 	}
 
-	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, sourceBucketKVVBMap, err_source := service.utils.BucketValidationInfo(local_connStr, sourceBucket, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, service.logger)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           false,
+		HostAddr:          local_connStr,
+		BucketName:        sourceBucket,
+		Username:          "",
+		Password:          "",
+		HTTPAuthMech:      base.HttpAuthMechPlain,
+		Certificate:       nil,
+		SanInCertificate:  false,
+		ClientCertificate: nil,
+		ClientKey:         nil,
+	}
+
+	_, sourceBucketType, sourceBucketUUID, sourceConflictResolutionType, sourceEvictionPolicy, sourceBucketKVVBMap, err_source := service.utils.BucketValidationInfo(service.logger, req)
 	service.logger.Infof("Result from local bucket look up: bucketName=%v, err_source=%v, time taken=%v\n", sourceBucket, err_source, time.Since(start_time))
 	service.validateBucket(sourceBucket, targetCluster, targetBucket, sourceBucketType, sourceEvictionPolicy, err_source, errorMap, true)
 
@@ -507,18 +520,32 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				return
 			}
 			if performRemoteValidation {
-				targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap = service.validateTargetBucket(validateTargetBucketErrMap, remoteConnstr, targetBucket, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster, useExternal)
+				req := &utilities.GetBucketInfoReq{
+					FromCNG:           targetClusterRef.IsCNG(),
+					HostAddr:          remoteConnstr,
+					BucketName:        targetBucket,
+					Username:          remoteUsername,
+					Password:          remotePassword,
+					HTTPAuthMech:      httpAuthMech,
+					Certificate:       certificate,
+					SanInCertificate:  sanInCertificate,
+					ClientCertificate: clientCertificate,
+					ClientKey:         clientKey,
+				}
+				targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap = service.validateTargetBucket(validateTargetBucketErrMap, req, sourceBucket, targetCluster, useExternal)
 
-				// Validate the alternate/external address setup, particularly to check if private link is configured.
-				hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo)
-				if err != nil {
-					errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
-					service.logger.Error(errMsg)
-					validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
-				} else if hasSharedExternalHostname {
-					errMsg := fmt.Sprintf("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
-					service.logger.Error(errMsg)
-					validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+				if !targetClusterRef.IsCNG() {
+					// Validate the alternate/external address setup, particularly to check if private link is configured.
+					hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo)
+					if err != nil {
+						errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
+						service.logger.Error(errMsg)
+						validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+					} else if hasSharedExternalHostname {
+						errMsg := fmt.Sprintf("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
+						service.logger.Error(errMsg)
+						validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+					}
 				}
 			}
 			if len(validateTargetBucketErrMap) > 0 {
@@ -633,7 +660,19 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 		}
 		var targetBucketInfo map[string]interface{}
 		var targetKVVBMap map[string][]uint16
-		targetBucketInfo, _, _, _, _, targetKVVBMap, err = service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, useExternal)
+		req := &utilities.GetBucketInfoReq{
+			FromCNG:           targetClusterRef.IsCNG(),
+			HostAddr:          remote_connStr,
+			BucketName:        targetBucket,
+			Username:          remote_userName,
+			Password:          remote_password,
+			HTTPAuthMech:      httpAuthMech,
+			Certificate:       certificate,
+			SanInCertificate:  sanInCertificate,
+			ClientCertificate: clientCertificate,
+			ClientKey:         clientKey,
+		}
+		targetBucketInfo, _, _, _, _, targetKVVBMap, err = service.utils.RemoteBucketValidationInfo(service.logger, req, useExternal)
 		if err != nil {
 			return nil, err, nil
 		}
@@ -691,7 +730,21 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 				service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
 				return err
 			}
-			bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+
+			req := &utilities.GetBucketInfoReq{
+				FromCNG:           false,
+				HostAddr:          connstr,
+				BucketName:        sourceBucket,
+				Username:          username,
+				Password:          password,
+				HTTPAuthMech:      authMech,
+				Certificate:       certificate,
+				SanInCertificate:  sanInCertificate,
+				ClientCertificate: clientCertificate,
+				ClientKey:         clientKey,
+			}
+
+			bucketInfo, err := service.utils.GetBucketInfo(service.logger, req)
 			if err != nil {
 				return err
 			}
@@ -736,7 +789,19 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
 			return err
 		}
-		bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+
+		req := &utilities.GetBucketInfoReq{
+			HostAddr:          connstr,
+			BucketName:        sourceBucket,
+			Username:          username,
+			Password:          password,
+			HTTPAuthMech:      authMech,
+			Certificate:       certificate,
+			SanInCertificate:  sanInCertificate,
+			ClientCertificate: clientCertificate,
+			ClientKey:         clientKey,
+		}
+		bucketInfo, err := service.utils.GetBucketInfo(service.logger, req)
 		if err != nil {
 			return err
 		}
@@ -857,29 +922,17 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 		return err
 	}
 
-	// Version check
-	targetClusterCompatibility, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
-	if err != nil {
-		errorMap[base.ToCluster] = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-		return err
-	}
-	hasCompressionSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForCompressionSupport)
-	if !hasCompressionSupport {
-		errorMap[base.ToCluster] = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support compression. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
-			base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
-		return err
-	}
 	return err
 }
 
 // validate target bucket
-func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, sourceBucket, targetCluster string, useExternal bool) (targetBucketInfo map[string]interface{}, targetBucketUUID string, vbs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
+func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, req *utilities.GetBucketInfoReq, sourceBucket, targetCluster string, useExternal bool) (targetBucketInfo map[string]interface{}, targetBucketUUID string, vbs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
 
-	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, useExternal)
-	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", remote_connStr, targetBucket, targetBucketType, err_target, time.Since(start_time))
+	targetBucketInfo, targetBucketType, targetBucketUUID, targetConflictResolutionType, _, targetKVVBMap, err_target := service.utils.RemoteBucketValidationInfo(service.logger, req, useExternal)
+	service.logger.Infof("Result from remote bucket look up: connStr=%v, bucketName=%v, targetBucketType=%v, err_target=%v, time taken=%v\n", req.HostAddr, req.BucketName, targetBucketType, err_target, time.Since(start_time))
 
-	service.validateBucket(sourceBucket, targetCluster, targetBucket, targetBucketType, "", err_target, errorMap, false)
+	service.validateBucket(sourceBucket, targetCluster, req.BucketName, targetBucketType, "", err_target, errorMap, false)
 
 	return targetBucketInfo, targetBucketUUID, base.GetNumberOfVbs(targetKVVBMap), targetConflictResolutionType, targetKVVBMap
 }
@@ -1610,7 +1663,20 @@ func (service *ReplicationSpecService) targetBucketUUID(targetClusterUUID, bucke
 		return "", err_target
 	}
 
-	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           ref.IsCNG(),
+		HostAddr:          remote_connStr,
+		BucketName:        bucketName,
+		Username:          remote_userName,
+		Password:          remote_password,
+		HTTPAuthMech:      httpAuthMech,
+		Certificate:       certificate,
+		SanInCertificate:  sanInCertificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	return service.utils.BucketUUID(service.logger, req)
 }
 
 // used by unit test only. does not use https and is not of production quality

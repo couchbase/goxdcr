@@ -412,9 +412,9 @@ type StatisticsManager struct {
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
 	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error),
 	hasConflictLogger bool, variableVBMode bool) *StatisticsManager {
-	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
+	localLogger := log.NewLogger(base.StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
-		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
+		AbstractComponent:         component.NewAbstractComponentWithLogger(base.StatsMgrId, localLogger),
 		registries:                make(map[string]metrics.Registry),
 		logger:                    localLogger,
 		bucket_name:               bucket_name,

@@ -110,6 +110,7 @@ func (p *ConnPool) init() error {
 			return fmt.Errorf("failed to create connection %d: %w", i, err)
 		}
 	}
+	p.logger.Infof("CNG connection pool initialized successfully")
 
 	return nil
 }
@@ -281,14 +282,21 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 				return
 			}
 
+			cngErrCode := mapErrorToCode(err)
 			// Check if it's a network error that requires connection recreation
-			if !p.cfg.UtilsSvc.IsSeriousNetError(err) {
+			if !p.isRetryableError(err, cngErrCode) {
 				err = fmt.Errorf("non-network error, connIndex=%d, err: %w", index, err)
 				return
 			}
 
 			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
 			st.RetryCount++
+
+			if cngErrCode == ERR_GRPC_DEADLINE_EXCEEDED {
+				// For deadline exceeded errors, we do not attempt to recreate the connection
+				continue
+			}
+
 			// Attempt to recreate the connection
 			err = p.connect(int(index), err)
 			if err != nil {
@@ -298,6 +306,20 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 			}
 		}
 	}
+}
+
+// isRetryableError determines if the error is a network error that warrants connection recreation and retry
+// PermissionDenied and Unauthenticated errors are treated as network errors for retry purposes
+func (p *ConnPool) isRetryableError(err error, errCode CNGErrorCode) bool {
+	if p.cfg.UtilsSvc.IsSeriousNetError(err) {
+		return true
+	}
+
+	if errCode == ERR_GRPC_PERMISSION_DENIED || errCode == ERR_GRPC_UNAUTHENTICATED {
+		return true
+	}
+
+	return false
 }
 
 type PoolCallStat struct {

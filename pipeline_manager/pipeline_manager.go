@@ -2727,7 +2727,20 @@ func (pm *PipelineManager) gcSourceBucket(spec *metadata.ReplicationSpecificatio
 		return false, err
 	}
 
-	bucketInfo, err := pm.utils.GetBucketInfo(local_connStr, spec.SourceBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, pm.logger)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           false,
+		HostAddr:          local_connStr,
+		BucketName:        spec.SourceBucketName,
+		Username:          username,
+		Password:          password,
+		HTTPAuthMech:      authMech,
+		Certificate:       certificate,
+		SanInCertificate:  sanInCertificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	bucketInfo, err := pm.utils.GetBucketInfo(pm.logger, req)
 	if err == pm.utils.GetNonExistentBucketError() {
 		shouldDel := pm.incrementGCCnt(pm.srcGcMap, spec.Id)
 		if shouldDel {

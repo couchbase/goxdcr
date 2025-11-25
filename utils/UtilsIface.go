@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package utils
 
 import (
+	"context"
 	"crypto/tls"
 	"expvar"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"google.golang.org/grpc"
 )
 
 type ExponentialOpFunc func() error
@@ -54,6 +56,23 @@ type CngUtils interface {
 	CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])
 	CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse])
 	CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse]
+
+	// CngGetVbucketInfoOnce is a helper function that wraps the streaming RPC GetVbucketInfo call
+	// to return the first response message only.
+	CngGetVbucketInfoOnce(ctx context.Context, c base.CngClient, req *internal_xdcr_v1.GetVbucketInfoRequest, opts ...grpc.CallOption) (rsp map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, err error)
+}
+
+type GetBucketInfoReq struct {
+	FromCNG           bool
+	HostAddr          string
+	BucketName        string
+	Username          string
+	Password          string
+	HTTPAuthMech      base.HttpAuthMech
+	Certificate       []byte
+	SanInCertificate  bool
+	ClientCertificate []byte
+	ClientKey         []byte
 }
 
 type UtilsIface interface {
@@ -80,8 +99,7 @@ type UtilsIface interface {
 	 */
 	// Buckets related utilities
 	BucketInfoParseError(bucketInfo map[string]interface{}, errMsg string, logger *log.CommonLogger) error
-	BucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	BucketValidationInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
 	GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
@@ -159,13 +177,13 @@ type UtilsIface interface {
 	 * ------------------------
 	 */
 	// Buckets related utilities
-	BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
+	BucketUUID(logger *log.CommonLogger, req *GetBucketInfoReq) (string, error)
 	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error)
-	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
+	// GetBucketInfo is a wrapper that calls either CNG or non-CNG GetBucketInfo based on the request param FromCNG
+	GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (map[string]interface{}, error)
 	GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error)
 	GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error)
-	RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-		logger *log.CommonLogger, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+	RemoteBucketValidationInfo(logger *log.CommonLogger, req *GetBucketInfoReq, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{})
 	VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error

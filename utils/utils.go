@@ -12,7 +12,6 @@ package utils
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
@@ -39,16 +38,21 @@ import (
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goutils/scramsha"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/base/filter"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbaselabs/gojsonsm"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	// Indicates the source of the bucket info obtained i.e. CNG or XMEM
+	BucketInfoSourceKey = "__source"
+	// Indicates the kv-vb map simulated from CNG bucket info
+	BucketInfoCngKvVbMapKey = "__cngKvVbMap"
 )
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
@@ -511,7 +515,19 @@ func (u *Utilities) InvalidRuneIndexErrorMessage(key string, index int) string {
 }
 
 func (u *Utilities) LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
-	return u.BucketUUID(local_connStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
+	req := &GetBucketInfoReq{
+		FromCNG:           false,
+		HostAddr:          local_connStr,
+		BucketName:        bucketName,
+		Username:          "",
+		Password:          "",
+		HTTPAuthMech:      base.HttpAuthMechPlain,
+		Certificate:       nil,
+		SanInCertificate:  false,
+		ClientCertificate: nil,
+		ClientKey:         nil,
+	}
+	return u.BucketUUID(logger, req)
 }
 
 func (u *Utilities) BucketStorageBackend(bucketInfo map[string]interface{}) (string, error) {
@@ -900,6 +916,15 @@ func (u *Utilities) GetServersListFromBucketInfo(bucketInfo map[string]interface
 }
 
 func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func(nodes []string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error) {
+	if IsBucketInfoFromCng(bucketInfo) {
+		tmp, err := GetCngKVVBMap(bucketInfo)
+		if err != nil {
+			return nil, err
+		}
+		ret := base.KvVBMapType(tmp)
+		return &ret, nil
+	}
+
 	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
 	if !ok {
 		// The returned error will be displayed on UI. We don't want to include the bucketInfo map since it is too much info for UI.
@@ -1490,16 +1515,27 @@ func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defa
 
 // get bucket info
 // a specialized case of GetClusterInfo
-func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
-	if bucketName == "" {
+func (u *Utilities) GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (map[string]interface{}, error) {
+	if req == nil {
+		err := fmt.Errorf("GetBucketInfoReq cannot be nil")
+		return nil, err
+	}
+
+	if req.BucketName == "" {
 		return nil, fmt.Errorf("Bucket name cannot be empty")
 	}
-	bucketInfo := make(map[string]interface{})
 
 	// This is used for local as well - but log only if atrociously bad
-	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetBucketInfo(%v, %v)", req.HostAddr, req.BucketName), base.DiagNetworkThreshold)
 	defer stopFunc()
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil)
+
+	if req.FromCNG {
+		return u.GetBucketInfoFromCNG(logger, req)
+	}
+
+	bucketInfo := make(map[string]interface{})
+	bucketInfo[BucketInfoSourceKey] = base.Xmem
+	err, statusCode := u.QueryRestApiWithAuth(req.HostAddr, base.DefaultPoolBucketsPath+req.BucketName, false, req.Username, req.Password, req.HTTPAuthMech, req.Certificate, req.SanInCertificate, req.ClientCertificate, req.ClientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}
@@ -1512,19 +1548,19 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 	case http.StatusForbidden:
 		return nil, base.ErrorForbidden
 	default:
-		logger.Errorf("Failed to get bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
+		logger.Errorf("Failed to get bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", req.BucketName, req.HostAddr, err, statusCode)
 		return nil, fmt.Errorf("Failed to get bucket info.")
 	}
 }
 
 // get bucket uuid
-func (u *Utilities) BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+func (u *Utilities) BucketUUID(logger *log.CommonLogger, req *GetBucketInfoReq) (string, error) {
+	bucketInfo, err := u.GetBucketInfo(logger, req)
 	if err != nil {
 		return "", err
 	}
 
-	return u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+	return u.GetBucketUuidFromBucketInfo(req.BucketName, bucketInfo, logger)
 }
 
 func (u *Utilities) GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error) {
@@ -1582,18 +1618,16 @@ func (u *Utilities) GetBucketsFromInfoMap(bucketListInfo []interface{}, logger *
 	return buckets, nil
 }
 
-func (u *Utilities) BucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+func (u *Utilities) BucketValidationInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
-	return u.bucketValidationInfoInternal(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, false /*external*/)
+	return u.bucketValidationInfoInternal(logger, req, false /*external*/)
 }
 
-func (u *Utilities) RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	logger *log.CommonLogger, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+func (u *Utilities) RemoteBucketValidationInfo(logger *log.CommonLogger, req *GetBucketInfoReq, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
-	return u.bucketValidationInfoInternal(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	return u.bucketValidationInfoInternal(logger, req, useExternal)
 }
 
 // get a number of fields in bucket for validation purpose
@@ -1602,38 +1636,37 @@ func (u *Utilities) RemoteBucketValidationInfo(hostAddr, bucketName, username, p
 // 3. bucket conflict resolution type
 // 4. bucket eviction policy
 // 5. bucket server vb map
-func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
-	logger *log.CommonLogger, remote bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
+func (u *Utilities) bucketValidationInfoInternal(logger *log.CommonLogger, req *GetBucketInfoReq, remote bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 	bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error) {
 
 	bucketValidationInfoOp := func() error {
-		bucketInfo, err = u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+		bucketInfo, err = u.GetBucketInfo(logger, req)
 		if err != nil {
 			return err
 		}
-		bucketType, err = u.GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
+		bucketType, err = u.GetBucketTypeFromBucketInfo(req.BucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", req.BucketName, err)
 			return err
 		}
-		bucketUUID, err = u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
+		bucketUUID, err = u.GetBucketUuidFromBucketInfo(req.BucketName, bucketInfo, logger)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("Error retrieving UUID setting on bucket %v. err=%v", req.BucketName, err)
 			return err
 		}
-		bucketConflictResolutionType, err = u.GetConflictResolutionTypeFromBucketInfo(bucketName, bucketInfo)
+		bucketConflictResolutionType, err = u.GetConflictResolutionTypeFromBucketInfo(req.BucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("Error retrieving ConflictResolutionType setting on bucket %v. err=%v", req.BucketName, err)
 			return err
 		}
-		bucketEvictionPolicy, err = u.GetEvictionPolicyFromBucketInfo(bucketName, bucketInfo)
+		bucketEvictionPolicy, err = u.GetEvictionPolicyFromBucketInfo(req.BucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", req.BucketName, err)
 			return err
 		}
-		bucketKVVBMapPtr, err := u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo, nil, nil)
+		bucketKVVBMapPtr, err := u.GetServerVBucketsMap(req.HostAddr, req.BucketName, bucketInfo, nil, nil)
 		if err != nil {
-			err = fmt.Errorf("Error getServerVBucketsMap on bucket %v. err=%v", bucketName, err)
+			err = fmt.Errorf("Error getServerVBucketsMap on bucket %v. err=%v", req.BucketName, err)
 			return err
 		}
 		bucketKVVBMap = *bucketKVVBMapPtr
@@ -3269,7 +3302,20 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 		return err
 	}
 
-	bucketInfo, err := u.GetBucketInfo(connStr, targetBucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	req := &GetBucketInfoReq{
+		FromCNG:           remoteClusterRef.IsCNG(),
+		HostAddr:          connStr,
+		BucketName:        targetBucketName,
+		Username:          username,
+		Password:          password,
+		HTTPAuthMech:      authMech,
+		Certificate:       certificate,
+		SanInCertificate:  sanInCertificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	bucketInfo, err := u.GetBucketInfo(logger, req)
 	if err != nil {
 		return err
 	}
@@ -3784,110 +3830,4 @@ func (u *Utilities) GetTerseInfo(localConnStr string, username, password string,
 	}
 
 	return clusterInfo, nil
-}
-
-// GrpcStreamHandler defines the interface for handling streamed messages.
-type GrpcStreamHandler[Resp any] interface {
-	// OnMessage is called for each message received from the stream.
-	OnMessage(msg Resp)
-	// OnError is called if an error occurs during streaming.
-	OnError(err error)
-	// OnComplete is called when the stream completes successfully.
-	OnComplete()
-}
-
-// grpcCall handles simple unary gRPC calls.
-func grpcCall[Req, Resp any](request *base.GrpcRequest[Req], rpc func(ctx context.Context, request Req, opts ...grpc.CallOption) (Resp, error)) *base.GrpcResponse[Resp] {
-	resp, err := rpc(request.Context, request.Request)
-	st, _ := status.FromError(err)
-	return &base.GrpcResponse[Resp]{
-		Resp:   resp,
-		Status: st,
-		Error:  err,
-	}
-}
-
-// isUserTriggeredCancellation checks if the cancellation was caused by user action
-func isUserTriggeredCancellation(cause error) bool {
-	if cause == nil {
-		return false
-	}
-	return errors.Is(cause, base.ErrorUserInitiatedStreamRpcCancellation)
-}
-
-// grpcServerStreamCall handles server-side streaming gRPC calls.
-func grpcServerStreamCall[Req, Resp any](
-	request *base.GrpcRequest[Req],
-	handler GrpcStreamHandler[*Resp],
-	rpc func(ctx context.Context, request Req, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Resp], error),
-) {
-	stream, err := rpc(request.Context, request.Request)
-	if err != nil {
-		err = fmt.Errorf("error calling rpc: %w", err)
-		handler.OnError(err)
-		return
-	}
-
-	// Wait for the header to be received
-	// A receipt of the header indicates that the server has accepted the request and
-	// is ready to send messages
-	if _, err := stream.Header(); err != nil {
-		err = fmt.Errorf("error reading stream header: %w", err)
-		handler.OnError(err)
-		return
-	}
-
-	// Get the context for the stream
-	streamCtx := stream.Context()
-
-	// Receive messages from the stream
-	for {
-		resp, err := stream.Recv()
-		if err != nil {
-			if err == io.EOF {
-				// Stream completed successfully
-				handler.OnComplete()
-				return
-			}
-			// Check for cancellation - gRPC wraps context.Canceled in a status error
-			st, _ := status.FromError(err)
-			if strings.Contains(st.Message(), context.Canceled.Error()) || st.Code() == codes.Canceled {
-				// Check if the cancellation was caused by user action
-				if isUserTriggeredCancellation(context.Cause(streamCtx)) {
-					// A user-initiated cancellation occurs when XDCR intentionally ends the stream—for example,
-					//  when all replications for the target bucket are deleted and the stream is no longer needed.
-					// This should be treated as a successful completion of the stream.
-					handler.OnComplete()
-					return
-				}
-			}
-			// any other errors (timeout, connection breakdown, application errors etc.) should be treated as errors on the client side and retried.
-			handler.OnError(err)
-			return
-		}
-		handler.OnMessage(resp)
-	}
-}
-
-// CngGetClusterInfo fetches cluster information from the target couchbase cluster via CNG
-func (u *Utilities) CngGetClusterInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetClusterInfoResponse] {
-	return grpcCall(request, client.GetClusterInfo)
-}
-
-// CngGetBucketInfo fetches bucket information from the target couchbase cluster via CNG
-func (u *Utilities) CngGetBucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]) *base.GrpcResponse[*internal_xdcr_v1.GetBucketInfoResponse] {
-	return grpcCall(request, client.GetBucketInfo)
-}
-
-// CngHeartbeat sends a heartbeat to the target couchbase cluster via CNG
-func (u *Utilities) CngHeartbeat(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
-	return grpcCall(request, client.Heartbeat)
-}
-
-func (u *Utilities) CngGetVbucketInfo(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], handler GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse]) {
-	grpcServerStreamCall(request, handler, client.GetVbucketInfo)
-}
-
-func (u *Utilities) CngWatchCollections(client base.CngClient, request *base.GrpcRequest[*internal_xdcr_v1.WatchCollectionsRequest], handler GrpcStreamHandler[*internal_xdcr_v1.WatchCollectionsResponse]) {
-	grpcServerStreamCall(request, handler, client.WatchCollections)
 }

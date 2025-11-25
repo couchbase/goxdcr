@@ -93,7 +93,8 @@ func (agent *RemoteCngAgent) GetReferenceAndStatusClone() *metadata.RemoteCluste
 
 func (agent *RemoteCngAgent) GetCapability() (metadata.Capability, error) {
 	// Darshan TODO: implement MB-68864
-	return metadata.Capability{}, nil
+	// CNG TODO: temparily return all enabled capability
+	return *metadata.AllEnabledCapability(), nil
 }
 
 // CAPI is not used anymore and will not be supported for CNG targets

@@ -11,11 +11,13 @@ licenses/APL2.txt.
 package service_impl
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
@@ -109,8 +111,52 @@ func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface)
 //	err
 //
 // Refer to ns_server/deps/ns_couchdb/src/capi_replication.erl for server side source code
+
+func (c *CAPIService) getVBInfoCng(remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (vbInfo *internal_xdcr_v1.GetVbucketInfoResponse_VbucketState, err error) {
+	conn, err := remoteBucket.RemoteClusterRef.NewCNGConn()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	includeMaxCas := true
+	stream, err := conn.Client().GetVbucketInfo(context.Background(), &internal_xdcr_v1.GetVbucketInfoRequest{
+		BucketName:    remoteBucket.BucketName,
+		VbucketIds:    []uint32{uint32(vbno)},
+		IncludeMaxCas: &includeMaxCas,
+	})
+	if err != nil {
+		return
+	}
+
+	var rsp internal_xdcr_v1.GetVbucketInfoResponse
+	err = stream.RecvMsg(&rsp)
+	if err != nil {
+		return
+	}
+	if len(rsp.Vbuckets) == 0 {
+		return nil, fmt.Errorf("no vb info returned for vb %v from cng", vbno)
+	}
+
+	return rsp.Vbuckets[0], nil
+}
+
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
+
+	if remoteBucket.RemoteClusterRef.IsCNG() {
+		vbInfo, err := capi_svc.getVBInfoCng(remoteBucket, knownRemoteVBStatus.VBNo)
+		if err != nil {
+			return false, nil, err
+		}
+
+		opaque := &metadata.TargetVBUuid{
+			Target_vb_uuid: vbInfo.Uuid,
+		}
+
+		return true, opaque, nil
+	}
+
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo, PRE_REPLICATE_CMD)
 	if err != nil {
 		return

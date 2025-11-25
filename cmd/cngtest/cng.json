@@ -1,0 +1,43 @@
+{
+    "addr": "localhost:18098",
+    "username": "Administrator",
+    "password": "aaaaaa",
+    "certfile": "/tmp/cngcert.crt",
+
+    "GetBucketInfoReq": {
+        "bucket_name": "B1"
+    },
+
+    "WatchCollectionsReq": {
+        "bucket_name": "B1"
+    },
+
+    "GetVBucketInfoReq": {
+        "bucket_name": "B1",
+        "vbucket_ids": [10],
+        "include_history": true,
+        "include_max_cas": true
+    },
+
+    "GetVBucketInfoReqOnceReq": {
+        "bucket_name": "B1",
+        "vbucket_ids": [],
+        "include_history": true,
+        "include_max_cas": true,
+        "vb_count": 128
+    },
+
+    "PushDocumentReq": {
+        "key": "doc1",
+        "bucket": "B1",
+        "scope": "S2",
+        "collection": "C2",
+        "body": "{\"name\":\"value1\"}",
+        "store_cas": 0,
+        "revno": 0,
+        "content_type": "json",
+        "flags": 33554432,
+        "expiry": 0,
+        "opcode": "Upsert"
+    }
+}

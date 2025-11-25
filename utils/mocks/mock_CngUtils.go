@@ -3,8 +3,14 @@
 package mocks
 
 import (
-	internal_xdcr_v1 "github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
+	context "context"
+
 	base "github.com/couchbase/goxdcr/v8/base"
+
+	grpc "google.golang.org/grpc"
+
+	internal_xdcr_v1 "github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
+
 	mock "github.com/stretchr/testify/mock"
 
 	utils "github.com/couchbase/goxdcr/v8/utils"
@@ -153,6 +159,81 @@ func (_c *CngUtils_CngGetVbucketInfo_Call) Return() *CngUtils_CngGetVbucketInfo_
 
 func (_c *CngUtils_CngGetVbucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])) *CngUtils_CngGetVbucketInfo_Call {
 	_c.Run(run)
+	return _c
+}
+
+// CngGetVbucketInfoOnce provides a mock function with given fields: ctx, c, req, opts
+func (_m *CngUtils) CngGetVbucketInfoOnce(ctx context.Context, c base.CngClient, req *internal_xdcr_v1.GetVbucketInfoRequest, opts ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, c, req)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngGetVbucketInfoOnce")
+	}
+
+	var r0 map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error)); ok {
+		return rf(ctx, c, req, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse); ok {
+		r0 = rf(ctx, c, req, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, c, req, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// CngUtils_CngGetVbucketInfoOnce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetVbucketInfoOnce'
+type CngUtils_CngGetVbucketInfoOnce_Call struct {
+	*mock.Call
+}
+
+// CngGetVbucketInfoOnce is a helper method to define mock.On call
+//   - ctx context.Context
+//   - c base.CngClient
+//   - req *internal_xdcr_v1.GetVbucketInfoRequest
+//   - opts ...grpc.CallOption
+func (_e *CngUtils_Expecter) CngGetVbucketInfoOnce(ctx interface{}, c interface{}, req interface{}, opts ...interface{}) *CngUtils_CngGetVbucketInfoOnce_Call {
+	return &CngUtils_CngGetVbucketInfoOnce_Call{Call: _e.mock.On("CngGetVbucketInfoOnce",
+		append([]interface{}{ctx, c, req}, opts...)...)}
+}
+
+func (_c *CngUtils_CngGetVbucketInfoOnce_Call) Run(run func(ctx context.Context, c base.CngClient, req *internal_xdcr_v1.GetVbucketInfoRequest, opts ...grpc.CallOption)) *CngUtils_CngGetVbucketInfoOnce_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(base.CngClient), args[2].(*internal_xdcr_v1.GetVbucketInfoRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *CngUtils_CngGetVbucketInfoOnce_Call) Return(rsp map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, err error) *CngUtils_CngGetVbucketInfoOnce_Call {
+	_c.Call.Return(rsp, err)
+	return _c
+}
+
+func (_c *CngUtils_CngGetVbucketInfoOnce_Call) RunAndReturn(run func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error)) *CngUtils_CngGetVbucketInfoOnce_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

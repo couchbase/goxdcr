@@ -9,28 +9,62 @@
 package cngAgent
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
-	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 )
 
 var _ metadata_svc.RemoteAgentManifestOps = &RemoteCngAgent{}
 
 func (agent *RemoteCngAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
+	// CNG TODO: Temporary implementation for one-time manifest fetch using WatchCollections RPC.
+	// This is due to a bug in CngCollections watcher
 	if err := requestOpts.Validate(); err != nil {
 		return nil, err
 	}
 
-	collectionsWatcher := cngWatcher.NewCollectionsWatcher(requestOpts.BucketName, agent.GetGrpcOpts, agent.services.utils, base.CollectionsWatcherWaitTime,
-		base.CollectionsWatcherBackoffFactor, base.CollectionsWatcherMaxWaitTime, false, agent.logger)
-	collectionsWatcher.Start()
-	defer collectionsWatcher.Stop()
-	res := collectionsWatcher.GetResult()
-	return res, nil
+	ref, err := agent.GetReferenceClone(false)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := ref.NewCNGConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	// CNG TODO: Use a proper timeout value
+	// Its hardcoded because this is a temporary implementation
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+
+	stream, err := conn.Client().WatchCollections(ctx, &internal_xdcr_v1.WatchCollectionsRequest{
+		BucketName: requestOpts.BucketName,
+	})
+	if err != nil {
+		err = fmt.Errorf("failed to create stream to get one time remote manifest: %w", err)
+		return nil, err
+	}
+
+	var msg internal_xdcr_v1.WatchCollectionsResponse
+	if err := stream.RecvMsg(&msg); err != nil {
+		err = fmt.Errorf("failed to receive watch collections response for one time remote manifest: %w", err)
+		return nil, err
+	}
+
+	agent.logger.Infof("successfully received one time watch collections response for bucket %v msg:%v", requestOpts.BucketName, msg)
+
+	manifest := &metadata.CollectionsManifest{}
+	manifest.LoadFromWatchCollectionsResp(&msg)
+
+	return manifest, nil
 }
 
 func (agent *RemoteCngAgent) GetManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {

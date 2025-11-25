@@ -179,7 +179,6 @@ func TestTransfer(t *testing.T) {
 			logger := log.DefaultLoggerContext
 			n, err := New("testNozzle", logger, Config{
 				Replication: ReplicationConfig{
-					CNGAddr:           "cnghost:18098",
 					SourceClusterUUID: "source1",
 					SourceBucketName:  "B1",
 					SourceBucketUUID:  "sourceB1",

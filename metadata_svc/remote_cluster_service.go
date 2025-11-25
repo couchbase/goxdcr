@@ -2389,7 +2389,20 @@ func (agent *RemoteClusterAgent) initTopologyGetterFunc(bucketName string) func(
 			return nil, false, "", err
 		}
 
-		targetBucketInfo, err := agent.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		req := &utilities.GetBucketInfoReq{
+			FromCNG:           agent.reference.IsCNG(),
+			HostAddr:          connStr,
+			BucketName:        bucketName,
+			Username:          username,
+			Password:          password,
+			HTTPAuthMech:      httpAuthMech,
+			Certificate:       certificate,
+			SanInCertificate:  sanInCertificate,
+			ClientCertificate: clientCertificate,
+			ClientKey:         clientKey,
+		}
+
+		targetBucketInfo, err := agent.utils.GetBucketInfo(agent.logger, req)
 		if err != nil {
 			return nil, false, "", err
 		}
@@ -4287,6 +4300,7 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(requestOpts *bas
 	clientCert := agent.reference.ClientCertificate()
 	clientKey := agent.reference.ClientKey()
 	connStr, err := agent.reference.MyConnectionStr()
+	isCNG := agent.reference.IsCNG()
 	agent.refMtx.RUnlock()
 	if err != nil {
 		return nil, err
@@ -4304,7 +4318,20 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(requestOpts *bas
 		}()
 	}()
 
-	_, _, _, _, _, _, err = agent.utils.RemoteBucketValidationInfo(connStr, bucketName, userName, password, authMech, cert, sanInCert, clientCert, clientKey, agent.logger, useExternal)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           isCNG,
+		HostAddr:          connStr,
+		BucketName:        bucketName,
+		Username:          userName,
+		Password:          password,
+		HTTPAuthMech:      authMech,
+		Certificate:       cert,
+		SanInCertificate:  sanInCert,
+		ClientCertificate: clientCert,
+		ClientKey:         clientKey,
+	}
+
+	_, _, _, _, _, _, err = agent.utils.RemoteBucketValidationInfo(agent.logger, req, useExternal)
 
 	if err != nil {
 		return nil, err
@@ -4572,44 +4599,28 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 			if err != nil {
 				return nil, false, "", err
 			}
+			req := &utilities.GetBucketInfoReq{
+				FromCNG:           ref.IsCNG(),
+				HostAddr:          connStr,
+				BucketName:        bucketName,
+				Username:          ref.UserName(),
+				Password:          ref.Password(),
+				HTTPAuthMech:      ref.HttpAuthMech(),
+				Certificate:       ref.Certificates(),
+				SanInCertificate:  ref.SANInCertificate(),
+				ClientCertificate: ref.ClientCertificate(),
+				ClientKey:         ref.ClientKey(),
+			}
+			bucketInfo, err := service.utils.GetBucketInfo(service.logger, req)
+			if err != nil {
+				return nil, false, "", err
+			}
+
 			useExternal, err := agent.UsesAlternateAddress()
 			if err != nil {
 				return nil, false, "", err
 			}
-			grpcOpts, _ := base.NewGrpcOptionsSecure(connStr, func() *base.Credentials { return ref.Credentials.Clone() }, base.DeepCopyByteArray(ref.Certificates()))
-			cngConn, err := base.NewCngConn(grpcOpts)
-			if err != nil {
-				return nil, false, "", err
-			}
-			defer cngConn.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
-			defer cancel()
-			request := &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
-				Context: ctx,
-				Request: &internal_xdcr_v1.GetBucketInfoRequest{
-					BucketName: bucketName,
-				},
-			}
-			response := service.utils.CngGetBucketInfo(cngConn.Client(), request)
-			if response.Code() != codes.OK {
-				return nil, false, "", fmt.Errorf("failed to get bucket info for bucket %v. err=%s statusCode=%v", bucketName, response.Message(), response.Code())
-			}
-			conflictResolutionType := response.Response().ConflictResolutionType
-			var conflictResolutionTypeStr string
-			switch conflictResolutionType {
-			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_TIMESTAMP:
-				conflictResolutionTypeStr = base.ConflictResolutionType_Lww
-			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_SEQUENCE_NUMBER:
-				conflictResolutionTypeStr = base.ConflictResolutionType_Seqno
-			case internal_xdcr_v1.ConflictResolutionType_CONFLICT_RESOLUTION_TYPE_CUSTOM:
-				conflictResolutionTypeStr = base.ConflictResolutionType_Custom
-			}
-			return map[string]interface{}{
-				base.UUIDKey:                         response.Response().BucketUuid,
-				base.NumVBucketsKey:                  response.Response().NumVbuckets,
-				base.ConflictResolutionTypeKey:       conflictResolutionTypeStr,
-				base.EnableCrossClusterVersioningKey: response.Response().CrossClusterVersioningEnabled,
-			}, useExternal, connStr, nil
+			return bucketInfo, useExternal, connStr, nil
 		}, nil
 	}
 	// Darshan TODO: Uncomment this once bucketTopologySvc is changed to support CNG

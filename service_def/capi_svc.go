@@ -83,7 +83,20 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		return err
 	}
 
-	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(connStr, remoteBucket.BucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, remoteBucket.logger)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           remoteBucket.RemoteClusterRef.IsCNG(),
+		HostAddr:          connStr,
+		BucketName:        remoteBucket.BucketName,
+		Username:          username,
+		Password:          password,
+		HTTPAuthMech:      httpAuthMech,
+		Certificate:       certificate,
+		SanInCertificate:  sanInCertificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	targetBucketInfo, err := remoteBucket.utils.GetBucketInfo(remoteBucket.logger, req)
 	if err != nil {
 		return err
 	}
@@ -98,23 +111,27 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		return fmt.Errorf("uuid for remote bucket %v is of wrong type", remoteBucket.BucketName)
 	}
 
-	capabilitiesObj, ok := targetBucketInfo[base.BucketCapabilitiesKey]
-	if !ok {
-		return fmt.Errorf("Failed to get bucket capabilities for remote bucket %v", remoteBucket.BucketName)
-	}
-
-	capabilitiesArr, ok := capabilitiesObj.([]interface{})
-	if !ok {
-		return fmt.Errorf("bucket capabilities for remote bucket %v is of wrong type", remoteBucket.BucketName)
-	}
-
-	remoteBucket.Capabilities = make([]string, 0)
-	for _, capabilityObj := range capabilitiesArr {
-		capability, ok := capabilityObj.(string)
+	if remoteBucket.RemoteClusterRef.IsCNG() {
+		remoteBucket.Capabilities = append(remoteBucket.Capabilities, base.XDCRCheckpointing)
+	} else {
+		capabilitiesObj, ok := targetBucketInfo[base.BucketCapabilitiesKey]
 		if !ok {
-			return fmt.Errorf("bucket capability for remote bucket %v is of wrong type", remoteBucket.BucketName)
+			return fmt.Errorf("Failed to get bucket capabilities for remote bucket %v", remoteBucket.BucketName)
 		}
-		remoteBucket.Capabilities = append(remoteBucket.Capabilities, capability)
+
+		capabilitiesArr, ok := capabilitiesObj.([]interface{})
+		if !ok {
+			return fmt.Errorf("bucket capabilities for remote bucket %v is of wrong type", remoteBucket.BucketName)
+		}
+
+		remoteBucket.Capabilities = make([]string, 0)
+		for _, capabilityObj := range capabilitiesArr {
+			capability, ok := capabilityObj.(string)
+			if !ok {
+				return fmt.Errorf("bucket capability for remote bucket %v is of wrong type", remoteBucket.BucketName)
+			}
+			remoteBucket.Capabilities = append(remoteBucket.Capabilities, capability)
+		}
 	}
 
 	remoteBucket.VBServerMap, err = remoteBucket.utils.GetRemoteServerVBucketsMap(connStr, remoteBucket.BucketName, targetBucketInfo, useExternal)
@@ -125,39 +142,43 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
 	remoteBucket.RestAddrHttpClientMap = make(map[string]*http.Client)
 
-	clusterCompatibility, err := remoteBucket.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, remoteBucket.logger)
-	if err != nil {
-		return err
-	}
-	nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
-	remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
-
-	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
-	if err != nil {
-		return err
-	}
-
-	for serverAddr, urlstr := range urlmap {
-		var hostAddr string
-		if remoteBucket.UseCouchApiBase {
-			// urlstr is couchApiBase, which looks like http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
-			// we only need the host part
-			u, err := url.Parse(urlstr)
-			if err != nil {
-				return err
-			}
-			hostAddr = u.Host
-		} else {
-			// urlstr is the host address, e.g., 127.0.0.1:9000, which can be used as is
-			hostAddr = urlstr
-		}
-
-		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = hostAddr
-		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger, nil)
+	if remoteBucket.RemoteClusterRef.IsCNG() {
+		remoteBucket.UseCouchApiBase = false
+	} else {
+		clusterCompatibility, err := remoteBucket.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, remoteBucket.logger)
 		if err != nil {
 			return err
 		}
-		remoteBucket.RestAddrHttpClientMap[hostAddr] = http_client
+		nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
+		remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
+
+		urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
+		if err != nil {
+			return err
+		}
+
+		for serverAddr, urlstr := range urlmap {
+			var hostAddr string
+			if remoteBucket.UseCouchApiBase {
+				// urlstr is couchApiBase, which looks like http://127.0.0.1:9500/default%2B77aceaa5b49efbd92a261b8a1e72dab5
+				// we only need the host part
+				u, err := url.Parse(urlstr)
+				if err != nil {
+					return err
+				}
+				hostAddr = u.Host
+			} else {
+				// urlstr is the host address, e.g., 127.0.0.1:9000, which can be used as is
+				hostAddr = urlstr
+			}
+
+			remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = hostAddr
+			http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger, nil)
+			if err != nil {
+				return err
+			}
+			remoteBucket.RestAddrHttpClientMap[hostAddr] = http_client
+		}
 	}
 	remoteBucket.logger.Infof("remoteBucket.MemcachedAddrRestAddrMap=%v\n", remoteBucket.MemcachedAddrRestAddrMap)
 

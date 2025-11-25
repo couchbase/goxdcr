@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package factory
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 	"github.com/couchbase/goxdcr/v8/capi_utils"
@@ -228,8 +230,6 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		xdcrf.logger.Errorf("Failed to get the nozzle type for %v, err=%v\n", spec.Id, err)
 		return nil, nil, err
 	}
-	// CNG TODO: remove hard coding
-	nozzleType = base.CNG
 
 	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {
@@ -312,7 +312,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * 2. vbNozzleMap - map of VBucket# -> nozzle to be used (to be used by router)
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
-	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
+	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, err :=
 		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef,
 			nozzleType, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap)
 
@@ -359,7 +359,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
 		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName,
-			target_kv_vb_map, targetClusterRef, targetClusterVersion, nozzleType, mainPipeline, sourceCRMode, variableVBMode)
+			target_kv_vb_map, targetClusterRef, nozzleType, mainPipeline, sourceCRMode, variableVBMode)
 	}
 
 	return pipeline, registerCb, nil
@@ -726,78 +726,16 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
 	targetClusterRef *metadata.RemoteClusterReference, nozzleType base.XDCROutgoingNozzleType, logger_ctx *log.LoggerContext, sourceClusterUUID string,
 	pipelineType common.PipelineType, kvsVbMap base.KvVBMapType) (outNozzles map[string]common.Nozzle,
-	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
-	outNozzles = make(map[string]common.Nozzle)
-	vbNozzleMap = make(map[uint16]string)
+	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, err error) {
 
 	xdcrf.logger.Infof("constructing outgoing nozzles for topic=%v, nozzleType=%v\n", topic, nozzleType)
 
 	if nozzleType == base.CNG {
-		targetUserName = targetClusterRef.UserName()
-		targetPassword = targetClusterRef.Password()
-		xdcrf.logger.Infof("%v username for target bucket access=%v%v%v\n", spec.Id, base.UdTagBegin, targetUserName, base.UdTagEnd)
-
-		// For CNG, there is only one nozzle per target cluster
-		id := xdcrf.partId(CNG_NOZZLE_NAME_PREFIX, topic, targetClusterRef.HostName(), 0)
-		cfg := cng.Config{
-			Replication: cng.ReplicationConfig{
-				CRMode: sourceCRMode,
-				// CNG TODO: HARDCODED
-				CNGAddr:           "127.0.0.1:18098",
-				SourceBucketName:  spec.SourceBucketName,
-				SourceClusterUUID: sourceClusterUUID,
-				SourceBucketUUID:  spec.SourceBucketUUID,
-				TargetClusterUUID: spec.TargetClusterUUID,
-				TargetBucketName:  spec.TargetBucketName,
-				TargetBucketUUID:  spec.TargetBucketUUID,
-			},
-			Services: cng.Services{
-				RemoteClusterSvc: xdcrf.remote_cluster_svc,
-				Utils:            xdcrf.utils,
-			},
-		}
-
-		var nozzle *cng.Nozzle
-		nozzle, err = cng.New(id, xdcrf.logger.LoggerContext(), cfg)
-		if err != nil {
-			xdcrf.logger.Errorf("Error constructing CNG nozzle, err=%v\n", err)
-			return nil, nil, nil, "", "", 0, err
-		}
-
-		// CNG TODO: get rid of this call
-		kvVBMap, err = xdcrf.utils.GetRemoteServerVBucketsMap(targetClusterRef.HostName(), spec.TargetBucketName, targetBucketInfo, false)
-		if err != nil {
-			xdcrf.logger.Errorf("Error getting server vbuckets map, err=%v\n", err)
-			return
-		}
-		if len(kvVBMap) == 0 {
-			err = base.ErrorNoTargetNozzle
-			return
-		}
-
-		numVBs := 0
-		for _, vbList := range kvVBMap {
-			numVBs += len(vbList)
-		}
-
-		xdcrf.logger.Infof("constructed CNG nozzle %v for target cluster %v numVBs=%d\n", id, targetClusterRef.HostName(), numVBs)
-		vblist := []uint16{}
-		outNozzles[nozzle.Id()] = nozzle
-		for i := uint16(0); i < uint16(numVBs); i++ {
-			vbNozzleMap[i] = nozzle.Id()
-			vblist = append(vblist, uint16(i))
-		}
-
-		// CNG TODO: The commented kvVBMap is the real thing but commented
-		// out for now.
-		/*
-			kvVBMap = map[string][]uint16{
-				targetClusterRef.HostName(): vblist,
-			}
-		*/
-
-		return
+		return xdcrf.constructCNGNozzle(topic, spec, sourceCRMode, targetBucketInfo, targetClusterRef, sourceClusterUUID)
 	}
+
+	outNozzles = make(map[string]common.Nozzle)
+	vbNozzleMap = make(map[uint16]string)
 
 	useExternal, err := xdcrf.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
 	if err != nil {
@@ -955,6 +893,10 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 }
 
 func (xdcrf *XDCRFactory) getOutNozzleType(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (base.XDCROutgoingNozzleType, error) {
+	if targetClusterRef.IsCNG() {
+		return base.CNG, nil
+	}
+
 	switch spec.Settings.RepType {
 	case metadata.ReplicationTypeXmem:
 		return base.Xmem, nil
@@ -1585,7 +1527,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	return routerSettings, nil
 }
 
-func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, targetUserName, targetPassword, targetBucketName string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference, targetClusterVersion int, nozzleType base.XDCROutgoingNozzleType, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode, variableVBMode bool) error {
+func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext, kv_vb_map map[string][]uint16, targetUserName, targetPassword, targetBucketName string, target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference, nozzleType base.XDCROutgoingNozzleType, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode, variableVBMode bool) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
@@ -2141,4 +2083,36 @@ func (xdcrf *XDCRFactory) constructVBTranslator(src, tgt base.KvVBMapType, logge
 	tgtVBs := len(tgt.GetSortedVBList())
 	translator := connector.NewVBTranslator("VBTranslator", loggerContext, srcVBs, tgtVBs, len(srcNozzles))
 	return translator
+}
+
+func getVbucketInfoFromCng(logger *log.CommonLogger, u utilities.UtilsIface,
+	clusterRef *metadata.RemoteClusterReference,
+	bucketName string,
+	targetBucketInfo map[string]interface{}) (rsp map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, err error) {
+	vbmap, err := utilities.GetCngKVVBMap(targetBucketInfo)
+	if err != nil {
+		return
+	}
+
+	vblist := []uint32{}
+	for _, vbnums := range vbmap {
+		for _, vb := range vbnums {
+			vblist = append(vblist, uint32(vb))
+		}
+	}
+
+	req := &internal_xdcr_v1.GetVbucketInfoRequest{
+		BucketName: bucketName,
+		VbucketIds: vblist,
+	}
+
+	conn, err := clusterRef.NewCNGConn()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	// CNG TODO: need to use timeout
+	rsp, err = u.CngGetVbucketInfoOnce(context.Background(), conn.Client(), req)
+	return
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	baseH "github.com/couchbase/goxdcr/v8/base/helpers"
 	"github.com/couchbase/goxdcr/v8/log"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -334,6 +335,48 @@ func (ref *RemoteClusterReference) GetRemoteType() RemoteType {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
 	return ref.RemoteType
+}
+
+func (ref *RemoteClusterReference) IsCNG() bool {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+
+	return ref.RemoteType == RemoteTypeCng
+}
+
+// NewCNGConn creates a new CNG connection with credentials, certificates from the remote cluster reference
+// Returns an error if the remote cluster reference is not of CNG type
+func (ref *RemoteClusterReference) NewCNGConn(dialOpts ...grpc.DialOption) (conn *base.CngConn, err error) {
+	if !ref.IsCNG() {
+		err = fmt.Errorf("remote cluster %v is not of CNG type", ref.Name_)
+		return
+	}
+
+	var userName, passwd, cngHost string
+	var cert []byte
+
+	ref.mutex.RLock()
+	cngHost = ref.HostName_
+	userName = ref.UserName_
+	passwd = ref.Password_
+	cert = bytes.Clone(ref.certificatesNoLock())
+	ref.mutex.RUnlock()
+
+	creds := func() *base.Credentials {
+		return &base.Credentials{
+			UserName_: userName,
+			Password_: passwd,
+		}
+	}
+
+	grpcOpts, err := base.NewGrpcOptions(cngHost, creds, cert, true)
+	if err != nil {
+		return
+	}
+
+	conn, err = base.NewCngConn(grpcOpts, dialOpts...)
+
+	return
 }
 
 type HostNameSrvType int

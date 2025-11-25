@@ -44,6 +44,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	serviceDefMocks "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/utils"
 	utilsReal "github.com/couchbase/goxdcr/v8/utils"
 	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/golang/snappy"
@@ -372,7 +373,21 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 
 func getBucketUuid(conStr, bucketName string, assert *assert.Assertions) string {
 	realUtils := utilsReal.NewUtilities()
-	bucketInfo, err := realUtils.GetBucketInfo(conStr, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, nil)
+
+	req := &utils.GetBucketInfoReq{
+		FromCNG:           false,
+		HostAddr:          conStr,
+		BucketName:        bucketName,
+		Username:          username,
+		Password:          password,
+		HTTPAuthMech:      base.HttpAuthMechPlain,
+		Certificate:       nil,
+		SanInCertificate:  false,
+		ClientCertificate: nil,
+		ClientKey:         nil,
+	}
+
+	bucketInfo, err := realUtils.GetBucketInfo(nil, req)
 	assert.Nil(err)
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)

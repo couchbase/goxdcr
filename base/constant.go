@@ -2018,3 +2018,12 @@ const MaxAllowedRCDegradedCyclesForCng = 6
 const CollectionsWatcherWaitTime = 5 * time.Second
 const CollectionsWatcherBackoffFactor = 2
 const CollectionsWatcherMaxWaitTime = 60 * time.Second
+
+// Checkpointing related constants
+const (
+	XDCRCheckpointing string = "xdcrCheckpointing"
+	CheckpointMgrId   string = "CheckpointMgr"
+	StatsMgrId        string = "StatsMgr"
+	TimeCommiting     string = "time_commiting"
+	Vbno              string = "vbno"
+)

@@ -1369,7 +1369,21 @@ func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount in
 	}
 
 	l.logger.Infof("fetching bucket info to get UUID and vbCount, id=%s, bucket=%s", l.id, bucketName)
-	data, err := l.utils.GetBucketInfo(localConnStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, l.logger)
+
+	// Zero values below are explicitly set for clarity
+	req := &utils.GetBucketInfoReq{
+		FromCNG:           false,
+		HostAddr:          localConnStr,
+		BucketName:        bucketName,
+		Username:          "",
+		Password:          "",
+		HTTPAuthMech:      base.HttpAuthMechPlain,
+		Certificate:       nil,
+		SanInCertificate:  false,
+		ClientCertificate: nil,
+		ClientKey:         nil,
+	}
+	data, err := l.utils.GetBucketInfo(l.logger, req)
 	if err != nil {
 		return
 	}

@@ -57,7 +57,9 @@ func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.Wrap
 		return
 	}
 
-	n.Logger().Tracef("processing key=%s, seqno=%d, cas=%d, opcode=%s, dataType=%v, hasXattrs=%v, needsReCompression=%v, snappy?=%v, revSeqNo=%v, expiry=%v, flags=%v",
+	n.Logger().Tracef("processing key=%[1]s%[3]s%[2]s, seqno=%[4]d, cas=%[5]d, opcode=%[6]s, dataType=%[7]v, hasXattrs=%[8]v, needsReCompression=%[9]v, snappy?=%[10]v, revSeqNo=%[11]v, expiry=%[12]v, flags=%[13]v",
+		base.UdTagBegin,
+		base.UdTagEnd,
 		req.OriginalKey, req.Seqno, req.Req.Cas, req.Req.Opcode, req.Req.DataType, base.HasXattr(req.Req.DataType),
 		req.NeedToRecompress,
 		req.Req.DataType&base.SnappyDataType > 0,

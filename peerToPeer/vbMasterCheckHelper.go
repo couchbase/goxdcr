@@ -12,8 +12,9 @@ package peerToPeer
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/v8/metadata"
 	"sync"
+
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 type VbMasterCheckHelper interface {

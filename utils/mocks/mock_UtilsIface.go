@@ -3,12 +3,17 @@
 package mocks
 
 import (
-	couchbase "github.com/couchbase/go-couchbase"
+	context "context"
+
 	base "github.com/couchbase/goxdcr/v8/base"
+
+	couchbase "github.com/couchbase/go-couchbase"
 
 	expvar "expvar"
 
 	gomemcached "github.com/couchbase/gomemcached"
+
+	grpc "google.golang.org/grpc"
 
 	http "net/http"
 
@@ -270,9 +275,9 @@ func (_c *UtilsIface_BucketStorageBackend_Call) RunAndReturn(run func(map[string
 	return _c
 }
 
-// BucketUUID provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+// BucketUUID provides a mock function with given fields: logger, req
+func (_m *UtilsIface) BucketUUID(logger *log.CommonLogger, req *utils.GetBucketInfoReq) (string, error) {
+	ret := _m.Called(logger, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BucketUUID")
@@ -280,17 +285,17 @@ func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username st
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (string, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) (string, error)); ok {
+		return rf(logger, req)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) string); ok {
+		r0 = rf(logger, req)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq) error); ok {
+		r1 = rf(logger, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -304,23 +309,15 @@ type UtilsIface_BucketUUID_Call struct {
 }
 
 // BucketUUID is a helper method to define mock.On call
-//   - hostAddr string
-//   - bucketName string
-//   - username string
-//   - password string
-//   - authMech base.HttpAuthMech
-//   - certificate []byte
-//   - sanInCertificate bool
-//   - clientCertificate []byte
-//   - clientKey []byte
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) BucketUUID(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}) *UtilsIface_BucketUUID_Call {
-	return &UtilsIface_BucketUUID_Call{Call: _e.mock.On("BucketUUID", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)}
+//   - req *utils.GetBucketInfoReq
+func (_e *UtilsIface_Expecter) BucketUUID(logger interface{}, req interface{}) *UtilsIface_BucketUUID_Call {
+	return &UtilsIface_BucketUUID_Call{Call: _e.mock.On("BucketUUID", logger, req)}
 }
 
-func (_c *UtilsIface_BucketUUID_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_BucketUUID_Call {
+func (_c *UtilsIface_BucketUUID_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq)) *UtilsIface_BucketUUID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq))
 	})
 	return _c
 }
@@ -330,14 +327,14 @@ func (_c *UtilsIface_BucketUUID_Call) Return(_a0 string, _a1 error) *UtilsIface_
 	return _c
 }
 
-func (_c *UtilsIface_BucketUUID_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (string, error)) *UtilsIface_BucketUUID_Call {
+func (_c *UtilsIface_BucketUUID_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq) (string, error)) *UtilsIface_BucketUUID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// BucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+// BucketValidationInfo provides a mock function with given fields: logger, req
+func (_m *UtilsIface) BucketValidationInfo(logger *log.CommonLogger, req *utils.GetBucketInfoReq) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
+	ret := _m.Called(logger, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for BucketValidationInfo")
@@ -350,51 +347,51 @@ func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, u
 	var r4 string
 	var r5 map[string][]uint16
 	var r6 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)); ok {
+		return rf(logger, req)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) map[string]interface{}); ok {
+		r0 = rf(logger, req)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq) string); ok {
+		r1 = rf(logger, req)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
 
-	if rf, ok := ret.Get(2).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r2 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(2).(func(*log.CommonLogger, *utils.GetBucketInfoReq) string); ok {
+		r2 = rf(logger, req)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
-	if rf, ok := ret.Get(3).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r3 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(3).(func(*log.CommonLogger, *utils.GetBucketInfoReq) string); ok {
+		r3 = rf(logger, req)
 	} else {
 		r3 = ret.Get(3).(string)
 	}
 
-	if rf, ok := ret.Get(4).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r4 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(4).(func(*log.CommonLogger, *utils.GetBucketInfoReq) string); ok {
+		r4 = rf(logger, req)
 	} else {
 		r4 = ret.Get(4).(string)
 	}
 
-	if rf, ok := ret.Get(5).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string][]uint16); ok {
-		r5 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(5).(func(*log.CommonLogger, *utils.GetBucketInfoReq) map[string][]uint16); ok {
+		r5 = rf(logger, req)
 	} else {
 		if ret.Get(5) != nil {
 			r5 = ret.Get(5).(map[string][]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(6).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r6 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(6).(func(*log.CommonLogger, *utils.GetBucketInfoReq) error); ok {
+		r6 = rf(logger, req)
 	} else {
 		r6 = ret.Error(6)
 	}
@@ -408,23 +405,15 @@ type UtilsIface_BucketValidationInfo_Call struct {
 }
 
 // BucketValidationInfo is a helper method to define mock.On call
-//   - hostAddr string
-//   - bucketName string
-//   - username string
-//   - password string
-//   - authMech base.HttpAuthMech
-//   - certificate []byte
-//   - sanInCertificate bool
-//   - clientCertificate []byte
-//   - clientKey []byte
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) BucketValidationInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}) *UtilsIface_BucketValidationInfo_Call {
-	return &UtilsIface_BucketValidationInfo_Call{Call: _e.mock.On("BucketValidationInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)}
+//   - req *utils.GetBucketInfoReq
+func (_e *UtilsIface_Expecter) BucketValidationInfo(logger interface{}, req interface{}) *UtilsIface_BucketValidationInfo_Call {
+	return &UtilsIface_BucketValidationInfo_Call{Call: _e.mock.On("BucketValidationInfo", logger, req)}
 }
 
-func (_c *UtilsIface_BucketValidationInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_BucketValidationInfo_Call {
+func (_c *UtilsIface_BucketValidationInfo_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq)) *UtilsIface_BucketValidationInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq))
 	})
 	return _c
 }
@@ -434,7 +423,7 @@ func (_c *UtilsIface_BucketValidationInfo_Call) Return(bucketInfo map[string]int
 	return _c
 }
 
-func (_c *UtilsIface_BucketValidationInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)) *UtilsIface_BucketValidationInfo_Call {
+func (_c *UtilsIface_BucketValidationInfo_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)) *UtilsIface_BucketValidationInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -674,6 +663,81 @@ func (_c *UtilsIface_CngGetVbucketInfo_Call) Return() *UtilsIface_CngGetVbucketI
 
 func (_c *UtilsIface_CngGetVbucketInfo_Call) RunAndReturn(run func(base.CngClient, *base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest], utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])) *UtilsIface_CngGetVbucketInfo_Call {
 	_c.Run(run)
+	return _c
+}
+
+// CngGetVbucketInfoOnce provides a mock function with given fields: ctx, c, req, opts
+func (_m *UtilsIface) CngGetVbucketInfoOnce(ctx context.Context, c base.CngClient, req *internal_xdcr_v1.GetVbucketInfoRequest, opts ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, c, req)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CngGetVbucketInfoOnce")
+	}
+
+	var r0 map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error)); ok {
+		return rf(ctx, c, req, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse); ok {
+		r0 = rf(ctx, c, req, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, c, req, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_CngGetVbucketInfoOnce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CngGetVbucketInfoOnce'
+type UtilsIface_CngGetVbucketInfoOnce_Call struct {
+	*mock.Call
+}
+
+// CngGetVbucketInfoOnce is a helper method to define mock.On call
+//   - ctx context.Context
+//   - c base.CngClient
+//   - req *internal_xdcr_v1.GetVbucketInfoRequest
+//   - opts ...grpc.CallOption
+func (_e *UtilsIface_Expecter) CngGetVbucketInfoOnce(ctx interface{}, c interface{}, req interface{}, opts ...interface{}) *UtilsIface_CngGetVbucketInfoOnce_Call {
+	return &UtilsIface_CngGetVbucketInfoOnce_Call{Call: _e.mock.On("CngGetVbucketInfoOnce",
+		append([]interface{}{ctx, c, req}, opts...)...)}
+}
+
+func (_c *UtilsIface_CngGetVbucketInfoOnce_Call) Run(run func(ctx context.Context, c base.CngClient, req *internal_xdcr_v1.GetVbucketInfoRequest, opts ...grpc.CallOption)) *UtilsIface_CngGetVbucketInfoOnce_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(base.CngClient), args[2].(*internal_xdcr_v1.GetVbucketInfoRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *UtilsIface_CngGetVbucketInfoOnce_Call) Return(rsp map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, err error) *UtilsIface_CngGetVbucketInfoOnce_Call {
+	_c.Call.Return(rsp, err)
+	return _c
+}
+
+func (_c *UtilsIface_CngGetVbucketInfoOnce_Call) RunAndReturn(run func(context.Context, base.CngClient, *internal_xdcr_v1.GetVbucketInfoRequest, ...grpc.CallOption) (map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse, error)) *UtilsIface_CngGetVbucketInfoOnce_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
@@ -1423,9 +1487,9 @@ func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, str
 	return _c
 }
 
-// GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+// GetBucketInfo provides a mock function with given fields: logger, req
+func (_m *UtilsIface) GetBucketInfo(logger *log.CommonLogger, req *utils.GetBucketInfoReq) (map[string]interface{}, error) {
+	ret := _m.Called(logger, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetBucketInfo")
@@ -1433,19 +1497,19 @@ func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username
 
 	var r0 map[string]interface{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, error)); ok {
+		return rf(logger, req)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) map[string]interface{}); ok {
+		r0 = rf(logger, req)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq) error); ok {
+		r1 = rf(logger, req)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1459,23 +1523,15 @@ type UtilsIface_GetBucketInfo_Call struct {
 }
 
 // GetBucketInfo is a helper method to define mock.On call
-//   - hostAddr string
-//   - bucketName string
-//   - username string
-//   - password string
-//   - authMech base.HttpAuthMech
-//   - certificate []byte
-//   - sanInCertificate bool
-//   - clientCertificate []byte
-//   - clientKey []byte
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}) *UtilsIface_GetBucketInfo_Call {
-	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)}
+//   - req *utils.GetBucketInfoReq
+func (_e *UtilsIface_Expecter) GetBucketInfo(logger interface{}, req interface{}) *UtilsIface_GetBucketInfo_Call {
+	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo", logger, req)}
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq))
 	})
 	return _c
 }
@@ -1485,7 +1541,7 @@ func (_c *UtilsIface_GetBucketInfo_Call) Return(_a0 map[string]interface{}, _a1 
 	return _c
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6299,9 +6355,9 @@ func (_c *UtilsIface_RecoverPanic_Call) RunAndReturn(run func(*error)) *UtilsIfa
 	return _c
 }
 
-// RemoteBucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal
-func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, useExternal bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+// RemoteBucketValidationInfo provides a mock function with given fields: logger, req, useExternal
+func (_m *UtilsIface) RemoteBucketValidationInfo(logger *log.CommonLogger, req *utils.GetBucketInfoReq, useExternal bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
+	ret := _m.Called(logger, req, useExternal)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoteBucketValidationInfo")
@@ -6314,51 +6370,51 @@ func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName str
 	var r4 string
 	var r5 map[string][]uint16
 	var r6 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)); ok {
+		return rf(logger, req, useExternal)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) map[string]interface{}); ok {
+		r0 = rf(logger, req, useExternal)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) string); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) string); ok {
+		r1 = rf(logger, req, useExternal)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
 
-	if rf, ok := ret.Get(2).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) string); ok {
-		r2 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(2).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) string); ok {
+		r2 = rf(logger, req, useExternal)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
-	if rf, ok := ret.Get(3).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) string); ok {
-		r3 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(3).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) string); ok {
+		r3 = rf(logger, req, useExternal)
 	} else {
 		r3 = ret.Get(3).(string)
 	}
 
-	if rf, ok := ret.Get(4).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) string); ok {
-		r4 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(4).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) string); ok {
+		r4 = rf(logger, req, useExternal)
 	} else {
 		r4 = ret.Get(4).(string)
 	}
 
-	if rf, ok := ret.Get(5).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) map[string][]uint16); ok {
-		r5 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(5).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) map[string][]uint16); ok {
+		r5 = rf(logger, req, useExternal)
 	} else {
 		if ret.Get(5) != nil {
 			r5 = ret.Get(5).(map[string][]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(6).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) error); ok {
-		r6 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
+	if rf, ok := ret.Get(6).(func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) error); ok {
+		r6 = rf(logger, req, useExternal)
 	} else {
 		r6 = ret.Error(6)
 	}
@@ -6372,24 +6428,16 @@ type UtilsIface_RemoteBucketValidationInfo_Call struct {
 }
 
 // RemoteBucketValidationInfo is a helper method to define mock.On call
-//   - hostAddr string
-//   - bucketName string
-//   - username string
-//   - password string
-//   - authMech base.HttpAuthMech
-//   - certificate []byte
-//   - sanInCertificate bool
-//   - clientCertificate []byte
-//   - clientKey []byte
 //   - logger *log.CommonLogger
+//   - req *utils.GetBucketInfoReq
 //   - useExternal bool
-func (_e *UtilsIface_Expecter) RemoteBucketValidationInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}, useExternal interface{}) *UtilsIface_RemoteBucketValidationInfo_Call {
-	return &UtilsIface_RemoteBucketValidationInfo_Call{Call: _e.mock.On("RemoteBucketValidationInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)}
+func (_e *UtilsIface_Expecter) RemoteBucketValidationInfo(logger interface{}, req interface{}, useExternal interface{}) *UtilsIface_RemoteBucketValidationInfo_Call {
+	return &UtilsIface_RemoteBucketValidationInfo_Call{Call: _e.mock.On("RemoteBucketValidationInfo", logger, req, useExternal)}
 }
 
-func (_c *UtilsIface_RemoteBucketValidationInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, useExternal bool)) *UtilsIface_RemoteBucketValidationInfo_Call {
+func (_c *UtilsIface_RemoteBucketValidationInfo_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq, useExternal bool)) *UtilsIface_RemoteBucketValidationInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger), args[10].(bool))
+		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq), args[2].(bool))
 	})
 	return _c
 }
@@ -6399,7 +6447,7 @@ func (_c *UtilsIface_RemoteBucketValidationInfo_Call) Return(bucketInfo map[stri
 	return _c
 }
 
-func (_c *UtilsIface_RemoteBucketValidationInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)) *UtilsIface_RemoteBucketValidationInfo_Call {
+func (_c *UtilsIface_RemoteBucketValidationInfo_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq, bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error)) *UtilsIface_RemoteBucketValidationInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

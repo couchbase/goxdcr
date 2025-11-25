@@ -31,6 +31,16 @@ type Capability struct {
 	heartbeatSupport uint32
 }
 
+// CNG TODO: temparily return all enabled capability
+func AllEnabledCapability() *Capability {
+	return &Capability{
+		initialized:        1,
+		collection:         1,
+		advErrorMapSupport: 1,
+		heartbeatSupport:   1,
+	}
+}
+
 func (c *Capability) Reset() {
 	atomic.StoreUint32(&c.collection, 0)
 }
