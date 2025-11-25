@@ -2318,7 +2318,7 @@ function validatePrometheusStatsNon0 {
 function validatePrometheusSourceNodesCnt {
 	local node=$1
 	local expectedCnt=$2
-	local sourcePort=${CLUSTER_NAME_PORT_MAP[$node]:-}
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
 	local prometheusOut
 	local idleSleepCnt=0
 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
