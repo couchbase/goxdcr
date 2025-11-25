@@ -6,7 +6,7 @@ const (
 
 	// ProcessRetryInterval is the interval to wait before retrying processing a request
 	// This is different from the backoff time for retryable errors
-	ProcessRetryInterval = 1000 * time.Millisecond
+	ProcessRetryInterval = 5000 * time.Millisecond
 
 	ConflictReasonSuccess    = "SUCCESS"
 	ConflictReasonDocMissing = "DOC_MISSING"

@@ -102,6 +102,11 @@ func (r *RemoteMemcachedComponent) SetDataTransferredIncrementer(incrementer fun
 // It is not a guarantee that the memcached clients in kv_mem_clients map is usable or valid
 // and thus callers should manually check and re-initate if necessary
 func (r *RemoteMemcachedComponent) InitConnections() error {
+	// CNG TODO: remove this RemoteMemcachedComponent
+	if r.RefGetter().IsCNG() {
+		return nil
+	}
+
 	r.InitConnOnce.Do(func() {
 		defer close(r.InitConnDone)
 		if r.RefGetter().IsFullEncryption() {

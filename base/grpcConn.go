@@ -22,12 +22,18 @@ type GrpcCredentials struct {
 	RequireTLS bool
 	// IsMTLS indicates if mutual TLS is being used for authentication
 	IsMTLS bool
+
+	// headers hold the pre-computed authentication headers
+	headers map[string]string
 }
 
 // NewGrpcCredentials creates a new GrpcCredentials instance based on the provided client credentials.
+// This computes the headers once and caches it. Incase the creds are invalid then the pipeline is
+// expected to recreate n/w connection and retry.
 func NewGrpcCredentials(getCredentials func() *Credentials, requireTLS bool) (*GrpcCredentials, error) {
 	// Get the client credentials to determine if mTLS is required.
 	clientCreds := getCredentials()
+
 	if len(clientCreds.ClientCertificate_) > 0 {
 		// In mTLS mode, PerRPCCredentials are not required.
 		// The grpc framework on server side(CNG) automatically extracts the client certificate
@@ -39,27 +45,40 @@ func NewGrpcCredentials(getCredentials func() *Credentials, requireTLS bool) (*G
 		}, nil
 	}
 
-	return &GrpcCredentials{
+	g := &GrpcCredentials{
 		GetCredentials: getCredentials,
 		RequireTLS:     requireTLS,
 		IsMTLS:         false,
-	}, nil
+	}
+
+	err := g.prepRequestMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare request metadata: %w", err)
+	}
+
+	return g, nil
 }
 
-// GetRequestMetadata attaches authentication headers to outgoing RPCs.
-func (grpc *GrpcCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+// prepare request metadata with authentication headers once and reuse it
+func (grpc *GrpcCredentials) prepRequestMetadata() error {
 	credentials := grpc.GetCredentials()
 
 	if err := credentials.Validate(); err != nil {
-		return nil, err
+		return err
 	}
 
 	basicAuth := fmt.Sprintf("%s%s%s", credentials.UserName_, JsonDelimiter, credentials.Password_)
 	base64EncodedAuth := base64.StdEncoding.EncodeToString([]byte(basicAuth))
 
-	return map[string]string{
+	grpc.headers = map[string]string{
 		AuthorizationKey: BasicAuthorizationKey + base64EncodedAuth,
-	}, nil
+	}
+	return nil
+}
+
+// GetRequestMetadata attaches authentication headers to outgoing RPCs.
+func (grpc *GrpcCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return grpc.headers, nil
 }
 
 // RequireTransportSecurity reports whether the credentials require a secure

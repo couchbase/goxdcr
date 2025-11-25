@@ -36,21 +36,27 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			// CNG TODO: check use of datapool
 			body, err = snappy.Decode(nil, req.Req.Body)
 			if err != nil {
-				logger.Errorf("Failed to snappy decode body for key=%s, err=%v",
-					req.OriginalKey, err)
+				logger.Errorf("Failed to snappy decode body for key=%s[1]s%[3]s%[2]s, dataType=%[4]d, buf=%s[1]s%[5]s%[2]s, err=%[6]v",
+					base.UdTagBegin,
+					base.UdTagEnd,
+					req.OriginalKey, req.Req.DataType, req.Req.Body, err)
 				return
 			}
 		}
 		c.Xattrs, err = getXattrMap(body)
 		if err != nil {
-			logger.Errorf("Failed to get xattr map for key=%s, err=%v",
+			logger.Errorf("Failed to get xattr map for key=%s[1]s%[3]s%[2]s, err=%[4]v",
+				base.UdTagBegin,
+				base.UdTagEnd,
 				req.OriginalKey, err)
 			return
 		}
 
 		bodyWithoutXattr, err := base.StripXattrAndGetBody(body)
 		if err != nil {
-			logger.Errorf("Failed to strip xattr for key=%s, err=%v",
+			logger.Errorf("Failed to strip xattr for key=%s[1]s%[3]s%[2]s, err=%[4]v",
+				base.UdTagBegin,
+				base.UdTagEnd,
 				req.OriginalKey, err)
 			return c, err
 		}

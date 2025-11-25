@@ -2051,6 +2051,13 @@ const (
 
 	// FilterExpirationsWithFEKey is a toggle to enable filter expression based filtering on expirations.
 	FilterExpirationsWithFEKey string = "filterExpirationsWithExpression"
+
+	// Checkpointing related constants
+	XDCRCheckpointing string = "xdcrCheckpointing"
+	CheckpointMgrId   string = "CheckpointMgr"
+	StatsMgrId        string = "StatsMgr"
+	TimeCommiting     string = "time_commiting"
+	Vbno              string = "vbno"
 )
 
 const MaxValueLenForLogging = 512

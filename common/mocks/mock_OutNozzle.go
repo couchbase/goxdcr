@@ -345,6 +345,38 @@ func (_c *OutNozzle_Open_Call) RunAndReturn(run func() error) *OutNozzle_Open_Ca
 	return _c
 }
 
+// PrintStatusSummary provides a mock function with no fields
+func (_m *OutNozzle) PrintStatusSummary() {
+	_m.Called()
+}
+
+// OutNozzle_PrintStatusSummary_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrintStatusSummary'
+type OutNozzle_PrintStatusSummary_Call struct {
+	*mock.Call
+}
+
+// PrintStatusSummary is a helper method to define mock.On call
+func (_e *OutNozzle_Expecter) PrintStatusSummary() *OutNozzle_PrintStatusSummary_Call {
+	return &OutNozzle_PrintStatusSummary_Call{Call: _e.mock.On("PrintStatusSummary")}
+}
+
+func (_c *OutNozzle_PrintStatusSummary_Call) Run(run func()) *OutNozzle_PrintStatusSummary_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *OutNozzle_PrintStatusSummary_Call) Return() *OutNozzle_PrintStatusSummary_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *OutNozzle_PrintStatusSummary_Call) RunAndReturn(run func()) *OutNozzle_PrintStatusSummary_Call {
+	_c.Run(run)
+	return _c
+}
+
 // RaiseEvent provides a mock function with given fields: event
 func (_m *OutNozzle) RaiseEvent(event *common.Event) {
 	_m.Called(event)

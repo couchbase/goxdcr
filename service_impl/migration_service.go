@@ -666,7 +666,20 @@ func (service *MigrationSvc) targetBucketUUID(targetClusterUUID, bucketName stri
 		return "", err_target
 	}
 
-	return service.utils.BucketUUID(remote_connStr, bucketName, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           ref.IsCNG(),
+		HostAddr:          remote_connStr,
+		BucketName:        bucketName,
+		Username:          remote_userName,
+		Password:          remote_password,
+		HTTPAuthMech:      httpAuthMech,
+		Certificate:       certificate,
+		SanInCertificate:  sanInCertificate,
+		ClientCertificate: clientCertificate,
+		ClientKey:         clientKey,
+	}
+
+	return service.utils.BucketUUID(service.logger, req)
 }
 
 func addErrorMapToErrorList(errorMap map[string]error, errorList []error) []error {

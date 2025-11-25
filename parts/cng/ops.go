@@ -3,6 +3,7 @@ package cng
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -28,7 +29,9 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 		return
 	}
 
-	n.Logger().Tracef("checkDocument req key=%s, seqNo=%v, cas=%v, revSeqNo=%v, expiry=%v",
+	n.Logger().Tracef("checkDocument req key=%[1]s%[3]s%[2]s, seqNo=%[4]v, cas=%[5]v, revSeqNo=%[6]v, expiry=%[7]v",
+		base.UdTagBegin,
+		base.UdTagEnd,
 		req.OriginalKey, req.Seqno, req.Req.Cas, revSeqNo, expiry)
 
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
@@ -112,7 +115,16 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		return
 	}
 
-	// CNG TODO: Check if expiry is already in nanoseconds or seconds
+	targetVBNo := req.GetTargetVB()
+	if targetVBNo == math.MaxUint16 {
+		err = fmt.Errorf("invalid target vbucket number %v for key %s", targetVBNo, req.OriginalKey)
+		return
+	}
+	vbuuid, err := n.getTargetVBUUID(targetVBNo)
+	if err != nil {
+		return
+	}
+
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
 
 	pushDocReq := &internal_xdcr_v1.PushDocumentRequest{
@@ -127,6 +139,7 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		Revno:      revSeqNo,
 		ExpiryTime: &expiryTime,
 		StoreCas:   req.Req.Cas,
+		VbUuid:     &vbuuid,
 	}
 
 	if req.Req.Opcode == mc.UPR_MUTATION {
@@ -155,8 +168,6 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		if len(content.Xattrs) > 0 {
 			pushDocReq.Xattrs = content.Xattrs
 		}
-		n.Logger().Debugf("PushDocument content, key=%s, dataType=%v, hasXattrs=%v, notCompressed=%v, isJson=%v",
-			req.OriginalKey, req.Req.DataType, len(content.Xattrs) > 0, content.NotCompressed, content.IsJson)
 	}
 
 	now := time.Now()
@@ -205,6 +216,17 @@ func handlePushDocErr(origErr error, rsp *PushDocRsp) (err error) {
 				}
 			}
 		}
+	}
+
+	return
+}
+
+// getTargetVBUUID gets the target vbuuid for a given vbucket number
+func (n *Nozzle) getTargetVBUUID(vbNo uint16) (vbuuid string, err error) {
+	vbuuid, ok := n.cfg.Replication.vbUUIDMap[vbNo]
+	if !ok {
+		err = fmt.Errorf("unable to find vbuuid for vbucket %v", vbNo)
+		return
 	}
 
 	return

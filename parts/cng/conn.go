@@ -3,20 +3,11 @@ package cng
 import (
 	"context"
 	"net"
-	"os"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"google.golang.org/grpc"
 )
-
-// CNG TODO: Remove this file once remote cluster reference is implemented for CNG
-func (n *Nozzle) getCNGCredentials() (creds base.Credentials, err error) {
-	return base.Credentials{
-		// CNG TODO: HARDCODED
-		UserName_: "Administrator",
-		Password_: "aaaaaa",
-	}, nil
-}
 
 func (n *Nozzle) getDialOpts() (dialOpts []grpc.DialOption, err error) {
 	if n.cfg.Services.BWThrottler != nil {
@@ -41,37 +32,23 @@ func (n *Nozzle) getDialOpts() (dialOpts []grpc.DialOption, err error) {
 // Note: grpc.NewClient does not actually create the TCP connection.
 // It gets lazily created when the first RPC is made.
 func (n *Nozzle) newCNGClient() (conn *base.CngConn, err error) {
-	creds, err := n.getCNGCredentials()
+	ref, err := n.getRemoteRef()
 	if err != nil {
+		n.Logger().Errorf("error getting remote cluster reference: %v", err)
 		return nil, err
 	}
+	cngHost := ref.HostName()
 
-	cngCert, err := n.getCNGCert()
-	if err != nil {
-		n.Logger().Errorf("error getting CNG cert: %v", err)
-		return nil, err
-	}
-
-	n.Logger().Infof("connecting at %v\n", n.cfg.Replication.CNGAddr)
-	getCreds := func() *base.Credentials {
-		return &creds
-	}
-	opts, err := base.NewGrpcOptions(n.cfg.Replication.CNGAddr, getCreds, cngCert, n.cfg.Tunables.InsecureSkipVerify)
-	if err != nil {
-		return nil, err
-	}
-
+	n.Logger().Infof("connecting at %v\n", cngHost)
 	dialOpts, err := n.getDialOpts()
 	if err != nil {
 		return nil, err
 	}
-	conn, err = base.NewCngConn(opts, dialOpts...)
+	conn, err = ref.NewCNGConn(dialOpts...)
 	return
 }
 
-// getCNGCert reads the CNG certificate from a file
-// CNG TODO: This is a temporary implementation for testing purpose only
-// CNG TODO: remove this function
-func (n *Nozzle) getCNGCert() (buf []byte, err error) {
-	return os.ReadFile("/tmp/cngcert.crt")
+func (n *Nozzle) getRemoteRef() (ref *metadata.RemoteClusterReference, err error) {
+	ref, err = n.cfg.Services.RemoteClusterSvc.RemoteClusterByUuid(n.cfg.Replication.TargetClusterUUID, false)
+	return
 }

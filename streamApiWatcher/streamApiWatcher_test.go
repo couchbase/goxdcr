@@ -9,13 +9,14 @@ package streamApiWatcher
 
 import (
 	"fmt"
+	"os"
+	"testing"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/mocks"
 	realUtils "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/stretchr/testify/assert"
-	"os"
-	"testing"
 )
 
 const username = "Administrator"
@@ -101,7 +102,20 @@ func TestBucketWatch(t *testing.T) {
 
 func isClusterRunning() bool {
 	utils := realUtils.Utilities{}
-	bucketInfo, err := utils.GetBucketInfo("127.0.0.1:9000", "B1", username, password, base.HttpAuthMechPlain, nil, false, nil, nil, log.NewLogger("test", log.DefaultLoggerContext))
+
+	req := &realUtils.GetBucketInfoReq{
+		FromCNG:           false, //CNG TODO: change as needed
+		HostAddr:          "127.0.0.1:9000",
+		BucketName:        "B1",
+		Username:          username,
+		Password:          password,
+		HTTPAuthMech:      base.HttpAuthMechPlain,
+		Certificate:       nil,
+		SanInCertificate:  false,
+		ClientCertificate: nil,
+		ClientKey:         nil,
+	}
+	bucketInfo, err := utils.GetBucketInfo(log.NewLogger("test", log.DefaultLoggerContext), req)
 	if err == nil && bucketInfo != nil {
 		return true
 	} else {

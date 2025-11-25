@@ -470,60 +470,70 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 			return err
 		}
 
-		shouldUseTerseInfo, err := b.utils.ShouldUseTerseBucketInfo(targetBucketInfo, connStr, spec.TargetBucketName, shouldUseExternal, perUpdateRef.IsHttps())
-		if err != nil {
-			return err
-		}
+		var replicasMap *base.VbHostsMapType
+		var translateMap *base.StringStringMap
+		var numOfReplicas int
+		var vbReplicaMember []uint16
+		var versionPruningWindowHrs int
+		var storageBackend string
+		var targetServerVBMap map[string][]uint16
 
-		bucketInfoForKvVBMap := targetBucketInfo
-		if shouldUseTerseInfo {
-			terseTargetBucketInfo, shouldUseExternal, connStr, err := terseBucketInfoGetter()
+		if !utils.IsBucketInfoFromCng(targetBucketInfo) {
+			shouldUseTerseInfo, err := b.utils.ShouldUseTerseBucketInfo(targetBucketInfo, connStr, spec.TargetBucketName, shouldUseExternal, perUpdateRef.IsHttps())
 			if err != nil {
 				return err
 			}
 
-			b.logger.Debugf("using terse bucket info for kv_vb_map construction during remote topology change check. external=%v, connStr=%v, bucket=%s", shouldUseExternal, connStr, targetBucketUUID)
-			bucketInfoForKvVBMap = terseTargetBucketInfo
-		}
+			bucketInfoForKvVBMap := targetBucketInfo
+			if shouldUseTerseInfo {
+				terseTargetBucketInfo, shouldUseExternal, connStr, err := terseBucketInfoGetter()
+				if err != nil {
+					return err
+				}
 
-		targetServerVBMap, err := b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, bucketInfoForKvVBMap, shouldUseExternal)
-		if err != nil {
-			return fmt.Errorf("error constructing targetServerVbMap (terse=%v): %w", shouldUseTerseInfo, err)
-		}
-
-		nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)
-		if err != nil {
-			return err
-		}
-
-		/**
-		Target bucket pruning window parameter is only used by xdcrDiffer at the moment.
-		Reasons for ignoring the error:
-		* Bucket parameter "versionPruningWindowHrs" will have a default value provided by the CB server.
-		* On older versions (< 7.5.0), the parameter does not exist, and thus should be ignored.
-		* Additionally versionPruningWindowHrs=0 (default int value) implies no PV pruning is performed.
-		**/
-		versionPruningWindowHrs, _ := b.utils.GetVersionPruningWindowHrs(targetBucketInfo)
-
-		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
-		if err != nil {
-			if err != watcher.replicaLastWarnErr {
-				watcher.replicaLastWarnErr = err
-				watcher.logger.Warnf("%v target replicasInfo error %v", spec.TargetBucketName, err)
+				b.logger.Debugf("using terse bucket info for kv_vb_map construction during remote topology change check. external=%v, connStr=%v, bucket=%s", shouldUseExternal, connStr, targetBucketUUID)
+				bucketInfoForKvVBMap = terseTargetBucketInfo
 			}
-			// Odd error but continue anyway
-			replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
-			translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
-			numOfReplicas = 0
-			vbReplicaMember = []uint16{}
-		} else {
-			watcher.replicaLastWarnErr = nil
-		}
 
-		storageBackend, err := b.utils.BucketStorageBackend(targetBucketInfo)
-		if err != nil {
-			// This can happen if target is older version
-			storageBackend = ""
+			targetServerVBMap, err = b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, bucketInfoForKvVBMap, shouldUseExternal)
+			if err != nil {
+				return fmt.Errorf("error constructing targetServerVbMap (terse=%v): %w", shouldUseTerseInfo, err)
+			}
+
+			nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)
+			if err != nil {
+				return err
+			}
+
+			/**
+			Target bucket pruning window parameter is only used by xdcrDiffer at the moment.
+			Reasons for ignoring the error:
+			* Bucket parameter "versionPruningWindowHrs" will have a default value provided by the CB server.
+			* On older versions (< 7.5.0), the parameter does not exist, and thus should be ignored.
+			* Additionally versionPruningWindowHrs=0 (default int value) implies no PV pruning is performed.
+			**/
+			versionPruningWindowHrs, _ = b.utils.GetVersionPruningWindowHrs(targetBucketInfo)
+
+			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err = b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
+			if err != nil {
+				if err != watcher.replicaLastWarnErr {
+					watcher.replicaLastWarnErr = err
+					watcher.logger.Warnf("%v target replicasInfo error %v", spec.TargetBucketName, err)
+				}
+				// Odd error but continue anyway
+				replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
+				translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
+				numOfReplicas = 0
+				vbReplicaMember = []uint16{}
+			} else {
+				watcher.replicaLastWarnErr = nil
+			}
+
+			storageBackend, err = b.utils.BucketStorageBackend(targetBucketInfo)
+			if err != nil {
+				// This can happen if target is older version
+				storageBackend = ""
+			}
 		}
 
 		// In mixed mode, this will return false with an error, which is OK
