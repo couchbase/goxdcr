@@ -86,7 +86,8 @@ func executeConnectionPreCheck(ref *metadata.RemoteClusterReference, targetNodes
 // helper function to connect to the ns_server of a given target node
 func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, portsMap base.HostPortMapType, ch chan<- []error, utils utils.UtilsIface, logger *log.CommonLogger) {
 	// sleep for a random amount of time to not overwhelm the target
-	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
+	// Add 1 millisecond to avoid zero sleep time
+	numMilliSec := 1 + rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
 	logger.Debugf("connectToRemoteNS(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
 	<-ticker.C
@@ -148,7 +149,8 @@ func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, po
 // helper function to connect to the KV of a given target node
 func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, portsMap base.HostPortMapType, ch chan<- []error, utils utils.UtilsIface, logger *log.CommonLogger) {
 	// sleep for a random amount of time to not overwhelm the target
-	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
+	// Add 1 millisecond to avoid zero sleep time
+	numMilliSec := 1 + rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
 	logger.Debugf("connectToRemoteKV(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
 	<-ticker.C
