@@ -337,6 +337,7 @@ type replicationSettingsInjections interface {
 	GetDevBackfillPipelineDelay(settings *ReplicationSettings) int
 	GetDevPreCheckMaxCasErrorInjection(settings *ReplicationSettings) bool
 	GetCasDriftInjectDocKey(settings *ReplicationSettings) string
+	GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int
 }
 
 func NewEmptyReplicationSettings() *ReplicationSettings {

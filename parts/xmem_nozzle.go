@@ -667,6 +667,7 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 */
 type XmemNozzle struct {
 	AbstractPart
+	XmemNozzleInjector
 
 	//remote cluster reference for retrieving up to date remote cluster reference
 	remoteClusterSvc service_def.RemoteClusterSvc
@@ -833,6 +834,12 @@ func getMcStatusFromGuardrailIdx(idx int) mc.Status {
 	return mc.Status(int(mc.BUCKET_RESIDENT_RATIO_TOO_LOW) + idx)
 }
 
+type XmemNozzleInjector interface {
+	Init(settings metadata.ReplicationSettingsMap)
+	Update(settings metadata.ReplicationSettingsMap)
+	GetConn(client *base.XmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error)
+}
+
 func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int,
 	connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string, sourceHostname string, pipelineType common.PipelineType) *XmemNozzle {
@@ -840,6 +847,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
 	xmem := &XmemNozzle{
+		XmemNozzleInjector:     NewXmemNozzleInjector(),
 		AbstractPart:           part,
 		remoteClusterSvc:       remoteClusterSvc,
 		sourceBucketUuid:       sourceBucketUuid,
@@ -3362,6 +3370,8 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 		return err
 	}
 
+	xmem.XmemNozzleInjector.Init(settings)
+
 	if xmem.sourceActorId, err = hlv.UUIDstoDocumentSource(xmem.sourceBucketUuid, xmem.sourceClusterUuid); err != nil {
 		xmem.Logger().Errorf("Cannot convert source bucket UUID %v to base64. Error: %v", xmem.sourceBucketUuid, err)
 		return err
@@ -4497,7 +4507,7 @@ func (xmem *XmemNozzle) getConn(client *base.XmemClient, readTimeout bool, write
 	if err != nil {
 		return nil, client.RepairCount(), err
 	}
-	return client.GetConn(readTimeout, writeTimeout)
+	return xmem.XmemNozzleInjector.GetConn(client, readTimeout, writeTimeout)
 }
 
 func (xmem *XmemNozzle) validateRunningState() error {
@@ -4844,6 +4854,7 @@ func (xmem *XmemNozzle) ConnStr() string {
 
 func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	xmem.config.baseConfigInjector.Update(&xmem.config.baseConfig, settings, xmem.Logger(), xmem.Id())
+	xmem.XmemNozzleInjector.Update(settings)
 
 	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
 	if ok {

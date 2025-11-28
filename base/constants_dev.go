@@ -26,3 +26,4 @@ const DevBackfillReqHandlerStartOnceDelay = "xdcrDevBackfillReqHandlerStartOnceD
 const DevBackfillReqHandlerHandleVBTaskDoneHang = "xdcrDevBackfillReqHandlerHandleVBTaskDoneHang"
 const DevBackfillUnrecoverableErrorInj = "xdcrDevBackfillUnrecoverableErrorInj"
 const DevBackfillMgrVbsTasksDoneNotifierDelay = "xdcrDevBackfillMgrVbsTasksDoneNotifierDelay"
+const DevXmemNozzleNetworkIOFaultProbability = "xdcrDevXmemNozzleNetworkIOFaultProbability"

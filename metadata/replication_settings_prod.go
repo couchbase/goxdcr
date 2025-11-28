@@ -47,3 +47,7 @@ func (s *ReplicationSettingsProdInjections) GetDevBackfillPipelineRollbackTo0VB(
 func (s *ReplicationSettingsProdInjections) GetCasDriftInjectDocKey(settings *ReplicationSettings) string {
 	return ""
 }
+
+func (s *ReplicationSettingsProdInjections) GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int {
+	return 0
+}

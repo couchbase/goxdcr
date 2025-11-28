@@ -43,6 +43,7 @@ func (i *XDCRFactoryDevInjector) InjectDcpNozzleUpdate(in metadata.ReplicationSe
 func (i *XDCRFactoryDevInjector) InjectXmemNozzle(in metadata.ReplicationSettings, out metadata.ReplicationSettingsMap) {
 	out[parts.XMEM_DEV_MAIN_SLEEP_DELAY] = in.GetDevMainPipelineDelay(&in)
 	out[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = in.GetDevBackfillPipelineDelay(&in)
+	out[parts.XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY] = in.GetXmemNozzleNetworkIOFaultPercent(&in)
 }
 
 func (i *XDCRFactoryDevInjector) InjectXmemNozzleUpdate(in metadata.ReplicationSettingsMap, out metadata.ReplicationSettingsMap) {
@@ -54,6 +55,11 @@ func (i *XDCRFactoryDevInjector) InjectXmemNozzleUpdate(in metadata.ReplicationS
 	backfillSleepDelay, ok := in[metadata.DevBackfillPipelineSendDelay]
 	if ok {
 		out[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
+	}
+
+	networkFaultPercent, ok := in[metadata.DevXmemNozzleNetworkIOFaultProbability]
+	if ok {
+		out[parts.XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY] = networkFaultPercent
 	}
 }
 

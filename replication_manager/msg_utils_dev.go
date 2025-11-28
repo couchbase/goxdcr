@@ -35,6 +35,7 @@ func init() {
 		base.DevBackfillReqHandlerHandleVBTaskDoneHang: metadata.DevBackfillReqHandlerHandleVBTaskDoneHang,
 		base.DevBackfillUnrecoverableErrorInj:          metadata.DevBackfillUnrecoverableErrorInj,
 		base.DevBackfillMgrVbsTasksDoneNotifierDelay:   metadata.DevBackfillMgrVbsTasksDoneNotifierDelay,
+		base.DevXmemNozzleNetworkIOFaultProbability:    metadata.DevXmemNozzleNetworkIOFaultProbability,
 	}
 
 	// Merge the dev settings into the main configuration map
@@ -58,6 +59,7 @@ func init() {
 		metadata.DevBackfillReqHandlerHandleVBTaskDoneHang: base.DevBackfillReqHandlerHandleVBTaskDoneHang,
 		metadata.DevBackfillUnrecoverableErrorInj:          base.DevBackfillUnrecoverableErrorInj,
 		metadata.DevBackfillMgrVbsTasksDoneNotifierDelay:   base.DevBackfillMgrVbsTasksDoneNotifierDelay,
+		metadata.DevXmemNozzleNetworkIOFaultProbability:    base.DevXmemNozzleNetworkIOFaultProbability,
 	}
 
 	for k, v := range devSettingsKeyToKeyMap {

@@ -30,6 +30,7 @@ const (
 	DevBackfillReqHandlerHandleVBTaskDoneHang = base.DevBackfillReqHandlerHandleVBTaskDoneHang
 	DevBackfillUnrecoverableErrorInj          = base.DevBackfillUnrecoverableErrorInj
 	DevBackfillMgrVbsTasksDoneNotifierDelay   = base.DevBackfillMgrVbsTasksDoneNotifierDelay
+	DevXmemNozzleNetworkIOFaultProbability    = base.DevXmemNozzleNetworkIOFaultProbability
 )
 
 var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
@@ -47,6 +48,7 @@ var XDCRDevBackfillReqHandlerStartOnceDelayConfig = &SettingsConfig{0, &Range{0,
 var XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
+var XDCRDevXmemNozzleNetworkIOFaultProbabilityConfig = &SettingsConfig{0 /*percent*/, &Range{0, 100}}
 
 // This file contains development-only settings that will only be included
 // when the code is compiled with the "dev" build tag
@@ -105,6 +107,9 @@ func init() {
 
 		// DevBackfillMgrVbsTasksDoneNotifierDelay is used to inject delay in backfill mgr's notifier for vb tasks done
 		DevBackfillMgrVbsTasksDoneNotifierDelay: XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig,
+
+		// DevXmemNozzleNetworkIOFaultProbability is used to inject network I/O faults in xmem nozzle for testing purposes
+		DevXmemNozzleNetworkIOFaultProbability: XDCRDevXmemNozzleNetworkIOFaultProbabilityConfig,
 	}
 
 	// Merge the dev settings into the main configuration map
@@ -145,4 +150,8 @@ func (s *ReplicationSettingsDevInjections) GetDevBackfillPipelineRollbackTo0VB(s
 
 func (s *ReplicationSettingsDevInjections) GetCasDriftInjectDocKey(settings *ReplicationSettings) string {
 	return settings.GetStringSettingValue(DevCasDriftForceDocKey)
+}
+
+func (s *ReplicationSettingsDevInjections) GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int {
+	return settings.GetIntSettingValue(DevXmemNozzleNetworkIOFaultProbability)
 }

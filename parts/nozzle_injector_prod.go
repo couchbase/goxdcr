@@ -13,6 +13,9 @@ licenses/APL2.txt.
 package parts
 
 import (
+	"io"
+
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 )
@@ -39,4 +42,16 @@ func NewDcpNozzleInjector() *DcpNozzleProdInjector {
 
 func (d *DcpNozzleProdInjector) Init(dcp *DcpNozzle, settings metadata.ReplicationSettingsMap) {
 	// no op
+}
+
+type XmemNozzleProdInjector struct{}
+
+func NewXmemNozzleInjector() *XmemNozzleProdInjector { return &XmemNozzleProdInjector{} }
+
+func (x *XmemNozzleProdInjector) Init(settings metadata.ReplicationSettingsMap) {}
+
+func (x *XmemNozzleProdInjector) Update(settings metadata.ReplicationSettingsMap) {}
+
+func (x *XmemNozzleProdInjector) GetConn(client *base.XmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
+	return client.GetConn(readTimeout, writeTimeout)
 }

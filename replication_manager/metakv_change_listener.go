@@ -506,7 +506,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetCasDriftInjectDocKey(oldSettings) != newSettings.GetCasDriftInjectDocKey(newSettings) ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) ||
-		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() {
+		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
+		oldSettings.GetXmemNozzleNetworkIOFaultPercent(oldSettings) != newSettings.GetXmemNozzleNetworkIOFaultPercent(newSettings) {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

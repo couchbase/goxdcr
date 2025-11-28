@@ -22,12 +22,14 @@ const (
 	DCP_DEV_MAIN_ROLLBACK_VB     = base.DevMainPipelineRollbackTo0VB
 	DCP_DEV_BACKFILL_ROLLBACK_VB = base.DevBackfillRollbackTo0VB
 
-	XMEM_DEV_MAIN_SLEEP_DELAY     = base.DevMainPipelineSendDelay
-	XMEM_DEV_BACKFILL_SLEEP_DELAY = base.DevBackfillPipelineSendDelay
+	XMEM_DEV_MAIN_SLEEP_DELAY             = base.DevMainPipelineSendDelay
+	XMEM_DEV_BACKFILL_SLEEP_DELAY         = base.DevBackfillPipelineSendDelay
+	XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY = base.DevXmemNozzleNetworkIOFaultProbability
 )
 
 func init() {
 	// Add development settings to the main configuration map
 	xmem_setting_defs[XMEM_DEV_MAIN_SLEEP_DELAY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
 	xmem_setting_defs[XMEM_DEV_BACKFILL_SLEEP_DELAY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
+	xmem_setting_defs[XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
 }

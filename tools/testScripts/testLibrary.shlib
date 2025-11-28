@@ -49,6 +49,7 @@ REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline
 
 # Dev Injection Globals
 SEED_INJ_MAX_MAIN_DELAY_MS=200
+SEED_INJ_MAX_NETWORK_FAULT_PERCENT=30
 
 # These should be imported after clusterRunProvision script
 
@@ -3010,8 +3011,8 @@ function vagrantGetPprof {
 	${VSSH[$idx]} "curl -s http://localhost:9998/debug/pprof/$pprofType?debug=1"
 }
 
-function getDelayMsGivenSeed {
-	local maxDelayMs=$1
+function getIntFromSeed {
+	local maxVal=$1
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
 	# Derive seed if not provided
@@ -3041,12 +3042,12 @@ function getDelayMsGivenSeed {
 		fi
 	fi
 
-	if ((maxDelayMs <= 0)); then
+	if ((maxVal <= 0)); then
 		echo 0
 	fi
 
-	local delayMs=$((seedDec % maxDelayMs))
-	echo "$delayMs"
+	local returnInt=$((seedDec % maxVal))
+	echo "$returnInt"
 }
 
 function seedInjectMainPipelineDelay {
@@ -3057,7 +3058,7 @@ function seedInjectMainPipelineDelay {
 	local maxDelayMs=$5
 
 	local delayMs
-	delayMs=$(getDelayMsGivenSeed "$maxDelayMs")
+	delayMs=$(getIntFromSeed "$maxDelayMs")
 	if ((delayMs <= 0)); then
 		return
 	fi
@@ -3071,7 +3072,7 @@ function calculateTimeToSleepWithMainDelay {
 	local numberOfItemsToTransfer=$1
 	local maxMs=$2
 	local delayMs
-	delayMs=$(getDelayMsGivenSeed "$maxMs")
+	delayMs=$(getIntFromSeed "$maxMs")
 
 	if (($delayMs <= 0)); then
 		echo 0
@@ -3084,4 +3085,21 @@ function calculateTimeToSleepWithMainDelay {
 	local sleepSecs=$((totalDelayMs / 1000))
 	echo "Total delay ms is $totalDelayMs, sleep seconds is $sleepSecs" >&2
 	echo "$sleepSecs"
+}
+
+function seedInjectXmemNetworkErrors {
+	local clusterName=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local maxPercent=$5
+	local errorRatePercent=$(getIntFromSeed $maxPercent)
+
+	if ((errorRatePercent <= 0)); then
+		return
+	fi
+
+	echo "Seeding xmem network errors of $errorRatePercent% for $clusterName/$sourceBucket/$targetCluster/$targetBucket"
+	setReplicationSettings "$clusterName" "$sourceBucket" "$targetCluster" "$targetBucket" "xdcrDevXmemNozzleNetworkIOFaultProbability=$errorRatePercent"
+	sleep 5
 }
