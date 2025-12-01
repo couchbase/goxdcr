@@ -774,15 +774,26 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	ckptMgr.unitTest = true
 
 	var simpleMergerWaiter sync.WaitGroup
+	var simplemergerStarted bool
+	var simplemergerStartedMtx sync.Mutex
+	var simplemergerStartedCond = sync.NewCond(&simplemergerStartedMtx)
+
 	simpleMergerWaiter.Add(1)
 	// Test simple merger
 	simpleMerger := func() {
+		simplemergerStartedMtx.Lock()
+		simplemergerStarted = true
+		simplemergerStartedMtx.Unlock()
+		simplemergerStartedCond.Broadcast()
 		defer simpleMergerWaiter.Done()
 		for {
 			select {
 			case <-ckptMgr.periodicPushRequested:
 				// Sleep here to simulate processing time while another is queued up
 				args := ckptMgr.periodicBatchGetter()
+				if args == nil {
+					continue
+				}
 				assert.NotNil(args)
 				assert.Equal(2, len(args.PushRespChs))
 
@@ -803,6 +814,16 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	ckptMgr.periodicMerger = simpleMerger
 	// simulate Start
 	go ckptMgr.periodicMerger()
+
+	simplemergerStartedMtx.Lock()
+	for {
+		if simplemergerStarted {
+			simplemergerStartedMtx.Unlock()
+			break
+		} else {
+			simplemergerStartedCond.Wait()
+		}
+	}
 
 	// Lazy way of creating a ckptDoc with 2 VBs
 	ckptDoc := mockVBCkptDoc(spec, 12)
