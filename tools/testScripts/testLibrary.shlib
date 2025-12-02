@@ -3018,6 +3018,7 @@ function getIntFromSeed {
 	# Derive seed if not provided
 	if [[ -z "${seedArg:-}" ]]; then
 		echo 0
+		return
 	fi
 
 	local seedDec
@@ -3035,6 +3036,7 @@ function getIntFromSeed {
 		seedDec=$(echo -n "$seedArg" | od -An -tu4 | tr -d ' ' | head -n1)
 		if [[ -z "${seedDec:-}" ]]; then
 			echo 0
+			return
 		fi
 		if ((seedDec < 0)); then
 			# convert to positive
@@ -3044,6 +3046,7 @@ function getIntFromSeed {
 
 	if ((maxVal <= 0)); then
 		echo 0
+		return
 	fi
 
 	local returnInt=$((seedDec % maxVal))
