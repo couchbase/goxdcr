@@ -72,6 +72,7 @@ function runTestCase {
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" ImplicitReplProperties
 	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectXmemNetworkErrors "C1" "B1" "C2" "B2" $SEED_INJ_MAX_NETWORK_FAULT_PERCENT
 	printGlobalScopeAndCollectionInfo
 
 	echo "Waiting 15 seconds before checking item count first pass"
