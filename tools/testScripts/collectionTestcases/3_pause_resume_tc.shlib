@@ -60,11 +60,11 @@ function pauseAndResumeMultiples {
 		oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
 
 		# Verify prometheus stats for running is correct
-		pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | grep "Running" | awk '{print $NF}')
+		pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Running" | awk '{print $NF}')
 		if ((!$pauseResumeStatus == 1)); then
 			# try again
 			sleep 30
-			pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | grep "Running" | awk '{print $NF}')
+			pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Running" | awk '{print $NF}')
 			if ((!$pauseResumeStatus == 0)); then
 				echo "Pipeline running should have status 1. Got $pauseResumeStatus"
 				exit 1
@@ -79,11 +79,11 @@ function pauseAndResumeMultiples {
 		validateXDCRCheckpoints "C1"
 		validateXDCRCheckpoints "C2"
 
-		pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | grep "Paused" | awk '{print $NF}')
+		pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Paused" | awk '{print $NF}')
 		if (($pauseResumeStatus == 0)); then
 			# try again
 			sleep 30
-			pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | grep "Paused" | awk '{print $NF}')
+			pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Paused" | awk '{print $NF}')
 			if (($pauseResumeStatus == 0)); then
 				echo "Pipeline paused should have status 1. Got $pauseResumeStatus"
 				exit 1
