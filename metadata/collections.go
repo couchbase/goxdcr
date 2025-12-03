@@ -468,28 +468,49 @@ func (c *CollectionsManifest) LoadBytes(data []byte) error {
 	return c.Load(collectionsMeta)
 }
 
-func (c *CollectionsManifest) LoadFromWatchCollectionsResp(resp *internal_xdcr_v1.WatchCollectionsResponse) {
+// LoadFromWatchCollectionsResp loads the manifest from a CNG WatchCollectionsResponse.
+// It validates the response and returns an error if the response is invalid.
+// If the response is valid, it loads the manifest into the CollectionsManifest object.
+func (c *CollectionsManifest) LoadFromWatchCollectionsResp(resp *internal_xdcr_v1.WatchCollectionsResponse) error {
 	if resp == nil {
-		return
+		return base.ErrorNilPtr
 	}
+
 	c.uid = uint64(resp.GetManifestUid())
 	c.scopes = make(ScopesMap)
-	for _, scopeVal := range resp.GetScopes() {
+	for i, scopeVal := range resp.GetScopes() {
+		if scopeVal == nil {
+			return fmt.Errorf("scope at index %d is nil", i)
+		}
+
+		scopeName := scopeVal.GetScopeName()
+		if scopeName == "" {
+			return fmt.Errorf("scope at index %d has empty name", i)
+		}
 		scope := Scope{
 			Uid:         scopeVal.GetScopeId(),
-			Name:        scopeVal.GetScopeName(),
+			Name:        scopeName,
 			Collections: make(CollectionsMap),
 		}
-		for _, collVal := range scopeVal.GetCollections() {
+		for j, collVal := range scopeVal.GetCollections() {
+			if collVal == nil {
+				return fmt.Errorf("collection at index %d in scope '%s' is nil", j, scopeName)
+			}
+
+			collectionName := collVal.GetCollectionName()
+			if collectionName == "" {
+				return fmt.Errorf("collection at index %d in scope '%s' has empty name", j, scopeName)
+			}
 			collection := Collection{
 				Uid:  collVal.GetCollectionId(),
-				Name: collVal.GetCollectionName(),
+				Name: collectionName,
 			}
 			scope.Collections[collection.Name] = collection
 		}
 		c.scopes[scope.Name] = scope
 	}
 	c.generateReverseLookupMap()
+	return nil
 }
 
 // Implements the marshaller interface

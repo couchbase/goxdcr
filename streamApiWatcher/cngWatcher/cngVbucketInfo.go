@@ -19,7 +19,6 @@ func (vbh *VbucketInfoHandler) OnMessage(msg *internal_xdcr_v1.GetVbucketInfoRes
 // OnError is called if an error occurs during streaming
 func (vbh *VbucketInfoHandler) OnError(err error) {
 	vbh.errorCh <- err
-	close(vbh.errorCh)
 }
 
 // OnComplete is called when the stream completes successfully
