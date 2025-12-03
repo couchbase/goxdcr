@@ -12,59 +12,62 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
+	"google.golang.org/grpc/codes"
 )
 
 var _ metadata_svc.RemoteAgentManifestOps = &RemoteCngAgent{}
 
 func (agent *RemoteCngAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
-	// CNG TODO: Temporary implementation for one-time manifest fetch using WatchCollections RPC.
-	// This is due to a bug in CngCollections watcher
 	if err := requestOpts.Validate(); err != nil {
 		return nil, err
 	}
 
-	ref, err := agent.GetReferenceClone(false)
+	// Validate if the remote bucket actually exists
+	grpcOpts := agent.GetGrpcOpts()
+	conn, err := base.NewCngConn(grpcOpts)
 	if err != nil {
-		return nil, err
-	}
-
-	conn, err := ref.NewCNGConn()
-	if err != nil {
-		return nil, err
+		agent.logger.Errorf("OneTimeGetRemoteBucketManifest: failed to create CNG connection: %v", err)
+		return nil, fmt.Errorf("failed to get manifest: %w", err)
 	}
 	defer conn.Close()
 
-	// CNG TODO: Use a proper timeout value
-	// Its hardcoded because this is a temporary implementation
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	bucketInfoContext, bucketInfoCancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
+	defer bucketInfoCancel()
+
+	request := &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
+		Context: bucketInfoContext,
+		Request: &internal_xdcr_v1.GetBucketInfoRequest{
+			BucketName: requestOpts.BucketName,
+		},
+	}
+	response := agent.services.utils.CngGetBucketInfo(conn.Client(), request)
+	if response.Code() != codes.OK {
+		agent.logger.Errorf("OneTimeGetRemoteBucketManifest: failed to get bucket info: %v", response.Message())
+		return nil, fmt.Errorf("failed to verify the bucket for get manifest: %v", response.Message())
+	}
+
+	// Get the manifest from the remote cluster
+	collectionsWatcher := cngWatcher.NewCollectionsWatcher(requestOpts.BucketName, agent.GetGrpcOpts, agent.services.utils, base.CollectionsWatcherWaitTime,
+		base.CollectionsWatcherBackoffFactor, base.CollectionsWatcherMaxWaitTime, false, agent.logger)
+	collectionsWatcher.Start()
+	defer collectionsWatcher.Stop()
+
+	context, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
 	defer cancel()
 
-	stream, err := conn.Client().WatchCollections(ctx, &internal_xdcr_v1.WatchCollectionsRequest{
-		BucketName: requestOpts.BucketName,
-	})
+	res, err := collectionsWatcher.GetResult(context)
 	if err != nil {
-		err = fmt.Errorf("failed to create stream to get one time remote manifest: %w", err)
-		return nil, err
+		agent.logger.Errorf("failed to get manifest for bucket %v: %v", requestOpts.BucketName, err)
+		defaultManifest := metadata.NewDefaultCollectionsManifest()
+		return &defaultManifest, nil
 	}
-
-	var msg internal_xdcr_v1.WatchCollectionsResponse
-	if err := stream.RecvMsg(&msg); err != nil {
-		err = fmt.Errorf("failed to receive watch collections response for one time remote manifest: %w", err)
-		return nil, err
-	}
-
-	agent.logger.Infof("successfully received one time watch collections response for bucket %v msg:%v", requestOpts.BucketName, msg)
-
-	manifest := &metadata.CollectionsManifest{}
-	manifest.LoadFromWatchCollectionsResp(&msg)
-
-	return manifest, nil
+	return res, nil
 }
 
 func (agent *RemoteCngAgent) GetManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
@@ -88,5 +91,16 @@ func (agent *RemoteCngAgent) GetManifest(requestOpts *base.GetManifestOpts) (*me
 		// we need a one-time manifest fetch operation.
 		return agent.OneTimeGetRemoteBucketManifest(requestOpts)
 	}
-	return watcher.GetResult(), nil
+
+	// Use an already-cancelled context for non-blocking behavior.
+	// This returns immediately with the cached manifest if available, or an error if its not available yet.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := watcher.GetResult(ctx)
+	if err != nil {
+		agent.logger.Errorf("failed to get manifest for bucket %v: %v", requestOpts.BucketName, err)
+		defaultManifest := metadata.NewDefaultCollectionsManifest()
+		return &defaultManifest, nil
+	}
+	return result, nil
 }

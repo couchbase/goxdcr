@@ -31,6 +31,14 @@ func setupMockUtils() *utilsMock.CngUtils {
 	return mockUtils
 }
 
+// nonBlockingCtx returns an already-cancelled context for non-blocking GetResult calls.
+// Use this when you want GetResult to return immediately with cached value or an error if its not available yet.
+func nonBlockingCtx() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}
+
 // Setup GrpcOptions for testing
 func getTestGrpcOptions() *base.GrpcOptions {
 	return &base.GrpcOptions{
@@ -109,7 +117,7 @@ func TestCollectionsWatcher_StartStopMock(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Check that we can get a result
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	if result != nil {
 		assert.Equal(uint64(123), result.Uid())
 	}
@@ -171,7 +179,7 @@ func TestCollectionsWatcher_ErrorHandling(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Should eventually get a successful result
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	if result != nil {
 		assert.Equal(uint64(456), result.Uid())
 	}
@@ -227,7 +235,7 @@ func TestCollectionsWatcher_UserInitiatedCancellation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify we can get a result while it's running
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.NotNil(result)
 	assert.Equal(uint64(789), result.Uid())
 
@@ -336,19 +344,19 @@ func TestCollectionsWatcher_GetResult_RaceCondition_RetryWait(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// During this window, the watcher should be inactive (after failure, before retry connects)
-	// GetResult should return default manifest because no message has been received yet
-	result := watcher.GetResult()
-	assert.NotNil(result, "GetResult should return default manifest when no message received yet")
-	assert.Equal(uint64(0), result.Uid(), "Default manifest should have UID 0")
+	// GetResult should return nil with error because no message has been received yet
+	result, err := watcher.GetResult(nonBlockingCtx())
+	assert.Nil(result, "GetResult should return nil when no message received yet")
+	assert.Error(err, "GetResult should return an error when no message received yet")
 
 	// Wait for retry to succeed
 	time.Sleep(300 * time.Millisecond)
 
 	// Now GetResult should return the manifest
-	result = watcher.GetResult()
-	if result != nil {
-		assert.Equal(uint64(999), result.Uid())
-	}
+	result, err = watcher.GetResult(nonBlockingCtx())
+	assert.NoError(err)
+	assert.NotNil(result)
+	assert.Equal(uint64(999), result.Uid())
 
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
@@ -388,12 +396,12 @@ func TestCollectionsWatcher_GetResult_RaceCondition_CacheNeverInitialized(t *tes
 	// Wait for failure to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	// GetResult should return default manifest because:
+	// GetResult should return nil with error because:
 	// 1. The cache was never initialized (no message was ever received)
 	// 2. The stream failed
-	result := watcher.GetResult()
-	assert.NotNil(result, "GetResult should return default manifest when cache was never initialized")
-	assert.Equal(uint64(0), result.Uid(), "Default manifest should have UID 0")
+	result, err := watcher.GetResult(nonBlockingCtx())
+	assert.Nil(result, "GetResult should return nil when cache was never initialized")
+	assert.Error(err, "GetResult should return an error when cache was never initialized")
 
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
@@ -450,18 +458,19 @@ func TestCollectionsWatcher_GetResult_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			// Add some randomness to timing
 			time.Sleep(time.Duration(idx*50) * time.Millisecond)
-			results[idx] = watcher.GetResult()
+			results[idx], _ = watcher.GetResult(nonBlockingCtx())
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Some calls might return default manifest (during inactive periods), others might return the actual manifest
+	// Some calls might return nil with error when the stream is failing
+	// others might return the actual manifest once the stream succeeds.
 	// The important thing is that there are no race conditions or panics
 	var successfulResults int
 	for _, result := range results {
-		assert.NotNil(result, "GetResult should always return a manifest (default or actual)")
-		if result.Uid() == 777 {
+		// result can be nil if called before any message was received
+		if result != nil && result.Uid() == 777 {
 			successfulResults++
 		}
 	}
@@ -514,7 +523,7 @@ func TestCollectionsWatcher_GetResult_OnRetryWait(t *testing.T) {
 	assert.Greater(failureCount, 1)
 
 	// assert the result is the message we initialized the cache with
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.Equal(uint64(999), result.Uid())
 
 	// stop the watcher
@@ -690,7 +699,7 @@ func TestCollectionsWatcher_GetResult_WithManifestData(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify manifest is properly constructed
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.NotNil(result)
 	assert.Equal(uint64(12345), result.Uid())
 
@@ -730,7 +739,7 @@ func TestCollectionsWatcher_OnMessage(t *testing.T) {
 	// Call OnMessage
 	watcher.OnMessage(msg)
 
-	// Verify the message is cached
+	// Verify the manifest is cached
 	select {
 	case <-watcher.cache.initDone:
 		// initDone should be closed
@@ -739,8 +748,16 @@ func TestCollectionsWatcher_OnMessage(t *testing.T) {
 	}
 
 	watcher.cache.mutex.RLock()
-	assert.Equal(msg, watcher.cache.currVal)
+	cachedManifest := watcher.cache.currVal
 	watcher.cache.mutex.RUnlock()
+
+	// Verify the cached manifest has the correct properties
+	assert.NotNil(cachedManifest)
+	assert.Equal(uint64(123), cachedManifest.Uid())
+	scopes := cachedManifest.Scopes()
+	assert.Len(scopes, 1)
+	assert.Contains(scopes, "_default")
+	assert.Equal(uint32(456), scopes["_default"].Uid)
 }
 
 // Test CollectionsWatcher OnError method
@@ -894,7 +911,7 @@ func TestCollectionsWatcher_GetResult_RaceDetection(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result := watcher.GetResult()
+			result, _ := watcher.GetResult(nonBlockingCtx())
 			assert.NotNil(result)
 			assert.Equal(uint64(555), result.Uid())
 		}()
@@ -952,7 +969,7 @@ func TestCollectionsWatcher_GetResult_OnMessage_Concurrent(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				result := watcher.GetResult()
+				result, _ := watcher.GetResult(nonBlockingCtx())
 				assert.NotNil(result)
 			}()
 		}
@@ -962,7 +979,7 @@ func TestCollectionsWatcher_GetResult_OnMessage_Concurrent(t *testing.T) {
 	// Verify no race condition occurred and we got a valid manifest
 	// Due to concurrent execution, we can't predict which message will be last
 	// but it should be one of the messages we sent (UID between 100 and 124)
-	result := watcher.GetResult()
+	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.NotNil(result)
 	uid := result.Uid()
 	assert.Greater(uid, uint64(100), "UID should be at least 100")
@@ -1015,12 +1032,12 @@ func TestWatchCollectionsOpState_ConcurrentAccess(t *testing.T) {
 	assert.False(opState.active)
 }
 
-// Test GetResult returns default manifest immediately without blocking
-func TestCollectionsWatcher_GetResult_DefaultManifest(t *testing.T) {
+// Test GetResult returns nil with error immediately without blocking when no message received
+func TestCollectionsWatcher_GetResult_NoMessageReceived(t *testing.T) {
 	assert := assert.New(t)
 
 	mockUtils := setupMockUtils()
-	logger := log.NewLogger("defaultManifestTest", log.DefaultLoggerContext)
+	logger := log.NewLogger("noMessageTest", log.DefaultLoggerContext)
 
 	watcher := NewCollectionsWatcher(
 		bucketName,
@@ -1033,30 +1050,30 @@ func TestCollectionsWatcher_GetResult_DefaultManifest(t *testing.T) {
 		logger,
 	).(*CollectionsWatcher)
 
-	// GetResult should return default manifest immediately without blocking
+	// GetResult should return nil with error immediately without blocking
 	done := make(chan bool)
 	go func() {
-		result := watcher.GetResult()
-		assert.NotNil(result)
-		assert.Equal(uint64(0), result.Uid())
+		result, err := watcher.GetResult(nonBlockingCtx())
+		assert.Nil(result)
+		assert.Error(err)
 		done <- true
 	}()
 
 	// Should complete quickly without blocking
 	select {
 	case <-done:
-		// Success - returned default manifest immediately
+		// Success - returned nil with error immediately
 	case <-time.After(100 * time.Millisecond):
-		assert.Fail("GetResult should return default manifest immediately")
+		assert.Fail("GetResult should return immediately when no message received")
 	}
 }
 
-// Test that multiple GetResult calls without messages return default manifest
-func TestCollectionsWatcher_GetResult_MultipleCallsDefaultManifest(t *testing.T) {
+// Test that multiple GetResult calls without messages return nil with error
+func TestCollectionsWatcher_GetResult_MultipleCallsNoMessage(t *testing.T) {
 	assert := assert.New(t)
 
 	mockUtils := setupMockUtils()
-	logger := log.NewLogger("multipleDefaultManifest", log.DefaultLoggerContext)
+	logger := log.NewLogger("multipleNoMessage", log.DefaultLoggerContext)
 
 	watcher := NewCollectionsWatcher(
 		bucketName,
@@ -1069,11 +1086,11 @@ func TestCollectionsWatcher_GetResult_MultipleCallsDefaultManifest(t *testing.T)
 		logger,
 	).(*CollectionsWatcher)
 
-	// Multiple calls should all return default manifest
+	// Multiple calls should all return nil with error when no message received
 	for i := 0; i < 5; i++ {
-		result := watcher.GetResult()
-		assert.NotNil(result)
-		assert.Equal(uint64(0), result.Uid())
+		result, err := watcher.GetResult(nonBlockingCtx())
+		assert.Nil(result)
+		assert.Error(err)
 	}
 }
 

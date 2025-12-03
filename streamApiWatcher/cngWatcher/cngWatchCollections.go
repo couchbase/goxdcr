@@ -2,6 +2,7 @@ package cngWatcher
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
@@ -10,14 +11,29 @@ import (
 	"github.com/pkg/errors"
 )
 
-// OnMessage is called when a new message is received from the stream
+// OnMessage is called when a new message is received from the stream.
+// It validates the message, converts it to CollectionsManifest, and caches the result.
+// Invalid messages are logged and ignored.
 func (cw *CollectionsWatcher) OnMessage(msg *internal_xdcr_v1.WatchCollectionsResponse) {
+	if msg == nil {
+		// this should never happen
+		cw.logger.Errorf("CollectionsWatcher: OnMessage() called with nil msg for bucket %v, ignoring msg", cw.bucketName)
+		return
+	}
+
+	// Load and validate the manifest from the WatchCollectionsResponse
+	manifest := &metadata.CollectionsManifest{}
+	if err := manifest.LoadFromWatchCollectionsResp(msg); err != nil {
+		cw.logger.Errorf("CollectionsWatcher: OnMessage() received invalid msg for bucket %v: %v, ignoring msg", cw.bucketName, err)
+		return
+	}
+
 	cw.cache.mutex.Lock()
 	defer cw.cache.mutex.Unlock()
 
-	cw.cache.currVal = msg
+	cw.cache.currVal = manifest
 
-	// When the first message is received, we close the initDone channel
+	// When the first valid message is received, we close the initDone channel
 	cw.cache.once.Do(func() {
 		close(cw.cache.initDone)
 	})
@@ -36,7 +52,6 @@ func (cw *CollectionsWatcher) OnError(err error) {
 
 	if cw.opState.errorCh != nil {
 		cw.opState.errorCh <- err
-		close(cw.opState.errorCh)
 	}
 }
 
@@ -55,7 +70,9 @@ func (cw *CollectionsWatcher) OnComplete() {
 
 	if cw.opState.doneCh != nil {
 		// close the done channel to denote that the stream operation has completed
-		close(cw.opState.doneCh)
+		cw.closeOnce.Do(func() {
+			close(cw.opState.doneCh)
+		})
 	}
 }
 
@@ -139,7 +156,13 @@ func (cw *CollectionsWatcher) run() {
 			// watcher is stopped, end the stream
 			cw.opState.cancelOp()
 			// wait for the stream to gracefully terminate
-			<-doneCh
+			select {
+			case <-doneCh:
+				// stream terminated successfully
+			case err := <-errorCh:
+				// stream terminated with an error
+				cw.logger.Errorf("error occurred while terminating the watch collections stream for bucket %v: %v", cw.bucketName, err)
+			}
 			// end the operation
 			cw.opState.endOp()
 			return
@@ -193,25 +216,30 @@ func (cw *CollectionsWatcher) Stop() {
 }
 
 // GetResult retrieves the latest manifest from the CollectionsWatcher.
-// If the CollectionsWatcher has not received any manifest yet, it returns the default manifest.
-func (cw *CollectionsWatcher) GetResult() *metadata.CollectionsManifest {
-	var resp *internal_xdcr_v1.WatchCollectionsResponse
+// It blocks until the manifest is available or the context is done.
+// If ctx is done before the manifest is available, it returns a default manifest and ctx.Err().
+func (cw *CollectionsWatcher) GetResult(ctx context.Context) (*metadata.CollectionsManifest, error) {
 	select {
 	case <-cw.cache.initDone:
-		cw.cache.mutex.RLock()
-		resp = cw.cache.currVal
-		cw.cache.mutex.RUnlock()
-	default:
-		// if we haven't received the first message yet, return the default manifest
-		cw.logger.Infof("CollectionsWatcher for bucket %v has not received any manifest yet, returning default manifest", cw.bucketName)
-		ret := metadata.NewDefaultCollectionsManifest()
-		return &ret
+		return cw.getCurrentManifest(), nil
+	case <-ctx.Done():
+		// recheck initDone here to avoid a race condition
+		// If both the channels are ready, then go does a pseudo random selection between the two channels.
+		// This is to avoid the non-deterministic behavior when both channels are ready.
+		select {
+		case <-cw.cache.initDone:
+			return cw.getCurrentManifest(), nil
+		default:
+			return nil, fmt.Errorf("manifest not received: context canceled or timed out: %w", ctx.Err())
+		}
 	}
+}
 
-	// load the manifest from the WatchCollectionsResponse
-	manifest := &metadata.CollectionsManifest{}
-	manifest.LoadFromWatchCollectionsResp(resp)
-	return manifest
+// getCurrentManifest safely returns the current manifest.
+func (cw *CollectionsWatcher) getCurrentManifest() *metadata.CollectionsManifest {
+	cw.cache.mutex.RLock()
+	defer cw.cache.mutex.RUnlock()
+	return cw.cache.currVal
 }
 
 // minDuration returns the smaller of two durations

@@ -19,8 +19,10 @@ type GrpcStreamManager[Resp any] interface {
 	Start()
 	// Stop stops the streaming gRPC call
 	Stop()
-	// GetResult returns the latest result obtained from the streaming gRPC call
-	GetResult() Resp
+	// GetResult returns the latest result obtained from the streaming gRPC call.
+	// It blocks until the result is available or the context is done.
+	// If ctx is done before the result is available, it returns a zero value of Resp and ctx.Err().
+	GetResult(ctx context.Context) (Resp, error)
 }
 
 // VBucketInfoResponse is a map of vBucket number to vBucket info response
@@ -113,8 +115,8 @@ type CollectionsWatcher struct {
 	getGrpcOpts func() *base.GrpcOptions
 	// opState denotes the state of the watch collections operation
 	opState WatchCollectionsOpState
-	// cache denotes the cache of the CollectionsWatcher
-	cache HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]
+	// cache denotes the cache of the CollectionsWatcher storing the validated CollectionsManifest
+	cache HandlerCache[*metadata.CollectionsManifest]
 	// finCh denotes the signal to terminate the watcher
 	finCh chan struct{}
 	// utils service here is used to issue the stream request
@@ -135,6 +137,8 @@ type CollectionsWatcher struct {
 	// Darshan TODO: Ideally we should use the global connection pool instead of creating a new connection here
 	// This TODO is a placeholder until we have the conn pool checked in
 	cngConn *base.CngConn
+	// closeOnce is used to ensure that the cngConn is closed only once
+	closeOnce sync.Once
 }
 
 // NewCollectionsWatcher creates a new CollectionsWatcher
@@ -142,7 +146,7 @@ func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptio
 	return &CollectionsWatcher{
 		bucketName:  bucketName,
 		getGrpcOpts: getGrpcOpts,
-		cache: HandlerCache[*internal_xdcr_v1.WatchCollectionsResponse]{
+		cache: HandlerCache[*metadata.CollectionsManifest]{
 			initDone: make(chan struct{}),
 		},
 		utils:         utils,
