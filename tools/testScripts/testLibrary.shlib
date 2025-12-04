@@ -380,8 +380,14 @@ function waitForChangesLeft0 {
 	local changesLeft
 	local lastChangesLeft=-1
 	local i
+	local changesLeftMaxCheck=$CHECK_CHANGES_LEFT_MAX
+	local seedArg="${RANDOM_SEED_ARG:-}"
 
-	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
+	if [[ ! -z "$seedArg" ]]; then
+		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
+	fi
+
+	for ((i = 0; $i < $changesLeftMaxCheck; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($? != 0)); then
 			echo "Failed to get changes_left"
@@ -527,8 +533,14 @@ function checkDocsProcessed {
 	local docsProcessedCheck=$5
 	local prevDocsProcessed=0
 	local i
+	local changesLeftMaxCheck=$CHECK_CHANGES_LEFT_MAX
+	local seedArg="${RANDOM_SEED_ARG:-}"
 
-	for ((i = 0; $i < 5; i = $(($i + 1)))); do
+	if [[ ! -z "$seedArg" ]]; then
+		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
+	fi
+
+	for ((i = 0; $i < $changesLeftMaxCheck; i = $(($i + 1)))); do
 		docsProcessed=$(getDocsProcessed "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($docsProcessed != $docsProcessedCheck)); then
 			if (($docsProcessed != $prevDocsProcessed)); then
