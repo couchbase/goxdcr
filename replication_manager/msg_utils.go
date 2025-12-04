@@ -371,14 +371,10 @@ var SettingsValueToRestValueMap = map[string]map[interface{}]interface{}{
 
 var logger_msgutil *log.CommonLogger = log.NewLogger(base.MsgUtilsKey, log.GetOrCreateContext(base.MsgUtilsKey))
 
-func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference, includeStagedCreds bool) (*ap.Response, error) {
+func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
 	remoteClusterArr := make([]map[string]interface{}, 0)
 	for _, remoteCluster := range remoteClusters {
 		mapOutput := remoteCluster.ToMap()
-		if !includeStagedCreds {
-			// staged credentials should be returned only when explicitly asked for
-			delete(mapOutput, base.StageCredentials)
-		}
 		remoteClusterArr = append(remoteClusterArr, mapOutput)
 
 	}

@@ -295,7 +295,7 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 			remoteClusters = remoteClustersClone
 		}
 	}
-	return NewGetRemoteClustersResponse(remoteClusters, remoteClusterGetOpts.IncludeStagedCredentials)
+	return NewGetRemoteClustersResponse(remoteClusters)
 }
 
 type getOptsCommon struct {
@@ -311,7 +311,6 @@ type getRemoteClusterOpts struct {
 	getOptsCommon
 	BucketManifestBucketName string
 	RemoteClusterUuid        string
-	IncludeStagedCredentials bool
 }
 
 type getSourcesOpt struct {
@@ -343,10 +342,6 @@ func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOp
 				opt.RemoteClusterUuid = uuidAndBucketName[0]
 				opt.BucketManifestBucketName = uuidAndBucketName[1]
 			}
-		}
-		if key == base.StageCredentials && len(valArr) == 1 {
-			includeStagedCreds, _ := strconv.ParseBool(strings.ToLower(strings.TrimSpace(valArr[0])))
-			opt.IncludeStagedCredentials = includeStagedCreds
 		}
 	}
 	return opt
