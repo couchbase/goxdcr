@@ -10,6 +10,8 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"testing"
 	"time"
 
@@ -70,4 +72,167 @@ func TestShaRefCounter_cleanup_deadlock(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		counter.upsertMapping(internalId, true)
 	})
+}
+
+func TestShaRefCounter_GetShaNamespaceMap_ReturnsClone(t *testing.T) {
+	assert := assert.New(t)
+	metadataSvc := &service_def.MetadataSvc{}
+	topic := "test-topic"
+	internalId := "internal-id-123"
+
+	// Create counter and initialize
+	counter := NewMapShaRefCounterWithInternalId(topic, internalId, metadataSvc, "meta-kv-op", nil)
+	counter.Init()
+
+	// Add a mapping to the internal map
+	mapping := &metadata.CollectionNamespaceMapping{}
+	testSha := "test-sha-256"
+	counter.shaToMapping[testSha] = mapping
+
+	// Get the map (should be a clone)
+	retrievedMap := counter.GetShaNamespaceMap()
+
+	assert.False(maps.Equal(retrievedMap, counter.shaToMapping))
+}
+
+func TestShaRefCounter_GetShaGlobalInfoMap_ReturnsClone(t *testing.T) {
+	assert := assert.New(t)
+	metadataSvc := &service_def.MetadataSvc{}
+	topic := "test-topic"
+	internalId := "internal-id-123"
+
+	// Create counter and initialize
+	counter := NewMapShaRefCounterWithInternalId(topic, internalId, metadataSvc, "meta-kv-op", nil)
+	counter.Init()
+
+	// Add a GlobalTimestamp to the internal map
+	globalTimestamp := make(metadata.GlobalTimestamp)
+	globalTimestamp[0] = &metadata.GlobalVBTimestamp{}
+	testSha := "test-sha-256"
+	counter.shaToGlobalInfo[testSha] = &globalTimestamp
+
+	// Get the map (should be a clone)
+	retrievedMap := counter.GetShaGlobalInfoMap()
+
+	assert.False(maps.Equal(retrievedMap, counter.shaToGlobalInfo))
+}
+
+func TestShaRefCounter_GetShaGlobalInfoMap_ConcurrentAccess(t *testing.T) {
+	assert := assert.New(t)
+	metadataSvc := &service_def.MetadataSvc{}
+	topic := "test-topic"
+	internalId := "internal-id-123"
+
+	// Create counter and initialize
+	counter := NewMapShaRefCounterWithInternalId(topic, internalId, metadataSvc, "meta-kv-op", nil)
+	counter.Init()
+
+	// Pre-populate with some test data
+	for i := 0; i < 10; i++ {
+		globalTimestamp := make(metadata.GlobalTimestamp)
+		globalTimestamp[uint16(i)] = &metadata.GlobalVBTimestamp{}
+		testSha := fmt.Sprintf("test-sha-%d", i)
+		counter.shaToGlobalInfo[testSha] = &globalTimestamp
+	}
+
+	const numReaders = 50
+	const numWriters = 50
+	const iterations = 100
+
+	done := make(chan bool)
+	errChan := make(chan error, numReaders+numWriters)
+
+	// Launch reader goroutines
+	for i := 0; i < numReaders; i++ {
+		go func(id int) {
+			defer func() {
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("reader %d panicked: %v", id, r)
+				}
+				done <- true
+			}()
+
+			for j := 0; j < iterations; j++ {
+				// Get the map (should not cause data races)
+				retrievedMap := counter.GetShaGlobalInfoMap()
+
+				// Verify we got a map back
+				if retrievedMap == nil {
+					errChan <- fmt.Errorf("reader %d: got nil map", id)
+					return
+				}
+
+				// do a read operation on the map
+				testSha := fmt.Sprintf("test-sha-%d", id%10)
+				_, exists := retrievedMap[testSha]
+				if !exists {
+					errChan <- fmt.Errorf("reader %d: test-sha-%d not found", id, id%10)
+					return
+				}
+
+				// Modify the retrieved clone (should not affect internal state)
+				newGlobalTimestamp := make(metadata.GlobalTimestamp)
+				newGlobalTimestamp[0] = &metadata.GlobalVBTimestamp{}
+				retrievedMap[fmt.Sprintf("reader-%d-%d", id, j)] = &newGlobalTimestamp
+
+				// Small delay to increase chance of concurrent access
+				if j%10 == 0 {
+					time.Sleep(1 * time.Microsecond)
+				}
+			}
+		}(i)
+	}
+
+	// Launch writer goroutines that use RecordOneCount (the proper API)
+	for i := 0; i < numWriters; i++ {
+		go func(id int) {
+			defer func() {
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("writer %d panicked: %v", id, r)
+				}
+				done <- true
+			}()
+
+			for j := 0; j < iterations; j++ {
+				// Create a new global timestamp
+				globalTimestamp := make(metadata.GlobalTimestamp)
+				globalTimestamp[0] = &metadata.GlobalVBTimestamp{}
+				testSha := fmt.Sprintf("writer-sha-%d-%d", id, j)
+
+				// Use the proper API to record a count
+				counter.RecordOneCount(testSha, &globalTimestamp)
+
+				// Small delay to increase chance of concurrent access
+				if j%10 == 0 {
+					time.Sleep(1 * time.Microsecond)
+				}
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < numReaders+numWriters; i++ {
+		<-done
+	}
+	close(errChan)
+
+	// Check for any errors
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
+	}
+	assert.Empty(errors, "Expected no errors from concurrent access, got: %v", errors)
+
+	// Verify the internal state is still valid
+	finalMap := counter.GetShaGlobalInfoMap()
+	assert.NotNil(finalMap)
+
+	// Verify none of the "reader-*" keys exist in the internal map
+	// (they should only exist in the clones)
+	for key := range finalMap {
+		assert.NotContains(key, "reader-", "Reader modifications should not affect internal map")
+	}
+
+	// Verify at least the original test data and writer data exist
+	assert.GreaterOrEqual(len(finalMap), 60, "Should have at least the original 60 entries")
 }
