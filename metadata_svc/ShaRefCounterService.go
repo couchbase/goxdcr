@@ -410,7 +410,7 @@ func (c *MapShaRefCounter) GetShaNamespaceMap() metadata.ShaToCollectionNamespac
 	}
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return c.shaToMapping
+	return c.shaToMapping.Clone()
 }
 
 func (c *MapShaRefCounter) GetShaGlobalInfoMap() metadata.ShaToGlobalInfoMap {
@@ -419,7 +419,7 @@ func (c *MapShaRefCounter) GetShaGlobalInfoMap() metadata.ShaToGlobalInfoMap {
 	}
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return c.shaToGlobalInfo
+	return c.shaToGlobalInfo.Clone()
 }
 
 func (c *MapShaRefCounter) upsertCompressedMappingDoc(doc *metadata.CompressedMappings, addOp bool) error {

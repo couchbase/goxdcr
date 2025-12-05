@@ -653,6 +653,22 @@ func (g *GlobalTimestamp) CustomJsonMarshaller() ([]byte, error) {
 	return json.Marshal(newGlobalInfoMetaObj)
 }
 
+func (g *GlobalTimestamp) ValidateTargetOpaque() error {
+	if g == nil {
+		return fmt.Errorf("ValidateTargetOpaque: GlobalTimestamp is nil")
+	}
+	if len(*g) == 0 {
+		return fmt.Errorf("ValidateTargetOpaque: GlobalTimestamp is empty")
+	}
+
+	for vbno, v := range *g {
+		if v == nil || v.Target_vb_opaque == nil {
+			return fmt.Errorf("target timestamp for vb %v is not populated properly", vbno)
+		}
+	}
+	return nil
+}
+
 // SourceVBCounters are item counts based on source VB streams and are restored to the source-related
 // components when resuming from a checkpoint
 type SourceVBCounters struct {

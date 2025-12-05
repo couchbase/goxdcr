@@ -2426,17 +2426,22 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, h
 	// when updating the actual record, then this mean an concurrent operation has jumped ahead of us
 	currRecordVersion := ckpt_obj.versionNum
 	lastSeqno := ckpt_obj.ckpt.Seqno
-	if ckmgr.isVariableVBMode() {
+	switch ckmgr.isVariableVBMode() {
+	case true:
+		err = ckpt_obj.ckpt.GlobalTimestamp.ValidateTargetOpaque()
+		if err != nil {
+			err = fmt.Errorf("global timestamp for vb %v is not populated properly. err=%v", vbno, err)
+			return
+		}
 		curCkptTargetVBOpaque = ckpt_obj.ckpt.GlobalTimestamp.GetTargetOpaque()
-	} else {
+	case false:
+		if ckpt_obj.ckpt.TargetVBTimestamp.Target_vb_opaque == nil {
+			err = fmt.Errorf("target timestamp for vb %v is not populated properly", vbno)
+			return
+		}
 		curCkptTargetVBOpaque = ckpt_obj.ckpt.TargetVBTimestamp.Target_vb_opaque
 	}
 	ckpt_obj.lock.RUnlock()
-
-	if curCkptTargetVBOpaque == nil || curCkptTargetVBOpaque.Value() == nil {
-		err = fmt.Errorf("Target timestamp for vb %v is not populated properly", vbno)
-		return
-	}
 
 	// Item 1:
 	// Update the one and only check point record that checkpoint_manager keeps track of in its "cur_ckpts" with the through_seq_no

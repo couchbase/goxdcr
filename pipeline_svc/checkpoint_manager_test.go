@@ -1931,3 +1931,170 @@ func TestBackfillCollectionIdStamping(t *testing.T) {
 	assert.Nil(unmarshalledRecord.UnmarshalJSON(bytes))
 	assert.True(record.SameAs(unmarshalledRecord))
 }
+
+func TestCkptMgrNoPanicOnMissingTargetOpaque(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrNoPanicOnMissingTargetOpaque =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrNoPanicOnMissingTargetOpaque =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	throughSeqnoMap[0] = 100
+	var upsertCkptDoneErr error
+
+	// Test scenario 1: Traditional mode - target VB opaque not populated
+	t.Run("Traditional mode - target opaque not populated", func(t *testing.T) {
+		setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+		ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+			throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+			targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+			getBackfillMgr, bucketTopologySvc, false)
+
+		assert.Nil(err)
+		assert.NotNil(ckptMgr)
+		ckptMgr.unitTest = true
+
+		// Manually create a checkpoint record with nil target_vb_opaque to simulate the scenario
+		ckpt_obj := &checkpointRecordWithLock{
+			ckpt: &metadata.CheckpointRecord{
+				SourceVBTimestamp: metadata.SourceVBTimestamp{
+					Seqno: 100,
+				},
+				TargetVBTimestamp: metadata.TargetVBTimestamp{
+					Target_vb_opaque: nil, // This is the problematic case
+				},
+			},
+			lock: &sync.RWMutex{},
+		}
+		ckptMgr.cur_ckpts[0] = ckpt_obj
+
+		high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
+		high_seqno_and_vbuuid_map[0] = []uint64{200, 12345}
+		srcManifestIds := make(map[uint16]uint64)
+		tgtManifestIds := make(map[uint16]uint64)
+
+		_, err = ckptMgr.doCheckpoint(0, 100, high_seqno_and_vbuuid_map, srcManifestIds, tgtManifestIds)
+
+		assert.NotNil(err)
+		assert.Contains(err.Error(), "not populated properly")
+	})
+
+	// Test scenario 2: Variable VB mode - GlobalTimestamp with nil target_vb_opaque
+	t.Run("Variable VB mode - global timestamp with nil opaque", func(t *testing.T) {
+		ckptSvc2 := &service_def.CheckpointsService{}
+		capiSvc2 := &service_def.CAPIService{}
+		remoteClusterSvc2 := &service_def.RemoteClusterSvc{}
+		replSpecSvc2 := &service_def.ReplicationSpecSvc{}
+		xdcrTopologySvc2 := &service_def.XDCRCompTopologySvc{}
+		throughSeqnoTrackerSvc2 := &service_def.ThroughSeqnoTrackerSvc{}
+		utils2 := &utilities.UtilsIface{}
+		statsMgr2 := &service_def.StatsMgrIface{}
+		uiLogSvc2 := &service_def.UILogSvc{}
+		collectionsManifestSvc2 := &service_def.CollectionsManifestSvc{}
+		backfillReplSvc2 := &service_def.BackfillReplSvc{}
+		backfillMgrIface2 := &service_def.BackfillMgrIface{}
+		getBackfillMgr2 := func() service_def_real.BackfillMgrIface {
+			return backfillMgrIface2
+		}
+		bucketTopologySvc2 := &service_def.BucketTopologySvc{}
+
+		setupMock(ckptSvc2, capiSvc2, remoteClusterSvc2, replSpecSvc2, xdcrTopologySvc2, throughSeqnoTrackerSvc2, utils2, statsMgr2, uiLogSvc2, collectionsManifestSvc2, backfillReplSvc2, backfillMgrIface2, bucketTopologySvc2, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+		ckptMgr2, err := NewCheckpointManager(ckptSvc2, capiSvc2, remoteClusterSvc2, replSpecSvc2, xdcrTopologySvc2,
+			throughSeqnoTrackerSvc2, activeVBs, "", "", "", targetKvVbMap,
+			targetRef, nil, utils2, statsMgr2, uiLogSvc2, collectionsManifestSvc2, backfillReplSvc2,
+			getBackfillMgr2, bucketTopologySvc2, true)
+
+		assert.Nil(err)
+		assert.NotNil(ckptMgr2)
+		ckptMgr2.unitTest = true
+
+		globalTimestamp := make(metadata.GlobalTimestamp)
+		globalTimestamp[0] = &metadata.GlobalVBTimestamp{
+			TargetVBTimestamp: metadata.TargetVBTimestamp{
+				Target_vb_opaque: nil,
+			},
+		}
+
+		ckpt_obj2 := &checkpointRecordWithLock{
+			ckpt: &metadata.CheckpointRecord{
+				SourceVBTimestamp: metadata.SourceVBTimestamp{
+					Seqno: 100,
+				},
+				GlobalTimestamp: globalTimestamp,
+			},
+			lock: &sync.RWMutex{},
+		}
+		ckptMgr2.cur_ckpts[0] = ckpt_obj2
+
+		high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
+		high_seqno_and_vbuuid_map[0] = []uint64{200, 12345}
+		srcManifestIds := make(map[uint16]uint64)
+		tgtManifestIds := make(map[uint16]uint64)
+
+		_, err = ckptMgr2.doCheckpoint(0, 100, high_seqno_and_vbuuid_map, srcManifestIds, tgtManifestIds)
+
+		assert.NotNil(err)
+		assert.Contains(err.Error(), " is not populated properly. err=target timestamp for vb")
+	})
+
+	// Test scenario 3: Variable VB mode - GlobalTimestamp is empty
+	t.Run("Variable VB mode - global timestamp is empty", func(t *testing.T) {
+		ckptSvc3 := &service_def.CheckpointsService{}
+		capiSvc3 := &service_def.CAPIService{}
+		remoteClusterSvc3 := &service_def.RemoteClusterSvc{}
+		replSpecSvc3 := &service_def.ReplicationSpecSvc{}
+		xdcrTopologySvc3 := &service_def.XDCRCompTopologySvc{}
+		throughSeqnoTrackerSvc3 := &service_def.ThroughSeqnoTrackerSvc{}
+		utils3 := &utilities.UtilsIface{}
+		statsMgr3 := &service_def.StatsMgrIface{}
+		uiLogSvc3 := &service_def.UILogSvc{}
+		collectionsManifestSvc3 := &service_def.CollectionsManifestSvc{}
+		backfillReplSvc3 := &service_def.BackfillReplSvc{}
+		backfillMgrIface3 := &service_def.BackfillMgrIface{}
+		getBackfillMgr3 := func() service_def_real.BackfillMgrIface {
+			return backfillMgrIface3
+		}
+		bucketTopologySvc3 := &service_def.BucketTopologySvc{}
+
+		setupMock(ckptSvc3, capiSvc3, remoteClusterSvc3, replSpecSvc3, xdcrTopologySvc3, throughSeqnoTrackerSvc3, utils3, statsMgr3, uiLogSvc3, collectionsManifestSvc3, backfillReplSvc3, backfillMgrIface3, bucketTopologySvc3, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+		ckptMgr3, err := NewCheckpointManager(ckptSvc3, capiSvc3, remoteClusterSvc3, replSpecSvc3, xdcrTopologySvc3,
+			throughSeqnoTrackerSvc3, activeVBs, "", "", "", targetKvVbMap,
+			targetRef, nil, utils3, statsMgr3, uiLogSvc3, collectionsManifestSvc3, backfillReplSvc3,
+			getBackfillMgr3, bucketTopologySvc3, true)
+
+		assert.Nil(err)
+		assert.NotNil(ckptMgr3)
+		ckptMgr3.unitTest = true
+
+		globalTimestamp3 := make(metadata.GlobalTimestamp)
+
+		ckpt_obj3 := &checkpointRecordWithLock{
+			ckpt: &metadata.CheckpointRecord{
+				SourceVBTimestamp: metadata.SourceVBTimestamp{
+					Seqno: 100,
+				},
+				GlobalTimestamp: globalTimestamp3,
+			},
+			lock: &sync.RWMutex{},
+		}
+		ckptMgr3.cur_ckpts[0] = ckpt_obj3
+
+		high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
+		high_seqno_and_vbuuid_map[0] = []uint64{200, 12345}
+		srcManifestIds := make(map[uint16]uint64)
+		tgtManifestIds := make(map[uint16]uint64)
+
+		_, err = ckptMgr3.doCheckpoint(0, 100, high_seqno_and_vbuuid_map, srcManifestIds, tgtManifestIds)
+
+		assert.NotNil(err)
+		assert.Contains(err.Error(), "ValidateTargetOpaque: GlobalTimestamp is empty")
+	})
+}
