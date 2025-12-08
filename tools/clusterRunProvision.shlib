@@ -1034,6 +1034,25 @@ function enableDeveloperPreview {
 	done
 }
 
+function checkBucketCreationErrors {
+	local output="$1"
+
+	if (($(checkJQ) != 0)); then
+		echo "Cannot check bucket creation errors without jq"
+		return 1
+	fi
+
+	local errors=$(echo "$output" | jq -r '.errors // empty')
+
+	if [[ -n "${errors}" ]]; then
+		echo "Bucket creation failed with errors:"
+		echo "$errors" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+		return 1
+	fi
+
+	return 0
+}
+
 function createBucket {
 	local clusterName=$1
 	local bucketName=$2
@@ -1056,11 +1075,11 @@ function createBucket {
 		local max_retry=5
 		while ((retry < max_retry)); do
 			output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName "${getBucketOutArr[@]}" 2>&1)
+			checkBucketCreationErrors "$output"
 			if (($? == 0)); then
 				break
 			fi
-			echo "Retrying bucket creation for $bucketName. Attempt $((retry + 1))/$max_retry. Last error:"
-			echo "$output"
+			echo "Retrying bucket creation for $bucketName. Attempt $((retry + 1))/$max_retry."
 			sleep 5
 			retry=$((retry + 1))
 		done

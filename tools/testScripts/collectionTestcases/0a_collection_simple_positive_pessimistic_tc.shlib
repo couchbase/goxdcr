@@ -79,14 +79,15 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
-	checkUnidirectionalChangesLeft
-
 	validateDataLoad
 
 	validateInternalLogWithInstance "C1" "$BAD_MAGIC_MSG" "0"
 	validateInternalLogWithInstance "C2" "$BAD_MAGIC_MSG" "0"
 	validateDatapoolFailIs0 "C1" "B1" "B2"
 	validateDatapoolFailIs0 "C2" "B2" "B1"
+
+	sleep 5
+	validatePrometheusStatsNon0 "C1" "B1" "B2" "xdcr_metadata_transferred_bytes"
 
 	echo "============================================================================"
 	echo "PASSED"
