@@ -1026,6 +1026,20 @@
         ],
         "stability": "committed"
     },
+    "xdcr_metadata_transferred_bytes": {
+        "type": "counter",
+        "help": "The total amount of data transferred to and from target that is used for source side conflict resolution that is not the actual document replicated",
+        "added": "8.1.0",
+        "unit": "bytes",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "notes": "This is metadata that is transferred as part of GET_META, or SubdocGet command",
+        "stability": "internal"
+    },
     "xdcr_mobile_docs_filtered_total": {
         "type": "counter",
         "help": "Total number of documents filtered and not replicated because the documents were mobile records",

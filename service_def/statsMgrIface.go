@@ -60,6 +60,7 @@ const (
 	// the number of docs processed by pipeline
 	DOCS_PROCESSED_METRIC               = "docs_processed"
 	DATA_REPLICATED_METRIC              = "data_replicated"
+	METADATA_TRANSFERRED_METRIC         = "metadata_transferred"
 	SIZE_REP_QUEUE_METRIC               = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
@@ -1184,6 +1185,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		UiName:       UIMetaLatency,
 		Notes: "This is similar to docs_latency but specifically for the GET_META command that is used for " +
 			"source side conflict resolution",
+	},
+	METADATA_TRANSFERRED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSeamlessCredsChangeSupport,
+		Description:  "The total amount of data transferred to and from target that is used for source side conflict resolution that is not the actual document replicated",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+		Notes:        "This is metadata that is transferred as part of GET_META, or SubdocGet command",
 	},
 	GET_DOC_LATENCY_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},

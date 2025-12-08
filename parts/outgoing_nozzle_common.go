@@ -144,6 +144,8 @@ type GetReceivedEventAdditional struct {
 	Seqno       uint64
 	Commit_time time.Duration
 	ManifestId  uint64
+	OrigReqSize int
+	RespSize    int
 }
 
 type DataFailedCRSourceEventAdditional struct {

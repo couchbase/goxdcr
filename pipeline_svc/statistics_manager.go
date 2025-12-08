@@ -47,7 +47,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, service_def.METADATA_TRANSFERRED_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -57,7 +57,7 @@ var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METR
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, service_def.DOCS_COMPRESSION_SKIPPED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
 	service_def.HLV_UPDATED_METRIC, service_def.HLV_PRUNED_METRIC, service_def.IMPORT_DOCS_WRITTEN_METRIC, service_def.IMPORT_DOCS_FAILED_CR_SOURCE_METRIC, service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC,
-	service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, service_def.TARGET_EACCESS_METRIC, service_def.HLV_PRUNED_AT_MERGE_METRIC}
+	service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, service_def.TARGET_EACCESS_METRIC, service_def.HLV_PRUNED_AT_MERGE_METRIC, service_def.METADATA_TRANSFERRED_METRIC}
 
 // keys for metrics in overview
 // Note the values used here does not correspond to the service_def GlobalStatsTable, since these are used internally
@@ -94,6 +94,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_LATENCY_METRIC:                 service_def.MetricTypeCounter,
 	service_def.RESP_WAIT_METRIC:                    service_def.MetricTypeCounter,
 	service_def.META_LATENCY_METRIC:                 service_def.MetricTypeCounter,
+	service_def.METADATA_TRANSFERRED_METRIC:         service_def.MetricTypeCounter,
 	service_def.DCP_DISPATCH_TIME_METRIC:            service_def.MetricTypeCounter,
 	service_def.DCP_DATACH_LEN:                      service_def.MetricTypeCounter,
 	service_def.THROTTLE_LATENCY_METRIC:             service_def.MetricTypeCounter,
@@ -1650,6 +1651,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.RESP_WAIT_METRIC, resp_wait)
 		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(service_def.META_LATENCY_METRIC, meta_latency)
+		meta_size_transferred := metrics.NewCounter()
+		registry.Register(service_def.METADATA_TRANSFERRED_METRIC, meta_size_transferred)
 		throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(service_def.THROTTLE_LATENCY_METRIC, throttle_latency)
 		dp_failed := metrics.NewCounter()
@@ -1733,6 +1736,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DOCS_LATENCY_METRIC] = docs_latency
 		metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
 		metric_map[service_def.META_LATENCY_METRIC] = meta_latency
+		metric_map[service_def.METADATA_TRANSFERRED_METRIC] = meta_size_transferred
 		metric_map[service_def.THROTTLE_LATENCY_METRIC] = throttle_latency
 		metric_map[service_def.GET_DOC_LATENCY_METRIC] = get_doc_latency
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
@@ -1960,12 +1964,18 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	case common.GetDocReceived:
 		event_otherInfos := event.OtherInfos.(parts.GetReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
+		origDataSize := event_otherInfos.OrigReqSize
+		respDataSize := event_otherInfos.RespSize
 		metricMap[service_def.GET_DOC_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metricMap[service_def.METADATA_TRANSFERRED_METRIC].(metrics.Counter).Inc(int64(origDataSize + respDataSize))
 
 	case common.GetMetaReceived:
 		event_otherInfos := event.OtherInfos.(parts.GetReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
+		origDataSize := event_otherInfos.OrigReqSize
+		respDataSize := event_otherInfos.RespSize
 		metricMap[service_def.META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metricMap[service_def.METADATA_TRANSFERRED_METRIC].(metrics.Counter).Inc(int64(origDataSize + respDataSize))
 
 	case common.DataThrottled:
 		throttle_latency := event.OtherInfos.(time.Duration)

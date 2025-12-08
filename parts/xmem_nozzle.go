@@ -612,52 +612,79 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 /*
 ***********************************
 /* struct opaque_KeySeqnoMap
+   When a request is for source conflict resolution, this map
+   is then used for lookup of previously stored information
+   for once the target responds
 ************************************
 */
-type opaqueKeySeqnoMap map[uint32][]interface{}
+type opaqueKeySeqnoMap map[uint32]opaqueKeySeqnoValue
 
 /**
- * The interface slice is composed of:
+ * The value is composed of:
  * 1. documentKey
  * 2. Sequence number
  * 3. vbucket number
  * 4. time.Now()
  * 5. ManifestId
+ * 6. size of the orig request
  */
+type opaqueKeySeqnoValue struct {
+	docKey     string
+	seqno      uint64
+	vbucket    uint16
+	startTime  time.Time
+	manifestId uint64
+	size       int
+}
+
+func (v *opaqueKeySeqnoValue) Clone() opaqueKeySeqnoValue {
+	return opaqueKeySeqnoValue{
+		docKey:     v.docKey,
+		seqno:      v.seqno,
+		vbucket:    v.vbucket,
+		startTime:  v.startTime,
+		manifestId: v.manifestId,
+		size:       v.size,
+	}
+}
+
+func (v *opaqueKeySeqnoValue) RedactDocKey() {
+	if !base.IsStringRedacted(v.docKey) {
+		v.docKey = base.TagUD(v.docKey)
+	}
+}
 
 // This function will ensure that the returned interface slice will have distinct copies of argument references
 // since everything coming in is passing by value
-func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time, manifestId uint64) []interface{} {
-	return []interface{}{docKey, seqno, vbucket, timeNow, manifestId}
+func compileOpaqueKeySeqnoValue(docKey string, seqno uint64, vbucket uint16, timeNow time.Time, manifestId uint64, size int) opaqueKeySeqnoValue {
+	return opaqueKeySeqnoValue{
+		docKey:     docKey,
+		seqno:      seqno,
+		vbucket:    vbucket,
+		startTime:  timeNow,
+		manifestId: manifestId,
+		size:       size,
+	}
 }
 
-func (omap opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
+func (omap *opaqueKeySeqnoMap) Clone() opaqueKeySeqnoMap {
 	newMap := make(opaqueKeySeqnoMap)
-	for k, v := range omap {
-		newMap[k] = compileOpaqueKeySeqnoValue(v[0].(string), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
+	for k, v := range *omap {
+		newMap[k] = v.Clone()
 	}
 	return newMap
 }
 
-func (omap opaqueKeySeqnoMap) Redact() opaqueKeySeqnoMap {
-	for _, v := range omap {
-		if !base.IsStringRedacted(v[0].(string)) {
-			v[0] = base.TagUD(v[0])
-		}
+func (omap *opaqueKeySeqnoMap) Redact() opaqueKeySeqnoMap {
+	for _, v := range *omap {
+		v.RedactDocKey()
 	}
-	return omap
+	return *omap
 }
 
-func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
-	clonedMap := make(opaqueKeySeqnoMap)
-	for k, v := range omap {
-		if !base.IsStringRedacted(v[0].(string)) {
-			clonedMap[k] = compileOpaqueKeySeqnoValue(base.TagUD(v[0].(string)), v[1].(uint64), v[2].(uint16), v[3].(time.Time), v[4].(uint64))
-		} else {
-			clonedMap[k] = v
-		}
-	}
-	return clonedMap
+func (omap *opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
+	cloned := omap.Clone()
+	return cloned.Redact()
 }
 
 /*
@@ -1727,13 +1754,11 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 					if response != nil {
 						keySeqno, ok := opaque_keySeqno_map[response.Opaque]
 						if ok {
-							key, ok1 := keySeqno[0].(string)
-							seqno, ok2 := keySeqno[1].(uint64)
-							vbno, ok3 := keySeqno[2].(uint16)
-							if ok1 && ok2 && ok3 {
-								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v%s%v, seqno=%v, vb=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno, vbno,
-									base.UdTagBegin, response, base.UdTagEnd)
-							}
+							key := keySeqno.docKey
+							seqno := keySeqno.seqno
+							vbno := keySeqno.vbucket
+							xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v%s%v, seqno=%v, vb=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno, vbno,
+								base.UdTagBegin, response, base.UdTagEnd)
 						}
 					}
 				} else if err == base.BadConnectionError || err == base.ConnectionClosedError {
@@ -1753,82 +1778,81 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 				keySeqno, ok := opaque_keySeqno_map[response.Opaque]
 				if ok {
 					//success
-					key, ok1 := keySeqno[0].(string)
-					seqno, ok2 := keySeqno[1].(uint64)
-					vbno, ok3 := keySeqno[2].(uint16)
-					start_time, ok4 := keySeqno[3].(time.Time)
-					manifestId, ok5 := keySeqno[4].(uint64)
-					if ok1 && ok2 && ok3 && ok4 && ok5 {
-						specs := getSpecMap[key]
+					key := keySeqno.docKey
+					seqno := keySeqno.seqno
+					vbno := keySeqno.vbucket
+					startTime := keySeqno.startTime
+					manifestId := keySeqno.manifestId
+					origSize := keySeqno.size
+					specs := getSpecMap[key]
 
-						wrappedResp := &base.WrappedMCResponse{
-							Specs: specs,
-							Resp:  response,
-						}
+					wrappedResp := &base.WrappedMCResponse{
+						Specs: specs,
+						Resp:  response,
+					}
 
-						// for the GetEx command SnappyEverywhere is enabled, the response body might be compressed
-						// and the snappy datatype bit will be set.
-						err := xmem.uncompressResponseBody(wrappedResp)
-						if err != nil {
-							xmem.Logger().Errorf("%v error uncompressing in getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v, body=%v%v%v, datatype=%v", xmem.Id(),
-								base.UdTagBegin, key, base.UdTagEnd, seqno,
-								base.UdTagBegin, response, base.UdTagEnd,
-								base.UdTagBegin, specs, base.UdTagEnd,
-								base.UdTagBegin, wrappedResp.Resp.Body, base.UdTagEnd,
-								wrappedResp.Resp.DataType,
-							)
+					// for the GetEx command SnappyEverywhere is enabled, the response body might be compressed
+					// and the snappy datatype bit will be set.
+					err := xmem.uncompressResponseBody(wrappedResp)
+					if err != nil {
+						xmem.Logger().Errorf("%v error uncompressing in getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v, body=%v%v%v, datatype=%v", xmem.Id(),
+							base.UdTagBegin, key, base.UdTagEnd, seqno,
+							base.UdTagBegin, response, base.UdTagEnd,
+							base.UdTagBegin, specs, base.UdTagEnd,
+							base.UdTagBegin, wrappedResp.Resp.Body, base.UdTagEnd,
+							wrappedResp.Resp.DataType,
+						)
+						return
+					}
+
+					respMap[key] = wrappedResp
+
+					// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
+					additionalInfo := GetReceivedEventAdditional{
+						Key:         key,
+						Seqno:       seqno, // field is used only for CAPI nozzle
+						Commit_time: time.Since(startTime),
+						ManifestId:  manifestId,
+						OrigReqSize: origSize,
+						RespSize:    response.Size(),
+					}
+					var receivedEvent common.ComponentEventType
+					if isGetMeta {
+						receivedEvent = common.GetMetaReceived
+					} else {
+						// could be subdoc_lookup or getEx.
+						receivedEvent = common.GetDocReceived
+					}
+					xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
+					if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, false) && !base.IsTemporaryMCError(response.Status) &&
+						!base.IsCollectionMappingError(response.Status) {
+						if base.IsTopologyChangeMCError(response.Status) {
+							vb_err := fmt.Errorf("received error %v on vb %v", base.ErrorNotMyVbucket, vbno)
+							xmem.handleVBError(vbno, vb_err)
+						} else if base.IsEAccessError(response.Status) && !isGetMeta {
+							// For getMeta, we will skip source side CR so this error is OK.
+							// For subdoc_get, we will retry so increment backoff factor.
+							xmem.client_for_getMeta.IncrementBackOffFactor()
+							atomic.AddUint64(&xmem.counter_eaccess, 1)
+							xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
+						} else if base.IsDocLocked(response) && !isGetMeta {
+							// For getMeta, we will skip source side CR so this error is OK.
+							// Plus the return code will be SUCCESS for getMeta if locked (but cas will be MaxCas)
+							// For subdoc_get, we will retry so increment backoff factor.
+							xmem.client_for_getMeta.IncrementBackOffFactor()
+						} else {
+							// log the corresponding request to facilitate debugging
+							xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+								base.UdTagBegin, response, base.UdTagEnd, base.UdTagBegin, specs, base.UdTagEnd)
+							err = fmt.Errorf("error response with status %v from memcached", response.Status)
+							xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
+							// no need to wait further since connection has been reset
 							return
 						}
-
-						respMap[key] = wrappedResp
-
-						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
-						additionalInfo := GetReceivedEventAdditional{
-							Key:         key,
-							Seqno:       seqno, // field is used only for CAPI nozzle
-							Commit_time: time.Since(start_time),
-							ManifestId:  manifestId,
-						}
-						var receivedEvent common.ComponentEventType
-						if isGetMeta {
-							receivedEvent = common.GetMetaReceived
-						} else {
-							// could be subdoc_lookup or getEx.
-							receivedEvent = common.GetDocReceived
-						}
-						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
-						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, false) && !base.IsTemporaryMCError(response.Status) &&
-							!base.IsCollectionMappingError(response.Status) {
-							if base.IsTopologyChangeMCError(response.Status) {
-								vb_err := fmt.Errorf("received error %v on vb %v", base.ErrorNotMyVbucket, vbno)
-								xmem.handleVBError(vbno, vb_err)
-							} else if base.IsEAccessError(response.Status) && !isGetMeta {
-								// For getMeta, we will skip source side CR so this error is OK.
-								// For subdoc_get, we will retry so increment backoff factor.
-								xmem.client_for_getMeta.IncrementBackOffFactor()
-								atomic.AddUint64(&xmem.counter_eaccess, 1)
-								xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
-							} else if base.IsDocLocked(response) && !isGetMeta {
-								// For getMeta, we will skip source side CR so this error is OK.
-								// Plus the return code will be SUCCESS for getMeta if locked (but cas will be MaxCas)
-								// For subdoc_get, we will retry so increment backoff factor.
-								xmem.client_for_getMeta.IncrementBackOffFactor()
-							} else {
-								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v, specs=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
-									base.UdTagBegin, response, base.UdTagEnd, base.UdTagBegin, specs, base.UdTagEnd)
-								err = fmt.Errorf("error response with status %v from memcached", response.Status)
-								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
-								// no need to wait further since connection has been reset
-								return
-							}
-						} else if base.IsTemporaryMCError(response.Status) && !isGetMeta {
-							xmem.client_for_getMeta.IncrementBackOffFactor()
-							atomic.AddUint64(&xmem.counter_tmperr, 1)
-							xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
-						}
-					} else {
-						panic("KeySeqno list is not formated as expected [string, uint64, time]")
+					} else if base.IsTemporaryMCError(response.Status) && !isGetMeta {
+						xmem.client_for_getMeta.IncrementBackOffFactor()
+						atomic.AddUint64(&xmem.counter_tmperr, 1)
+						xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 					}
 				}
 			}
@@ -1944,7 +1968,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int,
 			}
 
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.GetSourceVB(), time.Now(), originalReq.GetManifestId())
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.GetSourceVB(), time.Now(), originalReq.GetManifestId(), originalReq.Size)
 			opaque++
 			numOfReqsInReqBytesBatch++
 			sent_key_map[docKey] = true
