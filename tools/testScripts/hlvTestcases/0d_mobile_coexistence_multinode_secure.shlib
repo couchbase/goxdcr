@@ -185,7 +185,7 @@ function runOneRebalanceCycle {
 	setEncryptionLevel "C1" "strict"
 
 	echo "Sleeping before checking logs"
-	sleep 15
+	sleep $HLV_TESTS_RESUME_SLEEP_SECS
 	currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
 	local currentPeerMsgsC1
 	currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
@@ -196,7 +196,7 @@ function runOneRebalanceCycle {
 	killGoXdcr "C1P"
 
 	echo "Sleeping before checking logs"
-	sleep 15
+	sleep $HLV_TESTS_RESUME_SLEEP_SECS
 
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
@@ -214,8 +214,8 @@ function runReplicationResume {
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	resumeReplication "C2" "B1" "C1" "B0"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+	echo "Waiting $HLV_TESTS_RESUME_SLEEP_SECS seconds for resume to finish"
+	sleep $HLV_TESTS_RESUME_SLEEP_SECS
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")

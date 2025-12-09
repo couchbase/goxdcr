@@ -110,8 +110,6 @@ function runOneReplicationCycleAndPause {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-
-	sleep 5
 	setupCertsForTesting
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		setMandatoryClientCert "$clusterName"
@@ -138,8 +136,8 @@ function runOneReplicationCycleAndPause {
 	enableMobileImportSimIfPresent "C1" "B0"
 	enableMobileImportSimIfPresent "C2" "B1"
 
-	echo "sleeping 20s for replication to finish"
-	sleep 20
+	echo "sleeping $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS for replication to finish"
+	sleep $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
@@ -239,8 +237,8 @@ function runReplicationResume {
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	resumeReplication "C2" "B1" "C1" "B0"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+	echo "Waiting $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS seconds for resume to finish"
+	sleep $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")

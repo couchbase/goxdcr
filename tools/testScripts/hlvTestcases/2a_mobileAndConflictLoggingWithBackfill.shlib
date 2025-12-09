@@ -154,9 +154,8 @@ function testReplicationWithConflictLogging {
 	enableMobileImportSimIfPresent "C2" "B2"
 	enableMobileImportSimIfPresent "C3" "B3"
 
-	sleepTime=120
-	echo "Sleep $sleepTime seconds to wait for replication to finish"
-	sleep $sleepTime
+	echo "Sleep $HLV_TESTS_CLOG_MOBILE_INIT_SLEEP_SECS seconds to wait for replication to finish"
+	sleep $HLV_TESTS_CLOG_MOBILE_INIT_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 
@@ -186,8 +185,8 @@ function testReplicationWithConflictLogging {
 	resumeReplication "C2" "B2" "C3" "B3"
 	resumeReplication "C3" "B3" "C2" "B2"
 
-	echo "sleeping 30seconds for backfill to finish"
-	sleep 30
+	echo "sleeping $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS seconds for backfill to finish"
+	sleep $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 

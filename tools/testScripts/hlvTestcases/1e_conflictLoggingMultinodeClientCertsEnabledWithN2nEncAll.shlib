@@ -140,8 +140,8 @@ function runOneReplicationCycleAndPause {
 	createBucketReplication "C2" "B1" "C1" "B0" BucketReplProperties
 	printGlobalScopeAndCollectionInfo
 
-	echo "sleeping 20s for replication to finish"
-	sleep 20
+	echo "sleeping $HLV_TESTS_CLOG_RESUME_SLEEP_SECS for replication to finish"
+	sleep $HLV_TESTS_CLOG_RESUME_SLEEP_SECS
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"

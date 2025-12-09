@@ -104,12 +104,8 @@ function testMobileHlvWithRingTopology {
 	echo runCbWorkloadGenBucket "C3" "B3" 10000 "common"
 	runCbWorkloadGenBucket "C3" "B3" 10000 "common" &
 
-	echo "sleeping 20 seconds for cbworkloadgen to finish"
-	sleep 20
-
-	sleepTime=40
-	echo "Sleep $sleepTime seconds to wait for replication to finish"
-	sleep $sleepTime
+	echo "Sleep $HLV_TESTS_INIT_SLEEP_SECS seconds to wait for replication to finish"
+	sleep $HLV_TESTS_INIT_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 

@@ -230,7 +230,7 @@ function testMobileHlv {
 	echo runCbWorkloadGenBucket "C2" "B2" 10000 "common"
 	runCbWorkloadGenBucket "C2" "B2" 10000 "common" &
 
-	sleep 40
+	sleep $HLV_TESTS_INIT_SLEEP_SECS
 
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	waitForChangesLeft0 "C2" "B2" "C1" "B1"

@@ -141,9 +141,8 @@ function testReplicationWithConflictLogging {
 	resumeReplication "C2" "B2" "C3" "B3"
 	resumeReplication "C3" "B3" "C2" "B2"
 
-	sleepTime=120
-	echo "Sleep $sleepTime seconds to wait for replication to finish"
-	sleep $sleepTime
+	echo "Sleep $HLV_TESTS_CLOG_MOBILE_INIT_SLEEP_SECS seconds to wait for replication to finish"
+	sleep $HLV_TESTS_CLOG_MOBILE_INIT_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 

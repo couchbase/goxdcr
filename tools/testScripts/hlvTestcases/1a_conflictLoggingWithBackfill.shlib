@@ -150,9 +150,8 @@ function testReplicationWithConflictLogging {
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
 
-	sleepTime=300
-	echo "Sleep $sleepTime seconds to wait for replication to finish"
-	sleep $sleepTime
+	echo "Sleep $HLV_TESTS_CLOG_INIT_SLEEP_SECS seconds to wait for replication to finish"
+	sleep $HLV_TESTS_CLOG_INIT_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 
@@ -182,8 +181,8 @@ function testReplicationWithConflictLogging {
 	resumeReplication "C2" "B2" "C3" "B3"
 	resumeReplication "C3" "B3" "C2" "B2"
 
-	echo "sleeping $sleepTime seconds for backfill to finish"
-	sleep $sleepTime
+	echo "sleeping $HLV_TESTS_CLOG_RESUME_SLEEP_SECS seconds for backfill to finish"
+	sleep $HLV_TESTS_CLOG_RESUME_SLEEP_SECS
 
 	waitForChangesLeft0ForTopology
 
