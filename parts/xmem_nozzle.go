@@ -612,9 +612,11 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 /*
 ***********************************
 /* struct opaque_KeySeqnoMap
-   When a request is for source conflict resolution, this map
-   is then used for lookup of previously stored information
-   for once the target responds
+
+	When a request is for source conflict resolution, this map
+	is then used for lookup of previously stored information
+	for once the target responds
+
 ************************************
 */
 type opaqueKeySeqnoMap map[uint32]opaqueKeySeqnoValue
@@ -851,6 +853,9 @@ type XmemNozzle struct {
 	cLogReqSyncCh  chan bool
 
 	stopOnce uint32
+
+	// dev replication options for troubleshooting. Must not be nil.
+	devReplOpts *base.DevReplOpts
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -977,7 +982,21 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 		return err
 	}
 
-	xmem.dataPool = base.NewDataPool()
+	// we error out for dev options since this
+	// will be enabled in prod for troubleshooting, we need to
+	// make sure the settings are valid upfront instead of silently
+	// not taking effect
+	if err = xmem.initDevReplOpts(settings); err != nil {
+		return err
+	}
+
+	xmem.Logger().Infof("%v dev replication opts: %s\n", xmem.Id(), xmem.devReplOpts.String())
+
+	if xmem.devReplOpts.DisableDataPool {
+		xmem.dataPool = base.NewNoDataPool()
+	} else {
+		xmem.dataPool = base.NewDataPool()
+	}
 
 	err = xmem.initialize(settings)
 	if err != nil {
@@ -3440,6 +3459,21 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	return err
 }
 
+func (xmem *XmemNozzle) initDevReplOpts(settings metadata.ReplicationSettingsMap) (err error) {
+	val, ok := settings[base.DevReplOptsKey]
+	if !ok {
+		xmem.Logger().Infof("%v dev replication opts not found. Using defaults.", xmem.Id())
+		xmem.devReplOpts = &base.DevReplOpts{}
+		return
+	}
+
+	valStr := val.(string)
+	if xmem.devReplOpts, err = base.ParseDevReplOpts(valStr); err != nil {
+		xmem.Logger().Errorf("%v Error parsing dev repl opts string %v. err=%v", xmem.Id(), valStr, err)
+	}
+	return err
+}
+
 func (xmem *XmemNozzle) getRequestBuffer() *requestBuffer {
 	xmem.stateLock.RLock()
 	defer xmem.stateLock.RUnlock()
@@ -5122,8 +5156,4 @@ func (xmem *XmemNozzle) PrintResponseStatusError(status mc.Status) string {
 
 func (xmem *XmemNozzle) ForceXattrOn() {
 	xmem.xattrEnabled = true
-}
-
-func (xmem *XmemNozzle) ForceInitDataPool() {
-	xmem.dataPool = base.NewDataPool()
 }

@@ -140,6 +140,9 @@ const (
 
 	// length of data channel queue between component-events listener and handler
 	ComponentEventsChanLengthKey = base.ComponentEventsChanLengthKey
+
+	// Developer options for troubleshooting
+	DevReplOptsKey = base.DevReplOptsKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -287,6 +290,8 @@ var DCPConnectionBufferSizeConfig = &SettingsConfig{int(base.MaxDCPConnectionBuf
 
 var ComponentEventsChanLengthConfig = &SettingsConfig{base.MaxEventChanSize, &Range{base.MaxEventChanSize / 10, base.MaxEventChanSize}}
 
+var DevReplOptsConfig = &SettingsConfig{"", nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -346,6 +351,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DCPFeedDataChanLengthKey:             DCPFeedDataChanLengthConfig,
 	DCPConnectionBufferSizeKey:           DCPConnectionBufferSizeConfig,
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
+
+	DevReplOptsKey: DevReplOptsConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1419,6 +1426,11 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if convertedValue, err = ValidateAndConvertStrToCLogMapping(value); err != nil {
 			return
 		}
+	case DevReplOptsKey:
+		if _, err = base.ParseDevReplOpts(value); err != nil {
+			return
+		}
+		convertedValue = value
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)

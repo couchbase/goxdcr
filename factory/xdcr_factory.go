@@ -1360,6 +1360,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
 		xmemSettings[base.DisableHlvBasedShortCircuitKey] = val
 	}
+	if val, ok := settings[base.DevReplOptsKey]; ok {
+		xmemSettings[base.DevReplOptsKey] = val
+	}
 
 	return xmemSettings, nil
 }
