@@ -282,6 +282,9 @@ function runReplicationResume {
 	resumeReplication "C1" "B0" "C2" "B1"
 	resumeReplication "C2" "B1" "C1" "B0"
 
+	echo "Sleeping $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS for resume"
+	sleep $HLV_TESTS_CLOG_MOBILE_RESUME_SLEEP_SECS
+
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	lookForAbnormalities
 	checkChangesLeftInternal "C2" "B1" "C1" "B0"
