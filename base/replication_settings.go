@@ -16,6 +16,10 @@ const (
 	// Values: "true" or "false"
 	DevReplDisableDataPool string = "disableDataPool"
 
+	// Errors out if data pool is misused
+	// Values: "true" or "false"
+	DevReplStrictDataPoolUse string = "strictDataPoolUse"
+
 	// Enables the XMEM protocol check on disconnects
 	// Values: "true" or "false"
 	DevReplEnableXmemProtocolCheck string = "enableXmemProtocolCheck"
@@ -25,14 +29,18 @@ type DevReplOpts struct {
 	// DisableDataPool disables the use of data pool in the nozzle
 	DisableDataPool bool
 
+	// StrictDataPoolUse errors out if data pool is misused
+	StrictDataPoolUse bool
+
 	// EnableXmemProtocolCheck enables the XMEM protocol check on disconnects
 	// Note: Not in use at the moment
 	EnableXmemProtocolCheck bool
 }
 
 func (opts *DevReplOpts) String() string {
-	return fmt.Sprintf("%s=%v,%s=%v",
+	return fmt.Sprintf("%s=%v,%s=%v,%s=%v",
 		DevReplDisableDataPool, opts.DisableDataPool,
+		DevReplStrictDataPoolUse, opts.StrictDataPoolUse,
 		DevReplEnableXmemProtocolCheck, opts.EnableXmemProtocolCheck)
 }
 
@@ -61,6 +69,8 @@ func ParseDevReplOpts(val string) (opts *DevReplOpts, err error) {
 		switch key {
 		case DevReplDisableDataPool:
 			opts.DisableDataPool = (value == "true")
+		case DevReplStrictDataPoolUse:
+			opts.StrictDataPoolUse = (value == "true")
 		case DevReplEnableXmemProtocolCheck:
 			opts.EnableXmemProtocolCheck = (value == "true")
 		default:

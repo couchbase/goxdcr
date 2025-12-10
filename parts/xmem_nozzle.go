@@ -919,6 +919,11 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 		xmem.dataPool = base.NewDataPool()
 	}
 
+	if xmem.devReplOpts.StrictDataPoolUse {
+		// Defensively set strict mode on data pool usage only if dev option is set
+		xmem.dataPool.SetOptions(base.DataPoolOptions{StrictMode: true})
+	}
+
 	err = xmem.initialize(settings)
 	if err != nil {
 		return err
@@ -1557,6 +1562,9 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 		if err != nil {
 			bodyBytes = make([]byte, maxEncodedLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			if xmem.devReplOpts.StrictDataPoolUse {
+				return err
+			}
 		}
 		bodyBytes = snappy.Encode(bodyBytes, mc_req.Body)
 
@@ -1824,6 +1832,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 				// .Bytes() returns data ready to be fed over the wire
 				reqs_bytes = append(reqs_bytes, req.Bytes())
 				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+				if xmem.devReplOpts.StrictDataPoolUse {
+					return respMap, err
+				}
 			} else {
 				// BytesPreallocated will modify the preallocated byte slice
 				req.BytesPreallocated(preAllocatedBytes)
@@ -2075,6 +2086,10 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 	if err != nil {
 		body = make([]byte, bodylen)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+		if xmem.devReplOpts.StrictDataPoolUse {
+			// panic is a bit harsh, but the call chain does not return error
+			panic(fmt.Sprintf("%s ComposeRequestForSubdocGet: DataPool GetByteSlice failed even with StrictDataPoolUse option on, err=%v", xmem.Id(), err))
+		}
 	} else {
 		wrappedReq.AddByteSliceForXmemToRecycle(body)
 	}
@@ -2113,6 +2128,9 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 		if err != nil {
 			body = make([]byte, decodedLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			if xmem.devReplOpts.StrictDataPoolUse {
+				return err
+			}
 		} else {
 			req.AddByteSliceForXmemToRecycle(body)
 		}
@@ -2298,6 +2316,9 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	if err != nil {
 		newbody = make([]byte, newbodyLen)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+		if xmem.devReplOpts.StrictDataPoolUse {
+			return err
+		}
 	} else {
 		wrappedReq.AddByteSliceForXmemToRecycle(newbody)
 	}
@@ -2376,6 +2397,9 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 		if err != nil {
 			newHlv = make([]byte, maxHlvLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			if xmem.devReplOpts.StrictDataPoolUse {
+				return err
+			}
 		} else {
 			wrappedReq.AddByteSliceForXmemToRecycle(newHlv)
 		}
@@ -3898,6 +3922,9 @@ func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byt
 			if poolGetErr != nil {
 				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 				preAllocatedSlice = nil
+				if xmem.devReplOpts.StrictDataPoolUse {
+					return poolGetErr, 0
+				}
 			} else {
 				gcList = append(gcList, preAllocatedSlice)
 			}
