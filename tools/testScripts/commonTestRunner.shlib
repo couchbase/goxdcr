@@ -83,6 +83,8 @@ function testUsesInjections() {
 testCaseNumber=""
 from=""
 fromTestCaseNumber=""
+until=""
+untilTestCaseNumber=""
 crMode=""
 mobileMode=0
 eccv=0
@@ -141,6 +143,9 @@ while getopts "$optspec" optchar; do
 			;;
 		seed=*)
 			RANDOM_SEED_ARG="${OPTARG#*=}"
+			;;
+		until=*)
+			until=${OPTARG#*=}
 			;;
 		help)
 			man $0
@@ -273,6 +278,18 @@ if [ "$from" != "" ]; then
 		echo "ERRO: Cannot find test case number $from"
 		exit 1
 	fi
+	if [ "$until" != "" ]; then
+		untilTestCaseNumber=$(find ${testCasesDirectory:-}/${until}_*)
+		if [[ -z "$untilTestCaseNumber" ]]; then
+			echo "ERRO: Cannot find test case number $until"
+			exit 1
+		fi
+	fi
+else
+	if [ "$until" != "" ]; then
+		echo "ERRO: --until cannot be used without --from/-f"
+		exit 1
+	fi
 fi
 
 if [[ -z "$testCaseNumber" ]]; then
@@ -293,6 +310,12 @@ if [[ -z "$testCaseNumber" ]]; then
 		if [[ "$testcase" =~ _idle ]]; then
 			# test cases with _idle in the filename means they take too long for the whole suite
 			# and should be run on an individual basis only
+			echo ""
+			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
+		if [ "$untilTestCaseNumber" != "" ] && [[ "${testCasesDirectory:-}/$testcase" > "$untilTestCaseNumber" ]]; then
 			echo ""
 			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
 			continue
