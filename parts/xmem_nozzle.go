@@ -796,7 +796,7 @@ type XmemNozzle struct {
 	importMutationEventRaised uint32
 	importMutationEventId     int64
 	// dev replication options for troubleshooting. Must not be nil.
-	devReplOpts *base.DevReplOpts
+	devReplOpts base.DevReplOpts
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -917,7 +917,9 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 		return err
 	}
 
-	xmem.Logger().Infof("%v dev replication opts: %s\n", xmem.Id(), xmem.devReplOpts.String())
+	if !xmem.devReplOpts.IsDefault() {
+		xmem.Logger().Infof("%v dev replication opts: %s\n", xmem.Id(), xmem.devReplOpts.String())
+	}
 
 	if xmem.devReplOpts.DisableDataPool {
 		xmem.dataPool = base.NewNoDataPool()
@@ -2831,7 +2833,7 @@ func (xmem *XmemNozzle) initDevReplOpts(settings metadata.ReplicationSettingsMap
 	val, ok := settings[base.DevReplOptsKey]
 	if !ok {
 		xmem.Logger().Infof("%v dev replication opts not found. Using defaults.", xmem.Id())
-		xmem.devReplOpts = &base.DevReplOpts{}
+		xmem.devReplOpts = base.DevReplOpts{}
 		return
 	}
 
@@ -4076,6 +4078,25 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *base.XmemClient, 
 		return err, rev
 	}
 
+	// Do the protocol check for the serialized buffer if enabled.
+	// We do this just before the actual socket write. This way,
+	// it covers all the complexities e.g data pool reuse,
+	// slicing, network retries, diverse opcodes, batching etc.
+	if err = xmem.protocolCheck(bytes); err != nil {
+		// Log the entire byte buffer for debugging purposes.
+		// There is a risk of log flooding here, but the alternative is to capture
+		// network packets which not all customers approve of.
+		// Since this is to malformed protocol bytes which by its nature is very elusive and rare,
+		// we take the calulated risk that this this will be a rare event.
+		//
+		// About the risk of logging sensitive data:
+		// It is reasonable to assume that this code path is enabled only after informing
+		// the customer and getting their approval.
+		xmem.Logger().Errorf("%s protocol check failed: %v, buf=%v", xmem.Id(), err, bytes)
+
+		// We don't want to break the data flow for protocol check failures.
+		err = nil
+	}
 	n, err := conn.Write(bytes)
 
 	if err == nil {
