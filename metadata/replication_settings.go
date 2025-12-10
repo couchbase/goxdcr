@@ -141,6 +141,9 @@ const (
 
 	// FilterExpirationsWithFEKey represents filtering of expirations based on filter expression.
 	FilterExpirationsWithFEKey = base.FilterExpirationsWithFEKey
+
+	// Developer options for troubleshooting
+	DevReplOptsKey = base.DevReplOptsKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -287,6 +290,8 @@ var SkipReplSpecAutoGcConfig = &SettingsConfig{false, nil}
 // of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
 var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 
+var DevReplOptsConfig = &SettingsConfig{"", nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -349,6 +354,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
+	DevReplOptsKey:                       DevReplOptsConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1385,6 +1391,11 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if convertedValue, err = base.MobileCompatibilityStringToTypeConverter(value); err != nil {
 			return
 		}
+	case DevReplOptsKey:
+		if _, err = base.ParseDevReplOpts(value); err != nil {
+			return
+		}
+		convertedValue = value
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)

@@ -152,3 +152,22 @@ type DataPool interface {
 	GetByteSlice(sizeRequested uint64) ([]byte, error)
 	PutByteSlice(doneSlice []byte)
 }
+
+// No data pool, just allocate new byte slices using golang's GC/Heap
+// It simply implements the DataPool interface on top of normal byte slice allocation
+type NoDataPool struct{}
+
+func NewNoDataPool() *NoDataPool {
+	return &NoDataPool{}
+}
+
+func (np *NoDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
+	if sizeRequested == 0 {
+		// avoid zero-length byte slice. Ideally this should not happen.
+		// The minium size of 50 is on par with the actual datapool's minimum allocation size
+		sizeRequested = 50
+	}
+	return make([]byte, sizeRequested), nil
+}
+
+func (np *NoDataPool) PutByteSlice(doneSlice []byte) {}

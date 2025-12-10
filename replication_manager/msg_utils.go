@@ -110,6 +110,8 @@ const (
 	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
 	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
 	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
+	// Developer options for troubleshooting
+	DevReplOptsKey = base.DevReplOptsKey
 )
 
 // constants for parsing create/change/view replication response
@@ -242,6 +244,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
 	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
 	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
+	// Developer options for troubleshooting
+	DevReplOptsKey: metadata.DevReplOptsKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -316,6 +320,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
 	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
 	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
+	// Developer options for troubleshooting
+	metadata.DevReplOptsKey: DevReplOptsKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
