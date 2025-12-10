@@ -1650,6 +1650,13 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		startable, router.Start, router.Stop, (connector.CollectionsRerouteFunc)(router.RouteCollection),
 		(utilities.RecycleObjFunc)(router.recycleDataObj), router.RoutingMapByDownstreams)
 
+	// Note: pool options are set after router.Router is created as we need access to logger
+	err = router.setDataPoolOptions(spec)
+	if err != nil {
+		router.Logger().Errorf("%v - failed to set data pool options: %v", router.id, err)
+		return nil, err
+	}
+
 	routingUpdater := func(info CollectionsRoutingInfo) error {
 		// 1. It should raise a backfill event telling backfill manager to persist the backfill mapping
 		// 2. Backfill manager should synchronously persist the backfill.
@@ -1709,6 +1716,30 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	return router, nil
+}
+
+// setDataPoolOptions sets strict mode option depending on the 'devReplOpts' setting
+func (r *Router) setDataPoolOptions(spec *metadata.ReplicationSpecification) (err error) {
+	if r.dataPool == nil {
+		return nil
+	}
+
+	tmpVal, ok := spec.Settings.Values[base.DevReplOptsKey]
+	if !ok {
+		return nil
+	}
+
+	tmpStr := tmpVal.(string)
+	devReplOpts, err := base.ParseDevReplOpts(tmpStr)
+	if err != nil {
+		return fmt.Errorf("dev repl opts parsing failed: %w", err)
+	}
+
+	if devReplOpts.StrictDataPoolUse {
+		r.dataPool.SetOptions(base.DataPoolOptions{StrictMode: true})
+		r.Logger().Infof("%v - dataPool set to strict mode in router", r.id)
+	}
+	return nil
 }
 
 func (router *Router) nextMutationCounter() uint64 {

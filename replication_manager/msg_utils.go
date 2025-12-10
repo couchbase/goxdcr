@@ -126,9 +126,7 @@ const (
 	DCPFeedDataChanLengthKey          = base.DCPFeedDataChanLengthKey
 	DCPConnectionBufferSizeKey        = base.DCPConnectionBufferSizeKey
 	ComponentEventsChanLengthKey      = base.ComponentEventsChanLengthKey
-
-	// Developer options for troubleshooting
-	DevReplOptsKey = base.DevReplOptsKey
+	DevReplOptsKey                    = base.DevReplOptsKey
 )
 
 // constants for parsing create/change/view replication response
@@ -268,9 +266,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DCPFeedDataChanLengthKey:          metadata.DCPFeedDataChanLengthKey,
 	DCPConnectionBufferSizeKey:        metadata.DCPConnectionBufferSizeKey,
 	ComponentEventsChanLengthKey:      metadata.ComponentEventsChanLengthKey,
-
-	// Developer options for troubleshooting
-	DevReplOptsKey: metadata.DevReplOptsKey,
+	DevReplOptsKey:                    metadata.DevReplOptsKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -342,9 +338,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DCPFeedDataChanLengthKey:             DCPFeedDataChanLengthKey,
 	metadata.DCPConnectionBufferSizeKey:           DCPConnectionBufferSizeKey,
 	metadata.ComponentEventsChanLengthKey:         ComponentEventsChanLengthKey,
-
-	// Developer options for troubleshooting
-	metadata.DevReplOptsKey: DevReplOptsKey,
+	metadata.DevReplOptsKey:                       DevReplOptsKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
