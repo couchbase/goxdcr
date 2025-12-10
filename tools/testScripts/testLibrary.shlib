@@ -2624,8 +2624,23 @@ function setBucket {
 	local value=$4
 
 	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
-	output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
+
+	local retries=5
+	local count=0
+	local output
+	while [[ $count -lt $retries ]]; do
+		output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
+		if [[ $? -eq 0 ]]; then
+			echo $output
+			return 0
+		fi
+		count=$((count + 1))
+		sleep 3
+	done
+
+	echo "Failed to set bucket property after $retries attempts" >&2
 	echo $output
+	return 1
 }
 
 function enableMobileImportSimIfPresent {
