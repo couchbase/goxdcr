@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package base
 
 import (
+	"fmt"
 	"math/rand"
 	"sort"
 	"sync"
@@ -35,6 +36,8 @@ func (fd *FakeDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	return garbageSlice, nil
 }
 
+func (fd *FakeDataPool) SetOptions(opts DataPoolOptions) {}
+
 // Nothing
 func (fd *FakeDataPool) PutByteSlice(doneSlice []byte) {}
 
@@ -43,6 +46,8 @@ type DataPoolImpl struct {
 	byteSlicePools       [NumOfSizes]sync.Pool
 
 	logger_utils *log.CommonLogger
+
+	strictMode bool
 
 	errCnt uint32
 }
@@ -118,7 +123,14 @@ func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 				// log only once every 10 occurances to reduce spam
 				p.logger_utils.Warnf("Probable misuse of datapool, errCnt=%v, i=%v, cap(out)=%v, sizeRequested=%v", i, errCnt, cap(out), sizeRequested)
 			}
+
+			// return the slice back to the pool first
 			p.PutByteSlice(out)
+
+			if p.strictMode {
+				return nil, fmt.Errorf("datapool misused")
+			}
+
 			// need to get from the (i+1)th datapool
 			if i+1 >= 0 && i+1 < NumOfSizes {
 				out = p.byteSlicePools[i+1].Get().([]byte)
@@ -148,9 +160,22 @@ func (p *DataPoolImpl) PutByteSlice(doneSlice []byte) {
 	}
 }
 
+func (p *DataPoolImpl) SetOptions(opts DataPoolOptions) {
+	p.strictMode = opts.StrictMode
+}
+
+type DataPoolOptions struct {
+	// StrictMode errors out if datapool is misused and additional enforcements if any
+	// These checks are implementation specific
+	StrictMode bool
+}
+
 type DataPool interface {
 	GetByteSlice(sizeRequested uint64) ([]byte, error)
 	PutByteSlice(doneSlice []byte)
+
+	// SetOptions sets the options for the data pool
+	SetOptions(opts DataPoolOptions)
 }
 
 // No data pool, just allocate new byte slices using golang's GC/Heap
@@ -171,3 +196,5 @@ func (np *NoDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 }
 
 func (np *NoDataPool) PutByteSlice(doneSlice []byte) {}
+
+func (np *NoDataPool) SetOptions(opts DataPoolOptions) {}
