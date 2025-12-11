@@ -1294,6 +1294,20 @@
         ],
         "stability": "internal"
     },
+    "xdcr_sys_metadata_transferred_bytes": {
+        "type": "counter",
+        "help": "The total amount of data transferred to and from target that is not related to document but within a context of a pipeline",
+        "added": "8.1.0",
+        "unit": "bytes",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "notes": "This is metadata such as checkpoint manager used as part of checkpointing operation of a pipeline. Any other stats outside the context of a replication will not be accounted here. The metric will be re-initialized to 0 when a paused pipeline is resumed. The metadata checkpoint from the act of pausing a pipeline will not be accounted.",
+        "stability": "internal"
+    },
     "xdcr_system_events_received_from_dcp_total": {
         "type": "counter",
         "help": "The number of system events received from source data service",

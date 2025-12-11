@@ -65,6 +65,7 @@ const (
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
 	DOCS_COMPRESSION_SKIPPED_METRIC     = "docs_compression_skipped"
+	SYS_METADATA_TRANSFERRED_METRIC     = "sys_metadata_transferred"
 
 	DOCS_FILTERED_METRIC               = base.DocsFiltered
 	DOCS_UNABLE_TO_FILTER_METRIC       = base.DocsUnableToFilter
@@ -1194,6 +1195,18 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Internal,
 		Labels:       StandardLabels,
 		Notes:        "This is metadata that is transferred as part of GET_META, or SubdocGet command",
+	},
+	SYS_METADATA_TRANSFERRED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSeamlessCredsChangeSupport,
+		Description:  "The total amount of data transferred to and from target that is not related to document but within a context of a pipeline",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+		Notes: "This is metadata such as checkpoint manager used as part of checkpointing operation of a pipeline. " +
+			"Any other stats outside the context of a replication will not be accounted here. " +
+			"The metric will be re-initialized to 0 when a paused pipeline is resumed. " +
+			"The metadata checkpoint from the act of pausing a pipeline will not be accounted.",
 	},
 	GET_DOC_LATENCY_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},

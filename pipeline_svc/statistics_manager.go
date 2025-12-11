@@ -47,7 +47,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, service_def.METADATA_TRANSFERRED_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, service_def.METADATA_TRANSFERRED_METRIC, service_def.SYS_METADATA_TRANSFERRED_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -57,7 +57,7 @@ var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METR
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, service_def.DOCS_COMPRESSION_SKIPPED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
 	service_def.HLV_UPDATED_METRIC, service_def.HLV_PRUNED_METRIC, service_def.IMPORT_DOCS_WRITTEN_METRIC, service_def.IMPORT_DOCS_FAILED_CR_SOURCE_METRIC, service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC,
-	service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, service_def.TARGET_EACCESS_METRIC, service_def.HLV_PRUNED_AT_MERGE_METRIC, service_def.METADATA_TRANSFERRED_METRIC}
+	service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, service_def.TARGET_EACCESS_METRIC, service_def.HLV_PRUNED_AT_MERGE_METRIC}
 
 // keys for metrics in overview
 // Note the values used here does not correspond to the service_def GlobalStatsTable, since these are used internally
@@ -95,6 +95,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.RESP_WAIT_METRIC:                    service_def.MetricTypeCounter,
 	service_def.META_LATENCY_METRIC:                 service_def.MetricTypeCounter,
 	service_def.METADATA_TRANSFERRED_METRIC:         service_def.MetricTypeCounter,
+	service_def.SYS_METADATA_TRANSFERRED_METRIC:     service_def.MetricTypeCounter,
 	service_def.DCP_DISPATCH_TIME_METRIC:            service_def.MetricTypeCounter,
 	service_def.DCP_DATACH_LEN:                      service_def.MetricTypeCounter,
 	service_def.THROTTLE_LATENCY_METRIC:             service_def.MetricTypeCounter,
@@ -1653,6 +1654,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.META_LATENCY_METRIC, meta_latency)
 		meta_size_transferred := metrics.NewCounter()
 		registry.Register(service_def.METADATA_TRANSFERRED_METRIC, meta_size_transferred)
+		sys_meta_size_transferred := metrics.NewCounter()
+		registry.Register(service_def.SYS_METADATA_TRANSFERRED_METRIC, sys_meta_size_transferred)
 		throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(service_def.THROTTLE_LATENCY_METRIC, throttle_latency)
 		dp_failed := metrics.NewCounter()
@@ -1737,6 +1740,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
 		metric_map[service_def.META_LATENCY_METRIC] = meta_latency
 		metric_map[service_def.METADATA_TRANSFERRED_METRIC] = meta_size_transferred
+		metric_map[service_def.SYS_METADATA_TRANSFERRED_METRIC] = sys_meta_size_transferred
 		metric_map[service_def.THROTTLE_LATENCY_METRIC] = throttle_latency
 		metric_map[service_def.GET_DOC_LATENCY_METRIC] = get_doc_latency
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
@@ -3237,6 +3241,11 @@ func (ckpt_collector *checkpointMgrCollector) Mount(pipeline common.Pipeline, st
 	if err != nil {
 		return err
 	}
+
+	err = ckptmgr.(common.Component).RegisterComponentEventListener(common.SystemMetadataTransferred, ckpt_collector)
+	if err != nil {
+		return err
+	}
 	ckpt_collector.initRegistry()
 	return nil
 }
@@ -3246,6 +3255,7 @@ func (ckpt_collector *checkpointMgrCollector) initRegistry() {
 	registry_ckpt.Register(service_def.TIME_COMMITING_METRIC, metrics.NewHistogram(metrics.NewUniformSample(ckpt_collector.stats_mgr.sample_size)))
 	registry_ckpt.Register(service_def.NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
 	registry_ckpt.Register(service_def.NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
+	registry_ckpt.Register(service_def.SYS_METADATA_TRANSFERRED_METRIC, metrics.NewCounter())
 
 }
 
@@ -3259,18 +3269,20 @@ func (*checkpointMgrCollector) ListenerPipelineType() common.ListenerPipelineTyp
 
 func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 	registry := ckpt_collector.stats_mgr.registries["CkptMgr"]
-	if event.EventType == common.ErrorEncountered {
-		registry.Get(service_def.NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
 
-	} else if event.EventType == common.CheckpointDoneForVB {
+	switch event.EventType {
+	case common.ErrorEncountered:
+		registry.Get(service_def.NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
+	case common.CheckpointDoneForVB:
 		vbno := event.OtherInfos.(uint16)
 		ckpt_record := event.Data.(metadata.CheckpointRecord)
 		ckpt_collector.stats_mgr.checkpointed_seqnos[vbno].SetSeqno(ckpt_record.Seqno)
-
-	} else if event.EventType == common.CheckpointDone {
+	case common.CheckpointDone:
 		time_commit := event.OtherInfos.(time.Duration).Seconds() * 1000
 		registry.Get(service_def.NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
 		registry.Get(service_def.TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
+	case common.SystemMetadataTransferred:
+		registry.Get(service_def.SYS_METADATA_TRANSFERRED_METRIC).(metrics.Counter).Inc(int64(event.Data.(int)))
 	}
 }
 
@@ -3901,6 +3913,8 @@ func (cLogCollector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	registry.Register(service_def.CLOG_QUEUE_FULL, clogQueueFull)
 	clogHibernatedCnt := metrics.NewCounter()
 	registry.Register(service_def.CLOG_HIBERNATED_COUNT, clogHibernatedCnt)
+	sysMetadataTransfered := metrics.NewCounter()
+	registry.Register(service_def.SYS_METADATA_TRANSFERRED_METRIC, sysMetadataTransfered)
 
 	metricMap := make(map[string]interface{})
 	metricMap[service_def.CONFLICT_DOCS_WRITTEN] = conflict_docs_written
@@ -3923,6 +3937,7 @@ func (cLogCollector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	metricMap[service_def.CLOG_POOL_GET_TIMEDOUT] = clogPoolGetTimedout
 	metricMap[service_def.CLOG_QUEUE_FULL] = clogQueueFull
 	metricMap[service_def.CLOG_HIBERNATED_COUNT] = clogHibernatedCnt
+	metricMap[service_def.SYS_METADATA_TRANSFERRED_METRIC] = sysMetadataTransfered
 
 	cLogCollector.componentMap[cLogInstance.Id()] = metricMap
 	responsibleVbs := make([]uint16, 0)

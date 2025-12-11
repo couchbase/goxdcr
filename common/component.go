@@ -108,6 +108,8 @@ const (
 	// We use subdoc multipath sets and deletes when we have a specific mobile/xdcr case to avoid cas rollback on target
 	DocsSentWithSubdocCmd   ComponentEventType = iota
 	DocsSentWithPoisonedCas ComponentEventType = iota
+	// Any metadata transferred by any components outside of the context of actual document replication should raise this event
+	SystemMetadataTransferred ComponentEventType = iota
 
 	// Conflict logger events:
 	// 1. xmem's conflict logging stats

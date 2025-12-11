@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/couchbase/goxdcr/v8/peerToPeer"
-
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
@@ -30,6 +28,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
+	"github.com/couchbase/goxdcr/v8/peerToPeer"
 	"github.com/couchbase/goxdcr/v8/pipeline_utils"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
@@ -883,7 +882,13 @@ func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, 
 			}
 		}
 
-		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+		var statsBytesUsed uint64
+		clientCtx := &mcc.ClientContext{
+			BytesUsedCallback: func(bytesUsed int) {
+				atomic.StoreUint64(&statsBytesUsed, uint64(bytesUsed))
+			},
+		}
+		stats_map, err = client.StatsMap(base.VBUCKET_SEQNO_STAT_NAME, clientCtx)
 		if err != nil {
 			ckmgr.logger.Warnf("Error getting vbucket-seqno stats for serverAddr=%v. vbnos=%v, err=%v", serverAddr, vbnos, err)
 			clientCloseErr := client.Close()
@@ -894,6 +899,7 @@ func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, 
 			delete(ckmgr.KvMemClients, serverAddr)
 			ckmgr.KvMemClientsMtx.Unlock()
 		}
+		ckmgr.RaiseEvent(common.NewEvent(common.SystemMetadataTransferred, int(atomic.LoadUint64(&statsBytesUsed)), ckmgr, nil, nil))
 		return nil, err
 	}
 
