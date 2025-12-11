@@ -528,7 +528,7 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 
 // This routine construct XATTR _vv:{...} based on meta. The constructed XATTRs includes updates for
 // new change (meta.cas > meta.ver) and pruning in PV
-func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer) (int, bool, error) {
+func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer, minPVLen int) (int, bool, error) {
 	if meta == nil {
 		return 0, false, fmt.Errorf("metadata cannot be nil")
 	}
@@ -548,7 +548,7 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 	}
 
 	var pruned bool
-	*pos, pruned, err = ConstructHlv(body, *pos, meta, pruningWindow)
+	*pos, pruned, err = ConstructHlv(body, *pos, meta, pruningWindow, minPVLen)
 	if err != nil {
 		return *pos, pruned, err
 	}
@@ -559,7 +559,7 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 
 // constructs hlv content and writes it to "body" from "pos" index.
 // Increments pos and returns the last position.
-func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Duration) (int, bool, error) {
+func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Duration, minPVLen int) (int, bool, error) {
 	var err error
 	pruneFunc := base.GetHLVPruneFunction(meta.GetDocumentMetadata().Cas, pruningWindow)
 	pos = formatCv(meta, body, pos)
@@ -568,7 +568,7 @@ func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Dur
 	if len(mv) > 0 {
 		// This is not the first since we have cv before this
 		body, pos = base.WriteJsonRawMsg(body, []byte(HLV_MV_FIELD), pos, base.WriteJsonKey, len([]byte(HLV_MV_FIELD)), false)
-		pos, _, err = VersionMapToDeltasBytes(mv, body, pos, nil)
+		pos, _, err = VersionMapToDeltasBytes(mv, body, pos, nil, 0)
 		if err != nil {
 			return pos, false, err
 		}
@@ -580,7 +580,7 @@ func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Dur
 		startPos := pos
 		body, pos = base.WriteJsonRawMsg(body, []byte(HLV_PV_FIELD), pos, base.WriteJsonKey, len([]byte(HLV_PV_FIELD)), false)
 		afterKeyPos := pos
-		pos, pruned, err = VersionMapToDeltasBytes(pv, body, pos, &pruneFunc)
+		pos, pruned, err = VersionMapToDeltasBytes(pv, body, pos, &pruneFunc, minPVLen)
 		if err != nil {
 			return pos, pruned, err
 		}
@@ -651,25 +651,13 @@ func ComposeHLVEntry(source hlv.DocumentSourceId, version []byte) ([]byte, error
 // 1. applies the pruning function on top of the version entries if they are PVs i.e. if the pruning function is passed in.
 // 2. converts the entries into version deltas, strips the leading zeroes of delta values and composes the PV or MV for the target doc.
 // 3. PVs and MVs will be of the format of JSON arrays with individual string entries of the form "<version>@<source>".
-func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool, error) {
+func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc, minPVLen int) (int, bool, error) {
 	startPos := pos
 	first := true
 	pruned := false
 
-	if pruneFunction != nil {
-		// prune PVs if possible
-		for key, cas := range vMap {
-			if !((*pruneFunction)(cas)) {
-				continue
-			}
-			// Pruned entry
-			delete(vMap, key)
-			pruned = true
-		}
-	}
-
-	// deltas need to be recomputed from the non-pruned versions
-	deltas := vMap.VersionsDeltas()
+	// deltas need to be recomputed after applying pruneFunction.
+	deltas, pruned := vMap.VersionsDeltasAfterPruning(pruneFunction, minPVLen)
 	for _, delta := range deltas {
 		key := delta.GetSource()
 		ver := delta.GetVersion()
@@ -1001,7 +989,6 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 			xattrHlv = value
 		}
 		if base.Equals(key, base.XATTR_MOU) && !base.Equals(value, base.EmptyJsonObject) {
-			// TODO: MB-61748 - can use datapool + new pool for removedFromMou
 			newMou := make([]byte, len(value))
 			removedFromMou := make(map[string][]byte)
 

@@ -69,7 +69,6 @@ DIRS_WITH_UT=(
 	pipeline_manager
 	pipeline_utils
 	replication_manager
-	resource_manager
 	service_impl
 	streamApiWatcher
 	utils

@@ -1492,6 +1492,9 @@ const (
 	VbucketsMaxCasKey = "vbucketsMaxCas"
 	// Bucket setting for starting timestamp (CAS) to eanble versioning
 	HlvVbMaxCasKey = "vbucketsMaxCas"
+	// MinPVLenForMobileKey represents the minimum number of entries that should be present in PVs
+	// if the replication has mobile as Active.
+	MinPVLenForMobileKey = "minHLVHistoryLenForMobile"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

@@ -16,6 +16,7 @@ package parts
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -59,9 +61,12 @@ const targetPort = "9001"
 const username = "Administrator"
 const password = "wewewe"
 const poolsDefaultPath = "pools/default"
+const xdcrUser = "XdcrInboundUser"
 const curl = "curl"
 const POST = "POST"
+const PUT = "PUT"
 const GET = "GET"
+const couchstore = "couchstore"
 
 var combinedCreds = fmt.Sprintf("%v:%v", username, password)
 var printCmd bool = false
@@ -410,7 +415,6 @@ func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 }
 
 var totalSamples = 100
-var docBodySizeMaxBytes = 500
 
 func generateTestDataForSnappyDecode(numDocs int) []*base.WrappedMCRequest {
 	dataSet, _, err := generator.GenerateRandomData(10)
@@ -1388,7 +1392,6 @@ func deleteDoc(agent *gocbcore.Agent, key, collection, scope string) {
 			return
 		}
 	}
-	return
 }
 
 func getGocbBucket(connStr string, bucketName string) (bucket *gocb.Bucket, closeFunc func(opts *gocb.ClusterCloseOptions) error) {
@@ -1440,13 +1443,13 @@ func setupClusterRunCluster(port int) {
 	runCmd(cmd, printCmd)
 }
 
-func createClusterRunBucket(port int, bucketname string, lww bool) {
+func createClusterRunBucket(port int, bucketname string, lww bool, bucketType string) {
 	defer time.Sleep(3 * time.Second)
 	var cmd *exec.Cmd
 	if lww {
-		cmd = exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"), "-d", fmt.Sprintf("conflictResolutionType=%v", "lww"))
+		cmd = exec.Command(curl, "-s", "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"), "-d", fmt.Sprintf("conflictResolutionType=%v", "lww"), "-d", fmt.Sprintf("storageBackend=%v", bucketType))
 	} else {
-		cmd = exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"))
+		cmd = exec.Command(curl, "-s", "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets", port, poolsDefaultPath), "-d", fmt.Sprintf("name=%v", bucketname), "-d", fmt.Sprintf("ramQuotaMB=%v", 100), "-d", fmt.Sprintf("CompressionMode=%v", "Active"))
 	}
 	runCmd(cmd, printCmd)
 }
@@ -1480,6 +1483,30 @@ func resumeClusterRunReplication(port int, replID string) {
 	changeClusterRunReplicationSettings(port, replID, "pauseRequested", "false")
 }
 
+func fetchClusterUUID(port int) string {
+	cmd := exec.Command(curl, "-s", "-u", combinedCreds, "-X", GET, fmt.Sprintf("http://localhost:%v/pools", port))
+	out, _ := runCmd(cmd, printCmd)
+	var op map[string]interface{}
+	err := json.Unmarshal(out, &op)
+	if err != nil || len(op) == 0 {
+		fmt.Println("err=", err)
+		return ""
+	}
+	return op["uuid"].(string)
+}
+
+func fetchBucketUUID(port int, bucketName string) string {
+	cmd := exec.Command(curl, "-s", "-u", combinedCreds, "-X", GET, fmt.Sprintf("http://localhost:%v/pools/default/buckets/%v", port, bucketName))
+	out, _ := runCmd(cmd, printCmd)
+	var op map[string]interface{}
+	err := json.Unmarshal(out, &op)
+	if err != nil || len(op) == 0 {
+		fmt.Println("err=", err)
+		return ""
+	}
+	return op["uuid"].(string)
+}
+
 func changeClusterRunReplicationSettings(port int, replID, key, val string) {
 	defer time.Sleep(3 * time.Second)
 	cmd := exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/settings/replications/%v", port, strings.Replace(replID, "/", "%2F", -1)), "-d", fmt.Sprintf("%v=%v", key, val))
@@ -1490,6 +1517,11 @@ func changeClusterRunBucketSetting(port int, bucketname, key, val string) string
 	cmd := exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/%v/buckets/%v", port, poolsDefaultPath, bucketname), "-d", fmt.Sprintf("%v=%v", key, val))
 	op, _ := runCmd(cmd, printCmd)
 	return string(op)
+}
+
+func createXdcrInboundUser(port int) {
+	cmd := exec.Command(curl, "-s", "-u", combinedCreds, "-X", PUT, fmt.Sprintf("http://localhost:%v/settings/rbac/users/local/%v", port, xdcrUser), "-d", fmt.Sprintf("%v=%v", "password", password), "-d", "roles=replication_target[*]")
+	runCmd(cmd, printCmd)
 }
 
 func turnOnCrossXVersioningClusterRun(port int, bucketname string) {
@@ -1515,14 +1547,17 @@ func GetPrometheusStats(port int) string {
 	return string(out)
 }
 
-func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, bucketName, docKey, docVal string, srcNode, tgtNode int, bucketUUID string) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func(), string, uint64, uint64) {
+func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, bucketName, docKey, docVal string, srcNode, tgtNode int) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func(), string, uint64, uint64) {
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
 
-	createClusterRunBucket(srcNode, bucketName, true)
+	createXdcrInboundUser(srcNode)
+	createXdcrInboundUser(tgtNode)
+
+	createClusterRunBucket(srcNode, bucketName, true, couchstore)
 	turnOnCrossXVersioningClusterRun(srcNode, bucketName)
 
-	createClusterRunBucket(tgtNode, bucketName, true)
+	createClusterRunBucket(tgtNode, bucketName, true, couchstore)
 	turnOnCrossXVersioningClusterRun(tgtNode, bucketName)
 
 	srcBucket, closeFunc1 := getGocbBucket(sourceConnStr, bucketName)
@@ -1584,8 +1619,8 @@ func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, buc
 }
 
 // this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
-func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, bucketUUID string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2, 1)
+func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, tgtActorId string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(tgtActorId), cas2, 1)
 
 	cas3, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas4, _, _, _, _, _, cvCas4, _, _, importCas4, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
@@ -1617,23 +1652,16 @@ func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, r
 	// resume replication from C2 to C1 also, to make sure we have convergence after cas regeneration, but before an import process
 	resumeClusterRunReplication(tgtNode, replID2)
 
-	cas7, _, _, _, _, _, cvCas7, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas7, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas8, _, _, _, _, _, cvCas8, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas7Int, err := base.HexLittleEndianToUint64(cvCas7)
-	a.Nil(err)
 	cvCas8Int, err := base.HexLittleEndianToUint64(cvCas8)
 	a.Nil(err)
-	// check for convergence
 	a.Equal(cas8, cas6) // no changes on target
 	a.Equal(cvCas8Int, cvCas6Int)
-	a.Equal(cas7, cas8)
-	a.Equal(cvCas7Int, cvCas8Int)
 
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas8, 1)
-	cas9, _, _, _, _, _, cvCas9, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(tgtActorId), cas8, 1)
+	cas9, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas10, _, _, _, _, _, cvCas10, _, _, importCas10, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas9Int, err := base.HexLittleEndianToUint64(cvCas9)
-	a.Nil(err)
 	cvCas10Int, err := base.HexLittleEndianToUint64(cvCas10)
 	a.Nil(err)
 	importCas10Int, err := base.HexLittleEndianToUint64(importCas10)
@@ -1641,95 +1669,67 @@ func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, r
 
 	a.Equal(cas10, importCas10Int)
 	a.Equal(cvCas10Int, cas8)
-	a.Greater(cas10, cvCas10Int)
 	a.Equal(cas9, cas7) // no changes on source - import process should lead to a no-op
-	a.Equal(cvCas9Int, cvCas7Int)
-}
-
-// this is a scenario where, after CAS regeneration, import happens before cas convergence from C2 to C1
-func convergenceAfterImport(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, bucketUUID string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2, 1)
-
-	cas3, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas4, _, _, _, _, _, cvCas4, _, _, importCas4, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas4Int, err := base.HexLittleEndianToUint64(cvCas4)
-	a.Nil(err)
-	importCas4Int, err := base.HexLittleEndianToUint64(importCas4)
-	a.Nil(err)
-
-	// make sure we have a scenario where we have a cas rollback with SET_WITH_META
-	a.Greater(cas4, cas3)
-	a.Greater(cas3, cas1)
-	a.Greater(cas4, cas2)
-	a.Equal(cas2, cvCas4Int)
-	a.Greater(cas4, cvCas4Int)
-	a.Equal(cas4, importCas4Int)
-
-	// resume replication from C1 to C2 only and make sure cas doesn't rollback on target
-	resumeClusterRunReplication(srcNode, replID1)
-
-	cas5, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas6, _, _, _, _, _, cvCas6, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas6Int, err := base.HexLittleEndianToUint64(cvCas6)
-	a.Nil(err)
-
-	a.Equal(cas5, cas3)      // no changes on source
-	a.Greater(cas6, cas5)    // check if cas was regenerated
-	a.Equal(cvCas6Int, cas6) // check if macro-expansion was successful
-
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas6, 1)
-	cas7, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas8, _, _, _, _, _, cvCas8, _, _, importCas8, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas8Int, err := base.HexLittleEndianToUint64(cvCas8)
-	a.Nil(err)
-	importCas8Int, err := base.HexLittleEndianToUint64(importCas8)
-	a.Nil(err)
-
-	a.Equal(cas5, cas7) // no changes on source
-	a.Equal(cvCas8Int, cas6)
-	a.Greater(cas8, cvCas8Int)
-	a.Equal(cas8, importCas8Int)
-
-	// resume replication from C2 to C1 also, to make sure we have final convergence after cas regeneration and import process
-	resumeClusterRunReplication(tgtNode, replID2)
-
-	cas9, _, _, _, _, _, cvCas9, _, _, importCas9, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas10, _, _, _, _, _, cvCas10, _, _, importCas10, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
-	cvCas9Int, err := base.HexLittleEndianToUint64(cvCas9)
-	a.Nil(err)
-	cvCas10Int, err := base.HexLittleEndianToUint64(cvCas10)
-	a.Nil(err)
-	importCas9Int, err := base.HexLittleEndianToUint64(importCas9)
-	a.Nil(err)
-	importCas10Int, err := base.HexLittleEndianToUint64(importCas10)
-	a.Nil(err)
-	// check for final convergence
-	a.Equal(cas10, cas8) // no changes on target
-	a.Equal(importCas10Int, importCas8Int)
-	a.Equal(cvCas10Int, cvCas8Int)
-	a.Equal(cas10, cas9)
-	a.Equal(cvCas10Int, cvCas9Int)
-	a.Equal(importCas10Int, importCas9Int)
+	a.Greater(cas10, cvCas10Int)
 }
 
 func verifyStatsForDone(a *assert.Assertions, srcNode, tgtNode int) {
 	srcPromPort := srcNode - 9000 + 13000
 	tgtPromPort := tgtNode - 9000 + 13000
 	// changes left should be 0 on both source and target
-	srcPromStats := changesLeft(srcPromPort)
-	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), srcPromStats)
-	tgtPromStats := changesLeft(tgtPromPort)
-	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), tgtPromStats)
+	changesLeftRegex := regexp.MustCompile("changes_left.*} [1-9]")
+
+	maxRetries := 10
+	retryInterval := 10 * time.Second
+
+	var srcPromStats, tgtPromStats string
+	for i := 0; i < maxRetries; i++ {
+		srcPromStats = changesLeft(srcPromPort)
+		tgtPromStats = changesLeft(tgtPromPort)
+
+		srcMatch := changesLeftRegex.MatchString(srcPromStats)
+		tgtMatch := changesLeftRegex.MatchString(tgtPromStats)
+
+		if !srcMatch && !tgtMatch {
+			// no match means changes_left is 0
+			return
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	// Final assertion after all retries exhausted
+	a.NotRegexp(changesLeftRegex, srcPromStats)
+	a.NotRegexp(changesLeftRegex, tgtPromStats)
+}
+
+func verifyCasPoisonProtectionStats(t *testing.T, a *assert.Assertions, srcNode int, protectionMode string, count int) {
+	srcPromStats := GetPrometheusStats(srcNode)
+	var pattern string
+	switch protectionMode {
+	case "error":
+		pattern = fmt.Sprintf("docs_sent_with_poisonedCas_errorMode.*} %v", count)
+	case "replace":
+		pattern = fmt.Sprintf("docs_sent_with_poisonedCas_replaceMode.*} %v", count)
+	}
+	// Compile the regex
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		panic(fmt.Sprintf("Error compiling regex: %v", err))
+	}
+	// Check if the regex pattern matches the input string
+	match := re.MatchString(srcPromStats)
+	assert.True(t, match, fmt.Sprintf("Failed to verify the count for %s mode in Prometheus stats.", protectionMode))
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario1$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario1$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario1")
 	}
 
-	// this is a scenario where, after CAS regeneration by subdoc op, import happens before cas convergence from C2 to C1
+	// this is a scenario where, after CAS regeneration by subdoc op, import happens after cas convergence from C2 to C1
 	// both source and target docs are not tombstones
 	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario1 =================")
 	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario1 =================")
@@ -1737,7 +1737,6 @@ func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 
 	// test common parameters
 	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
 	scopeName := "_default"
 	colName := "_default"
 	docKey := "mobileDoc"
@@ -1746,7 +1745,7 @@ func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
@@ -1754,27 +1753,28 @@ func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 
 	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // create a mutation on source that is not tombstone. target is already not a tombstone.
 
-	convergenceAfterImport(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
+	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
+	a.Nil(err)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario2$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario2$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario2(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario2")
 	}
 
 	// this is a scenario where, after CAS regeneration by subdoc op, import happens after cas convergence from C2 to C1
-	// both source and target docs are not tombstones
+	// target doc is a tombstone, source doc is not.
 	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario2 =================")
 	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario2 =================")
 	a := assert.New(t)
 
 	// test common parameters
 	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
 	scopeName := "_default"
 	colName := "_default"
 	docKey := "mobileDoc"
@@ -1783,35 +1783,37 @@ func TestCasRollbackLWWMobileScenario2(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
 	defer closeFunc4()
 
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // create a mutation on source that is not tombstone. target is already not a tombstone.
+	deleteDoc(tgtAgent, docKey, colName, scopeName)                                 // target doc is a tombstone
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // source mutation is not a tombstone
 
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
+	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
+	a.Nil(err)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario3$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario3$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario3")
 	}
 
-	// this is a scenario where, after CAS regeneration by subdoc op, import happens before cas convergence from C2 to C1
-	// target doc is a tombstone, source doc is not.
+	// this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
+	// source doc is tombstone, target is not
 	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario3 =================")
 	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario3 =================")
 	a := assert.New(t)
 
 	// test common parameters
 	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
 	scopeName := "_default"
 	colName := "_default"
 	docKey := "mobileDoc"
@@ -1820,186 +1822,36 @@ func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
 	defer closeFunc4()
 
-	deleteDoc(tgtAgent, docKey, colName, scopeName)                                 // target doc is a tombstone
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // source mutation is not a tombstone
+	deleteDoc(srcAgent, docKey, colName, scopeName) // create a source doc tombstone mutation. target doc is not a tombstone.
 
-	convergenceAfterImport(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
+	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
+	a.Nil(err)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario4$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario4$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario4(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping TestCasRollbackLWWMobileScenario4")
-	}
-
-	// this is a scenario where, after CAS regeneration by subdoc op, import happens after cas convergence from C2 to C1
-	// target doc is a tombstone, source doc is not.
-	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario4 =================")
-	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario4 =================")
-	a := assert.New(t)
-
-	// test common parameters
-	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
-	scopeName := "_default"
-	colName := "_default"
-	docKey := "mobileDoc"
-	docVal := "{\"foo\" : \"bar\"}"
-	srcNode := 9000 // cluster_run source node port
-	tgtNode := 9001 // cluster_run target node port
-	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
-
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
-	defer closeFunc1(nil)
-	defer closeFunc2(nil)
-	defer closeFunc3()
-	defer closeFunc4()
-
-	deleteDoc(tgtAgent, docKey, colName, scopeName)                                 // target doc is a tombstone
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // source mutation is not a tombstone
-
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
-
-	verifyStatsForDone(a, srcNode, tgtNode)
-}
-
-// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario5$ github.com/couchbase/goxdcr/parts
-func TestCasRollbackLWWMobileScenario5(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping TestCasRollbackLWWMobileScenario5")
-	}
-
-	// this is a scenario where, after CAS regeneration, import happens before cas convergence from C2 to C1
-	// source doc is tombstone, target is not
-	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario5 =================")
-	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario5 =================")
-	a := assert.New(t)
-
-	// test common parameters
-	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
-	scopeName := "_default"
-	colName := "_default"
-	docKey := "mobileDoc"
-	docVal := "{\"foo\" : \"bar\"}"
-	srcNode := 9000 // cluster_run source node port
-	tgtNode := 9001 // cluster_run target node port
-	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
-
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
-	defer closeFunc1(nil)
-	defer closeFunc2(nil)
-	defer closeFunc3()
-	defer closeFunc4()
-
-	deleteDoc(srcAgent, docKey, colName, scopeName) // create a source doc tombstone mutation. target doc is not a tombstone.
-
-	convergenceAfterImport(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
-
-	verifyStatsForDone(a, srcNode, tgtNode)
-}
-
-// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario6$ github.com/couchbase/goxdcr/parts
-func TestCasRollbackLWWMobileScenario6(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping TestCasRollbackLWWMobileScenario6")
-	}
-
-	// this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
-	// source doc is tombstone, target is not
-	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario6 =================")
-	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario6 =================")
-	a := assert.New(t)
-
-	// test common parameters
-	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
-	scopeName := "_default"
-	colName := "_default"
-	docKey := "mobileDoc"
-	docVal := "{\"foo\" : \"bar\"}"
-	srcNode := 9000 // cluster_run source node port
-	tgtNode := 9001 // cluster_run target node port
-	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
-
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
-	defer closeFunc1(nil)
-	defer closeFunc2(nil)
-	defer closeFunc3()
-	defer closeFunc4()
-
-	deleteDoc(srcAgent, docKey, colName, scopeName) // create a source doc tombstone mutation. target doc is not a tombstone.
-
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
-
-	verifyStatsForDone(a, srcNode, tgtNode)
-}
-
-// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario7$ github.com/couchbase/goxdcr/parts
-func TestCasRollbackLWWMobileScenario7(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping TestCasRollbackLWWMobileScenario7")
-	}
-
-	// this is a scenario where, after CAS regeneration, import happens before cas convergence from C2 to C1
-	// both source and target docs are tombstones
-	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario7 =================")
-	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario7 =================")
-	a := assert.New(t)
-
-	// test common parameters
-	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
-	scopeName := "_default"
-	colName := "_default"
-	docKey := "mobileDoc"
-	docVal := "{\"foo\" : \"bar\"}"
-	srcNode := 9000 // cluster_run source node port
-	tgtNode := 9001 // cluster_run target node port
-	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
-
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
-	defer closeFunc1(nil)
-	defer closeFunc2(nil)
-	defer closeFunc3()
-	defer closeFunc4()
-
-	deleteDoc(tgtAgent, docKey, colName, scopeName) // target doc is a tombstone
-	deleteDoc(srcAgent, docKey, colName, scopeName) // create a source doc mutation which is also a tombstone
-
-	convergenceAfterImport(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
-
-	verifyStatsForDone(a, srcNode, tgtNode)
-}
-
-// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario8$ github.com/couchbase/goxdcr/parts
-func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario4")
 	}
 
 	// this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
 	// both source and target doc are tombstone
-	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario8 =================")
-	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario8 =================")
+	fmt.Println("============== Test case start: TestCasRollbackLWWMobileScenario4 =================")
+	defer fmt.Println("============== Test case end: TestCasRollbackLWWMobileScenario4 =================")
 	a := assert.New(t)
 
 	// test common parameters
 	bucketName := "B1" // both on source and target
-	bucketUUID := "adX1DsoRpCb6kQWoZYq5ew"
 	scopeName := "_default"
 	colName := "_default"
 	docKey := "mobileDoc"
@@ -2008,7 +1860,7 @@ func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, bucketUUID)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
@@ -2017,7 +1869,315 @@ func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 	deleteDoc(tgtAgent, docKey, colName, scopeName) // target doc is a tombstone
 	deleteDoc(srcAgent, docKey, colName, scopeName) // create a source doc mutation which is also a tombstone
 
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, bucketUUID, srcBucket, tgtBucket, srcAgent, tgtAgent)
+	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
+	a.Nil(err)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
+
+	verifyStatsForDone(a, srcNode, tgtNode)
+}
+
+func setupForPVPruningTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func()) {
+	setupClusterRunCluster(srcNode)
+	setupClusterRunCluster(tgtNode)
+
+	createXdcrInboundUser(srcNode)
+	createXdcrInboundUser(tgtNode)
+
+	createClusterRunBucket(srcNode, bucketName, true, couchstore)
+	turnOnCrossXVersioningClusterRun(srcNode, bucketName)
+
+	createClusterRunBucket(tgtNode, bucketName, true, couchstore)
+	turnOnCrossXVersioningClusterRun(tgtNode, bucketName)
+
+	srcBucket, closeFunc1 := getGocbBucket(sourceConnStr, bucketName)
+
+	tgtBucket, closeFunc2 := getGocbBucket(targetConnStr, bucketName)
+
+	srcAgentgentConfig := &gocbcore.AgentConfig{
+		BucketName:        bucketName,
+		UserAgent:         sourceClusterName,
+		UseTLS:            false,
+		TLSRootCAProvider: func() *x509.CertPool { return nil },
+		UseCollections:    true,
+		AuthMechanisms:    []gocbcore.AuthMechanism{gocbcore.ScramSha256AuthMechanism},
+		Auth:              gocbcore.PasswordAuthProvider{Username: username, Password: password},
+		MemdAddrs:         []string{kvStringSrc},
+	}
+
+	tgtAgentgentConfig := &gocbcore.AgentConfig{
+		BucketName:        bucketName,
+		UserAgent:         targetClusterName,
+		UseTLS:            false,
+		TLSRootCAProvider: func() *x509.CertPool { return nil },
+		UseCollections:    true,
+		AuthMechanisms:    []gocbcore.AuthMechanism{gocbcore.ScramSha256AuthMechanism},
+		Auth:              gocbcore.PasswordAuthProvider{Username: username, Password: password},
+		MemdAddrs:         []string{kvStringTgt},
+	}
+
+	srcAgent, closeFunc3 := createSDKAgent(srcAgentgentConfig)
+
+	tgtAgent, closeFunc4 := createSDKAgent(tgtAgentgentConfig)
+
+	a.NotNil(srcAgent)
+	a.NotNil(tgtAgent)
+	a.NotNil(srcBucket)
+	a.NotNil(tgtBucket)
+
+	createClusterRunRemoteRef(srcNode, tgtNode, "C1")
+	replID1 := createClusterRunReplication(srcNode, bucketName, bucketName, "C1")
+	time.Sleep(2 * time.Second)
+
+	return srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4
+}
+
+func randomString(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)[:n]
+}
+
+// generatePV generates and inserts an HLV with a PV of input size, with each source of PV randomly generated string of size 22
+// and each version of the PV = now() - baseDay - i for 0 <= i < pvLen.
+func generatePV(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeName string, bucketId hlv.DocumentSourceId, pvLen int, baseDay int) (hlv.VersionsMap, gocb.Cas) {
+	mutateInSpec := []gocb.MutateInSpec{}
+
+	// cv will be such that it's a src = source bucket and ver = cas after update
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_VER_PATH, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_SRC_PATH, string(bucketId), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Update cvCas such that cas == cvCas after update
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Add PV based on input. Generate PVs with versions now() - baseDay - i for 0 <= i < pvLen.
+	pvMap := hlv.VersionsMap{}
+	now := time.Now()
+	for i := 0; i < pvLen; i++ {
+		randStr := randomString(22)
+		ver := uint64(now.Add(-time.Duration(baseDay+i) * 24 * time.Hour).UnixNano())
+		pvMap[hlv.DocumentSourceId(randStr)] = ver
+	}
+	// 1000 is arbitrary for now to be good enough to run all tests.
+	pvBytes := make([]byte, 1000)
+	pos := 0
+	pos, _, err = crMeta.VersionMapToDeltasBytes(pvMap, pvBytes, pos, nil, 0)
+	a.Nil(err)
+
+	pvBytes = pvBytes[:pos]
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PV_PATH, pvBytesToArray(a, pvBytes), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+
+	res, err := bucket.Scope(scopeName).Collection(colName).MutateIn(key, mutateInSpec, &gocb.MutateInOptions{
+		Internal: struct {
+			DocFlags gocb.SubdocDocFlag
+			User     []byte
+		}{
+			DocFlags: gocb.SubdocDocFlagAccessDeleted,
+		},
+	})
+	a.Nil(err)
+	return pvMap, res.Cas()
+}
+
+func pvBytesToArray(a *assert.Assertions, pvBytes []byte) []interface{} {
+	if len(pvBytes) == 0 {
+		return []interface{}{}
+	}
+
+	var pv []interface{}
+	err = json.Unmarshal(pvBytes, &pv)
+	a.Nil(err)
+	return pv
+}
+
+func getHLV(a *assert.Assertions, bucket *gocb.Bucket, scopeName, colName, docKey string) (hlv []byte, cas uint64) {
+	value, err := bucket.Scope(scopeName).Collection(colName).LookupIn(string(docKey),
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	a.Nil(err)
+	if !value.Exists(0) {
+		return []byte{}, uint64(value.Cas())
+	}
+
+	err = value.ContentAt(0, &hlv)
+	a.Nil(err)
+	return hlv, uint64(value.Cas())
+}
+
+// deleteNSmallestEntriesInPV removes N entries with the smallest version values from the map.
+func deleteNSmallestEntriesInPV(n int, vm hlv.VersionsMap) {
+	if n <= 0 {
+		return
+	}
+	if n >= len(vm) {
+		for k := range vm {
+			delete(vm, k)
+		}
+		return
+	}
+
+	type pair struct {
+		ver uint64
+		src hlv.DocumentSourceId
+	}
+	versions := make([]pair, 0, len(vm))
+	for src, v := range vm {
+		versions = append(versions, pair{ver: v, src: src})
+	}
+
+	sort.Slice(versions, func(i, j int) bool {
+		if versions[i].ver == versions[j].ver {
+			return versions[i].src < versions[j].src
+		}
+		return versions[i].ver < versions[j].ver
+	})
+
+	for _, v := range versions[:n] {
+		delete(vm, v.src)
+	}
+}
+
+// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
+// go test -timeout 150s -run ^TestPVPruning$ github.com/couchbase/goxdcr/v8/parts
+func TestPVPruning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestPVPruning")
+	}
+
+	fmt.Println("============== Test case start: TestPVPruning =================")
+	defer fmt.Println("============== Test case end: TestPVPruning =================")
+	a := assert.New(t)
+
+	// test common parameters
+	bucketName := "B1" // both on source and target
+	scopeName := "_default"
+	colName := "_default"
+	docKey := "pvTestDoc"
+	docVal := "{\"foo\" : \"bar\"}"
+	srcNode := 9000 // cluster_run source node port
+	tgtNode := 9001 // cluster_run target node port
+	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
+
+	srcBucket, tgtBucket, srcAgent, _, replID, closeFunc1, closeFunc2, closeFunc3, closeFunc4 := setupForPVPruningTest(a, bucketName, srcNode, tgtNode)
+	defer closeFunc1(nil)
+	defer closeFunc2(nil)
+	defer closeFunc3()
+	defer closeFunc4()
+
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0)
+	time.Sleep(2 * time.Second)
+
+	srcActorID, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(srcNode, bucketName), fetchClusterUUID(srcNode))
+	a.Nil(err)
+
+	defaultPruningWindow := 30
+
+	// 1. mobile = Off i.e. there is no min retention policy for pruning.
+	testWithMobileOff := func(testNum int) {
+		// a. 5 entries, none of the them pruneable.
+		beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, 1)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList := pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%va: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// b. 5 entries, 3 of the them pruneable.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-3, len(afterPruningList), fmt.Sprintf("%vb: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// c. 5 entries, all of the them pruneable.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(0, len(afterPruningList), fmt.Sprintf("%vc: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+	}
+	testWithMobileOff(1)
+
+	// 2. mobile = On i.e. there is a min retention policy for pruning.
+	changeClusterRunReplicationSettings(srcNode, replID, "mobile", "Active")
+	time.Sleep(5 * time.Second)
+
+	testWithDefaultVal := func(testNum int) {
+		// a. 5 entries, none of the them pruneable.
+		beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, 1)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList := pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%va: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// b. 5 entries, 3 of the them pruneable, but won't be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%vb: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// c. 5 entries, all of the them pruneable, but won't be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%vc: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// d. 6 entries, all of the them pruneable, but only one entry will be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 6, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("%vd: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+		hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+		a.Nil(err)
+		deleteNSmallestEntriesInPV(1, beforePruningMap)
+		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%vd: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
+
+		// e. 10 entries, all of the them pruneable, but only 5 entries will be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 10, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-5, len(afterPruningList), fmt.Sprintf("%ve: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+		hlvBytes, cas = getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err = crMeta.ParseHlvFields(cas, hlvBytes)
+		a.Nil(err)
+		deleteNSmallestEntriesInPV(5, beforePruningMap)
+		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%ve: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
+	}
+	testWithDefaultVal(2)
+
+	// 3. mobile = On and change the minHLVHistoryLenForMobile setting
+	// a. 5 entries, 3 of the them pruneable, but only 1 will be pruned
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "4")
+	time.Sleep(2 * time.Second)
+	beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+	time.Sleep(2 * time.Second)
+	_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+	afterPruningList := pvBytesToArray(a, afterPruningBytes)
+	a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("3a: pv before: %v, pv after: %v", beforePruningMap, afterPruningList))
+	hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
+	_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+	a.Nil(err)
+	deleteNSmallestEntriesInPV(1, beforePruningMap)
+	a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("3a: pvMap before: %v, pvMap after: %v", beforePruningMap, afterPruningMap))
+
+	// b. 10 entries, all of the them pruneable, but all will be retained
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "10")
+	time.Sleep(2 * time.Second)
+	beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 10, defaultPruningWindow+10)
+	time.Sleep(2 * time.Second)
+	_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+	afterPruningList = pvBytesToArray(a, afterPruningBytes)
+	a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("3b: pv before: %v, pv after: %v", beforePruningMap, afterPruningList))
+
+	// 4. mobile = On, sanity test after changing the setting to default value
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "5")
+	time.Sleep(2 * time.Second)
+	testWithDefaultVal(4)
+
+	// 5. mobile = Off, sanity test after changing the mobile setting back to Off
+	changeClusterRunReplicationSettings(srcNode, replID, "mobile", "Off")
+	time.Sleep(2 * time.Second)
+	testWithMobileOff(5)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }

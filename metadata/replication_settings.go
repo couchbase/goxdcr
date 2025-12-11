@@ -144,6 +144,9 @@ const (
 
 	// Developer options for troubleshooting
 	DevReplOptsKey = base.DevReplOptsKey
+
+	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
+	MinPVLenForMobileKey = base.MinPVLenForMobileKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -292,6 +295,8 @@ var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 
 var DevReplOptsConfig = &SettingsConfig{"", nil}
 
+var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -355,6 +360,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
+	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1484,4 +1490,11 @@ func (s *ReplicationSettings) GetFilterExpression() string {
 	val, _ := s.GetSettingValueOrDefaultValue(FilterExpressionKey)
 	expression := val.(string)
 	return expression
+}
+
+// GetMinPVLenForMobile returns the value of MinPVLenForMobileKey setting.
+func (s *ReplicationSettings) GetMinPVLenForMobile() int {
+	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
+	len := val.(int)
+	return len
 }

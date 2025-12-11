@@ -108,6 +108,10 @@ type baseConfig struct {
 	devBackfillSendDelay uint32
 
 	DisableHlvBasedShortCircuit atomic.Bool
+
+	// minPVLen represents the lower bound of the number of entries in PV that must be retained
+	// and not be pruned. It will be always 0 when mobile is Off.
+	minPVLen atomic.Uint32
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes

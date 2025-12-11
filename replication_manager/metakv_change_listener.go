@@ -502,7 +502,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
-		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() {
+		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
+		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
