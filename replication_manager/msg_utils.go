@@ -127,6 +127,7 @@ const (
 	ForwardLocalOnlyKey               = base.ForwardLocalOnlyKey
 	DevReplOptsKey                    = base.DevReplOptsKey
 	ExcludeEventRegexKey              = base.ExcludeEventRegexKey
+	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
 )
 
 // constants for parsing create/change/view replication response
@@ -284,6 +285,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	ForwardLocalOnlyKey:               metadata.ForwardLocalOnlyKey,
 	DevReplOptsKey:                    metadata.DevReplOptsKey,
 	ExcludeEventRegexKey:              metadata.ExcludeEventRegexKey,
+	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -373,6 +375,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.ForwardLocalOnlyKey:                  ForwardLocalOnlyKey,
 	metadata.DevReplOptsKey:                       DevReplOptsKey,
 	metadata.ExcludeEventRegexKey:                 ExcludeEventRegexKey,
+	metadata.MinPVLenForMobileKey:                 MinPVLenForMobileKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

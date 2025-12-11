@@ -508,7 +508,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) ||
 		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
-		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() {
+		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() ||
+		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

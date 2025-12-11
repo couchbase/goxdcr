@@ -43,16 +43,19 @@ func (vm VersionsMap) Add(other VersionsMap) {
 	}
 }
 
-// convert VersionsMap to VersionsDeltas
+// versionsDeltas is a helper function to convert VersionsMap to VersionsDeltas
 // 1. The entries are sorted based on increasing order of version values
 // 2. The first entry in the sorted order, is kept as is
 // 3. ith delta value will be the difference of ith version value and (i-1)th version value; i >= 1
-func (vm VersionsMap) VersionsDeltas() VersionsDeltas {
+// It also returns a boolean to indicate if the input pruner was responsible for pruning of any entries
+// of vm.
+func (vm VersionsMap) versionsDeltas(pruner *base.PruningFunc, minPVLen int) (VersionsDeltas, bool) {
 	if vm == nil {
-		return nil
+		return nil, false
 	}
-	// TODO: MB-61748 -  Use datapool
+
 	vdm := make(VersionsDeltas, 0, len(vm))
+	var pruned bool
 
 	for source, version := range vm {
 		vdm = append(vdm, versionSourcePair{
@@ -64,11 +67,63 @@ func (vm VersionsMap) VersionsDeltas() VersionsDeltas {
 	// sort it based on version values
 	sort.Sort(vdm)
 
-	for idx := len(vm) - 1; idx >= 1; idx-- {
+	// prune while retaining minimum number of entries if requested by the caller
+	vdm, pruned = vdm.pruneWithMinRetention(vm, pruner, minPVLen)
+
+	// convert to deltas
+	for idx := len(vdm) - 1; idx >= 1; idx-- {
 		vdm[idx].version = vdm[idx].version - vdm[idx-1].version
 	}
 
+	return vdm, pruned
+}
+
+// pruneWithMinRetention prunes entries from the sorted VersionsDeltas slice based on the pruner function,
+// while ensuring at least minPVLen entries are retained. It also deletes pruned entries from the source map.
+// Returns the pruned slice and a boolean indicating if any entries were pruned.
+func (vdm VersionsDeltas) pruneWithMinRetention(vm VersionsMap, pruner *base.PruningFunc, minPVLen int) (VersionsDeltas, bool) {
+	if pruner == nil || len(vdm) <= minPVLen {
+		return vdm, false
+	}
+
+	// We can prune only entries in the index range [0, maxPrunableIdx).
+	// For example, if there are 6 entries and we should retain minimum 5 entries,
+	// then we should iterate and try to prune in the range [0, 1) i.e. we can prune
+	// only the first entry.
+	maxPrunableIdx := len(vdm) - minPVLen
+
+	// Since vdm is sorted by ascending version, if entry i is not prunable,
+	// all entries after it (with higher/newer versions) are also not prunable.
+	// Find the first index in [0, maxPrunableIdx) where the entry is not prunable.
+	firstNonPrunable := sort.Search(maxPrunableIdx, func(i int) bool {
+		return !(*pruner)(vdm[i].version)
+	})
+
+	// If no entries were pruned, return early
+	if firstNonPrunable == 0 {
+		return vdm, false
+	}
+
+	// Delete pruned entries from the source map
+	for i := 0; i < firstNonPrunable; i++ {
+		delete(vm, vdm[i].source)
+	}
+
+	return vdm[firstNonPrunable:], true
+}
+
+// VersionsDeltas converts vm to VersionsDeltas. It's similar to VersionsDeltasAfterPruning function,
+// but no pruning will be done on the entries.
+func (vm VersionsMap) VersionsDeltas() VersionsDeltas {
+	vdm, _ := vm.versionsDeltas(nil, 0)
 	return vdm
+}
+
+// VersionsDeltasAfterPruning converts vm to VersionsDeltas after applying pruner to the entries. It's
+// similar to VersionsDeltas function, but pruning will be done on the entries. It returns a boolean indicating if
+// the input pruner pruned any entries of vm.
+func (vm VersionsMap) VersionsDeltasAfterPruning(pruner *base.PruningFunc, minPVLen int) (VersionsDeltas, bool) {
+	return vm.versionsDeltas(pruner, minPVLen)
 }
 
 type versionSourcePair struct {

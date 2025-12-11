@@ -1685,6 +1685,9 @@ const (
 	HlvVbMaxCasKey = "vbucketsMaxCas"
 	// The target cluster counterparts for above.
 	TargetHlvVbMaxCasKey = "targetVbucketsMaxCas"
+	// MinPVLenForMobileKey represents the minimum number of entries that should be present in PVs
+	// if the replication has mobile as Active.
+	MinPVLenForMobileKey = "minHLVHistoryLenForMobile"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

@@ -163,6 +163,9 @@ const (
 
 	// ExcludeEventRegexKey is a regex pattern to exclude errors from UI logging
 	ExcludeEventRegexKey = base.ExcludeEventRegexKey
+
+	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
+	MinPVLenForMobileKey = base.MinPVLenForMobileKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -335,6 +338,8 @@ var DevReplOptsConfig = &SettingsConfig{"", nil}
 // An empty string "" means no exclude logic is applied, and all errors will be shown.
 var excludeEventRegexConfig = &SettingsConfig{"", nil}
 
+var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -409,6 +414,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 	ForwardLocalOnlyKey:                  forwardLocalOnlyConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
+	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
 	ExcludeEventRegexKey:                 excludeEventRegexConfig,
 }
 
@@ -1653,4 +1659,11 @@ func (s *ReplicationSettings) GetExcludeEventRegex() string {
 	val, _ := s.GetSettingValueOrDefaultValue(ExcludeEventRegexKey)
 	regex := val.(string)
 	return regex
+}
+
+// GetMinPVLenForMobile returns the value of MinPVLenForMobileKey setting.
+func (s *ReplicationSettings) GetMinPVLenForMobile() int {
+	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
+	len := val.(int)
+	return len
 }

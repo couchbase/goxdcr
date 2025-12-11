@@ -1068,6 +1068,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 		xmemSettings[base.ForwardLocalOnlyKey] = forwardLocalOnlyFlag
 	}
 
+	minPVLenForMobile, ok := settings[base.MinPVLenForMobileKey]
+	if ok {
+		xmemSettings[base.MinPVLenForMobileKey] = minPVLenForMobile
+	}
+
 	return xmemSettings
 }
 
@@ -1338,6 +1343,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	}
 	if val, ok := settings[base.DevReplOptsKey]; ok {
 		xmemSettings[base.DevReplOptsKey] = val
+	}
+	if val, ok := settings[base.MinPVLenForMobileKey]; ok {
+		xmemSettings[base.MinPVLenForMobileKey] = val
 	}
 
 	return xmemSettings, nil
