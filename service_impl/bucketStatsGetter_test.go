@@ -265,12 +265,12 @@ func TestClusterBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 
 	// Mock GetFailoverLog
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mcClient).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mcClient, mock.Anything).Return(failoverLog.FailoverLogMap, nil)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -322,16 +322,16 @@ func TestClusterBucketStatsProvider_GetFailoverLog_PartialFailure(t *testing.T) 
 			},
 		}
 	}
-	utils.On("GetFailoverLog", mcClient).Return(failoverLogServer1.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mcClient, mock.Anything).Return(failoverLogServer1.FailoverLogMap, nil)
 
 	// Second server fails
-	utils.On("GetFailoverLog", mcClient2).Return(nil, errors.New("failed to get failover log"))
+	utils.On("GetFailoverLog", mcClient2, mock.Anything).Return(nil, errors.New("failed to get failover log"))
 	utils.On("IsSeriousNetError", mock.Anything).Return(false)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -367,14 +367,14 @@ func TestClusterBucketStatsProvider_GetFailoverLog_NetworkError(t *testing.T) {
 
 	// Simulate serious network error
 	networkErr := errors.New("connection reset by peer")
-	utils.On("GetFailoverLog", mock.Anything).Return(nil, networkErr)
+	utils.On("GetFailoverLog", mock.Anything, mock.Anything).Return(nil, networkErr)
 	utils.On("IsSeriousNetError", networkErr).Return(true)
 	mcClient.On("Close").Return(nil)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -413,7 +413,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 			HighSeqno: 1000 + uint64(vb),
 		}
 	}
-	utils.On("GetVBucketStats", mock.Anything, mcClient).Return(expectedVBStatsMap, nil)
+	utils.On("GetVBucketStats", mock.Anything, mcClient, mock.Anything).Return(expectedVBStatsMap, nil)
 
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   []uint16{0, 1, 2, 3, 4, 5, 6, 7},
@@ -422,7 +422,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 	}
 	defer close(requestOpts.FinCh)
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -467,7 +467,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_MaxCasOnly(t *testing.T) {
 			MaxCas: uint64(9999999) + uint64(vb),
 		}
 	}
-	utils.On("GetVBucketStats", mock.Anything, mcClient).Return(expectedVBStatsMap, nil)
+	utils.On("GetVBucketStats", mock.Anything, mcClient, mock.Anything).Return(expectedVBStatsMap, nil)
 
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   []uint16{0, 1, 2, 3, 4, 5, 6, 7},
@@ -476,7 +476,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_MaxCasOnly(t *testing.T) {
 	}
 	defer close(requestOpts.FinCh)
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -513,7 +513,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_InvalidRequest(t *testing.T)
 	}
 	defer close(requestOpts.FinCh)
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.Error(err)
 	assert.Nil(result)
@@ -553,11 +553,11 @@ func TestClusterBucketStatsProvider_GetVBucketStats_PartialFailure(t *testing.T)
 			HighSeqno: 1000 + uint64(vb),
 		}
 	}
-	utils.On("GetVBucketStats", mock.Anything, mcClient).Return(expectedVBStatsMap, nil)
+	utils.On("GetVBucketStats", mock.Anything, mcClient, mock.Anything).Return(expectedVBStatsMap, nil)
 
 	// Second server fails
 	networkErr := errors.New("timeout")
-	utils.On("GetVBucketStats", mock.Anything, mcClient2).Return(base.VBucketStatsMap(nil), networkErr)
+	utils.On("GetVBucketStats", mock.Anything, mcClient2, mock.Anything).Return(base.VBucketStatsMap(nil), networkErr)
 	utils.On("IsSeriousNetError", networkErr).Return(false)
 
 	requestOpts := &base.VBucketStatsRequest{
@@ -567,7 +567,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_PartialFailure(t *testing.T)
 	}
 	defer close(requestOpts.FinCh)
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -602,7 +602,7 @@ func TestClusterBucketStatsProvider_Concurrent_GetFailoverLog(t *testing.T) {
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient
 
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface"), mock.Anything).Return(failoverLog.FailoverLogMap, nil)
 	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	// Execute concurrent requests
@@ -616,7 +616,7 @@ func TestClusterBucketStatsProvider_Concurrent_GetFailoverLog(t *testing.T) {
 			defer wg.Done()
 			finCh := make(chan bool, 1)
 			defer close(finCh)
-			result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+			result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 			assert.NoError(err)
 			assert.NotNil(result)
 			assert.Empty(errMap)
@@ -653,14 +653,14 @@ func TestClusterBucketStatsProvider_Idempotent_GetFailoverLog(t *testing.T) {
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient
 
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface"), mock.Anything).Return(failoverLog.FailoverLogMap, nil)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 
 	// Call multiple times - should be idempotent
 	for i := 0; i < 5; i++ {
 		finCh := make(chan bool, 1)
-		result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+		result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 		close(finCh)
 		assert.NoError(err)
 		assert.NotNil(result)
@@ -755,8 +755,9 @@ func TestCngBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -791,7 +792,7 @@ func TestCngBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -831,8 +832,9 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -859,12 +861,15 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 		handler.OnComplete()
 	}).Return()
 
+	finCh := make(chan bool, 1)
+	defer close(finCh)
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   vblist,
 		MaxCasOnly: false,
+		FinCh:      finCh,
 	}
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.NoError(err)
 	assert.NotNil(result)
@@ -901,8 +906,9 @@ func TestCngBucketStatsProvider_GetFailoverLog_Error(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -916,7 +922,7 @@ func TestCngBucketStatsProvider_GetFailoverLog_Error(t *testing.T) {
 
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.Error(err)
 	assert.Nil(result)
@@ -944,8 +950,9 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -957,12 +964,15 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 		handler.OnError(fmt.Errorf("gRPC timeout error"))
 	}).Return()
 
+	finCh := make(chan bool, 1)
+	defer close(finCh)
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   vblist,
 		MaxCasOnly: false,
+		FinCh:      finCh,
 	}
 
-	result, errMap, err := provider.GetVBucketStats(requestOpts)
+	result, errMap, err := provider.GetVBucketStats(requestOpts, nil)
 
 	assert.Error(err)
 	assert.Nil(result)
@@ -992,7 +1002,7 @@ func TestClusterBucketStatsProvider_EmptyVBList(t *testing.T) {
 	emptyVblist := []uint16{}
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: emptyVblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: emptyVblist, FinCh: finCh}, nil)
 
 	assert.Error(err)
 	assert.Nil(result)
@@ -1021,7 +1031,7 @@ func TestClusterBucketStatsProvider_KvVbMapError(t *testing.T) {
 	vblist := []uint16{0, 1, 2, 3}
 	finCh := make(chan bool, 1)
 	defer close(finCh)
-	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, nil)
 
 	assert.Error(err)
 	assert.Nil(result)
@@ -1197,8 +1207,8 @@ func TestClusterBucketStatsProvider_ConcurrentOperationsAndClose_NoDeadlock(t *t
 	// Setup basic mocks
 	setupBasicMocksForProvider(provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc)
 
-	mockUtils.On("GetFailoverLog", mock.Anything).Return(make(base.FailoverLogMapType), nil)
-	mockUtils.On("GetVBucketStats", mock.Anything, mock.Anything).Return(make(base.VBucketStatsMap), nil)
+	mockUtils.On("GetFailoverLog", mock.Anything, mock.Anything).Return(make(base.FailoverLogMapType), nil)
+	mockUtils.On("GetVBucketStats", mock.Anything, mock.Anything, mock.Anything).Return(make(base.VBucketStatsMap), nil)
 
 	var wg sync.WaitGroup
 	const numOps = 20
@@ -1214,7 +1224,7 @@ func TestClusterBucketStatsProvider_ConcurrentOperationsAndClose_NoDeadlock(t *t
 				VBuckets: []uint16{0, 1},
 				FinCh:    make(chan bool),
 			}
-			provider.GetFailoverLog(request)
+			provider.GetFailoverLog(request, nil)
 		}()
 
 		// GetVBucketStats operations
@@ -1225,7 +1235,7 @@ func TestClusterBucketStatsProvider_ConcurrentOperationsAndClose_NoDeadlock(t *t
 				FinCh:      make(chan bool),
 				MaxCasOnly: false,
 			}
-			provider.GetVBucketStats(request)
+			provider.GetVBucketStats(request, nil)
 		}()
 	}
 
@@ -1312,7 +1322,7 @@ func TestClusterBucketStatsProvider_OperationAfterClose_Fails(t *testing.T) {
 		VBuckets: []uint16{0, 1},
 		FinCh:    make(chan bool),
 	}
-	_, _, err1 := provider.GetFailoverLog(request1)
+	_, _, err1 := provider.GetFailoverLog(request1, nil)
 	assert.Error(err1)
 	assert.Contains(err1.Error(), "closed")
 
@@ -1322,7 +1332,7 @@ func TestClusterBucketStatsProvider_OperationAfterClose_Fails(t *testing.T) {
 		FinCh:      make(chan bool),
 		MaxCasOnly: false,
 	}
-	_, _, err2 := provider.GetVBucketStats(request2)
+	_, _, err2 := provider.GetVBucketStats(request2, nil)
 	assert.Error(err2)
 	assert.Contains(err2.Error(), "closed")
 }

@@ -1285,6 +1285,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
+	useLegacyPreReplicate bool,
 	colMarshalIdxThreshold int,
 	buildVersion string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
@@ -1475,6 +1476,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
+
+	UseLegacyPreReplicate = useLegacyPreReplicate
 	ColMappingLargeThreshold = colMarshalIdxThreshold
 }
 
@@ -2068,6 +2071,9 @@ const (
 	FailoverLogEntryIdKey                   = "id"
 	FailoverLogEntrySeqnoKey                = "seq"
 )
+
+// UseLegacyPreReplicate is the boolean flag that indicates whether to use legacy pre-replicate
+var UseLegacyPreReplicate = false
 
 const MaxValueLenForLogging = 512
 

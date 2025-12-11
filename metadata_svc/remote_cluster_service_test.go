@@ -3064,7 +3064,12 @@ func TestNLBPoolsDefaultSSLMgmt(t *testing.T) {
 	agentImpl.initDone = uint32(1)
 
 	clonedRef := ref.Clone()
-	agentImpl.pendingRef = *clonedRef
+
+	// Avoid copying a struct with embedded RWMutex which can cause panic
+	// when concurrent readers try to unlock a different copied mutex.
+	agentImpl.refMtx.Lock()
+	agentImpl.pendingRef.LoadFrom(clonedRef)
+	agentImpl.refMtx.Unlock()
 
 	time.Sleep(2 * time.Second)
 
