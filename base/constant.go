@@ -1288,6 +1288,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
+	useLegacyPreReplicate bool,
 	buildVersion string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
@@ -1477,6 +1478,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
+
+	UseLegacyPreReplicate = useLegacyPreReplicate
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -2036,3 +2039,6 @@ const (
 	FailoverLogEntryIdKey                   = "id"
 	FailoverLogEntrySeqnoKey                = "seq"
 )
+
+// UseLegacyPreReplicate is the boolean flag that indicates whether to use legacy pre-replicate
+var UseLegacyPreReplicate = false

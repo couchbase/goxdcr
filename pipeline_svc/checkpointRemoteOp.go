@@ -32,12 +32,10 @@ type remoteOps struct {
 	finCh chan bool
 	// capiSvc is the service that provides the capi service
 	capiSvc service_def.CAPIService
-	// useLegacyPreReplicate is used to determine if the legacy pre-replicate is used
-	useLegacyPreReplicate bool
 }
 
 // NewRemoteOps is the constructor for the remoteOps struct
-func NewRemoteOps(bucketStatsProvider service_def.BucketStatsOps, srcVbList, tgtVbList []uint16, isVariableVBMode bool, remoteBucket *service_def.RemoteBucketInfo, finCh chan bool, logger *log.CommonLogger) *remoteOps {
+func NewRemoteOps(bucketStatsProvider service_def.BucketStatsOps, srcVbList, tgtVbList []uint16, isVariableVBMode bool, remoteBucket *service_def.RemoteBucketInfo, finCh chan bool, capi_svc service_def.CAPIService, logger *log.CommonLogger) *remoteOps {
 	return &remoteOps{
 		bucketStatsProvider: bucketStatsProvider,
 		srcVbList:           srcVbList,
@@ -45,6 +43,8 @@ func NewRemoteOps(bucketStatsProvider service_def.BucketStatsOps, srcVbList, tgt
 		remoteBucket:        remoteBucket,
 		logger:              logger,
 		finCh:               finCh,
+		isVariableVBMode:    isVariableVBMode,
+		capiSvc:             capi_svc,
 	}
 }
 
@@ -101,7 +101,7 @@ func (r *remoteOps) PrepareForLocalPreReplicate(bucketFailoverLog *base.BucketFa
 // 2. targetVBOpaque: denotes the latest/current vbucketUUID of  the vbucket
 // 3. error: any error that occurred during the operation
 func (r *remoteOps) PreReplicate(tgtTs *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error) {
-	if r.useLegacyPreReplicate {
+	if base.UseLegacyPreReplicate {
 		return r.LegacyPreReplicate(tgtTs)
 	}
 

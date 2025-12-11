@@ -755,8 +755,9 @@ func TestCngBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -831,8 +832,9 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -859,9 +861,12 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 		handler.OnComplete()
 	}).Return()
 
+	finCh := make(chan bool, 1)
+	defer close(finCh)
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   vblist,
 		MaxCasOnly: false,
+		FinCh:      finCh,
 	}
 
 	result, errMap, err := provider.GetVBucketStats(requestOpts)
@@ -901,8 +906,9 @@ func TestCngBucketStatsProvider_GetFailoverLog_Error(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -944,8 +950,9 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 	}
 
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
-	// Mock cngConn to avoid nil pointer
+	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
+	provider.initDone.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -957,9 +964,12 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 		handler.OnError(fmt.Errorf("gRPC timeout error"))
 	}).Return()
 
+	finCh := make(chan bool, 1)
+	defer close(finCh)
 	requestOpts := &base.VBucketStatsRequest{
 		VBuckets:   vblist,
 		MaxCasOnly: false,
+		FinCh:      finCh,
 	}
 
 	result, errMap, err := provider.GetVBucketStats(requestOpts)

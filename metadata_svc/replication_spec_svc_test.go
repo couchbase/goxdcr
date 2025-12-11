@@ -206,14 +206,12 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
 	xdcrTopologyMock.On("MyClusterCompatibility").Return(clusterCompatVersion, nil)
 
-	// LOCAL mock
-	utilitiesMock.On("BucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+	// LOCAL mock - BucketValidationInfo(logger, req)
+	utilitiesMock.On("BucketValidationInfo", mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, srcResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
-	// TARGET mock - emptyString since we're feeding a dummy target
-	utilitiesMock.On("RemoteBucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(tgtBucketInfo,
+	// TARGET mock - RemoteBucketValidationInfo(logger, req, useExternal)
+	utilitiesMock.On("RemoteBucketValidationInfo", mock.Anything, mock.Anything, mock.Anything).Return(tgtBucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	nonExistentBucketError := errors.New("NonExistentBucketError")

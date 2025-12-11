@@ -20,9 +20,9 @@ func (_m *BucketStatsOps) EXPECT() *BucketStatsOps_Expecter {
 	return &BucketStatsOps_Expecter{mock: &_m.Mock}
 }
 
-// GetFailoverLog provides a mock function with given fields: vblist
-func (_m *BucketStatsOps) GetFailoverLog(vblist []uint16) (*base.BucketFailoverLog, base.ErrorMap, error) {
-	ret := _m.Called(vblist)
+// GetFailoverLog provides a mock function with given fields: requestOpts
+func (_m *BucketStatsOps) GetFailoverLog(requestOpts *base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error) {
+	ret := _m.Called(requestOpts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetFailoverLog")
@@ -31,27 +31,27 @@ func (_m *BucketStatsOps) GetFailoverLog(vblist []uint16) (*base.BucketFailoverL
 	var r0 *base.BucketFailoverLog
 	var r1 base.ErrorMap
 	var r2 error
-	if rf, ok := ret.Get(0).(func([]uint16) (*base.BucketFailoverLog, base.ErrorMap, error)); ok {
-		return rf(vblist)
+	if rf, ok := ret.Get(0).(func(*base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error)); ok {
+		return rf(requestOpts)
 	}
-	if rf, ok := ret.Get(0).(func([]uint16) *base.BucketFailoverLog); ok {
-		r0 = rf(vblist)
+	if rf, ok := ret.Get(0).(func(*base.FailoverLogRequest) *base.BucketFailoverLog); ok {
+		r0 = rf(requestOpts)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*base.BucketFailoverLog)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]uint16) base.ErrorMap); ok {
-		r1 = rf(vblist)
+	if rf, ok := ret.Get(1).(func(*base.FailoverLogRequest) base.ErrorMap); ok {
+		r1 = rf(requestOpts)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(base.ErrorMap)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func([]uint16) error); ok {
-		r2 = rf(vblist)
+	if rf, ok := ret.Get(2).(func(*base.FailoverLogRequest) error); ok {
+		r2 = rf(requestOpts)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -65,14 +65,14 @@ type BucketStatsOps_GetFailoverLog_Call struct {
 }
 
 // GetFailoverLog is a helper method to define mock.On call
-//   - vblist []uint16
-func (_e *BucketStatsOps_Expecter) GetFailoverLog(vblist interface{}) *BucketStatsOps_GetFailoverLog_Call {
-	return &BucketStatsOps_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", vblist)}
+//   - requestOpts *base.FailoverLogRequest
+func (_e *BucketStatsOps_Expecter) GetFailoverLog(requestOpts interface{}) *BucketStatsOps_GetFailoverLog_Call {
+	return &BucketStatsOps_GetFailoverLog_Call{Call: _e.mock.On("GetFailoverLog", requestOpts)}
 }
 
-func (_c *BucketStatsOps_GetFailoverLog_Call) Run(run func(vblist []uint16)) *BucketStatsOps_GetFailoverLog_Call {
+func (_c *BucketStatsOps_GetFailoverLog_Call) Run(run func(requestOpts *base.FailoverLogRequest)) *BucketStatsOps_GetFailoverLog_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16))
+		run(args[0].(*base.FailoverLogRequest))
 	})
 	return _c
 }
@@ -82,7 +82,7 @@ func (_c *BucketStatsOps_GetFailoverLog_Call) Return(_a0 *base.BucketFailoverLog
 	return _c
 }
 
-func (_c *BucketStatsOps_GetFailoverLog_Call) RunAndReturn(run func([]uint16) (*base.BucketFailoverLog, base.ErrorMap, error)) *BucketStatsOps_GetFailoverLog_Call {
+func (_c *BucketStatsOps_GetFailoverLog_Call) RunAndReturn(run func(*base.FailoverLogRequest) (*base.BucketFailoverLog, base.ErrorMap, error)) *BucketStatsOps_GetFailoverLog_Call {
 	_c.Call.Return(run)
 	return _c
 }

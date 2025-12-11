@@ -739,7 +739,7 @@ func (ckmgr *CheckpointManager) setRemoteOps() error {
 	}
 	srcVbList := ckmgr.getMyVBs()
 	tgtVbList := ckmgr.getMyTgtVBs()
-	ckmgr.remoteOps = NewRemoteOps(bucketStatsProvider, srcVbList, tgtVbList, ckmgr.isVariableVBMode(), ckmgr.remote_bucket, ckmgr.finish_ch, ckmgr.logger)
+	ckmgr.remoteOps = NewRemoteOps(bucketStatsProvider, srcVbList, tgtVbList, ckmgr.isVariableVBMode(), ckmgr.remote_bucket, ckmgr.finish_ch, ckmgr.capi_svc, ckmgr.logger)
 	return nil
 }
 
@@ -4189,11 +4189,11 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 
 func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(tgtBucketStats *base.BucketVBStats, globalTargetOpaque metadata.TargetVBOpaque) (metadata.TargetTimestamp, error) {
 	if tgtBucketStats == nil {
-		return nil, fmt.Errorf("%v:  getRemoteGlobalTimestamp:tgtBucketStats :%w", base.ErrorNilPtr)
+		return nil, fmt.Errorf("%v:  getRemoteGlobalTimestamp:tgtBucketStats :%w", ckmgr.pipeline.FullTopic(), base.ErrorNilPtr)
 	}
 
 	if globalTargetOpaque == nil {
-		return nil, fmt.Errorf("getRemoteGlobalTimestamp:globalTargetOpaque :%w", base.ErrorNilPtr)
+		return nil, fmt.Errorf("%v: getRemoteGlobalTimestamp:globalTargetOpaque :%w", ckmgr.pipeline.FullTopic(), base.ErrorNilPtr)
 	}
 
 	tgtBucketStats.Mutex.RLock()
@@ -4202,7 +4202,7 @@ func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(tgtBucketStats *base.Bu
 
 	// first check if vbuuid has changed or not
 	if !tgtBucketStatsMap.IsSame(globalTargetOpaque) {
-		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", globalTargetOpaque.Value(), tgtBucketStatsMap)
+		ckmgr.logger.Errorf("%v: target vbuuid has changed: old=%v, new=%v", ckmgr.pipeline.FullTopic(), globalTargetOpaque.Value(), tgtBucketStatsMap)
 		return nil, errTargetVbuuidChanged
 	}
 

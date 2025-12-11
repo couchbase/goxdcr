@@ -308,6 +308,9 @@ const (
 	MaxCheckpointRecordsToKeepVariableVBKey = "MaxCheckpointRecordsToKeepVariableVB"
 	// the maximum number of checkpoint records to read from the checkpoint doc - for variableVB replications
 	MaxCheckpointRecordsToReadVariableVBKey = "MaxCheckpointRecordsToReadVariableVB"
+
+	// use legacy pre-replicate
+	UseLegacyPreReplicateKey = "UseLegacyPreReplicate"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -450,6 +453,7 @@ var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMax
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
 var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
+var UseLegacyPreReplicateConfig = &SettingsConfig{false, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -592,6 +596,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
 	MaxCheckpointRecordsToKeepVariableVBKey:       MaxCheckpointRecordsToKeepVariableVBConfig,
 	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
+	UseLegacyPreReplicateKey:                      UseLegacyPreReplicateConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
