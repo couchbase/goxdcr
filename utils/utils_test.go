@@ -157,6 +157,15 @@ func getGCPPrivateLinksBPath() map[string]interface{} {
 	return retMap
 }
 
+func getAWSPrivateLinksBPath() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_aws_private_links.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
 type localNodeList []string
 
 func (list localNodeList) check() bool {
@@ -511,8 +520,8 @@ func TestReplaceKVVBMapExternalK8(t *testing.T) {
 	assert.True((externalNodeList)(nodeNameList).check())
 }
 
-func TestGetIntExtHostNameTranslationMapForGCPPrivateLinks(t *testing.T) {
-	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMapForGCPPrivateLinks =================")
+func TestGetIntExtHostNameTranslationMapForPrivateLinks(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMapForPrivateLinks =================")
 	a := assert.New(t)
 
 	bucketInfoMap := getGCPPrivateLinksBPath()
@@ -522,7 +531,14 @@ func TestGetIntExtHostNameTranslationMapForGCPPrivateLinks(t *testing.T) {
 	a.Equal(err, nil)
 	a.Greater(len(translatedMap), 1)
 
-	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMap =================")
+	bucketInfoMap = getAWSPrivateLinksBPath()
+
+	translatedMap, err = testUtils.GetIntExtHostNameKVPortTranslationMap(bucketInfoMap)
+
+	a.Equal(err, nil)
+	a.Greater(len(translatedMap), 1)
+
+	fmt.Println("============== Test case start: TestGetIntExtHostNameTranslationMapForPrivateLinks =================")
 }
 
 func TestGetMemcachedSSLPortMapExternal(t *testing.T) {
@@ -1190,6 +1206,80 @@ func TestBucketValidationInfoInternalWithGCPPrivateLinks(t *testing.T) {
 	}
 }
 
+func TestBucketValidationInfoInternalWithAWSPrivateLinks(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketValidationInfoInternalWithAWSPrivateLinks =================")
+	defer fmt.Println("============== Test case end: TestBucketValidationInfoInternalWithAWSPrivateLinks =================")
+	assert := assert.New(t)
+
+	// Load the test data files as specified in requirements
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_aws_private_links.json")
+	bucketInfo, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+
+	fileName = fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_aws_private_links.json")
+	terseBucketInfo, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+
+	// Test parameters as specified in requirements
+	hostAddr := "aovlgri3cyfkeouh.pl.aws-guardians.nonprod-project-avengers.com:20093"
+	bucketName := "sample"
+	username := "abc"
+	password := "def"
+	authMech := base.HttpAuthMechHttps
+	certificates := []byte("blah")
+	useExternal := true
+	logger := log.NewLogger("test", log.DefaultLoggerContext)
+
+	// Create a stub that will return our mock data
+	stub := &stubUtilsForBucketValidation{
+		Utilities:           testUtils,
+		mockBucketInfo:      bucketInfo,
+		mockTerseBucketInfo: terseBucketInfo,
+	}
+
+	// Manually test the core logic of bucketValidationInfoInternal
+	// First call GetBucketInfo (should return our mock)
+	bucketInfoResult, err := stub.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificates, false, nil, nil, logger)
+	assert.Nil(err)
+	assert.NotNil(bucketInfoResult)
+
+	// Check if we should use terse info
+	useTerseInfo, err := testUtils.ShouldUseTerseBucketInfo(bucketInfoResult, "", "", useExternal, authMech == base.HttpAuthMechHttps)
+	assert.Nil(err)
+	assert.True(useTerseInfo)
+
+	// Call GetTerseBucketInfo (should return our mock)
+	bucketInfoResult, err = stub.GetTerseBucketInfo(hostAddr, bucketName, username, password, authMech, certificates, false, nil, nil, logger)
+	assert.Nil(err)
+	assert.NotNil(bucketInfoResult)
+
+	// Get VB map from the bucket info
+	bucketKVVBMapPtr, err := testUtils.GetServerVBucketsMap(hostAddr, bucketName, bucketInfoResult, nil, nil)
+	assert.Nil(err)
+	bucketKVVBMap := *bucketKVVBMapPtr
+
+	// Translate if using external
+	testUtils.TranslateKvVbMap(bucketKVVBMap, bucketInfoResult)
+
+	// Verify results
+	assert.Equal(len(bucketKVVBMap), 3)
+
+	// Verify that terse bucket info was used
+	isTerse, err := testUtils.IsTerseBucketInfo(bucketInfoResult)
+	assert.Equal(err, nil)
+	assert.Equal(isTerse, true)
+
+	// Also check for validity of ssl_port_map
+	ssl_port_map, err := stub.getMemcachedSSLPortMapInternal(hostAddr, bucketInfoResult, logger, useExternal, true)
+	assert.Nil(err)
+	assert.Greater(len(ssl_port_map), 0)
+
+	for k := range bucketKVVBMap {
+		_, ok := ssl_port_map[k]
+		assert.True(ok)
+	}
+}
+
 func readJsonHelperForTest(fileName string) (retMap map[string]interface{}, err error) {
 	byteSlice, err := ioutil.ReadFile(fileName)
 	if err != nil {
@@ -1226,6 +1316,7 @@ func TestShouldUseTerseBucketInfo(t *testing.T) {
 	// privateEndPoints.json & privateEndPoints1.json (AWS private endpoints)
 	positiveFiles := []string{
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_aws_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json"),
 	}
@@ -1306,6 +1397,14 @@ func TestGetServerVBucketsMapWithTerseInfo(t *testing.T) {
 
 	serverName := "pe.vxzqmnl0syi3kpwn.aws-guardians.nonprod-project-avengers.com:1801"
 	kvVBMap, err := testUtils.GetRemoteServerVBucketsMap(serverName, "B1", bucketInfo, true /*useExternal*/)
+	assert.Nil(err)
+	assert.Equal(3, len(kvVBMap))
+
+	bucketInfo = getAWSPrivateLinksBPath()
+	assert.NotNil(bucketInfo)
+
+	serverName = "aovlgri3cyfkeouh.pl.aws-guardians.nonprod-project-avengers.com:20093"
+	kvVBMap, err = testUtils.GetRemoteServerVBucketsMap(serverName, "sample", bucketInfo, true /*useExternal*/)
 	assert.Nil(err)
 	assert.Equal(3, len(kvVBMap))
 
