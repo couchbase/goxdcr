@@ -53,7 +53,7 @@ func TestPreReplicateMapWithTerseBucketInfo(t *testing.T) {
 
 	// Test parameters needed to use terseInfo
 	useExternal := true
-	hostAddr := "pe.vxzqmnl0syi3kpwn.aws-guardians.nonprod-project-avengers.com:1801"
+	hostAddr := "abc.com"
 	bucketName := "B1"
 	testUtils := utils.NewUtilities()
 	ref := metadata.RemoteClusterReference{
@@ -61,10 +61,13 @@ func TestPreReplicateMapWithTerseBucketInfo(t *testing.T) {
 		HttpAuthMech_: base.HttpAuthMechHttps,
 	}
 
-	// 1. Positive case - pools_default_b_gcp_private_links.json (GCP private endpoints)
+	// 1. Positive case -
+	// a. pools_default_b_gcp_private_links.json (GCP private endpoints)
+	// b. pools_default_b_aws_private_links.json (AWS private endpoints which has non-KV nodes as well)
 	testExternalDataDir := "./../utils/testExternalData/"
 	positiveFiles := []string{
 		fmt.Sprintf("%v%v", testExternalDataDir, "alternateAddrKVSSL/pools_default_b_gcp_private_links.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "alternateAddrKVSSL/pools_default_b_aws_private_links.json"),
 	}
 
 	for _, fileName := range positiveFiles {
@@ -101,6 +104,7 @@ func TestPreReplicateMapWithTerseBucketInfo(t *testing.T) {
 	// 2. Negative cases - rest all of the valid non-terse bucketInfo files in the goxdcr repository.
 	privateLinksSetupFiles := []string{
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_aws_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json"),
 	}
