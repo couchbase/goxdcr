@@ -1389,7 +1389,6 @@ func HexLittleEndianToUint64WO0x(hexLE []byte) (uint64, error) {
 	// Decoding the hexLE will need the string to be of even length
 	// If hexLE is not of even length, it was probably stripped off of zeroes at the end as part of Uint64ToHexLittleEndianAndStrip
 	if len(hexLE)%2 != 0 {
-		// TODO: Use datapool - MB-61748
 		evenLenHexLE := make([]byte, len(hexLE), len(hexLE)+1)
 		copy(evenLenHexLE, hexLE)
 		evenLenHexLE = append(evenLenHexLE, '0')

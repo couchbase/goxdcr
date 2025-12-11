@@ -15,13 +15,24 @@ function reset {
 	sleep 3
 }
 
-function runTest {
+function runSubdocTest {
 	testNum=$1
-	echo "Running test $testNum"
+	echo "Running subdoc test $testNum"
 	testName="TestCasRollbackLWWMobileScenario$testNum"
 	go test -timeout 120s -run $testName github.com/couchbase/goxdcr/v8/parts
 	if (($? != 0)); then
-		echo "failed test $testNum"
+		echo "failed subdoc test $testNum"
+		exit 1
+	fi
+	reset
+}
+
+function runPVTests {
+	echo "Running PV pruning tests"
+	testName="TestPVPruning"
+	go test -timeout 140s -run $testName github.com/couchbase/goxdcr/v8/parts
+	if (($? != 0)); then
+		echo "failed PV pruning tests"
 		exit 1
 	fi
 	reset
@@ -29,7 +40,7 @@ function runTest {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running mobile coexistence subdoc test case"
+	echo "Running mobile coexistence subdoc test case + other go tests"
 	echo "============================================================================"
 
 	testForClusterRun
@@ -38,18 +49,20 @@ function runTestCase {
 	fi
 
 	# source and target docs are both not tombstones
-	runTest 1
+	runSubdocTest 1
 
 	# target doc is tombstone, but source doc is not
-	runTest 2
+	runSubdocTest 2
 
 	# source doc is tombstone, but target doc is not
-	runTest 3
+	runSubdocTest 3
 
 	# source and target docs are both tombstones
-	runTest 4
+	runSubdocTest 4
+
+	runPVTests
 
 	echo "============================================================================"
-	echo "Mobile coexistence subdoc test case passed"
+	echo "Mobile coexistence subdoc test + other go tests case passed"
 	echo "============================================================================"
 }

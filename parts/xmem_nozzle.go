@@ -611,6 +611,12 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 		if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
 			config.DisableHlvBasedShortCircuit.Store(val.(bool))
 		}
+		if val, ok := settings[base.MinPVLenForMobileKey]; ok &&
+			config.mobileCompatible == base.MobileCompatibilityActive {
+			config.minPVLen.Store(uint32(val.(int)))
+		} else {
+			config.minPVLen.Store(0)
+		}
 	}
 	return err
 }
@@ -2968,7 +2974,7 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	xattrComposer := base.NewXattrComposer(newbody)
 
 	if updateHLV {
-		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
+		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer, int(xmem.config.minPVLen.Load()))
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, sourceMeta=%s in updateSystemXattrForTarget, err=%v",
 				base.UdTagBegin, req.Key, base.UdTagEnd,
@@ -3050,7 +3056,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 			wrappedReq.AddByteSliceForXmemToRecycle(newHlv)
 		}
 
-		pos, pruned, err := crMeta.ConstructHlv(newHlv, 0, sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
+		pos, pruned, err := crMeta.ConstructHlv(newHlv, 0, sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, int(xmem.config.minPVLen.Load()))
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForSubdocOp, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
 			return err
@@ -4999,6 +5005,19 @@ func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 		if xmem.config.DisableHlvBasedShortCircuit.Load() != disableHlvBasedShortCircuitBool {
 			xmem.config.DisableHlvBasedShortCircuit.Store(disableHlvBasedShortCircuitBool)
 			xmem.Logger().Infof("%v updated %v to %v", xmem.Id(), DISABLE_HLV_SHORT_CIRCUIT, disableHlvBasedShortCircuitBool)
+		}
+	}
+	minPVLenVal, ok := settings[base.MinPVLenForMobileKey]
+	if ok {
+		minPVLenValUint32 := uint32(minPVLenVal.(int))
+		if xmem.getMobileCompatible() == base.MobileCompatibilityActive {
+			if xmem.config.minPVLen.Load() != minPVLenValUint32 {
+				xmem.config.minPVLen.Store(minPVLenValUint32)
+				xmem.Logger().Infof("%v updated %v to %v", xmem.Id(), base.MinPVLenForMobileKey, minPVLenValUint32)
+			}
+		} else {
+			xmem.config.minPVLen.Store(0)
+			xmem.Logger().Infof("%s %s overriden to 0 (mobile=%v)", xmem.Id(), base.MinPVLenForMobileKey, xmem.getMobileCompatible())
 		}
 	}
 

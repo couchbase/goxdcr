@@ -100,6 +100,8 @@ type ConflictManager struct {
 	userAgent         string
 	pruningWindowSec  uint32
 	functionTimeoutMs uint32
+	mobile            atomic.Uint32
+	minPVLen          atomic.Uint32
 
 	counter_conflict_ch_waittime uint64 // time waiting to put conflict into conflict_ch
 	counter_resolver_waittime    uint64 // time waiting to put conflict to resolver's input_ch
@@ -137,8 +139,8 @@ func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string,
 
 func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (err error) {
 	// ConflictManager depends on ResolverSvc to do the merge
-	if c.resolverSvc.Started() == false {
-		return fmt.Errorf("%v: Cannot start ConflictManager because ResolverSvc is not running.", c.pipeline.FullTopic())
+	if !c.resolverSvc.Started() {
+		return fmt.Errorf("%v: Cannot start ConflictManager because ResolverSvc is not running", c.pipeline.FullTopic())
 	}
 	c.conn_str, err = c.top_svc.MyMemcachedAddr()
 	if err != nil {
@@ -158,7 +160,7 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 		}
 	}
 	if mergeFunction == "" {
-		return fmt.Errorf("%v: Default merge function is not set for the pipeline.", c.pipeline.FullTopic())
+		return fmt.Errorf("%v: Default merge function is not set for the pipeline", c.pipeline.FullTopic())
 	}
 	if value, ok := settingsMap[base.VersionPruningWindowHrsKey]; ok {
 		pruningWindowInt := value.(int) * 60 * 60
@@ -167,6 +169,14 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	if value, ok := settingsMap[base.JSFunctionTimeoutKey]; ok {
 		timeoutInt := value.(int)
 		atomic.StoreUint32(&c.functionTimeoutMs, uint32(timeoutInt))
+	}
+	if value, ok := settingsMap[base.MobileCompatibleKey]; ok {
+		c.mobile.Store(uint32(value.(int)))
+	}
+	if value, ok := settingsMap[base.MinPVLenForMobileKey]; ok && c.mobile.Load() == base.MobileCompatibilityActive {
+		c.minPVLen.Store(uint32(value.(int)))
+	} else {
+		c.minPVLen.Store(0)
 	}
 	c.result_ch = make(chan *crMeta.MergeInputAndResult, resultChannelsize)
 	c.conflict_ch = make(chan *crMeta.ConflictParams, conflictChannelSize)
@@ -233,6 +243,19 @@ func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMa
 			c.Logger().Infof("%v: %v for %v is set to %v.", c.pipeline.FullTopic(), base.MergeFunctionMappingKey, base.BucketMergeFunctionKey, mergeFunction)
 		} else {
 			c.Logger().Errorf("%v: Type of %v is %v", c.pipeline.FullTopic(), base.MergeFunctionMappingKey, reflect.TypeOf(value))
+		}
+	}
+	if value, ok := settings[base.MobileCompatibleKey]; ok {
+		c.mobile.Store(uint32(value.(int)))
+		c.Logger().Infof("%v: %v is set to %v.", c.pipeline.FullTopic(), base.MobileCompatibleKey, c.mobile.Load())
+	}
+	if value, ok := settings[base.MinPVLenForMobileKey]; ok {
+		if c.mobile.Load() == base.MobileCompatibilityActive {
+			c.minPVLen.Store(uint32(value.(int)))
+			c.Logger().Infof("%v: %v is set to %v.", c.pipeline.FullTopic(), base.MinPVLenForMobileKey, c.minPVLen.Load())
+		} else {
+			c.minPVLen.Store(0)
+			c.Logger().Infof("%v: %v is set to 0.", c.pipeline.FullTopic(), base.MinPVLenForMobileKey)
 		}
 	}
 	return nil
@@ -465,7 +488,7 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	var mv, pv, mvSlice, pvSlice []byte
 	if mvlen > 0 {
 		mvSlice = make([]byte, mvlen)
-		pos, _, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil)
+		pos, _, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -475,7 +498,7 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 		pruneFunc := base.GetHLVPruneFunction(sourceMeta.GetDocumentMetadata().Cas,
 			time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
 		pvSlice = make([]byte, pvlen)
-		pos, pruned, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc)
+		pos, pruned, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc, int(c.minPVLen.Load()))
 		if err != nil {
 			return nil, err
 		}

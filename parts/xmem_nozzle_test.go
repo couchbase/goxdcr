@@ -16,6 +16,7 @@ package parts
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -417,7 +419,6 @@ func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 }
 
 var totalSamples = 100
-var docBodySizeMaxBytes = 500
 
 func generateTestDataForSnappyDecode(numDocs int) []*base.WrappedMCRequest {
 	dataSet, _, err := generator.GenerateRandomData(10)
@@ -1379,7 +1380,6 @@ func writeDoc(agent *gocbcore.Agent, key, val, collection, scope string, flags u
 			return
 		}
 	}
-	return
 }
 
 func InsertDocUsingSetMeta(agent *gocbcore.Agent, key, val, collection, scope string, flags uint32, datatype uint8, expiry uint32, cas uint64) {
@@ -1423,7 +1423,6 @@ func deleteDoc(agent *gocbcore.Agent, key, collection, scope string) {
 			return
 		}
 	}
-	return
 }
 
 func getGocbBucket(connStr string, bucketName string) (bucket *gocb.Bucket, closeFunc func(opts *gocb.ClusterCloseOptions) error) {
@@ -1653,15 +1652,6 @@ func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, buc
 	return srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2
 }
 
-func setTargetKVProtectionMode(protectionMode, bucketName string, port int) {
-	defer time.Sleep(3 * time.Second)
-	connStr := fmt.Sprintf("127.0.0.1:%v", port)
-	cmd := exec.Command("../../../../../../install/bin/cbepctl", connStr, "-b", bucketName, "set_vbucket_param", "hlc_invalid_strategy", "1", protectionMode, "-u", username, "-p", password)
-	fmt.Printf("command:%v\n", cmd)
-	out, _ := runCmd(cmd, printCmd)
-	fmt.Printf("Output: %v\n", out)
-}
-
 func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocbcore.Agent, func(), string) {
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
@@ -1777,9 +1767,10 @@ func verifyStatsForDone(a *assert.Assertions, srcNode, tgtNode int) {
 func verifyCasPoisonProtectionStats(t *testing.T, a *assert.Assertions, srcNode int, protectionMode string, count int) {
 	srcPromStats := GetPrometheusStats(srcNode)
 	var pattern string
-	if protectionMode == "error" {
+	switch protectionMode {
+	case "error":
 		pattern = fmt.Sprintf("docs_sent_with_poisonedCas_errorMode.*} %v", count)
-	} else if protectionMode == "replace" {
+	case "replace":
 		pattern = fmt.Sprintf("docs_sent_with_poisonedCas_replaceMode.*} %v", count)
 	}
 	// Compile the regex
@@ -2044,4 +2035,310 @@ func TestCasPoisonKVProtection(t *testing.T) {
 
 	//verify stats to ensure the right count was populated from the checkpoints
 	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs+1)
+}
+
+func setupForPVPruningTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func()) {
+	setupClusterRunCluster(srcNode)
+	setupClusterRunCluster(tgtNode)
+
+	createXdcrInboundUser(srcNode)
+	createXdcrInboundUser(tgtNode)
+
+	createClusterRunBucket(srcNode, bucketName, true, base.Couchstore)
+	turnOnCrossXVersioningClusterRun(srcNode, bucketName)
+
+	createClusterRunBucket(tgtNode, bucketName, true, base.Couchstore)
+	turnOnCrossXVersioningClusterRun(tgtNode, bucketName)
+
+	srcBucket, closeFunc1 := getGocbBucket(sourceConnStr, bucketName)
+
+	tgtBucket, closeFunc2 := getGocbBucket(targetConnStr, bucketName)
+
+	srcAgentgentConfig := &gocbcore.AgentConfig{
+		BucketName:        bucketName,
+		UserAgent:         sourceClusterName,
+		UseTLS:            false,
+		TLSRootCAProvider: func() *x509.CertPool { return nil },
+		UseCollections:    true,
+		AuthMechanisms:    []gocbcore.AuthMechanism{gocbcore.ScramSha256AuthMechanism},
+		Auth:              gocbcore.PasswordAuthProvider{Username: username, Password: password},
+		MemdAddrs:         []string{kvStringSrc},
+	}
+
+	tgtAgentgentConfig := &gocbcore.AgentConfig{
+		BucketName:        bucketName,
+		UserAgent:         targetClusterName,
+		UseTLS:            false,
+		TLSRootCAProvider: func() *x509.CertPool { return nil },
+		UseCollections:    true,
+		AuthMechanisms:    []gocbcore.AuthMechanism{gocbcore.ScramSha256AuthMechanism},
+		Auth:              gocbcore.PasswordAuthProvider{Username: username, Password: password},
+		MemdAddrs:         []string{kvStringTgt},
+	}
+
+	srcAgent, closeFunc3 := createSDKAgent(srcAgentgentConfig)
+
+	tgtAgent, closeFunc4 := createSDKAgent(tgtAgentgentConfig)
+
+	a.NotNil(srcAgent)
+	a.NotNil(tgtAgent)
+	a.NotNil(srcBucket)
+	a.NotNil(tgtBucket)
+
+	createClusterRunRemoteRef(srcNode, tgtNode, "C1")
+	replID1 := createClusterRunReplication(srcNode, bucketName, bucketName, "C1")
+	time.Sleep(2 * time.Second)
+
+	return srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4
+}
+
+func randomString(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)[:n]
+}
+
+// generatePV generates and inserts an HLV with a PV of input size, with each source of PV randomly generated string of size 22
+// and each version of the PV = now() - baseDay - i for 0 <= i < pvLen.
+func generatePV(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeName string, bucketId hlv.DocumentSourceId, pvLen int, baseDay int) (hlv.VersionsMap, gocb.Cas) {
+	mutateInSpec := []gocb.MutateInSpec{}
+
+	// cv will be such that it's a src = source bucket and ver = cas after update
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_VER_PATH, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_SRC_PATH, string(bucketId), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Update cvCas such that cas == cvCas after update
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Add PV based on input. Generate PVs with versions now() - baseDay - i for 0 <= i < pvLen.
+	pvMap := hlv.VersionsMap{}
+	now := time.Now()
+	for i := 0; i < pvLen; i++ {
+		randStr := randomString(22)
+		ver := uint64(now.Add(-time.Duration(baseDay+i) * 24 * time.Hour).UnixNano())
+		pvMap[hlv.DocumentSourceId(randStr)] = ver
+	}
+	// 1000 is arbitrary for now to be good enough to run all tests.
+	pvBytes := make([]byte, 1000)
+	pos := 0
+	pos, _, err = crMeta.VersionMapToDeltasBytes(pvMap, pvBytes, pos, nil, 0)
+	a.Nil(err)
+
+	pvBytes = pvBytes[:pos]
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PV_PATH, pvBytesToArray(a, pvBytes), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+
+	res, err := bucket.Scope(scopeName).Collection(colName).MutateIn(key, mutateInSpec, &gocb.MutateInOptions{
+		Internal: struct {
+			DocFlags gocb.SubdocDocFlag
+			User     []byte
+		}{
+			DocFlags: gocb.SubdocDocFlagAccessDeleted,
+		},
+	})
+	a.Nil(err)
+	return pvMap, res.Cas()
+}
+
+func pvBytesToArray(a *assert.Assertions, pvBytes []byte) []interface{} {
+	if len(pvBytes) == 0 {
+		return []interface{}{}
+	}
+
+	var pv []interface{}
+	err = json.Unmarshal(pvBytes, &pv)
+	a.Nil(err)
+	return pv
+}
+
+func getHLV(a *assert.Assertions, bucket *gocb.Bucket, scopeName, colName, docKey string) (hlv []byte, cas uint64) {
+	value, err := bucket.Scope(scopeName).Collection(colName).LookupIn(string(docKey),
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	a.Nil(err)
+	if !value.Exists(0) {
+		return []byte{}, uint64(value.Cas())
+	}
+
+	err = value.ContentAt(0, &hlv)
+	a.Nil(err)
+	return hlv, uint64(value.Cas())
+}
+
+// deleteNSmallestEntriesInPV removes N entries with the smallest version values from the map.
+func deleteNSmallestEntriesInPV(n int, vm hlv.VersionsMap) {
+	if n <= 0 {
+		return
+	}
+	if n >= len(vm) {
+		for k := range vm {
+			delete(vm, k)
+		}
+		return
+	}
+
+	type pair struct {
+		ver uint64
+		src hlv.DocumentSourceId
+	}
+	versions := make([]pair, 0, len(vm))
+	for src, v := range vm {
+		versions = append(versions, pair{ver: v, src: src})
+	}
+
+	sort.Slice(versions, func(i, j int) bool {
+		if versions[i].ver == versions[j].ver {
+			return versions[i].src < versions[j].src
+		}
+		return versions[i].ver < versions[j].ver
+	})
+
+	for _, v := range versions[:n] {
+		delete(vm, v.src)
+	}
+}
+
+// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
+// go test -timeout 150s -run ^TestPVPruning$ github.com/couchbase/goxdcr/v8/parts
+func TestPVPruning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestPVPruning")
+	}
+
+	fmt.Println("============== Test case start: TestPVPruning =================")
+	defer fmt.Println("============== Test case end: TestPVPruning =================")
+	a := assert.New(t)
+
+	// test common parameters
+	bucketName := "B1" // both on source and target
+	scopeName := "_default"
+	colName := "_default"
+	docKey := "pvTestDoc"
+	docVal := "{\"foo\" : \"bar\"}"
+	srcNode := 9000 // cluster_run source node port
+	tgtNode := 9001 // cluster_run target node port
+	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
+
+	srcBucket, tgtBucket, srcAgent, _, replID, closeFunc1, closeFunc2, closeFunc3, closeFunc4 := setupForPVPruningTest(a, bucketName, srcNode, tgtNode)
+	defer closeFunc1(nil)
+	defer closeFunc2(nil)
+	defer closeFunc3()
+	defer closeFunc4()
+
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0)
+	time.Sleep(2 * time.Second)
+
+	srcActorID, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(srcNode, bucketName), fetchClusterUUID(srcNode))
+	a.Nil(err)
+
+	defaultPruningWindow := 30
+
+	// 1. mobile = Off i.e. there is no min retention policy for pruning.
+	testWithMobileOff := func(testNum int) {
+		// a. 5 entries, none of the them pruneable.
+		beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, 1)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList := pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%va: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// b. 5 entries, 3 of the them pruneable.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-3, len(afterPruningList), fmt.Sprintf("%vb: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// c. 5 entries, all of the them pruneable.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(0, len(afterPruningList), fmt.Sprintf("%vc: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+	}
+	testWithMobileOff(1)
+
+	// 2. mobile = On i.e. there is a min retention policy for pruning.
+	changeClusterRunReplicationSettings(srcNode, replID, "mobile", "Active")
+	time.Sleep(5 * time.Second)
+
+	testWithDefaultVal := func(testNum int) {
+		// a. 5 entries, none of the them pruneable.
+		beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, 1)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList := pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%va: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// b. 5 entries, 3 of the them pruneable, but won't be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%vb: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// c. 5 entries, all of the them pruneable, but won't be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("%vc: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+
+		// d. 6 entries, all of the them pruneable, but only one entry will be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 6, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("%vd: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+		hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+		a.Nil(err)
+		deleteNSmallestEntriesInPV(1, beforePruningMap)
+		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%vd: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
+
+		// e. 10 entries, all of the them pruneable, but only 5 entries will be pruned.
+		beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 10, defaultPruningWindow+10)
+		time.Sleep(2 * time.Second)
+		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+		afterPruningList = pvBytesToArray(a, afterPruningBytes)
+		a.Equal(len(beforePruningMap)-5, len(afterPruningList), fmt.Sprintf("%ve: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
+		hlvBytes, cas = getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err = crMeta.ParseHlvFields(cas, hlvBytes)
+		a.Nil(err)
+		deleteNSmallestEntriesInPV(5, beforePruningMap)
+		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%ve: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
+	}
+	testWithDefaultVal(2)
+
+	// 3. mobile = On and change the minHLVHistoryLenForMobile setting
+	// a. 5 entries, 3 of the them pruneable, but only 1 will be pruned
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "4")
+	time.Sleep(2 * time.Second)
+	beforePruningMap, _ := generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 5, defaultPruningWindow-2)
+	time.Sleep(2 * time.Second)
+	_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+	afterPruningList := pvBytesToArray(a, afterPruningBytes)
+	a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("3a: pv before: %v, pv after: %v", beforePruningMap, afterPruningList))
+	hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
+	_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+	a.Nil(err)
+	deleteNSmallestEntriesInPV(1, beforePruningMap)
+	a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("3a: pvMap before: %v, pvMap after: %v", beforePruningMap, afterPruningMap))
+
+	// b. 10 entries, all of the them pruneable, but all will be retained
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "10")
+	time.Sleep(2 * time.Second)
+	beforePruningMap, _ = generatePV(a, srcBucket, docKey, colName, scopeName, srcActorID, 10, defaultPruningWindow+10)
+	time.Sleep(2 * time.Second)
+	_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
+	afterPruningList = pvBytesToArray(a, afterPruningBytes)
+	a.Equal(len(beforePruningMap), len(afterPruningList), fmt.Sprintf("3b: pv before: %v, pv after: %v", beforePruningMap, afterPruningList))
+
+	// 4. mobile = On, sanity test after changing the setting to default value
+	changeClusterRunReplicationSettings(srcNode, replID, "minHLVHistoryLenForMobile", "5")
+	time.Sleep(2 * time.Second)
+	testWithDefaultVal(4)
+
+	// 5. mobile = Off, sanity test after changing the mobile setting back to Off
+	changeClusterRunReplicationSettings(srcNode, replID, "mobile", "Off")
+	time.Sleep(2 * time.Second)
+	testWithMobileOff(5)
+
+	verifyStatsForDone(a, srcNode, tgtNode)
 }

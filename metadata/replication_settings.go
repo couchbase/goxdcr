@@ -146,6 +146,9 @@ const (
 
 	// FilterExpirationsWithFEKey represents filtering of expirations based on filter expression.
 	FilterExpirationsWithFEKey = base.FilterExpirationsWithFEKey
+
+	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
+	MinPVLenForMobileKey = base.MinPVLenForMobileKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -296,6 +299,8 @@ var ComponentEventsChanLengthConfig = &SettingsConfig{base.MaxEventChanSize, &Ra
 
 var DevReplOptsConfig = &SettingsConfig{"", nil}
 
+var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -355,6 +360,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DCPFlowControlThrottleKey:            DCPFlowControlThrottleConfig,
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
+	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1597,3 +1603,10 @@ func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *Repli
 var ValidateAndConvertStrToCLogMapping func(settingStr string) (base.ConflictLoggingMappingInput, error)
 
 var UpgradeReplicationSettings = [...]string{DCPFlowControlThrottleKey, ComponentEventsChanLengthKey}
+
+// GetMinPVLenForMobile returns the value of MinPVLenForMobileKey setting.
+func (s *ReplicationSettings) GetMinPVLenForMobile() int {
+	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
+	len := val.(int)
+	return len
+}

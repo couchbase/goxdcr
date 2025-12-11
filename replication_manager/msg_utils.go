@@ -128,6 +128,7 @@ const (
 	DevReplOptsKey                    = base.DevReplOptsKey
 	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
 	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
+	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
 )
 
 // constants for parsing create/change/view replication response
@@ -270,6 +271,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DevReplOptsKey:                    metadata.DevReplOptsKey,
 	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
 	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
+	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -343,6 +345,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevReplOptsKey:                       DevReplOptsKey,
 	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
 	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
+	metadata.MinPVLenForMobileKey:                 MinPVLenForMobileKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
