@@ -1761,8 +1761,9 @@ func (u *Utilities) GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]
 	return clusterCompatibility, nil
 }
 
-// GetNodeExtListFromInfoMap returns 'nodesExt' list from infoMap. Returns error if
-// it doesn't exist.
+// GetNodeExtListFromInfoMap returns 'nodesExt' list from infoMap. It filters and retains only the nodes which has
+// data service running in it.
+// Returns error if it doesn't exist.
 func (u *Utilities) GetNodeExtListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
 	if len(infoMap) == 0 {
 		return nil, base.ErrorInvalidInput
@@ -1780,7 +1781,36 @@ func (u *Utilities) GetNodeExtListFromInfoMap(infoMap map[string]interface{}, lo
 		return nil, u.BucketInfoParseError(infoMap, errMsg, logger)
 	}
 
-	return nodesExtArray, nil
+	nodesWithOnlyKV := make([]interface{}, 0, len(nodesExtArray))
+	for _, node := range nodesExtArray {
+		nodeMap, ok := node.(map[string]interface{})
+		if !ok {
+			u.logger_utils.Warnf("unable to parse node of nodesExt, type=%T, node=%v", node, node)
+			continue
+		}
+
+		portsObj, ok := nodeMap[base.ServicesKey]
+		if !ok {
+			u.logger_utils.Warnf("%s is missing in node of nodesExt, node=%v", base.ServicesKey, node)
+			continue
+		}
+
+		portsMap, ok := portsObj.(map[string]interface{})
+		if !ok {
+			u.logger_utils.Warnf("unable to parse portsMap of nodesExt, type=%T, node=%v", portsObj, node)
+			continue
+		}
+
+		_, ok = portsMap[base.KVPortKey]
+		if !ok {
+			// This node doesn't have data-service. Skip it.
+			continue
+		}
+
+		nodesWithOnlyKV = append(nodesWithOnlyKV, node)
+	}
+
+	return nodesWithOnlyKV, nil
 }
 
 func (u *Utilities) GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
