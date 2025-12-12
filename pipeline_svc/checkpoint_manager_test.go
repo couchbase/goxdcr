@@ -563,7 +563,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	ckptSvc.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(map[uint16]*metadata.CheckpointsDoc{}, nil).Once()
 
 	for k, client := range mcMap {
-		client.On("StatsMap", base.VBUCKET_SEQNO_STAT_NAME).Run(func(args mock.Arguments) { time.Sleep(time.Duration(delayMap[k]) * time.Second) }).Return(result[k].statsMap, result[k].err)
+		client.On("StatsMap", base.VBUCKET_SEQNO_STAT_NAME, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(time.Duration(delayMap[k]) * time.Second) }).Return(result[k].statsMap, result[k].err)
 	}
 
 	colManSvc.On("PersistNeededManifests", mock.Anything).Return(nil)

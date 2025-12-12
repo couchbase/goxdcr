@@ -250,6 +250,52 @@ func (_c *replicationSettingsInjections_GetDevPreCheckVBPoison_Call) RunAndRetur
 	return _c
 }
 
+// GetXmemNozzleNetworkIOFaultPercent provides a mock function with given fields: settings
+func (_m *replicationSettingsInjections) GetXmemNozzleNetworkIOFaultPercent(settings *metadata.ReplicationSettings) int {
+	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetXmemNozzleNetworkIOFaultPercent")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSettings) int); ok {
+		r0 = rf(settings)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetXmemNozzleNetworkIOFaultPercent'
+type replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call struct {
+	*mock.Call
+}
+
+// GetXmemNozzleNetworkIOFaultPercent is a helper method to define mock.On call
+//   - settings *metadata.ReplicationSettings
+func (_e *replicationSettingsInjections_Expecter) GetXmemNozzleNetworkIOFaultPercent(settings interface{}) *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call {
+	return &replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call{Call: _e.mock.On("GetXmemNozzleNetworkIOFaultPercent", settings)}
+}
+
+func (_c *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call) Run(run func(settings *metadata.ReplicationSettings)) *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSettings))
+	})
+	return _c
+}
+
+func (_c *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call) Return(_a0 int) *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call) RunAndReturn(run func(*metadata.ReplicationSettings) int) *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newReplicationSettingsInjections creates a new instance of replicationSettingsInjections. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newReplicationSettingsInjections(t interface {
