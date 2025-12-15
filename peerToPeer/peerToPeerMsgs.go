@@ -202,6 +202,20 @@ func (p *RequestCommon) ComposeResponseCommon() *ResponseCommon {
 	return respCommon
 }
 
+// Given the original data sent over the wire, keep track of it
+type StreamSizeTracker struct {
+	OrigSize int
+}
+
+func (s *StreamSizeTracker) RecordSize(bytesRead int) {
+	s.OrigSize = bytesRead
+}
+
+// GetOrigSize returns the original size of the data sent over the wire
+func (s *StreamSizeTracker) GetOrigSize() int {
+	return s.OrigSize
+}
+
 type DiscoveryRequest struct {
 	RequestCommon
 }
@@ -2233,6 +2247,7 @@ func (b *BackfillDelResponse) DeSerialize(stream []byte) error {
 
 type SourceHeartbeatReq struct {
 	RequestCommon
+	StreamSizeTracker
 
 	SourceClusterUUID string
 	SourceClusterName string
@@ -2324,6 +2339,7 @@ func (s *SourceHeartbeatReq) DeSerialize(stream []byte) error {
 		spec.Settings.PostProcessAfterUnmarshalling()
 	}
 
+	s.RecordSize(len(stream))
 	return nil
 }
 
@@ -2369,6 +2385,7 @@ func (s *SourceHeartbeatReq) GenerateResponse() interface{} {
 
 type SourceHeartbeatResp struct {
 	ResponseCommon
+	StreamSizeTracker
 
 	TargetClusterUUID string
 }
@@ -2378,7 +2395,12 @@ func (s *SourceHeartbeatResp) Serialize() ([]byte, error) {
 }
 
 func (s *SourceHeartbeatResp) DeSerialize(stream []byte) error {
-	return json.Unmarshal(stream, s)
+	err := json.Unmarshal(stream, s)
+	if err != nil {
+		return err
+	}
+	s.RecordSize(len(stream))
+	return nil
 }
 
 // For unit test

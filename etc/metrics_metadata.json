@@ -1258,6 +1258,18 @@
         "notes": "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered",
         "stability": "committed"
     },
+    "xdcr_source_cluster_heartbeat_recv_bytes": {
+        "type": "gauge",
+        "help": "For a given source cluster, the size of the accumulated heartbeat messages received from this cluster",
+        "added": "8.1.0",
+        "unit": "bytes",
+        "labels": [
+            "sourceClusterUUID",
+            "sourceClusterName"
+        ],
+        "notes": "One source node will be responsible to send heartbeat to one target node. This stats will accumulate only if this particular node received data",
+        "stability": "internal"
+    },
     "xdcr_source_sync_xattr_removed_total": {
         "type": "counter",
         "help": "Number of mutations with source mobile extended attributes removed",

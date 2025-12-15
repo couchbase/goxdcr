@@ -24,7 +24,7 @@ import (
 type ExpVarExporter interface {
 	LoadExpVarMap(m *expvar.Map) bool
 	LoadReplicationIds(remClusterUUIDs, replIds []string) error
-	LoadSourceClustersInfoV1(srcClusterNames map[string]string, srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string)
+	LoadSourceClustersInfoV1(srcClusterNames map[string]string, srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string, srcHBSizes map[string]int64)
 	Export() ([]byte, error)
 }
 
@@ -70,8 +70,9 @@ type PrometheusExporter struct {
 	// Key is the source stat key - and value is the source identifier
 	lastKnownIdentifiers map[string]base.StringList
 
-	srcNodes map[string][]string
-	srcSpecs map[string][]*metadata.ReplicationSpecification
+	srcNodes   map[string][]string
+	srcSpecs   map[string][]*metadata.ReplicationSpecification
+	srcHBSizes map[string]int64
 
 	lastKnownTgtReplMap map[string]int
 }
@@ -136,12 +137,13 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 	}
 }
 
-var sourceClusterStats = []string{service_def.SOURCE_CLUSTER_NUM_REPL, service_def.SOURCE_CLUSTER_NUM_NODES}
+var sourceClusterStats = []string{service_def.SOURCE_CLUSTER_NUM_REPL, service_def.SOURCE_CLUSTER_NUM_NODES, service_def.SOURCE_CLUSTER_HB_RECV_SIZE}
 
-func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
+func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, hbSizes map[string]int64, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
 	constValueMap := make(map[string]map[string]int)
 	specsCountMap := make(map[string]int)
 	nodesCountMap := make(map[string]int)
+	hbSizesMap := make(map[string]int)
 	runningSpecCountMap := make(map[string]int)
 	pausedSpecCountMap := make(map[string]int)
 	for uuid, specs := range specsIn {
@@ -160,8 +162,13 @@ func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, 
 		pausedSpecCountMap[uuid] = pausedCnt
 	}
 
+	for uuid, size := range hbSizes {
+		hbSizesMap[uuid] = int(size)
+	}
+
 	constValueMap[service_def.SOURCE_CLUSTER_NUM_REPL] = specsCountMap
 	constValueMap[service_def.SOURCE_CLUSTER_NUM_NODES] = nodesCountMap
+	constValueMap[service_def.SOURCE_CLUSTER_HB_RECV_SIZE] = hbSizesMap
 
 	for _, oneStat := range sourceClusterStats {
 		// As a reminder:
@@ -702,7 +709,7 @@ func (p *PrometheusExporter) resetOutputBuffer() {
 	p.outputBufferMtx.Unlock()
 }
 
-func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string) {
+func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string, hbSizes map[string]int64) {
 	p.mapsMtx.Lock()
 	defer p.mapsMtx.Unlock()
 
@@ -750,7 +757,7 @@ func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[stri
 	}
 	if cacheOutdated {
 		p.resetOutputBuffer()
-		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, p.globalLookupMap, p.labelsTableConstructor)
+		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, hbSizes, p.globalLookupMap, p.labelsTableConstructor)
 	}
 }
 

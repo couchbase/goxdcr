@@ -150,6 +150,10 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	sourceNodes[srcClusterUuid1] = []string{"node1", "node2", "node3", "node4"}
 	sourceNodes[srcClusterUuid2] = []string{"node5", "node6", "node7"}
 
+	sourceHbSizes := make(map[string]int64)
+	sourceHbSizes[srcClusterUuid1] = 1234
+	sourceHbSizes[srcClusterUuid2] = 5678
+
 	// Use already templated data
 	// This file is a shortcut produced by converting expVar.Map into a ExpVarParseMapType, and then saved to a file
 	// If the "LoadExpVarMap" function logic is changed, this file will need to be regenerated
@@ -176,7 +180,7 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	exporter.expVarParseMap = convertedMap
 
 	exporter.LoadMetricsMap(true)
-	exporter.LoadSourceClustersInfoV1(sourceClusterNames, sourceSpecs, sourceNodes)
+	exporter.LoadSourceClustersInfoV1(sourceClusterNames, sourceSpecs, sourceNodes, sourceHbSizes)
 
 	numNodes := exporter.metricsMap[service_def.SOURCE_CLUSTER_NUM_NODES]
 	assert.NotNil(numNodes)
@@ -208,6 +212,21 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 		}
 	}
 	assert.True(oneReplFound && twoReplFound)
+
+	numHbSize := exporter.metricsMap[service_def.SOURCE_CLUSTER_HB_RECV_SIZE]
+	assert.NotNil(numHbSize)
+	assert.Len(numHbSize, 2)
+	var size1234Found bool
+	var size5678Found bool
+	for _, statPerIdentifier := range numHbSize {
+		if statPerIdentifier.GetValue() == 1234 {
+			size1234Found = true
+		}
+		if statPerIdentifier.GetValue() == 5678 {
+			size5678Found = true
+		}
+	}
+	assert.True(size1234Found && size5678Found)
 }
 
 func TestPrometheusNumOfReplicationsPerTarget(t *testing.T) {

@@ -126,6 +126,12 @@ type ClusterHeartbeatAPI interface {
 	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hbMetadata *metadata.HeartbeatMetadata) error
 
 	// Provides the heartbeats received from source clusters in the form of maps keyed on cluster UUIDs,
-	// pointing to values of: 1) cluster name, 2) replication specifications, 3) list of cluster nodes, 4) time when heartbeat was received, and 5) time when it is expected to expire.
-	GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error)
+	// pointing to values of:
+	//1) cluster name,
+	//2) replication specifications,
+	//3) list of cluster nodes,
+	//4) time when heartbeat was received
+	//5) time when it is expected to expire
+	//6) accumulative size of heartbeat received
+	GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error)
 }

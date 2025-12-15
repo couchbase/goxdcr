@@ -1226,16 +1226,16 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 	return nil
 }
 
-func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
+func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error) {
 	p.receiveHandlersMtx.RLock()
 	handlerGeneric, ok := p.receiveHandlers[ReqSrcHeartbeat]
 	p.receiveHandlersMtx.RUnlock()
 	if !ok {
-		return nil, nil, nil, nil, nil, fmt.Errorf("unable to find heartbeat handler")
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("unable to find heartbeat handler")
 	}
 	srcClustersProvider, ok := handlerGeneric.(SourceClustersProvider)
 	if !ok {
-		return nil, nil, nil, nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
 	}
 	return srcClustersProvider.GetSourceClustersInfoV1()
 }

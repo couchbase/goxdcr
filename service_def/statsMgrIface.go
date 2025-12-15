@@ -180,8 +180,9 @@ const (
 	DOCS_SENT_WITH_POISONED_CAS_REPLACE = base.DocsSentWithPoisonedCasReplaceMode
 
 	// Heartbeat
-	SOURCE_CLUSTER_NUM_NODES = "number_of_source_nodes"
-	SOURCE_CLUSTER_NUM_REPL  = "number_of_source_replications"
+	SOURCE_CLUSTER_NUM_NODES    = "number_of_source_nodes"
+	SOURCE_CLUSTER_NUM_REPL     = "number_of_source_replications"
+	SOURCE_CLUSTER_HB_RECV_SIZE = "source_cluster_heartbeat_recv"
 
 	// conflict logging stats
 	// xmem's clog stats
@@ -1190,7 +1191,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	METADATA_TRANSFERRED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSeamlessCredsChangeSupport,
+		VersionAdded: base.VersionForMetadataStatsSupport,
 		Description:  "The total amount of data transferred to and from target that is used for source side conflict resolution that is not the actual document replicated",
 		Stability:    Internal,
 		Labels:       StandardLabels,
@@ -1199,7 +1200,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	SYS_METADATA_TRANSFERRED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
 		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForSeamlessCredsChangeSupport,
+		VersionAdded: base.VersionForMetadataStatsSupport,
 		Description:  "The total amount of data transferred to and from target that is not related to document but within a context of a pipeline",
 		Stability:    Internal,
 		Labels:       StandardLabels,
@@ -1594,6 +1595,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "For a given source cluster, the total number of outbound replications to this cluster",
 		Stability:    Committed,
 		Labels:       SourceClusterV1ReplLabels,
+	},
+	SOURCE_CLUSTER_HB_RECV_SIZE: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrBytes},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMetadataStatsSupport,
+		Description:  "For a given source cluster, the size of the accumulated heartbeat messages received from this cluster",
+		Stability:    Internal,
+		Labels:       SourceClusterV1Labels,
+		Notes:        "One source node will be responsible to send heartbeat to one target node. This stats will accumulate only if this particular node received data",
 	},
 	CONFLICT_DOCS_WRITTEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},

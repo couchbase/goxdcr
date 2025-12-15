@@ -13,7 +13,8 @@ import (
 )
 
 type SourceClustersProvider interface {
-	GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error)
+	GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error)
+	GetHeartbeatSizesReceived() map[string]int64
 }
 
 type HeartbeatCache struct {
@@ -23,6 +24,8 @@ type HeartbeatCache struct {
 	sourceSendTime time.Time
 	refreshTime    time.Time
 	expiryTimer    *time.Timer
+
+	totalSizeReceived int64
 }
 
 // note: should NOT be concurrently called on the same HeartbeatCache value
@@ -59,6 +62,10 @@ func (h *HeartbeatCache) HasHeartbeatMetadataChanged(incomingReq *SourceHeartbea
 // note: should NOT be concurrently called on the same HeartbeatCache value
 func (h *HeartbeatCache) UpdateRefreshTime() {
 	h.refreshTime = time.Now()
+}
+
+func (h *HeartbeatCache) RecordHeartbeatSize(size int) {
+	h.totalSizeReceived += int64(size)
 }
 
 func NewHeartbeatCache(ttl time.Duration, destroyOp func()) *HeartbeatCache {
@@ -131,6 +138,13 @@ func (s *SrcHeartbeatHandler) handler() {
 }
 
 func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
+	var sizeToRecord int
+
+	if req.ProxyMode {
+		// Only keep track of data received if this is node is the orchestrator
+		sizeToRecord = req.GetOrigSize()
+	}
+
 	// For now just simple messaging
 	s.heartbeatMtx.RLock()
 	hbCache, found := s.heartbeatMap[req.SourceClusterUUID]
@@ -139,6 +153,8 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 
 		hbCache.cacheMtx.Lock()
 		defer hbCache.cacheMtx.Unlock()
+
+		hbCache.RecordHeartbeatSize(sizeToRecord)
 
 		if req.SendTime.Before(hbCache.sourceSendTime) {
 			s.logger.Debugf("stale heartbeat received from cluster %v (node %v), ignoring", req.SourceClusterName, req.Sender)
@@ -179,6 +195,7 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 		)
 		s.heartbeatMap[req.SourceClusterUUID] = hbCache
 		hbCache.LoadInfoFrom(req)
+		hbCache.RecordHeartbeatSize(sizeToRecord)
 	}
 	s.heartbeatMtx.Unlock()
 }
@@ -234,12 +251,13 @@ func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
 	}
 }
 
-func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
+func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error) {
 	sourceClusterNamesMap := make(map[string]string)
 	sourceUuidSpecsMap := make(map[string][]*metadata.ReplicationSpecification)
 	sourceUuidNodesMap := make(map[string][]string)
 	heartbeatReceiveTime := make(map[string]time.Time)
 	heartbeatExpiryTime := make(map[string]time.Time)
+	heartBeatSizes := make(map[string]int64)
 
 	s.heartbeatMtx.RLock()
 	defer s.heartbeatMtx.RUnlock()
@@ -251,11 +269,26 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[
 		sourceUuidNodesMap[srcUUID] = base.SortStringList(base.CloneStringList(hb.NodesList))
 		heartbeatReceiveTime[srcUUID] = hb.refreshTime
 		heartbeatExpiryTime[srcUUID] = hb.refreshTime.Add(hb.TTL)
+		heartBeatSizes[srcUUID] = hb.totalSizeReceived
 
 		hb.cacheMtx.RUnlock()
 	}
 
-	return sourceClusterNamesMap, sourceUuidSpecsMap, sourceUuidNodesMap, heartbeatReceiveTime, heartbeatExpiryTime, nil
+	return sourceClusterNamesMap, sourceUuidSpecsMap, sourceUuidNodesMap, heartbeatReceiveTime, heartbeatExpiryTime, heartBeatSizes, nil
+}
+
+func (s *SrcHeartbeatHandler) GetHeartbeatSizesReceived() map[string]int64 {
+	sizesMap := make(map[string]int64)
+
+	s.heartbeatMtx.RLock()
+	defer s.heartbeatMtx.RUnlock()
+	for srcUUID, hb := range s.heartbeatMap {
+		hb.cacheMtx.RLock()
+		sizesMap[srcUUID] = hb.totalSizeReceived
+		hb.cacheMtx.RUnlock()
+	}
+
+	return sizesMap
 }
 
 func (s *SrcHeartbeatHandler) periodicPrintSummary() {

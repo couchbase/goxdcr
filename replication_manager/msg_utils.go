@@ -190,6 +190,7 @@ const (
 	SrcClusterNodes         = "SourceClusterNodes"
 	SrcClusterHBReceiveTime = "SourceClusterHBReceiveTime"
 	SrcClusterHBExpiryTime  = "SourceClusterHBExpiryTime"
+	SrcClusterHBRecSizes    = "SourceClusterHBRecSizes"
 )
 
 // errors
@@ -1642,7 +1643,7 @@ func NewConnectionPreCheckGetResponse(taskId string, res base.ConnectionErrMapTy
 	return response, err
 }
 
-func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string][]*metadata.ReplicationSpecification, nodesMap map[string][]string, receiveTimes, expiryTimes map[string]time.Time) (*ap.Response, error) {
+func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string][]*metadata.ReplicationSpecification, nodesMap map[string][]string, receiveTimes, expiryTimes map[string]time.Time, hbSizes map[string]int64) (*ap.Response, error) {
 	var respLists []interface{}
 
 	for uuid, specsList := range specsMap {
@@ -1653,6 +1654,7 @@ func NewSourceClustersV1Response(namesMap map[string]string, specsMap map[string
 		singleSrcResult[SrcClusterHBExpiryTime] = expiryTimes[uuid]
 		singleSrcResult[SrcClusterSpecs] = specsList
 		singleSrcResult[SrcClusterNodes] = nodesMap[uuid]
+		singleSrcResult[SrcClusterHBRecSizes] = hbSizes[uuid]
 		respLists = append(respLists, singleSrcResult)
 	}
 

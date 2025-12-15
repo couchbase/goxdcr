@@ -1418,11 +1418,11 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 		logger_ap.Debugf("Unable to load replication IDs due to err %v\n", err)
 	}
 
-	sourceClusterNames, sourceSpecs, sourceNodes, _, _, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	sourceClusterNames, sourceSpecs, sourceNodes, _, _, hbSizes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {
 		return nil, err
 	}
-	adminport.prometheusExporter.LoadSourceClustersInfoV1(sourceClusterNames, sourceSpecs, sourceNodes)
+	adminport.prometheusExporter.LoadSourceClustersInfoV1(sourceClusterNames, sourceSpecs, sourceNodes, hbSizes)
 
 	outputBytes, err := adminport.prometheusExporter.Export()
 	if err != nil {
@@ -1534,7 +1534,7 @@ func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*
 
 	options := parseGetSourcesRequestQuery(request)
 
-	srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes, hbSizes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {
 		return nil, err
 	}
@@ -1546,7 +1546,7 @@ func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*
 		}
 	}
 
-	return NewSourceClustersV1Response(srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes)
+	return NewSourceClustersV1Response(srcNames, srcSpecs, srcNodes, receiveTimes, expiryTimes, hbSizes)
 }
 
 func (adminport *Adminport) doPostClusterToClusterRequest(request *http.Request) (*ap.Response, error) {
