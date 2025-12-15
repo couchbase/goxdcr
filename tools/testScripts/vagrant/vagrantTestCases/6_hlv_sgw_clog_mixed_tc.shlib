@@ -129,6 +129,8 @@ function runMixedModeSGWClogTest {
 	local xdcrDifferDir="/opt/couchbase/bin"
 	runXdcrDifferValidation "$xdcrDifferDir" "C2" "B2" "C1" "B1"
 
+	local loopCounter=0
+
 	while ((1)); do
 		vagrantGrepForPanicAll
 		echo "============================================================================"
