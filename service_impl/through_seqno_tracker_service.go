@@ -2402,9 +2402,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 			ignoredSeqnoList := tsTracker.vbIgnoredSeqnoListMap[vbno].GetSortedSeqnoList(false)
 			cLogReq, cLogRes := tsTracker.cLogTrackerVbMap[vbno].sortAndGetSeqnoLists()
 			through_seqno_obj.Unlock()
-			tsTracker.logger.Debugf("%v: lastThroughSeqno=%v, lists=[%v %v %v %v %v %v %v %v %v %v], osoSessions=%s",
-				vbno, tsTracker.vbOsoModeSessionDCPTracker.Debug(vbno), last_through_seqno, sent_seqno_list, filtered_seqno_list,
-				failed_cr_seqno_list, gap_seqno_list_1, gap_seqno_list_2, systemEventSeqnoList, ignoredSeqnoList, cLogReq, cLogRes)
+			tsTracker.logger.Debugf("%v: lastThroughSeqno=%v, lists=[%v %v %v %v %v %v %v %v %v], osoSessions=%s",
+				vbno, last_through_seqno, sent_seqno_list, filtered_seqno_list, failed_cr_seqno_list, gap_seqno_list_1,
+				gap_seqno_list_2, systemEventSeqnoList, ignoredSeqnoList, cLogReq, cLogRes, tsTracker.vbOsoModeSessionDCPTracker.Debug(vbno))
 		}
 	}
 
