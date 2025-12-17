@@ -103,9 +103,23 @@ function checkItemCnt {
 		sleep 10
 	done
 	echo "ERROR: Cluster $cluster bucket $bucket has $itemCount items - failed to match expected items count of $expectedCnt"
-	read -p "Press any key once done investigating"
-	dumpDebugInfoBeforeExit
-	exit 1
+	return 1
+}
+
+function runDifferFindDifference {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	local retVal
+	runXdcrDiffer "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket"
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		exit 1
+	fi
+
+	validateDifferResults 0 0 0 0 0
 }
 
 # Assumes running test script from this directory

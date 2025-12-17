@@ -88,10 +88,29 @@ function verifyPromStats {
 
 	# verify that conflict records are not replicated
 	checkItemCnt "C1" "B0" 0
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B4" "C1" "B0"
+		exit 1
+	fi
 
 	checkItemCnt "C1" "B1" $numItems
+	if (($? == 1)); then
+		runDifferFindDifference "C2" "B2" "C1" "B1"
+		runDifferFindDifference "C3" "B3" "C1" "B1"
+		exit 1
+	fi
 	checkItemCnt "C2" "B2" $numItems
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		runDifferFindDifference "C3" "B3" "C2" "B2"
+		exit 1
+	fi
 	checkItemCnt "C3" "B3" $numItems
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C3" "B3"
+		runDifferFindDifference "C2" "B2" "C3" "B3"
+		exit 1
+	fi
 
 	validateBinaryFilteredIs0 "C1" "B4" "B0"
 	validatePrometheusStatsDocsFilteredNon0 "C1" "B4" "B0"

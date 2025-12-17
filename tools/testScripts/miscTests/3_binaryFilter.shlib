@@ -70,6 +70,10 @@ function runTestCase {
 	checkUnidirectionalChangesLeft
 	checkItemCnt "C1" "B1" 1
 	checkItemCnt "C2" "B2" 1
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	# Turn on binary filter
 	setReplicationSettings "C1" "B1" "C2" "B2" "filterBinary=true"
@@ -78,6 +82,10 @@ function runTestCase {
 	checkUnidirectionalChangesLeft
 	checkItemCnt "C1" "B1" 2
 	checkItemCnt "C2" "B2" 1
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	echo "============================================================================"
 	echo "PASSED"
