@@ -1,6 +1,8 @@
 package Component
 
 import (
+	"sync/atomic"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -270,6 +272,8 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 	errMap := make(base.ErrorMap)
 	var errMapMtx sync.Mutex
 
+	var statsBytesUsed uint64
+
 	var waitGrp sync.WaitGroup
 	r.KvMemClientsMtx.RLock()
 	for kvTransient, mccClientTransient := range r.KvMemClients {
@@ -279,7 +283,7 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 		waitGrp.Add(1)
 		go func() {
 			defer waitGrp.Done()
-			feed, err := mccClient.NewUprFeed()
+			feed, err := mccClient.NewUprFeedIface()
 			defer feed.Close()
 			if err != nil {
 				errMapMtx.Lock()
@@ -296,7 +300,12 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 				return
 			}
 
-			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[kv])
+			clientCtx := &mcc.ClientContext{
+				BytesUsedCallback: func(bytesUsed int) {
+					atomic.AddUint64(&statsBytesUsed, uint64(bytesUsed))
+				},
+			}
+			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[kv], clientCtx)
 			if err != nil {
 				errMapMtx.Lock()
 				errMap[kv] = err
@@ -311,6 +320,11 @@ func (r *RemoteMemcachedComponent) GetOneTimeTgtFailoverLogs(vbsList []uint16) (
 	}
 	r.KvMemClientsMtx.RUnlock()
 	waitGrp.Wait()
+
+	// account for data transferred
+	if statsBytesUsed > 0 && r.DataTransferredIncrementer != nil {
+		r.DataTransferredIncrementer(int(statsBytesUsed))
+	}
 
 	if len(errMap) > 0 {
 		r.LoggerImpl.Errorf("err getting failoverlogs from target %v", errMap)

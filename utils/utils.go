@@ -2715,19 +2715,60 @@ func (u *Utilities) GetAuthMode(username string, clientCertificate []byte, path 
 	return userAuthMode
 }
 
-func (u *Utilities) prepareForRestCall(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, client *http.Client, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, context ...*Context) (*http.Client, *http.Request, error) {
+func (u *Utilities) prepareForRestCall(
+	baseURL string,
+	path string,
+	preservePathEncoding bool,
+	username string,
+	password string,
+	authMech base.HttpAuthMech,
+	certificate []byte,
+	san_in_certificate bool,
+	clientCertificate []byte,
+	clientKey []byte,
+	httpCommand string,
+	contentType string,
+	body []byte,
+	client *http.Client,
+	logger *log.CommonLogger,
+	clientCertKeyPair []tls.Certificate,
+	context ...*Context,
+) (*http.Client, *http.Request, error) {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
 	userAuthMode := u.GetAuthMode(username, clientCertificate, path, authMech, clientCertKeyPair)
 
-	req, host, err := u.ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, l)
+	req, host, err := u.ConstructHttpRequest(
+		baseURL,
+		path,
+		preservePathEncoding,
+		username,
+		password,
+		authMech,
+		userAuthMode,
+		httpCommand,
+		contentType,
+		body,
+		l,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if ret_client == nil {
-		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l, clientCertKeyPair, context...)
+		ret_client, err = u.GetHttpClient(
+			username,
+			authMech,
+			certificate,
+			san_in_certificate,
+			clientCertificate,
+			clientKey,
+			host,
+			l,
+			clientCertKeyPair,
+			context...,
+		)
 		if err != nil {
 			// req body could be long and unreadable... print just the header
 			redactedReq := base.CloneAndTagHttpRequest(req)
