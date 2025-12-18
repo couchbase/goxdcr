@@ -103,6 +103,7 @@ function checkItemCnt {
 		sleep 10
 	done
 	echo "ERROR: Cluster $cluster bucket $bucket has $itemCount items - failed to match expected items count of $expectedCnt"
+	dumpDebugInfoBeforeExit
 	return 1
 }
 
