@@ -76,6 +76,10 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 0
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	# force a checkpointing operation
 	pauseReplication "C1" "B1" "C2" "B2"
@@ -143,6 +147,10 @@ function runTestCase {
 	# CBWORKLOAD_COLLECTION_NUM_ITEMS old col1 data +  CBWORKLOAD_COLLECTION_NUM_ITEMS new col1 data
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	echo "============================================================================"
 	echo "PASSED"

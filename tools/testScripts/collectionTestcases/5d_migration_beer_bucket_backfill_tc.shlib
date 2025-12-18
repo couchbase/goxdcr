@@ -122,6 +122,10 @@ function runTestCase {
 	sleep 15
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	checkItemCnt "C2" "B2" 920
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1)) $(($currentBrokenInstanceCnt + 2))
 
@@ -135,6 +139,10 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	# 1412 items total for the above filters
 	checkItemCnt "C2" "B2" 1412
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
 
 	grepForPanics

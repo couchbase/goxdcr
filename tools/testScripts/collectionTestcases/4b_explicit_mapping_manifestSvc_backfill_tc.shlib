@@ -125,6 +125,10 @@ function runTestCase {
 
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1)) $(($currentVBTasksDoneInstanceCnt + 2))

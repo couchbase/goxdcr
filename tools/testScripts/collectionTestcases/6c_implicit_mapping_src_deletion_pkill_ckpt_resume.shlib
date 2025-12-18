@@ -77,6 +77,10 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 0
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	# force a checkpointing operation
 	pauseReplication "C1" "B1" "C2" "B2"

@@ -45,6 +45,10 @@ function validateDataLoad {
 	checkUnidirectionalChangesLeft
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 }
 
 BACKFILL_PIPELINE_START_MSG="Starting BackfillPipeline backfill_"
@@ -119,6 +123,10 @@ function runTestCase {
 	sleep 10
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 	checkUnidirectionalChangesLeft
 	grepForPanics
 	resetCustomManifestRefreshInterval "C1"

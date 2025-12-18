@@ -48,7 +48,15 @@ function validateDataLoad {
 	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
 	checkBidirectionalChangesLeft
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C2" "B2" "C1" "B1"
+		exit 1
+	fi
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 }
 
 function runTestCase {
@@ -85,7 +93,15 @@ function runTestCase {
 	echo "Waiting 5 seconds before checking item count"
 	sleep 5
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C2" "B2" "C1" "B1"
+		exit 1
+	fi
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
 
 	checkUnidirectionalChangesLeft
 
