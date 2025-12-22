@@ -279,6 +279,7 @@ func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, 
 		if parseIntErr != nil {
 			u.logger_utils.Errorf("maxCas stats for vbno=%v in stats map is not a valid uint64. maxCas=%v", vbno, maxCasStr)
 			unableToParseVBs = append(unableToParseVBs, vbno)
+			continue
 		}
 		output[vbno] = &base.VBucketStats{
 			MaxCas: maxCas,
@@ -337,6 +338,10 @@ func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map m
 			HighSeqno: high_seqno,
 			Uuid:      vbuuid,
 		}
+	}
+
+	if len(warnings) > 0 {
+		u.logger_utils.Warnf("Warnings encountered when parsing high seqno and vbuuid from statsMap: %v", warnings)
 	}
 
 	return invalidVbnos, warnings
@@ -3842,6 +3847,23 @@ func (u *Utilities) GetTerseInfo(localConnStr string, username, password string,
 	return clusterInfo, nil
 }
 
+// failVB records a failure for the given vbucket if one has not already been recorded.
+func failVB(vb uint16, stage, key string, err error, vbFailoverLogMap base.FailoverLogMapType, vbErrorMap map[uint16]error) {
+	if _, exists := vbErrorMap[vb]; exists {
+		return
+	}
+
+	// Remove any partial / half-baked state
+	delete(vbFailoverLogMap, vb)
+
+	vbErrorMap[vb] = &base.FailoverLogParseError{
+		VBNo:  vb,
+		Stage: stage,
+		Key:   key,
+		Err:   err,
+	}
+}
+
 // handleFailoverLogResponse handles the response from the failover log STAT command
 // The KV STAT request is a server-side streaming request, meaning the response consists of
 // a stream of key-value pairs. Each response packet represents one key-value pair, and
@@ -3856,13 +3878,20 @@ func (u *Utilities) GetTerseInfo(localConnStr string, username, password string,
 // Documentation:
 //  1. https://github.com/couchbase/kv_engine/blob/26a32229a4e475207976d57b5a3dafbcb6032296/engines/ep/docs/stats.org#26-vbucket-failover-stats
 //  2. https://src.couchbase.org/source/xref/8.0.0/kv_engine/engines/ep/src/failover-table.cc?r=974b8bf34b82ebb5fa6a5b563eeef245623a7b51#284-316
-func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMap base.FailoverLogMapType) {
+func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMap base.FailoverLogMapType, vbErrorMap map[uint16]error) {
 	keyStr := string(key)
 
 	var vbno uint16
 	var subKey string
 	if n, err := fmt.Sscanf(keyStr, "vb_%d:%s", &vbno, &subKey); err != nil || n != 2 {
+		// Can't parse vbno
+		// Just log and return - caller will notice missing VB data
 		u.logger_utils.Warnf("invalid key format %s (got %d parts): %v", keyStr, n, err)
+		return
+	}
+
+	// If this VB already failed, ignore everything else
+	if _, failed := vbErrorMap[vbno]; failed {
 		return
 	}
 
@@ -3871,6 +3900,7 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 	case base.FailoverLogNumEntriesKey:
 		numEntries, err := strconv.ParseUint(string(value), 10, 64)
 		if err != nil {
+			failVB(vbno, "parse_num_entries", keyStr, err, vbFailoverLogMap, vbErrorMap)
 			return
 		}
 		vbFailoverLogMap[vbno] = &base.FailoverLog{
@@ -3880,15 +3910,7 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 		return
 
 	case base.FailoverLogNumErroneousEntriesErasedKey:
-		failoverLog, ok := vbFailoverLogMap[vbno]
-		if !ok {
-			return
-		}
-		numErroneousEntriesErased, err := strconv.ParseUint(string(value), 10, 64)
-		if err != nil {
-			return
-		}
-		failoverLog.NumErraneousEntriesErased = numErroneousEntriesErased
+		// No-op - this information is not needed
 		return
 	}
 
@@ -3896,11 +3918,13 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 	var entryIndex uint64
 	var entryKey string
 	if n, err := fmt.Sscanf(subKey, "%d:%s", &entryIndex, &entryKey); err != nil || n != 2 {
+		failVB(vbno, base.FailoverLogParseEntryKeyStage, keyStr, err, vbFailoverLogMap, vbErrorMap)
 		return
 	}
 
 	failoverLog, ok := vbFailoverLogMap[vbno]
 	if !ok {
+		failVB(vbno, base.FailoverLogLookupForEntryStage, keyStr, fmt.Errorf("vb not found in map when processing entry %d", entryIndex), vbFailoverLogMap, vbErrorMap)
 		return
 	}
 
@@ -3908,21 +3932,23 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 	case base.FailoverLogEntryIdKey:
 		uuid, err := strconv.ParseUint(string(value), 10, 64)
 		if err != nil {
+			failVB(vbno, base.FailoverLogParseEntryUuidStage, keyStr, err, vbFailoverLogMap, vbErrorMap)
 			return
 		}
 		entry := &base.FailoverEntry{Uuid: uuid}
 		if err := failoverLog.SetEntry(entryIndex, entry); err != nil {
-			u.logger_utils.Warnf("failed to set entry for %s: %v", keyStr, err)
+			failVB(vbno, base.FailoverLogSetEntryStage, keyStr, err, vbFailoverLogMap, vbErrorMap)
+			return
 		}
-		return
 	case base.FailoverLogEntrySeqnoKey:
 		seqno, err := strconv.ParseUint(string(value), 10, 64)
 		if err != nil {
+			failVB(vbno, base.FailoverLogParseEntrySeqnoStage, keyStr, err, vbFailoverLogMap, vbErrorMap)
 			return
 		}
 		entry, err := failoverLog.GetEntry(entryIndex)
 		if err != nil {
-			u.logger_utils.Warnf("failed to get entry for %s: %v", keyStr, err)
+			failVB(vbno, base.FailoverLogGetEntryStage, keyStr, err, vbFailoverLogMap, vbErrorMap)
 			return
 		}
 		entry.HighSeqno = seqno
@@ -3931,16 +3957,20 @@ func (u *Utilities) handleFailoverLogResponse(key, value []byte, vbFailoverLogMa
 }
 
 // GetFailoverLog fetches the failover log from the cluster associated with the given connection
-func (u *Utilities) GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, error) {
+func (u *Utilities) GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, map[uint16]error, error) {
 	vbFailoverLogMap := make(base.FailoverLogMapType)
+	vbErrorMap := make(map[uint16]error)
 	handleResponse := func(key, value []byte) {
-		u.handleFailoverLogResponse(key, value, vbFailoverLogMap)
+		u.handleFailoverLogResponse(key, value, vbFailoverLogMap, vbErrorMap)
 	}
 	err := conn.StatsFunc(base.FAILOVER_LOG_STAT_NAME, handleResponse)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return vbFailoverLogMap, nil
+	if len(vbErrorMap) > 0 {
+		return vbFailoverLogMap, vbErrorMap, nil
+	}
+	return vbFailoverLogMap, nil, nil
 }
 
 func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface) (base.VBucketStatsMap, error) {

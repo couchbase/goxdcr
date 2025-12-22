@@ -3030,7 +3030,7 @@ func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) RunAndReturn(run func(map[s
 }
 
 // GetFailoverLog provides a mock function with given fields: conn
-func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverLogMapType, error) {
+func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverLogMapType, map[uint16]error, error) {
 	ret := _m.Called(conn)
 
 	if len(ret) == 0 {
@@ -3038,8 +3038,9 @@ func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverL
 	}
 
 	var r0 base.FailoverLogMapType
-	var r1 error
-	if rf, ok := ret.Get(0).(func(memcached.ClientIface) (base.FailoverLogMapType, error)); ok {
+	var r1 map[uint16]error
+	var r2 error
+	if rf, ok := ret.Get(0).(func(memcached.ClientIface) (base.FailoverLogMapType, map[uint16]error, error)); ok {
 		return rf(conn)
 	}
 	if rf, ok := ret.Get(0).(func(memcached.ClientIface) base.FailoverLogMapType); ok {
@@ -3050,13 +3051,21 @@ func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface) (base.FailoverL
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(memcached.ClientIface) error); ok {
+	if rf, ok := ret.Get(1).(func(memcached.ClientIface) map[uint16]error); ok {
 		r1 = rf(conn)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[uint16]error)
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(memcached.ClientIface) error); ok {
+		r2 = rf(conn)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // UtilsIface_GetFailoverLog_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFailoverLog'
@@ -3077,12 +3086,12 @@ func (_c *UtilsIface_GetFailoverLog_Call) Run(run func(conn memcached.ClientIfac
 	return _c
 }
 
-func (_c *UtilsIface_GetFailoverLog_Call) Return(_a0 base.FailoverLogMapType, _a1 error) *UtilsIface_GetFailoverLog_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *UtilsIface_GetFailoverLog_Call) Return(_a0 base.FailoverLogMapType, _a1 map[uint16]error, _a2 error) *UtilsIface_GetFailoverLog_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface) (base.FailoverLogMapType, error)) *UtilsIface_GetFailoverLog_Call {
+func (_c *UtilsIface_GetFailoverLog_Call) RunAndReturn(run func(memcached.ClientIface) (base.FailoverLogMapType, map[uint16]error, error)) *UtilsIface_GetFailoverLog_Call {
 	_c.Call.Return(run)
 	return _c
 }

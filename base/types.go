@@ -4040,11 +4040,6 @@ type FailoverLog struct {
 	// The entries are stored in descending order of time i.e the newest entry is at the first index
 	// and the oldest entry is at the last index
 	LogTable []*FailoverEntry
-	// NumErraneousEntriesErased is the number of entries that have been erased from the failover log
-	// For more information on when KV removes entries from the failover log, see
-	//  1. https://couchbase.slack.com/archives/CFJDXSGUA/p1755012722540999
-	//  2. https://src.couchbase.org/source/xref/8.0.0/kv_engine/engines/ep/src/failover-table.cc?r=974b8bf34b82ebb5fa6a5b563eeef245623a7b51#412-427
-	NumErraneousEntriesErased uint64
 }
 
 // GetEntry returns the entry at the given index
@@ -4076,9 +4071,8 @@ func (fl *FailoverLog) GetLatestUUID() uint64 {
 // Clone clones the FailoverLog
 func (fl *FailoverLog) Clone() *FailoverLog {
 	return &FailoverLog{
-		NumEntries:                fl.NumEntries,
-		LogTable:                  DeepCopyFailoverEntryList(fl.LogTable),
-		NumErraneousEntriesErased: fl.NumErraneousEntriesErased,
+		NumEntries: fl.NumEntries,
+		LogTable:   DeepCopyFailoverEntryList(fl.LogTable),
 	}
 }
 

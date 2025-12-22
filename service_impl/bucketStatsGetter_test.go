@@ -265,7 +265,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 
 	// Mock GetFailoverLog
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mcClient).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mcClient).Return(failoverLog.FailoverLogMap, nil, nil)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 	finCh := make(chan bool, 1)
@@ -322,10 +322,10 @@ func TestClusterBucketStatsProvider_GetFailoverLog_PartialFailure(t *testing.T) 
 			},
 		}
 	}
-	utils.On("GetFailoverLog", mcClient).Return(failoverLogServer1.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mcClient).Return(failoverLogServer1.FailoverLogMap, nil, nil)
 
 	// Second server fails
-	utils.On("GetFailoverLog", mcClient2).Return(nil, errors.New("failed to get failover log"))
+	utils.On("GetFailoverLog", mcClient2).Return(nil, nil, errors.New("failed to get failover log"))
 	utils.On("IsSeriousNetError", mock.Anything).Return(false)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
@@ -367,7 +367,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_NetworkError(t *testing.T) {
 
 	// Simulate serious network error
 	networkErr := errors.New("connection reset by peer")
-	utils.On("GetFailoverLog", mock.Anything).Return(nil, networkErr)
+	utils.On("GetFailoverLog", mock.Anything).Return(nil, nil, networkErr)
 	utils.On("IsSeriousNetError", networkErr).Return(true)
 	mcClient.On("Close").Return(nil)
 
@@ -381,6 +381,270 @@ func TestClusterBucketStatsProvider_GetFailoverLog_NetworkError(t *testing.T) {
 	assert.NotEmpty(errMap)
 	assert.Contains(errMap, "MissingVbs")
 	assert.Equal(0, len(result.FailoverLogMap))
+
+	provider.Close()
+}
+
+func TestClusterBucketStatsProvider_GetFailoverLog_ParseErrors(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_GetFailoverLog_ParseErrors =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_GetFailoverLog_ParseErrors =================")
+	assert := assert.New(t)
+
+	remoteClusterSvc := &service_defMock.RemoteClusterSvc{}
+	utils := &utilsMock.UtilsIface{}
+	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
+	logger := createTestLogger()
+	mcClient := &clientMocks.ClientIface{}
+
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger)
+
+	setupTestRemoteMemcachedComponent(provider, utils, logger)
+	mcClient.On("Close").Return(nil)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] <- mcClient
+
+	// Test: Simulate parsing errors for some vbuckets
+	// vb_0: successful parse
+	// vb_1: invalid num_entries (parse error)
+	// vb_2: successful parse
+	// vb_3: missing failover log (lookup error)
+	failoverLogMap := make(base.FailoverLogMapType)
+	vbErrorMap := make(map[uint16]error)
+
+	// vb_0: successful
+	failoverLogMap[0] = &base.FailoverLog{
+		NumEntries: 2,
+		LogTable: []*base.FailoverEntry{
+			{Uuid: 123456, HighSeqno: 1000},
+			{Uuid: 789012, HighSeqno: 2000},
+		},
+	}
+
+	// vb_1: parsing error
+	vbErrorMap[1] = &base.FailoverLogParseError{
+		VBNo:  1,
+		Stage: "parse_num_entries",
+		Key:   "vb_1:num_entries",
+		Err:   errors.New("strconv.ParseUint: parsing \"invalid\": invalid syntax"),
+	}
+
+	// vb_2: successful
+	failoverLogMap[2] = &base.FailoverLog{
+		NumEntries: 1,
+		LogTable: []*base.FailoverEntry{
+			{Uuid: 111222, HighSeqno: 3000},
+		},
+	}
+
+	// vb_3: parsing error (entry index out of range)
+	vbErrorMap[3] = &base.FailoverLogParseError{
+		VBNo:  3,
+		Stage: "set_entry",
+		Key:   "vb_3:5:id",
+		Err:   errors.New("index 5 out of range for failover log with 2 entries"),
+	}
+
+	utils.On("GetFailoverLog", mcClient).Return(failoverLogMap, vbErrorMap, nil)
+	utils.On("IsSeriousNetError", mock.Anything).Return(false)
+
+	vblist := []uint16{0, 1, 2, 3}
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+
+	// Should not return transport error
+	assert.NoError(err)
+	assert.NotNil(result)
+
+	// Should have per-VB errors
+	assert.NotEmpty(errMap)
+	assert.Contains(errMap, "vb_1")
+	assert.Contains(errMap, "vb_3")
+
+	// Should have successful failover logs
+	assert.Equal(2, len(result.FailoverLogMap))
+	assert.Contains(result.FailoverLogMap, uint16(0))
+	assert.Contains(result.FailoverLogMap, uint16(2))
+
+	// vb_1 and vb_3 should NOT be in the result map (partial parse failures)
+	assert.NotContains(result.FailoverLogMap, uint16(1))
+	assert.NotContains(result.FailoverLogMap, uint16(3))
+
+	// Verify the error contains FailoverLogParseError
+	vb1Err := errMap["vb_1"]
+	assert.Contains(vb1Err.Error(), "parse_num_entries")
+	assert.Contains(vb1Err.Error(), "vb 1")
+
+	vb3Err := errMap["vb_3"]
+	assert.Contains(vb3Err.Error(), "set_entry")
+	assert.Contains(vb3Err.Error(), "vb 3")
+
+	// Verify successful VBs have correct data
+	log0, err := result.GetFailoverLog(0)
+	assert.NoError(err)
+	assert.Equal(uint64(2), log0.NumEntries)
+	assert.Equal(uint64(123456), log0.LogTable[0].Uuid)
+
+	log2, err := result.GetFailoverLog(2)
+	assert.NoError(err)
+	assert.Equal(uint64(1), log2.NumEntries)
+	assert.Equal(uint64(111222), log2.LogTable[0].Uuid)
+
+	provider.Close()
+}
+
+func TestClusterBucketStatsProvider_GetFailoverLog_AllVBsFailParsing(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_GetFailoverLog_AllVBsFailParsing =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_GetFailoverLog_AllVBsFailParsing =================")
+	assert := assert.New(t)
+
+	remoteClusterSvc := &service_defMock.RemoteClusterSvc{}
+	utils := &utilsMock.UtilsIface{}
+	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
+	logger := createTestLogger()
+	mcClient := &clientMocks.ClientIface{}
+
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger)
+
+	setupTestRemoteMemcachedComponent(provider, utils, logger)
+	mcClient.On("Close").Return(nil)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] <- mcClient
+
+	// All vbuckets fail to parse
+	failoverLogMap := make(base.FailoverLogMapType)
+	vbErrorMap := make(map[uint16]error)
+
+	for vb := uint16(0); vb < 4; vb++ {
+		vbErrorMap[vb] = &base.FailoverLogParseError{
+			VBNo:  vb,
+			Stage: "parse_num_entries",
+			Key:   fmt.Sprintf("vb_%d:num_entries", vb),
+			Err:   errors.New("strconv.ParseUint: parsing \"corrupted\": invalid syntax"),
+		}
+	}
+
+	utils.On("GetFailoverLog", mcClient).Return(failoverLogMap, vbErrorMap, nil)
+	utils.On("IsSeriousNetError", mock.Anything).Return(false)
+
+	vblist := []uint16{0, 1, 2, 3}
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+
+	// Should not return transport error
+	assert.NoError(err)
+	assert.NotNil(result)
+
+	// All VBs should have errors
+	assert.NotEmpty(errMap)
+	for vb := uint16(0); vb < 4; vb++ {
+		vbKey := fmt.Sprintf("vb_%d", vb)
+		assert.Contains(errMap, vbKey)
+		vbErr := errMap[vbKey]
+		assert.Contains(vbErr.Error(), "parse_num_entries")
+	}
+
+	// No successful parses
+	assert.Empty(result.FailoverLogMap)
+
+	provider.Close()
+}
+
+func TestClusterBucketStatsProvider_GetFailoverLog_MixedSuccessAndParseErrors(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_GetFailoverLog_MixedSuccessAndParseErrors =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_GetFailoverLog_MixedSuccessAndParseErrors =================")
+	assert := assert.New(t)
+
+	remoteClusterSvc := &service_defMock.RemoteClusterSvc{}
+	utils := &utilsMock.UtilsIface{}
+	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
+	logger := createTestLogger()
+	mcClient := &clientMocks.ClientIface{}
+	mcClient2 := &clientMocks.ClientIface{}
+
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger)
+
+	setupTestRemoteMemcachedComponent(provider, utils, logger)
+	mcClient.On("Close").Return(nil)
+	mcClient2.On("Close").Return(nil)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] <- mcClient
+	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient2
+
+	// First server: some VBs succeed, some fail parsing
+	failoverLogServer1 := make(base.FailoverLogMapType)
+	vbErrorMapServer1 := make(map[uint16]error)
+
+	// vb_0: success
+	failoverLogServer1[0] = &base.FailoverLog{
+		NumEntries: 1,
+		LogTable:   []*base.FailoverEntry{{Uuid: 100, HighSeqno: 1000}},
+	}
+	// vb_1: parse error
+	vbErrorMapServer1[1] = &base.FailoverLogParseError{
+		VBNo:  1,
+		Stage: "parse_entry_uuid",
+		Key:   "vb_1:0:id",
+		Err:   errors.New("strconv.ParseUint: parsing bad_uuid: invalid syntax"),
+	}
+	// vb_2: success
+	failoverLogServer1[2] = &base.FailoverLog{
+		NumEntries: 1,
+		LogTable:   []*base.FailoverEntry{{Uuid: 200, HighSeqno: 2000}},
+	}
+	// vb_3: parse error
+	vbErrorMapServer1[3] = &base.FailoverLogParseError{
+		VBNo:  3,
+		Stage: "parse_entry_seqno",
+		Key:   "vb_3:0:seq",
+		Err:   errors.New("strconv.ParseUint: parsing bad_seqno: invalid syntax"),
+	}
+
+	// Second server: all succeed
+	failoverLogServer2 := make(base.FailoverLogMapType)
+	for vb := uint16(4); vb < 8; vb++ {
+		failoverLogServer2[vb] = &base.FailoverLog{
+			NumEntries: 1,
+			LogTable:   []*base.FailoverEntry{{Uuid: uint64(vb) * 100, HighSeqno: uint64(vb) * 1000}},
+		}
+	}
+
+	utils.On("GetFailoverLog", mcClient).Return(failoverLogServer1, vbErrorMapServer1, nil)
+	utils.On("GetFailoverLog", mcClient2).Return(failoverLogServer2, nil, nil)
+	utils.On("IsSeriousNetError", mock.Anything).Return(false)
+
+	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	result, errMap, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh})
+
+	// Should not return transport error
+	assert.NoError(err)
+	assert.NotNil(result)
+
+	// Should have errors for vb_1 and vb_3
+	assert.NotEmpty(errMap)
+	assert.Contains(errMap, "vb_1")
+	assert.Contains(errMap, "vb_3")
+
+	// Verify error messages contain proper context
+	assert.Contains(errMap["vb_1"].Error(), "parse_entry_uuid")
+	assert.Contains(errMap["vb_3"].Error(), "parse_entry_seqno")
+
+	// Should have 6 successful vbuckets (0, 2, 4, 5, 6, 7)
+	assert.Equal(6, len(result.FailoverLogMap))
+	assert.Contains(result.FailoverLogMap, uint16(0))
+	assert.Contains(result.FailoverLogMap, uint16(2))
+	assert.Contains(result.FailoverLogMap, uint16(4))
+	assert.Contains(result.FailoverLogMap, uint16(5))
+	assert.Contains(result.FailoverLogMap, uint16(6))
+	assert.Contains(result.FailoverLogMap, uint16(7))
+
+	// Failed VBs should not be in the result
+	assert.NotContains(result.FailoverLogMap, uint16(1))
+	assert.NotContains(result.FailoverLogMap, uint16(3))
 
 	provider.Close()
 }
@@ -602,7 +866,7 @@ func TestClusterBucketStatsProvider_Concurrent_GetFailoverLog(t *testing.T) {
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient
 
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil, nil)
 	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	// Execute concurrent requests
@@ -653,7 +917,7 @@ func TestClusterBucketStatsProvider_Idempotent_GetFailoverLog(t *testing.T) {
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient
 
 	failoverLog := createTestFailoverLog()
-	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil)
+	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface")).Return(failoverLog.FailoverLogMap, nil, nil)
 
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 
@@ -1207,7 +1471,7 @@ func TestClusterBucketStatsProvider_ConcurrentOperationsAndClose_NoDeadlock(t *t
 	// Setup basic mocks
 	setupBasicMocksForProvider(provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc)
 
-	mockUtils.On("GetFailoverLog", mock.Anything).Return(make(base.FailoverLogMapType), nil)
+	mockUtils.On("GetFailoverLog", mock.Anything).Return(make(base.FailoverLogMapType), nil, nil, nil)
 	mockUtils.On("GetVBucketStats", mock.Anything, mock.Anything).Return(make(base.VBucketStatsMap), nil)
 
 	var wg sync.WaitGroup

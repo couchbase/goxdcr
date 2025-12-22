@@ -100,6 +100,8 @@ func (r *RemoteMemcachedComponent) reconfigureConnectionPoolNoLock(newMaxConnsPe
 	r.KvMemClientsMtx.Lock()
 	defer r.KvMemClientsMtx.Unlock()
 
+	errMap := make(base.ErrorMap)
+
 	for serverAddr, oldClientChan := range r.KvMemClients {
 		// Create a new channel with the updated capacity
 		newClientChan := make(chan mcc.ClientIface, newMaxConnsPerServer)
@@ -117,10 +119,13 @@ func (r *RemoteMemcachedComponent) reconfigureConnectionPoolNoLock(newMaxConnsPe
 			default:
 				// New pool is full, close the excess connection
 				if err := client.Close(); err != nil {
-					r.LoggerImpl.Warnf("error closing excess connection for %v during reconfiguration: %v", serverAddr, err)
+					errMap[serverAddr] = fmt.Errorf("error closing excess connection for %v during reconfiguration: %v", serverAddr, err)
 				}
 			}
 		}
+	}
+	if len(errMap) > 0 {
+		r.LoggerImpl.Warnf("Failed to close some excess connections during reconfiguration: %v", base.FlattenErrorMap(errMap))
 	}
 }
 
@@ -205,7 +210,7 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 
 			client, err := r.GetNewMemcachedClient(server_addr)
 			if err != nil {
-				r.LoggerImpl.Errorf("failed to construct memcached client for %v, err=%v", server_addr, err)
+				r.LoggerImpl.Warnf("failed to construct memcached client for %v, err=%v", server_addr, err)
 				// Continue despite failure - AcquireClient will retry creating connections
 				// on-demand, which handles any transient network errors gracefully
 				continue
@@ -546,8 +551,11 @@ func (r *RemoteMemcachedComponent) DeleteMemClientsNoLock(serverAddr string) {
 	r.LoggerImpl.Infof("removed connection for server %v", serverAddr)
 }
 
-// MonitorTopology monitors the topology of the target cluster and removes
-// connections for servers that are no longer in the target kvVbMap
+// MonitorTopology reconciles the connection pool with the current target topology.
+//
+// The kvVbMap is treated as the source of truth for target topology.
+// This routine only removes connections for servers that are no longer present
+// in the kvVbMap. Connections to newly added servers(if any) are created lazily on demand
 func (r *RemoteMemcachedComponent) MonitorTopology() {
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
 	defer ticker.Stop()

@@ -203,14 +203,14 @@ func (provider *ClusterBucketStatsProvider) getServerListFromVbList(ctx context.
 }
 
 // getFailoverLogFromServer is a helper function to get the failover log from a specific server
-func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server string) (base.FailoverLogMapType, error) {
+func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server string) (base.FailoverLogMapType, map[uint16]error, error) {
 	// Acquire a client from the pool
 	client, err := provider.remoteMemcachedComponent.AcquireClient(server)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	resp, err := provider.utils.GetFailoverLog(client)
+	resp, vbErrorMap, err := provider.utils.GetFailoverLog(client)
 	if err != nil {
 		if provider.utils.IsSeriousNetError(err) {
 			// Connection is broken due to network error, close it instead of returning to pool
@@ -221,29 +221,30 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server stri
 			// Non-network error, release client to pool for reuse
 			provider.remoteMemcachedComponent.ReleaseClient(server, client)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	// release client to pool
 	provider.remoteMemcachedComponent.ReleaseClient(server, client)
-	return resp, nil
+	return resp, vbErrorMap, nil
 }
 
 // getFailoverLogFromServerWithRetry is a helper function to get the failover log from a specific server with retry
-func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ctx context.Context, server string) (base.FailoverLogMapType, error) {
+func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ctx context.Context, server string) (base.FailoverLogMapType, map[uint16]error, error) {
 	waitTime := base.RemoteMcRetryWaitTime
 	var err error
 	var result base.FailoverLogMapType
+	var vbErrorMap map[uint16]error
 	for i := 1; i <= base.MaxRemoteMcRetry; i++ {
 		select {
 		case <-ctx.Done():
 			err = fmt.Errorf("getFailoverLogFromServerWithRetry: aborting %w", ctx.Err())
 			provider.logger.Warnf(err.Error())
 		default:
-			result, err = provider.getFailoverLogFromServer(server)
+			result, vbErrorMap, err = provider.getFailoverLogFromServer(server)
 		}
 		if err == nil {
-			return result, nil
+			return result, vbErrorMap, nil
 		}
 		if provider.IsRetryableError(err) && i != base.MaxRemoteMcRetry {
 			base.WaitForTimeoutOrContextDone(waitTime, ctx.Done())
@@ -252,7 +253,7 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServerWithRetry(ct
 			break
 		}
 	}
-	return nil, fmt.Errorf("getFailoverLogFromServerWithRetry: failed to get failover log from server %v: %w", server, err)
+	return nil, nil, fmt.Errorf("getFailoverLogFromServerWithRetry: failed to get failover log from server %v: %w", server, err)
 }
 
 // GetFailoverLog returns the failover log of the target bucket
@@ -302,13 +303,21 @@ func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.Fai
 		wg.Add(1)
 		go func(serverAddr string) {
 			defer wg.Done()
-			resp, err := provider.getFailoverLogFromServerWithRetry(reqCtx, serverAddr)
+			resp, vbErrorMap, err := provider.getFailoverLogFromServerWithRetry(reqCtx, serverAddr)
 			if err != nil {
 				mutex.Lock()
 				errMap[serverAddr] = err
 				mutex.Unlock()
 			} else {
 				resultCh <- resp
+				// Merge per-VB errors into the error map
+				if len(vbErrorMap) > 0 {
+					mutex.Lock()
+					for vbno, vbErr := range vbErrorMap {
+						errMap[fmt.Sprintf("vb_%d", vbno)] = vbErr
+					}
+					mutex.Unlock()
+				}
 			}
 		}(server)
 	}

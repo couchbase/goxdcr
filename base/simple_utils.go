@@ -781,11 +781,11 @@ func WaitForTimeoutOrFinishSignal(wait_time time.Duration, finish_ch chan bool) 
 }
 
 func WaitForTimeoutOrContextDone(wait_time time.Duration, ctxDone <-chan struct{}) {
-	ticker := time.NewTicker(wait_time)
-	defer ticker.Stop()
+	timer := time.NewTimer(wait_time)
+	defer timer.Stop()
 	select {
 	case <-ctxDone:
-	case <-ticker.C:
+	case <-timer.C:
 	}
 }
 

@@ -31,12 +31,13 @@ type VBucketInfoResponse map[uint32]*internal_xdcr_v1.GetVbucketInfoResponse_Vbu
 func (vbr VBucketInfoResponse) GetBucketFailoverLog() *base.BucketFailoverLog {
 	bucketFailoverLog := &base.BucketFailoverLog{FailoverLogMap: make(base.FailoverLogMapType)}
 	for vbno, vbInfo := range vbr {
-		numEntries := uint64(len(vbInfo.GetHistory()))
+		history := vbInfo.GetHistory()
+		numEntries := uint64(len(history))
 		vbFailoverLog := &base.FailoverLog{
 			NumEntries: numEntries,
 			LogTable:   make([]*base.FailoverEntry, numEntries),
 		}
-		for i, entry := range vbInfo.GetHistory() {
+		for i, entry := range history {
 			vbFailoverLog.LogTable[i] = &base.FailoverEntry{
 				Uuid:      entry.GetUuid(),
 				HighSeqno: entry.GetSeqno(),

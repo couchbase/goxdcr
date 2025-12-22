@@ -112,6 +112,29 @@ var (
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
 
+// FailoverLogParseError represents a structured error when parsing failover log responses
+type FailoverLogParseError struct {
+	// VBNo is the vbucket number for which the error occurred
+	VBNo uint16
+	// Stage denotes what operation failed (e.g., "parse_key", "parse_num_entries", "parse_uuid")
+	Stage string
+	// Key is the key being processed when the error occurred
+	Key string
+	// Err is the underlying error
+	Err error
+}
+
+func (e *FailoverLogParseError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("failover log parse error for vb %d at stage '%s' (key: %s): %s", e.VBNo, e.Stage, e.Key, e.Err.Error())
+	}
+	return ""
+}
+
+func (e *FailoverLogParseError) Unwrap() error {
+	return e.Err
+}
+
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
 }

@@ -2038,6 +2038,12 @@ const (
 	FailoverLogNumErroneousEntriesErasedKey = "num_erroneous_entries_erased"
 	FailoverLogEntryIdKey                   = "id"
 	FailoverLogEntrySeqnoKey                = "seq"
+	FailoverLogParseEntryKeyStage           = "parse_entry_key"
+	FailoverLogLookupForEntryStage          = "lookup_failover_log_for_entry"
+	FailoverLogParseEntryUuidStage          = "parse_entry_uuid"
+	FailoverLogSetEntryStage                = "set_entry"
+	FailoverLogParseEntrySeqnoStage         = "parse_entry_seqno"
+	FailoverLogGetEntryStage                = "get_entry"
 )
 
 // UseLegacyPreReplicate is the boolean flag that indicates whether to use legacy pre-replicate

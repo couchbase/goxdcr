@@ -188,7 +188,7 @@ type UtilsIface interface {
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
 	TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{})
 	VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error
-	GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, error)
+	GetFailoverLog(conn mcc.ClientIface) (base.FailoverLogMapType, map[uint16]error, error)
 	GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn mcc.ClientIface) (base.VBucketStatsMap, error)
 
 	// Collections related utilities
