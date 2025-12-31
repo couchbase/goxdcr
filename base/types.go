@@ -1371,16 +1371,27 @@ const (
 	filterExpDelSkipExpN            = 2
 	filterExpDelSkipUncommittedTxnN = 3
 	filterExpDelSkipBinaryN         = 4
+	filterExpDelFilterDelsWithFEN   = 5
+	filterExpDelFilterExpsWithFEN   = 6
 )
 
-var FilterExpDelNone FilterExpDelType = 0x0
-var FilterExpDelStripExpiration FilterExpDelType = 1 << filterExpDelStripN               // 0x1
-var FilterExpDelSkipDeletes FilterExpDelType = 1 << filterExpDelSkipDelN                 // 0x2
-var FilterExpDelSkipExpiration FilterExpDelType = 1 << filterExpDelSkipExpN              // 0x4
-var FilterSkipReplUncommittedTxn FilterExpDelType = 1 << filterExpDelSkipUncommittedTxnN // 0x8
-var FilterSkipBinary FilterExpDelType = 1 << filterExpDelSkipBinaryN                     // 0x16
-var FilterExpDelAllFiltered = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
-var FilterExpDelMax = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration | FilterSkipReplUncommittedTxn
+var (
+	FilterExpDelNone             FilterExpDelType = 0x0
+	FilterExpDelStripExpiration  FilterExpDelType = 1 << filterExpDelStripN              // 1
+	FilterExpDelSkipDeletes      FilterExpDelType = 1 << filterExpDelSkipDelN            // 2
+	FilterExpDelSkipExpiration   FilterExpDelType = 1 << filterExpDelSkipExpN            // 4
+	FilterSkipReplUncommittedTxn FilterExpDelType = 1 << filterExpDelSkipUncommittedTxnN // 8
+	FilterSkipBinary             FilterExpDelType = 1 << filterExpDelSkipBinaryN         // 16
+
+	// FilterDeletionsWithFE indicates that deletions can be filtered using key-only filter expression
+	FilterDeletionsWithFE FilterExpDelType = 1 << filterExpDelFilterDelsWithFEN // 32
+	// FilterExpirationsWithFE indicates that expirations can be filtered using key-only filter expression
+	FilterExpirationsWithFE FilterExpDelType = 1 << filterExpDelFilterExpsWithFEN // 64
+
+	FilterExpDelAllFiltered = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
+	FilterExpDelMax         = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration |
+		FilterSkipReplUncommittedTxn | FilterSkipBinary | FilterDeletionsWithFE | FilterExpirationsWithFE
+)
 
 func (a *FilterExpDelType) IsStripExpirationSet() bool {
 	return *a&FilterExpDelStripExpiration > 0
@@ -1402,14 +1413,12 @@ func (a *FilterExpDelType) IsSkipBinarySet() bool {
 	return *a&FilterSkipBinary > 0
 }
 
-// TODO: MB-69470
 func (a *FilterExpDelType) IsFilterDeletionsWithFESet() bool {
-	return false
+	return *a&FilterDeletionsWithFE > 0
 }
 
-// TODO: MB-69470
 func (a *FilterExpDelType) IsFilterExpirationsWithFESet() bool {
-	return false
+	return *a&FilterExpirationsWithFE > 0
 }
 
 func (a *FilterExpDelType) SetStripExpiration(setVal bool) {
@@ -1447,12 +1456,18 @@ func (a *FilterExpDelType) SetSkipBinary(setVal bool) {
 	}
 }
 
-// TODO: MB-69470
 func (a *FilterExpDelType) SetFilterDeletionsWithFE(setVal bool) {
+	curValue := *a&FilterDeletionsWithFE > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelFilterDelsWithFEN
+	}
 }
 
-// TODO: MB-69470
 func (a *FilterExpDelType) SetFilterExpirationsWithFE(setVal bool) {
+	curValue := *a&FilterExpirationsWithFE > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelFilterExpsWithFEN
+	}
 }
 
 func (a FilterExpDelType) String() string {

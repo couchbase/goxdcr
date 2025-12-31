@@ -1263,3 +1263,244 @@ func TestXattrFilters(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestXattrFilters =================")
 }
+
+func TestFilterDeletionsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterDeletionsWithFE =================")
+	defer fmt.Println("============== Test case end: TestFilterDeletionsWithFE =================")
+	assert := assert.New(t)
+
+	// Key-only filter that matches the deletion's key "TestDocKey"
+	keyOnlyFilter := "REGEXP_CONTAINS(META().id, \"^TestDocKey\")"
+
+	// Create a filter mode with FilterDeletionsWithFE set
+	var filterType base.FilterExpDelType
+	filterType.SetFilterDeletionsWithFE(true)
+
+	filter, err := NewFilter(filterId, keyOnlyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.True(filter.ShouldFilterDeletionsWithFE())
+	assert.False(filter.ShouldFilterExpirationsWithFE())
+
+	// Load deletion event
+	delEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	// With FilterDeletionsWithFE set, deletion should be filtered with the key-only expression
+	// Since the key matches "TestDocKey", it should pass the filter
+	result, err, _, _, status := filter.FilterUprEvent(delEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+
+	// Test with a key-only filter that does NOT match
+	nonMatchingKeyFilter := "REGEXP_CONTAINS(META().id, \"^NonExistentKey\")"
+	filterNonMatch, err := NewFilter(filterId, nonMatchingKeyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filterNonMatch)
+
+	delEvent2, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	result, err, _, _, status = filterNonMatch.FilterUprEvent(delEvent2)
+	assert.Nil(err)
+	assert.False(result)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
+}
+
+func TestFilterDeletionsWithoutFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterDeletionsWithoutFE =================")
+	defer fmt.Println("============== Test case end: TestFilterDeletionsWithoutFE =================")
+	assert := assert.New(t)
+
+	// Key-only filter that should NOT be applied to deletions without the flag
+	keyOnlyFilter := "REGEXP_CONTAINS(META().id, \"^NonExistentKey\")"
+
+	// Create a filter without FilterDeletionsWithFE set
+	var filterType base.FilterExpDelType = base.FilterExpDelNone
+
+	filter, err := NewFilter(filterId, keyOnlyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.False(filter.ShouldFilterDeletionsWithFE())
+
+	// Load deletion event
+	delEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	// Without FilterDeletionsWithFE set, deletion should pass through without being filtered
+	result, err, _, _, status := filter.FilterUprEvent(delEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+}
+
+func TestFilterExpirationsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterExpirationsWithFE =================")
+	defer fmt.Println("============== Test case end: TestFilterExpirationsWithFE =================")
+	assert := assert.New(t)
+
+	// Key-only filter that matches the expiration's key "TestDocKey"
+	keyOnlyFilter := "REGEXP_CONTAINS(META().id, \"^TestDocKey\")"
+
+	// Create a filter mode with FilterExpirationsWithFE set
+	var filterType base.FilterExpDelType
+	filterType.SetFilterExpirationsWithFE(true)
+
+	filter, err := NewFilter(filterId, keyOnlyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.False(filter.ShouldFilterDeletionsWithFE())
+	assert.True(filter.ShouldFilterExpirationsWithFE())
+
+	// Load expiration event
+	expEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	// With FilterExpirationsWithFE set, expiration should be filtered with the key-only expression
+	// Since the key matches "TestDocKey", it should pass the filter
+	result, err, _, _, status := filter.FilterUprEvent(expEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+
+	// Test with a key-only filter that does NOT match
+	nonMatchingKeyFilter := "REGEXP_CONTAINS(META().id, \"^NonExistentKey\")"
+	filterNonMatch, err := NewFilter(filterId, nonMatchingKeyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filterNonMatch)
+
+	expEvent2, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	result, err, _, _, status = filterNonMatch.FilterUprEvent(expEvent2)
+	assert.Nil(err)
+	assert.False(result)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
+}
+
+func TestFilterExpirationsWithoutFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterExpirationsWithoutFE =================")
+	defer fmt.Println("============== Test case end: TestFilterExpirationsWithoutFE =================")
+	assert := assert.New(t)
+
+	// Key-only filter that should NOT be applied to expirations without the flag
+	keyOnlyFilter := "REGEXP_CONTAINS(META().id, \"^NonExistentKey\")"
+
+	// Create a filter without FilterExpirationsWithFE set
+	var filterType base.FilterExpDelType = base.FilterExpDelNone
+
+	filter, err := NewFilter(filterId, keyOnlyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.False(filter.ShouldFilterExpirationsWithFE())
+
+	// Load expiration event
+	expEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	// Without FilterExpirationsWithFE set, expiration should pass through without being filtered
+	result, err, _, _, status := filter.FilterUprEvent(expEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+}
+
+func TestSetFilterDeletionsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestSetFilterDeletionsWithFE =================")
+	defer fmt.Println("============== Test case end: TestSetFilterDeletionsWithFE =================")
+	assert := assert.New(t)
+
+	// Create a filter without the flag initially
+	var filterType base.FilterExpDelType = base.FilterExpDelNone
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \"^Test\")", realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.False(filter.ShouldFilterDeletionsWithFE())
+
+	// Set the flag to true
+	filter.SetShouldFilterDeletionsWithFE(true)
+	assert.True(filter.ShouldFilterDeletionsWithFE())
+
+	// Set the flag back to false
+	filter.SetShouldFilterDeletionsWithFE(false)
+	assert.False(filter.ShouldFilterDeletionsWithFE())
+}
+
+func TestSetFilterExpirationsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestSetFilterExpirationsWithFE =================")
+	defer fmt.Println("============== Test case end: TestSetFilterExpirationsWithFE =================")
+	assert := assert.New(t)
+
+	// Create a filter without the flag initially
+	var filterType base.FilterExpDelType = base.FilterExpDelNone
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \"^Test\")", realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.False(filter.ShouldFilterExpirationsWithFE())
+
+	// Set the flag to true
+	filter.SetShouldFilterExpirationsWithFE(true)
+	assert.True(filter.ShouldFilterExpirationsWithFE())
+
+	// Set the flag back to false
+	filter.SetShouldFilterExpirationsWithFE(false)
+	assert.False(filter.ShouldFilterExpirationsWithFE())
+}
+
+func TestFilterDeletionsAndExpirationsWithFECombined(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterDeletionsAndExpirationsWithFECombined =================")
+	defer fmt.Println("============== Test case end: TestFilterDeletionsAndExpirationsWithFECombined =================")
+	assert := assert.New(t)
+
+	// Create a filter with both flags set
+	var filterType base.FilterExpDelType
+	filterType.SetFilterDeletionsWithFE(true)
+	filterType.SetFilterExpirationsWithFE(true)
+
+	// Key-only filter that matches
+	keyOnlyFilter := "REGEXP_CONTAINS(META().id, \"^TestDocKey\")"
+
+	filter, err := NewFilter(filterId, keyOnlyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.True(filter.ShouldFilterDeletionsWithFE())
+	assert.True(filter.ShouldFilterExpirationsWithFE())
+
+	// Test deletion event - should match
+	delEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	result, err, _, _, status := filter.FilterUprEvent(delEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+
+	// Test expiration event - should match
+	expEvent, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	result, err, _, _, status = filter.FilterUprEvent(expEvent)
+	assert.Nil(err)
+	assert.True(result)
+	assert.Equal(status, NotFiltered)
+
+	// Now test with a non-matching filter
+	nonMatchingKeyFilter := "REGEXP_CONTAINS(META().id, \"^NonExistent\")"
+	filterNonMatch, err := NewFilter(filterId, nonMatchingKeyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+
+	delEvent2, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	result, err, _, _, status = filterNonMatch.FilterUprEvent(delEvent2)
+	assert.Nil(err)
+	assert.False(result)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
+
+	expEvent2, err := base.RetrieveUprJsonAndConvert("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	result, err, _, _, status = filterNonMatch.FilterUprEvent(expEvent2)
+	assert.Nil(err)
+	assert.False(result)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
+}

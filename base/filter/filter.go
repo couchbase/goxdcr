@@ -27,6 +27,8 @@ type Filter interface {
 
 	SetShouldSkipUncommittedTxn(val bool)
 	SetShouldSkipBinaryDocs(val bool)
+	SetShouldFilterDeletionsWithFE(val bool)
+	SetShouldFilterExpirationsWithFE(val bool)
 }
 
 type FilterUtils interface {

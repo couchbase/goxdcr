@@ -98,6 +98,72 @@ func (_c *Filter_FilterUprEvent_Call) RunAndReturn(run func(*base.WrappedUprEven
 	return _c
 }
 
+// SetShouldFilterDeletionsWithFE provides a mock function with given fields: val
+func (_m *Filter) SetShouldFilterDeletionsWithFE(val bool) {
+	_m.Called(val)
+}
+
+// Filter_SetShouldFilterDeletionsWithFE_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetShouldFilterDeletionsWithFE'
+type Filter_SetShouldFilterDeletionsWithFE_Call struct {
+	*mock.Call
+}
+
+// SetShouldFilterDeletionsWithFE is a helper method to define mock.On call
+//   - val bool
+func (_e *Filter_Expecter) SetShouldFilterDeletionsWithFE(val interface{}) *Filter_SetShouldFilterDeletionsWithFE_Call {
+	return &Filter_SetShouldFilterDeletionsWithFE_Call{Call: _e.mock.On("SetShouldFilterDeletionsWithFE", val)}
+}
+
+func (_c *Filter_SetShouldFilterDeletionsWithFE_Call) Run(run func(val bool)) *Filter_SetShouldFilterDeletionsWithFE_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(bool))
+	})
+	return _c
+}
+
+func (_c *Filter_SetShouldFilterDeletionsWithFE_Call) Return() *Filter_SetShouldFilterDeletionsWithFE_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *Filter_SetShouldFilterDeletionsWithFE_Call) RunAndReturn(run func(bool)) *Filter_SetShouldFilterDeletionsWithFE_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetShouldFilterExpirationsWithFE provides a mock function with given fields: val
+func (_m *Filter) SetShouldFilterExpirationsWithFE(val bool) {
+	_m.Called(val)
+}
+
+// Filter_SetShouldFilterExpirationsWithFE_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetShouldFilterExpirationsWithFE'
+type Filter_SetShouldFilterExpirationsWithFE_Call struct {
+	*mock.Call
+}
+
+// SetShouldFilterExpirationsWithFE is a helper method to define mock.On call
+//   - val bool
+func (_e *Filter_Expecter) SetShouldFilterExpirationsWithFE(val interface{}) *Filter_SetShouldFilterExpirationsWithFE_Call {
+	return &Filter_SetShouldFilterExpirationsWithFE_Call{Call: _e.mock.On("SetShouldFilterExpirationsWithFE", val)}
+}
+
+func (_c *Filter_SetShouldFilterExpirationsWithFE_Call) Run(run func(val bool)) *Filter_SetShouldFilterExpirationsWithFE_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(bool))
+	})
+	return _c
+}
+
+func (_c *Filter_SetShouldFilterExpirationsWithFE_Call) Return() *Filter_SetShouldFilterExpirationsWithFE_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *Filter_SetShouldFilterExpirationsWithFE_Call) RunAndReturn(run func(bool)) *Filter_SetShouldFilterExpirationsWithFE_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetShouldSkipBinaryDocs provides a mock function with given fields: val
 func (_m *Filter) SetShouldSkipBinaryDocs(val bool) {
 	_m.Called(val)

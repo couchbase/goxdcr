@@ -670,12 +670,27 @@ func compressionSettingsChanged(changedSettingsMap metadata.ReplicationSettingsM
 	return false
 }
 
-func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string) bool {
+func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldExpDelMode base.FilterExpDelType) bool {
 	if newFilterExpression, ok := changedSettingsMap[metadata.FilterExpressionKey]; ok {
 		if newFilterExpression != oldFilterExpression {
 			return true
 		}
 	}
+
+	if filterDelsWithFEVal, ok := changedSettingsMap[metadata.FilterDeletionsWithFEKey]; ok {
+		filterDelsWithFE, ok := filterDelsWithFEVal.(bool)
+		if ok && filterDelsWithFE != oldExpDelMode.IsFilterDeletionsWithFESet() {
+			return true
+		}
+	}
+
+	if filterExpsWithFEVal, ok := changedSettingsMap[metadata.FilterExpirationsWithFEKey]; ok {
+		filterExpsWithFE, ok := filterExpsWithFEVal.(bool)
+		if ok && filterExpsWithFE != oldExpDelMode.IsFilterExpirationsWithFESet() {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -740,6 +755,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 
 	// Save some old values that we may need
 	filterExpression := replSpec.Settings.Values[metadata.FilterExpressionKey].(string)
+	expDelMode := replSpec.Settings.GetExpDelMode()
 	oldCompressionType := replSpec.Settings.Values[metadata.CompressionTypeKey].(int)
 	filterVersion := replSpec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
 	_, CompressionOk := settings[metadata.CompressionTypeKey]
@@ -768,7 +784,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	}
 
 	// If nonfilter-settings invoked this change, take this opportunity to fix stale infos if there is an existing expression present
-	if !filterSettingsChanged(changedSettingsMap, filterExpression) && len(filterExpression) > 0 && filterVersion < base.FilterVersionAdvanced {
+	if !filterSettingsChanged(changedSettingsMap, filterExpression, expDelMode) && len(filterExpression) > 0 && filterVersion < base.FilterVersionAdvanced {
 		settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
 
 		_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
