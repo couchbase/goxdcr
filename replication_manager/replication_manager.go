@@ -690,22 +690,37 @@ func compressionSettingsChanged(changedSettingsMap metadata.ReplicationSettingsM
 	return false
 }
 
-func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string) bool {
+func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldExpDelMode base.FilterExpDelType) bool {
 	if newFilterExpression, ok := changedSettingsMap[metadata.FilterExpressionKey]; ok {
 		if newFilterExpression != oldFilterExpression {
 			return true
 		}
 	}
+
+	if filterDelsWithFEVal, ok := changedSettingsMap[metadata.FilterDeletionsWithFEKey]; ok {
+		filterDelsWithFE, ok := filterDelsWithFEVal.(bool)
+		if ok && filterDelsWithFE != oldExpDelMode.IsFilterDeletionsWithFESet() {
+			return true
+		}
+	}
+
+	if filterExpsWithFEVal, ok := changedSettingsMap[metadata.FilterExpirationsWithFEKey]; ok {
+		filterExpsWithFE, ok := filterExpsWithFEVal.(bool)
+		if ok && filterExpsWithFE != oldExpDelMode.IsFilterExpirationsWithFESet() {
+			return true
+		}
+	}
+
 	return false
 }
 
-func pipelineReinitCausingChange(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldCollectionMode base.CollectionsMgtType) bool {
+func pipelineReinitCausingChange(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldCollectionMode base.CollectionsMgtType, oldExpDelMode base.FilterExpDelType) bool {
 	var filterSkipRestream bool
 	if filterSkipRestreamRaw, ok := changedSettingsMap[metadata.FilterSkipRestreamKey]; ok {
 		filterSkipRestream, _ = filterSkipRestreamRaw.(bool)
 	}
 
-	if !filterSkipRestream && filterSettingsChanged(changedSettingsMap, oldFilterExpression) {
+	if !filterSkipRestream && filterSettingsChanged(changedSettingsMap, oldFilterExpression, oldExpDelMode) {
 		return true
 	}
 
@@ -793,6 +808,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	// Save some old values that we may need
 	filterExpression := replSpec.Settings.Values[metadata.FilterExpressionKey].(string)
 	collectionMode := replSpec.Settings.GetCollectionModes()
+	expDelMode := replSpec.Settings.GetExpDelMode()
 	oldCompressionType := replSpec.Settings.Values[metadata.CompressionTypeKey].(int)
 	filterVersion := replSpec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
 	_, CompressionOk := settings[metadata.CompressionTypeKey]
@@ -821,7 +837,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	}
 
 	// If nonfilter-settings invoked this change, take this opportunity to fix stale infos if there is an existing expression present
-	if !filterSettingsChanged(changedSettingsMap, filterExpression) && len(filterExpression) > 0 && filterVersion < base.FilterVersionAdvanced {
+	if !filterSettingsChanged(changedSettingsMap, filterExpression, expDelMode) && len(filterExpression) > 0 && filterVersion < base.FilterVersionAdvanced {
 		settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
 
 		_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
@@ -840,7 +856,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		internalChangesTookPlace = true
 	}
 
-	if pipelineReinitCausingChange(changedSettingsMap, filterExpression, collectionMode) {
+	if pipelineReinitCausingChange(changedSettingsMap, filterExpression, collectionMode, expDelMode) {
 		clusterCompat, err := xdcrCompTopologySvc.MyClusterCompatibility()
 		if err != nil {
 			return nil, err, nil

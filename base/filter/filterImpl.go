@@ -48,6 +48,13 @@ type FilterImpl struct {
 	skipUncommittedTxn       uint32
 	skipBinaryDocs           uint32
 	mobileCompatible         int
+
+	// filterDeletionsWithFE indicates that filter expression is key only and should be evaluated on
+	// deletion tombstones.
+	filterDeletionsWithFE atomic.Bool
+	// filterExpirationsWithFE indicates that filter expression is key only and should be evaluated on
+	// expiration tombstones.
+	filterExpirationsWithFE atomic.Bool
 }
 
 func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, filterModes base.FilterExpDelType, mobileCompatible int) (*FilterImpl, error) {
@@ -66,6 +73,9 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 	if filterModes.IsSkipBinarySet() {
 		filter.skipBinaryDocs = 1
 	}
+
+	filter.filterDeletionsWithFE.Store(filterModes.IsFilterDeletionsWithFESet())
+	filter.filterExpirationsWithFE.Store(filterModes.IsFilterExpirationsWithFESet())
 
 	if len(filterExpression) == 0 {
 		return filter, nil
@@ -120,6 +130,14 @@ func (filter *FilterImpl) ShouldSkipBinaryDocs() bool {
 	return atomic.LoadUint32(&filter.skipBinaryDocs) > 0
 }
 
+func (filter *FilterImpl) ShouldFilterDeletionsWithFE() bool {
+	return filter.filterDeletionsWithFE.Load()
+}
+
+func (filter *FilterImpl) ShouldFilterExpirationsWithFE() bool {
+	return filter.filterExpirationsWithFE.Load()
+}
+
 func (filter *FilterImpl) SetShouldSkipUncommittedTxn(val bool) {
 	if val {
 		atomic.StoreUint32(&filter.skipUncommittedTxn, 1)
@@ -139,6 +157,14 @@ func (filter *FilterImpl) SetShouldSkipBinaryDocs(val bool) {
 // only used by xdcrDiffer
 func (filter *FilterImpl) SetMobileCompatibility(val int) {
 	filter.mobileCompatible = val
+}
+
+func (filter *FilterImpl) SetShouldFilterDeletionsWithFE(val bool) {
+	filter.filterDeletionsWithFE.Store(val)
+}
+
+func (filter *FilterImpl) SetShouldFilterExpirationsWithFE(val bool) {
+	filter.filterExpirationsWithFE.Store(val)
 }
 
 func (filter *FilterImpl) getMobileCompatibility() int {
@@ -339,8 +365,11 @@ func (filter *FilterImpl) filterNecessarySystemXattrsRelatedUprEvent(uprEvent *m
 // 3. If err is not nil, additional description
 // 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
 func (filter *FilterImpl) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, slicesToBeReleased *[][]byte) (bool, error, string, int64) {
-	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
-		// For now, pass through
+	if (uprEvent.Opcode == gomemcached.UPR_DELETION && !filter.ShouldFilterDeletionsWithFE()) ||
+		(uprEvent.Opcode == gomemcached.UPR_EXPIRATION && !filter.ShouldFilterExpirationsWithFE()) {
+		// If filterDeletionsWithFE/filterExpirationsWithFE is off, pass through tombstone without filtering.
+		// When on, it is guaranteed that the filter expression is key-only and therefore we can evaluate the filter expression
+		// uprEvent, eventhough it's a tombstone.
 		return true, nil, "", 0
 	}
 

@@ -403,7 +403,181 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	fmt.Println("============== Test case end: TestRouterExpDelAllMode =================")
 }
 
-var testDir string = "../metadata/testData/"
+func TestRouterSkipDeletionWithFilterDeletionsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipDeletionWithFilterDeletionsWithFE =================")
+	defer fmt.Println("============== Test case end: TestRouterSkipDeletionWithFilterDeletionsWithFE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Set both SkipDeletes AND FilterDeletionsWithFE - deletions should NOT be skipped by ProcessExpDelTTL
+	// because FilterDeletionsWithFE indicates the filter should evaluate deletions instead of skipping them
+	expDelMode = base.FilterExpDelSkipDeletes | base.FilterDeletionsWithFE
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	currentExpDelMode := router.expDelMode.Get()
+	assert.True(currentExpDelMode.IsSkipDeletesSet())
+	assert.True(currentExpDelMode.IsFilterDeletionsWithFESet())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	// Deletion should continue (not be skipped) because FilterDeletionsWithFE is set
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+
+	// Expiration should still continue as normal (SkipExpiration is not set)
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.True(shouldContinue)
+}
+
+func TestRouterSkipDeletionWithoutFilterDeletionsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipDeletionWithoutFilterDeletionsWithFE =================")
+	defer fmt.Println("============== Test case end: TestRouterSkipDeletionWithoutFilterDeletionsWithFE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Set only SkipDeletes without FilterDeletionsWithFE - deletions should be skipped
+	expDelMode = base.FilterExpDelSkipDeletes
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	currentExpDelMode := router.expDelMode.Get()
+	assert.True(currentExpDelMode.IsSkipDeletesSet())
+	assert.False(currentExpDelMode.IsFilterDeletionsWithFESet())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	// Deletion should be skipped because SkipDeletes is set and FilterDeletionsWithFE is NOT set
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.False(shouldContinue)
+}
+
+func TestRouterSkipExpirationWithFilterExpirationsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipExpirationWithFilterExpirationsWithFE =================")
+	defer fmt.Println("============== Test case end: TestRouterSkipExpirationWithFilterExpirationsWithFE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Set both SkipExpiration AND FilterExpirationsWithFE - expirations should NOT be skipped by ProcessExpDelTTL
+	// because FilterExpirationsWithFE indicates the filter should evaluate expirations instead of skipping them
+	expDelMode = base.FilterExpDelSkipExpiration | base.FilterExpirationsWithFE
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	currentExpDelMode := router.expDelMode.Get()
+	assert.True(currentExpDelMode.IsSkipExpirationSet())
+	assert.True(currentExpDelMode.IsFilterExpirationsWithFESet())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	// Expiration should continue (not be skipped) because FilterExpirationsWithFE is set
+	shouldContinue := router.ProcessExpDelTTL(expEvent)
+	assert.True(shouldContinue)
+
+	// Deletion should still continue as normal (SkipDeletes is not set)
+	shouldContinue = router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+}
+
+func TestRouterSkipExpirationWithoutFilterExpirationsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSkipExpirationWithoutFilterExpirationsWithFE =================")
+	defer fmt.Println("============== Test case end: TestRouterSkipExpirationWithoutFilterExpirationsWithFE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Set only SkipExpiration without FilterExpirationsWithFE - expirations should be skipped
+	expDelMode = base.FilterExpDelSkipExpiration
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	currentExpDelMode := router.expDelMode.Get()
+	assert.True(currentExpDelMode.IsSkipExpirationSet())
+	assert.False(currentExpDelMode.IsFilterExpirationsWithFESet())
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	// Expiration should be skipped because SkipExpiration is set and FilterExpirationsWithFE is NOT set
+	shouldContinue := router.ProcessExpDelTTL(expEvent)
+	assert.False(shouldContinue)
+}
+
+func TestRouterAllFiltersWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterAllFiltersWithFE =================")
+	defer fmt.Println("============== Test case end: TestRouterAllFiltersWithFE =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+
+	// Set all filters with FilterDeletionsWithFE and FilterExpirationsWithFE
+	// Both should continue to filter instead of being skipped
+	expDelMode = base.FilterExpDelAllFiltered | base.FilterDeletionsWithFE | base.FilterExpirationsWithFE
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus, nil, nil)
+	assert.Nil(err)
+	assert.NotNil(router)
+
+	currentExpDelMode := router.expDelMode.Get()
+	assert.True(currentExpDelMode.IsSkipDeletesSet())
+	assert.True(currentExpDelMode.IsSkipExpirationSet())
+	assert.True(currentExpDelMode.IsStripExpirationSet())
+	assert.True(currentExpDelMode.IsFilterDeletionsWithFESet())
+	assert.True(currentExpDelMode.IsFilterExpirationsWithFESet())
+
+	delEvent, err := RetrieveUprFile("./testdata/uprEventDeletion.json")
+	assert.Nil(err)
+	assert.NotNil(delEvent)
+
+	expEvent, err := RetrieveUprFile("./testdata/uprEventExpiration.json")
+	assert.Nil(err)
+	assert.NotNil(expEvent)
+
+	mutEvent, err := RetrieveUprFile("./testdata/perfDataExpiry.json")
+	assert.Nil(err)
+	assert.NotNil(mutEvent)
+
+	// Both deletion and expiration should continue because their respective FilterWithFE flags are set
+	shouldContinue := router.ProcessExpDelTTL(delEvent)
+	assert.True(shouldContinue)
+
+	shouldContinue = router.ProcessExpDelTTL(expEvent)
+	assert.True(shouldContinue)
+
+	// Mutation expiry should still be stripped
+	assert.NotEqual(0, int(mutEvent.Expiry))
+	shouldContinue = router.ProcessExpDelTTL(mutEvent)
+	assert.True(shouldContinue)
+	assert.Equal(0, int(mutEvent.Expiry))
+}
+
+var testDir string = "../metadata/testdata/"
 
 var targetv8 string = testDir + "diffTargetv8.json"
 var targetv9 string = testDir + "diffTargetv9.json"
