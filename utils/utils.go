@@ -2962,8 +2962,9 @@ func (u *Utilities) ConstructHttpRequest(
 		return nil, "", fmt.Errorf("Invalid userAuthMode %v", userAuthMode)
 	}
 
-	//TODO: log request would log password barely
-	l.Debugf("http request=%v\n", req)
+	if l.GetLogLevel() >= log.LogLevelDebug {
+		l.Debugf("http request=%v", base.CloneAndTagHttpRequest(req))
+	}
 
 	return req, url.Host, nil
 }
