@@ -181,15 +181,17 @@ var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, Collec
 
 // settings that are externally multiple values, but internally single value
 var MultiValueMap map[string]string = map[string]string{
-	FilterExpKey:             FilterExpDelKey,
-	FilterDelKey:             FilterExpDelKey,
-	BypassExpiryKey:          FilterExpDelKey,
-	BypassUncommittedTxnKey:  FilterExpDelKey,
-	FilterBinaryDocsKey:      FilterExpDelKey,
-	CollectionsMgtMappingKey: CollectionsMgtMultiKey,
-	CollectionsMgtMirrorKey:  CollectionsMgtMultiKey,
-	CollectionsMgtMigrateKey: CollectionsMgtMultiKey,
-	CollectionsMgtOsoKey:     CollectionsMgtMultiKey,
+	FilterExpKey:               FilterExpDelKey,
+	FilterDelKey:               FilterExpDelKey,
+	BypassExpiryKey:            FilterExpDelKey,
+	BypassUncommittedTxnKey:    FilterExpDelKey,
+	FilterBinaryDocsKey:        FilterExpDelKey,
+	FilterDeletionsWithFEKey:   FilterExpDelKey,
+	FilterExpirationsWithFEKey: FilterExpDelKey,
+	CollectionsMgtMappingKey:   CollectionsMgtMultiKey,
+	CollectionsMgtMirrorKey:    CollectionsMgtMultiKey,
+	CollectionsMgtMigrateKey:   CollectionsMgtMultiKey,
+	CollectionsMgtOsoKey:       CollectionsMgtMultiKey,
 }
 
 // settings that require validation
@@ -553,6 +555,10 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKey(curConfig base.Filte
 		curConfig.SetSkipReplicateUncommittedTxn(boolVal)
 	case FilterBinaryDocsKey:
 		curConfig.SetSkipBinary(boolVal)
+	case FilterDeletionsWithFEKey:
+		curConfig.SetFilterDeletionsWithFE(boolVal)
+	case FilterExpirationsWithFEKey:
+		curConfig.SetFilterExpirationsWithFE(boolVal)
 	}
 	retVal = curConfig
 	return
@@ -594,6 +600,12 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKeyImport(s *Replication
 	}
 	if val, ok := r.flagKeyIssued[FilterBinaryDocsKey]; ok {
 		curVal.SetSkipBinary(val)
+	}
+	if val, ok := r.flagKeyIssued[FilterDeletionsWithFEKey]; ok {
+		curVal.SetFilterDeletionsWithFE(val)
+	}
+	if val, ok := r.flagKeyIssued[FilterExpirationsWithFEKey]; ok {
+		curVal.SetFilterExpirationsWithFE(val)
 	}
 
 	sm[FilterExpDelKey] = curVal
@@ -843,6 +855,8 @@ func (s *ReplicationSettings) exportFlagTypeValues() {
 	s.Values[FilterExpKey] = expDelMode.IsSkipExpirationSet()
 	s.Values[FilterDelKey] = expDelMode.IsSkipDeletesSet()
 	s.Values[FilterBinaryDocsKey] = expDelMode.IsSkipBinarySet()
+	s.Values[FilterDeletionsWithFEKey] = expDelMode.IsFilterDeletionsWithFESet()
+	s.Values[FilterExpirationsWithFEKey] = expDelMode.IsFilterExpirationsWithFESet()
 	collectionModes := s.GetCollectionModes()
 	s.Values[CollectionsMgtMappingKey] = collectionModes.IsExplicitMapping()
 	s.Values[CollectionsMgtMirrorKey] = collectionModes.IsMirroringOn()

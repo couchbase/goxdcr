@@ -699,16 +699,13 @@ func TestInvalidPrivateEndpointsSetup1(t *testing.T) {
 // TestValidateDeletionFilterExprForTombstones tests the validateDeletionFilterExprForTombstones function
 // which validates settings for filtering tombstones (deletions/expirations) based on filter expression.
 func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
-	// TODO: MB-69470
-	t.Skip()
-
 	fmt.Println("============== Test case start: TestValidateDeletionFilterExprForTombstones =================")
 	defer fmt.Println("============== Test case end: TestValidateDeletionFilterExprForTombstones =================")
 
-	// Version 8.1.0 encoded: 8*0x10000 + 1 = 524289
-	version81Compat := 0x80001
-	// Pre 8.1.0 version encoded: 8*0x10000 + 0 = 524288
-	preVersion81Compat := 0x80000
+	// Version 8.1.0 encoded
+	version81Compat := base.EncodeVersionToEffectiveVersion(base.VersionForKeyOnlyDeletionFilterExpr)
+	// Version 8.0.0 encoded
+	preVersion81Compat := base.EncodeVersionToEffectiveVersion(base.VersionForCLoggerSupport)
 
 	// Helper function to create settings with proper expDelMode bitmask
 	createSettings := func(filterDelWithFE, filterExpWithFE, filterDel, filterExp bool, filterExpr string) *metadata.ReplicationSettings {
@@ -800,7 +797,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 			clusterVersion:   preVersion81Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
-			expectedErrMsg:   "must be upgraded atleast to 8.1.0",
+			expectedErrMsg:   "must be upgraded to atleast 8.1.0",
 		},
 		{
 			name:             "Filter expression is not key-only",

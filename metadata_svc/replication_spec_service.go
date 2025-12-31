@@ -1847,7 +1847,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 		// See ImmutableDefaultSettings for more details.
 		// However check cluster compatibility to avoid settings change in mixed mode.
 		if !base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr) {
-			errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded atleast to atleast %s when either %s or %s is true",
+			errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to atleast %s when either %s or %s is true",
 				base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
 			return
 		}
@@ -1875,7 +1875,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 			return
 		}
 	default:
-		errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded atleast to atleast %s when either %s or %s is true",
+		errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to atleast %s when either %s or %s is true",
 			base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
 		return
 	}

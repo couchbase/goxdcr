@@ -2303,6 +2303,8 @@ func (router *Router) updateExpDelMode(expDelModeObj interface{}) error {
 	router.expDelMode.Set(expDelMode)
 	router.filter.SetShouldSkipUncommittedTxn(expDelMode.IsSkipReplicateUncommittedTxnSet())
 	router.filter.SetShouldSkipBinaryDocs(expDelMode.IsSkipBinarySet())
+	router.filter.SetShouldFilterDeletionsWithFE(expDelMode.IsFilterDeletionsWithFESet())
+	router.filter.SetShouldFilterExpirationsWithFE(expDelMode.IsFilterExpirationsWithFESet())
 	return nil
 }
 
@@ -2428,11 +2430,13 @@ func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
 		return true
 	}
 
-	if expDelMode&base.FilterExpDelSkipDeletes > 0 && uprEvent.Opcode == mc.UPR_DELETION {
+	if expDelMode&base.FilterExpDelSkipDeletes > 0 && uprEvent.Opcode == mc.UPR_DELETION &&
+		!expDelMode.IsFilterDeletionsWithFESet() {
 		return false
 	}
 
-	if expDelMode&base.FilterExpDelSkipExpiration > 0 && uprEvent.Opcode == mc.UPR_EXPIRATION {
+	if expDelMode&base.FilterExpDelSkipExpiration > 0 && uprEvent.Opcode == mc.UPR_EXPIRATION &&
+		!expDelMode.IsFilterExpirationsWithFESet() {
 		return false
 	}
 

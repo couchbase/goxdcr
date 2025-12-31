@@ -618,3 +618,92 @@ func TestKvVBMapType_HasSameNumberOfVBs(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterExpDelType_FilterDeletionsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterExpDelType_FilterDeletionsWithFE =================")
+	defer fmt.Println("============== Test case end: TestFilterExpDelType_FilterDeletionsWithFE =================")
+	assert := assert.New(t)
+
+	// Test initial state
+	var expDelMode FilterExpDelType = FilterExpDelNone
+	assert.False(expDelMode.IsFilterDeletionsWithFESet())
+
+	// Test setting to true
+	expDelMode.SetFilterDeletionsWithFE(true)
+	assert.True(expDelMode.IsFilterDeletionsWithFESet())
+	assert.Equal(FilterDeletionsWithFE, expDelMode)
+
+	// Test setting to true again (should remain true)
+	expDelMode.SetFilterDeletionsWithFE(true)
+	assert.True(expDelMode.IsFilterDeletionsWithFESet())
+
+	// Test setting to false
+	expDelMode.SetFilterDeletionsWithFE(false)
+	assert.False(expDelMode.IsFilterDeletionsWithFESet())
+	assert.Equal(FilterExpDelNone, expDelMode)
+
+	// Test setting to false again (should remain false)
+	expDelMode.SetFilterDeletionsWithFE(false)
+	assert.False(expDelMode.IsFilterDeletionsWithFESet())
+}
+
+func TestFilterExpDelType_FilterExpirationsWithFE(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterExpDelType_FilterExpirationsWithFE =================")
+	defer fmt.Println("============== Test case end: TestFilterExpDelType_FilterExpirationsWithFE =================")
+	assert := assert.New(t)
+
+	// Test initial state
+	var expDelMode FilterExpDelType = FilterExpDelNone
+	assert.False(expDelMode.IsFilterExpirationsWithFESet())
+
+	// Test setting to true
+	expDelMode.SetFilterExpirationsWithFE(true)
+	assert.True(expDelMode.IsFilterExpirationsWithFESet())
+	assert.Equal(FilterExpirationsWithFE, expDelMode)
+
+	// Test setting to true again (should remain true)
+	expDelMode.SetFilterExpirationsWithFE(true)
+	assert.True(expDelMode.IsFilterExpirationsWithFESet())
+
+	// Test setting to false
+	expDelMode.SetFilterExpirationsWithFE(false)
+	assert.False(expDelMode.IsFilterExpirationsWithFESet())
+	assert.Equal(FilterExpDelNone, expDelMode)
+
+	// Test setting to false again (should remain false)
+	expDelMode.SetFilterExpirationsWithFE(false)
+	assert.False(expDelMode.IsFilterExpirationsWithFESet())
+}
+
+func TestFilterExpDelType_CombinedModes(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterExpDelType_CombinedModes =================")
+	defer fmt.Println("============== Test case end: TestFilterExpDelType_CombinedModes =================")
+	assert := assert.New(t)
+
+	// Test combining FilterDeletionsWithFE with FilterExpDelSkipDeletes
+	var expDelMode FilterExpDelType = FilterExpDelNone
+	expDelMode.SetSkipDeletes(true)
+	expDelMode.SetFilterDeletionsWithFE(true)
+
+	assert.True(expDelMode.IsSkipDeletesSet())
+	assert.True(expDelMode.IsFilterDeletionsWithFESet())
+	assert.False(expDelMode.IsFilterExpirationsWithFESet())
+
+	// Test combining FilterExpirationsWithFE with FilterExpDelSkipExpiration
+	expDelMode.SetSkipExpiration(true)
+	expDelMode.SetFilterExpirationsWithFE(true)
+
+	assert.True(expDelMode.IsSkipDeletesSet())
+	assert.True(expDelMode.IsFilterDeletionsWithFESet())
+	assert.True(expDelMode.IsSkipExpirationSet())
+	assert.True(expDelMode.IsFilterExpirationsWithFESet())
+
+	// Test FilterExpDelMax includes the new filter modes
+	assert.True(FilterExpDelMax.IsFilterDeletionsWithFESet())
+	assert.True(FilterExpDelMax.IsFilterExpirationsWithFESet())
+	assert.True(FilterExpDelMax.IsSkipDeletesSet())
+	assert.True(FilterExpDelMax.IsSkipExpirationSet())
+	assert.True(FilterExpDelMax.IsSkipBinarySet())
+	assert.True(FilterExpDelMax.IsStripExpirationSet())
+	assert.True(FilterExpDelMax.IsSkipReplicateUncommittedTxnSet())
+}
