@@ -1044,10 +1044,16 @@ function writeJSONDocument {
 	# jsonData needs to be enclosed in single quotes
 	#local jsonData='{"foo":"bar"}'
 	local jsonData=$4
+	local expiryInSec=${5:-} # Optional: expiry in seconds
+
+	local expiryParam=""
+	if [[ -n "$expiryInSec" && "$expiryInSec" -gt 0 ]]; then
+		expiryParam="-d expiry=$expiryInSec"
+	fi
 
 	$CURL --location --request POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
 		--header 'Accept: application/json, text/plain, */*' --header 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
-		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData >/dev/null
+		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData $expiryParam >/dev/null
 }
 
 function getJSONDocument {
