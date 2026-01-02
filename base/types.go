@@ -1608,9 +1608,10 @@ func (a FilterExpDelType) String() string {
 }
 
 func (a FilterExpDelType) LogString() string {
-	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v), SkipUncommittedTxn(%v), SkipBinary(%v)",
+	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v), SkipUncommittedTxn(%v), SkipBinary(%v), SkipExpWithFE(%v), SkipDelWithFE(%v)",
 		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0,
-		a&FilterSkipReplUncommittedTxn > 0, a&FilterSkipBinary > 0)
+		a&FilterSkipReplUncommittedTxn > 0, a&FilterSkipBinary > 0, a.IsFilterExpirationsWithFESet(),
+		a.IsFilterDeletionsWithFESet())
 }
 
 type CollectionsMgtType int
