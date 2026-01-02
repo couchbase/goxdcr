@@ -1,0 +1,265 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+# Test cases for filter expression changes with filterSkipRestream flag
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+# Replication properties with initial filter expression that doesn't match "preload_" prefix
+# Filter: REGEXP_CONTAINS(META().id,"^nomatch") - won't match docs with prefix "preload_"
+declare -A FilterExprNoMatchReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterExpression"]='REGEXP_CONTAINS(META().id,"^nomatch")')
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+# Log patterns for verification
+REINIT_STREAM_LOG="PipelineOpSerializer.*handling job.*PipelineReinitStream"
+FOUND_0_CKPT_LOG="Found 0 checkpoint documents for replication"
+# Test A: Filter expression change with filterSkipRestream=false
+# - Create replication with filterExpression that doesn't match docs
+# - Write 2000 docs that don't match the filter
+# - Update filterExpression to match docs with filterSkipRestream=false
+# - Docs should be replicated after restream
+# - Expected: source=2000, target=2000
+function testFilterExpressionChangeWithRestream {
+	echo "============================================================================"
+	echo "Test A: Filter expression change with filterSkipRestream=false"
+	echo "============================================================================"
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	# Create replication with filter expression that doesn't match "preload_" prefix
+	echo "Creating replication with filterExpression=REGEXP_CONTAINS(META().id,\"^nomatch\")..."
+	createBucketReplication "C1" "B1" "C2" "B2" FilterExprNoMatchReplProperties
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+	# Load 2000 docs with prefix "preload_" (won't match initial filter)
+	echo "Loading 2000 docs on source with prefix 'preload_' (won't match filter)..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+	# Wait for replication to process (docs should be filtered)
+	echo "Waiting for replication..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Verify target has 0 docs (all filtered)
+	echo "Verifying target has 0 docs (all filtered)..."
+	checkItemCnt "C2" "B2" 0
+	if (($? != 0)); then
+		echo "FAILED: Target should have 0 docs before filter change"
+		exit 1
+	fi
+	echo "PASSED: Target has 0 docs (all filtered by initial expression)"
+	# Get log counts before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before: $reinitCountBefore"
+	echo "Found0Ckpt count before: $found0CkptCountBefore"
+	# Update filter expression to match "preload_" prefix with filterSkipRestream=false
+	echo "Updating filterExpression to match 'preload_' with filterSkipRestream=false..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		'filterExpression=REGEXP_CONTAINS(META().id,"^preload_")' \
+		"filterSkipRestream=false"
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+	# Check logs for restream
+	echo "Checking logs for pipeline restart and restream..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after: $reinitCountAfter"
+	echo "Found0Ckpt count after: $found0CkptCountAfter"
+	if (($reinitCountAfter <= $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream count to increase (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count increased (pipeline restarted)"
+	if (($found0CkptCountAfter <= $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to increase (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count increased (pipeline restreamed from beginning)"
+	# Wait for restream to complete
+	echo "Waiting for changes left to reach 0 after restream..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Verify doc counts: source=2000, target=2000
+	echo "Verifying doc counts: source=2000, target=2000..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+	checkItemCnt "C2" "B2" 2000
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2000 docs after restream"
+		exit 1
+	fi
+	echo "PASSED: Target has 2000 docs"
+	echo "============================================================================"
+	echo "Test A: Filter expression change with filterSkipRestream=false PASSED"
+	echo "============================================================================"
+	# Cleanup for next test
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	sleep 5
+}
+# Test B: Filter expression change with filterSkipRestream=true
+# - Create replication with filterExpression that doesn't match docs
+# - Write 2000 docs that don't match the filter
+# - Update filterExpression to match docs with filterSkipRestream=true
+# - Docs should NOT be replicated (no restream)
+# - Expected: source=2000, target=0
+function testFilterExpressionChangeWithoutRestream {
+	echo "============================================================================"
+	echo "Test B: Filter expression change with filterSkipRestream=true"
+	echo "============================================================================"
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	# Create replication with filter expression that doesn't match "preload_" prefix
+	echo "Creating replication with filterExpression=REGEXP_CONTAINS(META().id,\"^nomatch\")..."
+	createBucketReplication "C1" "B1" "C2" "B2" FilterExprNoMatchReplProperties
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+	# Load 2000 docs with prefix "preload_" (won't match initial filter)
+	echo "Loading 2000 docs on source with prefix 'preload_' (won't match filter)..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+	# Wait for replication to process (docs should be filtered)
+	echo "Waiting for replication..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Verify target has 0 docs (all filtered)
+	echo "Verifying target has 0 docs (all filtered)..."
+	checkItemCnt "C2" "B2" 0
+	if (($? != 0)); then
+		echo "FAILED: Target should have 0 docs before filter change"
+		exit 1
+	fi
+	echo "PASSED: Target has 0 docs (all filtered by initial expression)"
+	# Get log counts before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before: $reinitCountBefore"
+	echo "Found0Ckpt count before: $found0CkptCountBefore"
+	# Update filter expression to match "preload_" prefix with filterSkipRestream=true
+	echo "Updating filterExpression to match 'preload_' with filterSkipRestream=true..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		'filterExpression=REGEXP_CONTAINS(META().id,"^preload_")' \
+		"filterSkipRestream=true"
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+	# Check logs - no restream should occur
+	echo "Checking logs for pipeline restart (but no restream)..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after: $reinitCountAfter"
+	echo "Found0Ckpt count after: $found0CkptCountAfter"
+	if (($reinitCountAfter != $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream to remain same (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count unchanged (no restream)"
+	if (($found0CkptCountAfter != $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to remain same (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count unchanged (no restream)"
+	# Wait for changes left to reach 0
+	echo "Waiting for changes left to reach 0..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Verify doc counts: source=2000, target=0 (no restream, old docs not replicated)
+	echo "Verifying doc counts: source=2000, target=0..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+	checkItemCnt "C2" "B2" 0
+	if (($? != 0)); then
+		echo "FAILED: Target should have 0 docs (no restream)"
+		exit 1
+	fi
+	echo "PASSED: Target has 0 docs (no restream, old docs not replicated)"
+	echo "============================================================================"
+	echo "Test B: Filter expression change with filterSkipRestream=true PASSED"
+	echo "============================================================================"
+	# Cleanup for next test
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	sleep 5
+}
+function runTestCase {
+	echo "============================================================================"
+	echo "Running filter expression change tests"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Run test cases
+	testFilterExpressionChangeWithRestream
+	testFilterExpressionChangeWithoutRestream
+	grepForPanics
+	echo "============================================================================"
+	echo "Running filter expression change tests - PASSED"
+	echo "============================================================================"
+}

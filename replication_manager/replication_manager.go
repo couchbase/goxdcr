@@ -698,7 +698,12 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 }
 
 func pipelineReinitCausingChange(changedSettingsMap metadata.ReplicationSettingsMap, oldFilterExpression string, oldCollectionMode base.CollectionsMgtType) bool {
-	if filterSettingsChanged(changedSettingsMap, oldFilterExpression) {
+	var filterSkipRestream bool
+	if filterSkipRestreamRaw, ok := changedSettingsMap[metadata.FilterSkipRestreamKey]; ok {
+		filterSkipRestream, _ = filterSkipRestreamRaw.(bool)
+	}
+
+	if !filterSkipRestream && filterSettingsChanged(changedSettingsMap, oldFilterExpression) {
 		return true
 	}
 
