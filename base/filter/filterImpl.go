@@ -352,7 +352,7 @@ func (filter *FilterImpl) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, en
 		(uprEvent.Opcode == gomemcached.UPR_EXPIRATION && !filter.ShouldFilterExpirationsWithFE()) {
 		// If filterDeletionsWithFE/filterExpirationsWithFE is off, pass through tombstone without filtering.
 		// When on, it is guaranteed that the filter expression is key-only and therefore we can evaluate the filter expression
-		// uprEvent, eventhough it's a tombstone.
+		// on uprEvent, eventhough it's a tombstone.
 		return true, nil, "", 0
 	}
 

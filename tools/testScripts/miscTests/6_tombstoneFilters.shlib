@@ -1,0 +1,1375 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["statsInterval"]=500)
+
+# Replication properties for filterDeletionsWithExpression positive test
+# Filter expression: REGEXP_CONTAINS(META().id,"^match") - matches keys starting with "match"
+declare -A FilterDeletionsWithFEReplProperties=(["replicationType"]="continuous" ["filterDeletion"]="true" ["filterDeletionsWithExpression"]="true" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")')
+
+# Replication properties for filterDeletion only (all deletions filtered, no expression)
+declare -A FilterDeletionOnlyReplProperties=(["replicationType"]="continuous" ["filterDeletion"]="true")
+
+# Replication properties with filterExpression but WITHOUT filterDeletionsWithExpression and filterDeletion
+# Used for upgrade test where filterDeletionsWithExpression is added later
+declare -A FilterDeletionWithExprReplProperties=(["replicationType"]="continuous" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")')
+
+# Replication properties with filterExpression and filterDeletion but WITHOUT filterDeletionsWithExpression
+# Used for upgrade test where filterDeletionsWithExpression is added later
+declare -A FilterDeletionWithExprReplProperties2=(["replicationType"]="continuous" ["filterDeletion"]="true" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")')
+
+# =====================
+# Expiration Filter Properties (mirror of deletion filter properties)
+# filterBypassExpiry=true strips expiry from replicated docs so target docs don't expire on their own
+# =====================
+
+# Replication properties for filterExpirationsWithExpression positive test
+# Filter expression: REGEXP_CONTAINS(META().id,"^match") - matches keys starting with "match"
+declare -A FilterExpirationsWithFEReplProperties=(["replicationType"]="continuous" ["filterExpiration"]="true" ["filterExpirationsWithExpression"]="true" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")' ["filterBypassExpiry"]="true")
+
+# Replication properties for filterExpiration only (all expirations filtered, no expression)
+declare -A FilterExpirationOnlyReplProperties=(["replicationType"]="continuous" ["filterExpiration"]="true" ["filterBypassExpiry"]="true")
+
+# Replication properties with filterExpression but WITHOUT filterExpirationsWithExpression and filterExpiration
+# Used for upgrade test where filterExpirationsWithExpression is added later
+declare -A FilterExpirationWithExprReplProperties=(["replicationType"]="continuous" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")' ["filterBypassExpiry"]="true")
+
+# Replication properties with filterExpression and filterExpiration but WITHOUT filterExpirationsWithExpression
+# Used for upgrade test where filterExpirationsWithExpression is added later
+declare -A FilterExpirationWithExprReplProperties2=(["replicationType"]="continuous" ["filterExpiration"]="true" ["filterExpression"]='REGEXP_CONTAINS(META().id,"^match")' ["filterBypassExpiry"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+# Helper function to test default settings change failure
+# Usage: testDefaultSettingsChangeShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testDefaultSettingsChangeShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to change default settings with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/settings/replications \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Helper function to test replication creation failure
+# Usage: testCreateReplicationShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testCreateReplicationShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to create replication with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication \
+		-d fromBucket=B1 \
+		-d toCluster=C2 \
+		-d toBucket=B2 \
+		-d replicationType=continuous \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Global variable to store the replication ID for update tests
+REPLICATION_ID=""
+
+# Helper function to test replication settings update failure
+# Usage: testUpdateReplicationSettingsShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testUpdateReplicationSettingsShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to update replication settings with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW "http://127.0.0.1:9000/settings/replications/${REPLICATION_ID}" \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Common error messages
+EMPTY_FILTER_ERROR="filterExpression is mandatory when either filterDeletionsWithExpression or filterExpirationsWithExpression is true"
+KEY_ONLY_FILTER_ERROR="filterExpression should be referencing only the document key when either filterDeletionsWithExpression or filterExpirationsWithExpression is true"
+REINIT_STREAM_LOG="PipelineOpSerializer.*handling job.*PipelineReinitStream"
+FOUND_0_CKPT_LOG="Found 0 checkpoint documents for replication"
+
+# ============================================================================
+# Consolidated Negative Test Functions (parameterized for deletion/expiration)
+# ============================================================================
+
+# Helper: Get filter toggle name based on test type
+# Usage: getFilterToggle "deletion" -> "filterDeletion"
+function getFilterToggle {
+	local testType=$1
+	if [[ "$testType" == "deletion" ]]; then
+		echo "filterDeletion"
+	else
+		echo "filterExpiration"
+	fi
+}
+
+# Helper: Get filterWithExpression name based on test type
+# Usage: getFilterTombstoneSettingWithExpr "deletion" -> "filterDeletionsWithExpression"
+function getFilterTombstoneSettingWithExpr {
+	local testType=$1
+	if [[ "$testType" == "deletion" ]]; then
+		echo "filterDeletionsWithExpression"
+	else
+		echo "filterExpirationsWithExpression"
+	fi
+}
+
+# Helper: Get replication properties name based on test type and variant
+# Usage: getReplPropsName "deletion" "withFE" -> "FilterDeletionsWithFEReplProperties"
+function getReplPropsName {
+	local testType=$1
+	local variant=$2 # "withFE", "onlyToggle", "withExpr", "withExpr2"
+
+	if [[ "$testType" == "deletion" ]]; then
+		case "$variant" in
+		"withFE") echo "FilterDeletionsWithFEReplProperties" ;;
+		"onlyToggle") echo "FilterDeletionOnlyReplProperties" ;;
+		"withExpr") echo "FilterDeletionWithExprReplProperties" ;;
+		"withExpr2") echo "FilterDeletionWithExprReplProperties2" ;;
+		esac
+	else
+		case "$variant" in
+		"withFE") echo "FilterExpirationsWithFEReplProperties" ;;
+		"onlyToggle") echo "FilterExpirationOnlyReplProperties" ;;
+		"withExpr") echo "FilterExpirationWithExprReplProperties" ;;
+		"withExpr2") echo "FilterExpirationWithExprReplProperties2" ;;
+		esac
+	fi
+}
+
+# Note: createTombstone function has been moved to testLibrary.shlib
+# Usage: createTombstone <cluster> <bucket> <docKey> [tombstoneType]
+
+# Default Settings Test: filterWithExpression=true but filterToggle=false should fail
+# Parameter: testType = "deletion" or "expiration"
+function testDefaultSettingsWithFEWithoutToggle {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterTombstoneSettingWithExpr=true")
+	testDefaultSettingsChangeShouldFail \
+		"Default Settings Test: $filterTombstoneSettingWithExpr=true but $filterToggle=false should fail" \
+		params \
+		"$filterToggle must be true when $filterTombstoneSettingWithExpr is true"
+}
+
+# Note: Default settings don't include filterExpression, so we can only validate the toggle dependencies.
+# Filter expression validation tests are only applicable to replication creation/update.
+
+# ============================================================================
+# Update Replication Settings Tests (Consolidated)
+# ============================================================================
+
+# Update Settings Test: filterWithExpression=true but filterToggle=false should fail
+function testUpdateSettingsWithFEWithoutToggle {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterTombstoneSettingWithExpr=true")
+	testUpdateReplicationSettingsShouldFail \
+		"Update Settings Test: $filterTombstoneSettingWithExpr=true but $filterToggle=false should fail" \
+		params \
+		"$filterToggle must be true when $filterTombstoneSettingWithExpr is true"
+}
+
+# ============================================================================
+# Replication Creation Tests (Consolidated)
+# ============================================================================
+
+# Create Replication Test: filterWithExpression=true but filterToggle=false should fail
+function testCreateWithFEWithoutToggle {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterTombstoneSettingWithExpr=true")
+	testCreateReplicationShouldFail \
+		"Create Test: $filterTombstoneSettingWithExpr=true but $filterToggle=false should fail" \
+		params \
+		"$filterToggle must be true when $filterTombstoneSettingWithExpr is true"
+}
+
+# Create Replication Test: Empty filterExpression should fail
+function testCreateEmptyFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true")
+	testCreateReplicationShouldFail \
+		"Create Test: Empty filterExpression with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$EMPTY_FILTER_ERROR"
+}
+
+# Create Replication Test: filterExpression referencing body should fail
+function testCreateBodyFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true" -d 'filterExpression=REGEXP_CONTAINS(field,"value")')
+	testCreateReplicationShouldFail \
+		"Create Test: filterExpression referencing body with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$KEY_ONLY_FILTER_ERROR"
+}
+
+# Create Replication Test: filterExpression referencing xattrs should fail
+function testCreateXattrFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true" -d 'filterExpression=META().xattrs.key="value"')
+	testCreateReplicationShouldFail \
+		"Create Test: filterExpression referencing xattrs with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$KEY_ONLY_FILTER_ERROR"
+}
+
+# Create Replication Test: filterExpression referencing key and xattrs should fail
+function testCreateKeyAndXattrFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true" -d 'filterExpression=REGEXP_CONTAINS(META().id,"^abc") AND META().xattrs.key="value"')
+	testCreateReplicationShouldFail \
+		"Create Test: filterExpression referencing key and xattrs with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$KEY_ONLY_FILTER_ERROR"
+}
+
+# Create Replication Test: filterExpression referencing key and body should fail
+function testCreateKeyAndBodyFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true" -d 'filterExpression=REGEXP_CONTAINS(META().id,"^abc") AND REGEXP_CONTAINS(field,"value")')
+	testCreateReplicationShouldFail \
+		"Create Test: filterExpression referencing key and body with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$KEY_ONLY_FILTER_ERROR"
+}
+
+# Create Replication Test: filterExpression referencing key, body, and xattrs should fail
+function testCreateKeyBodyXattrFilterExpr {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+
+	local -a params=(-d "$filterToggle=true" -d "$filterTombstoneSettingWithExpr=true" -d 'filterExpression=REGEXP_CONTAINS(META().id,"^abc") AND REGEXP_CONTAINS(field,"value") AND META().xattrs.key="value"')
+	testCreateReplicationShouldFail \
+		"Create Test: filterExpression referencing key, body, and xattrs with $filterTombstoneSettingWithExpr=true should fail" \
+		params \
+		"$KEY_ONLY_FILTER_ERROR"
+}
+
+# ============================================================================
+# Positive Test Cases (Consolidated for deletion and expiration)
+# ============================================================================
+
+# Positive Test: filterWithExpression with create replication API
+# Parameter: testType = "deletion" or "expiration"
+# Step 1:
+# - Create replication with filterToggle=true, filterWithExpression=true, and key-only filter
+# - Write match_doc and nomatch_doc to both source and target
+# - Create tombstones on source (delete for deletion, expire for expiration)
+# - Load 2000 docs on source with prefix "preload_" (won't match filter, won't be replicated)
+# - match_doc tombstone matches filter -> replicated (deleted on target)
+# - nomatch_doc tombstone doesn't match filter -> filtered (remains on target)
+# - Result: source=2000, target=1 (preloaded docs filtered by expression, only nomatch_doc remains)
+# Step 2:
+# - Turn off filterWithExpression (filterToggle stays true)
+# - Verify pipeline reinit restream and no checkpoints used
+# - Add 2 new docs (match_new, nomatch_new) to both source and target, create tombstones on source
+# - Both tombstones should be filtered (filterWithExpression=false means ALL tombstones filtered)
+# - Final: source=2000, target=3 (nomatch_doc + match_new + nomatch_new)
+function testPositiveWithFECreate {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+	local replPropsName=$(getReplPropsName "$testType" "withFE")
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with create replication API"
+	echo "============================================================================"
+
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Create replication with filterWithExpression settings
+	# Filter: REGEXP_CONTAINS(META().id,"^match") - matches keys starting with "match"
+	echo "Creating replication with $filterToggle=true, $filterTombstoneSettingWithExpr=true, filterExpression=REGEXP_CONTAINS(META().id,\"^match\")"
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+	if (($? != 0)); then
+		echo "Failed to create replication with $filterTombstoneSettingWithExpr settings"
+		exit 1
+	fi
+	sleep 5
+
+	# Wait for initial stabilization
+	echo "Waiting for replication to stabilize..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Write docs to target first (so they exist when tombstone arrives)
+	echo "Writing match_doc and nomatch_doc to target bucket..."
+	writeJSONDocument "C2" "B2" "match_doc" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones on source..."
+	createTombstone "C1" "B1" "match_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc" "$testType"
+
+	# Load 2000 docs on source bucket (prefix doesn't match filter)
+	echo "Loading 2000 docs on source bucket with prefix 'preload_' (won't match filter)..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+
+	# Wait for docs to replicate
+	echo "Waiting for docs to replicate..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify tombstone behavior
+	echo "Verifying ${testType} replication behavior..."
+
+	# match_doc should NOT exist (tombstone was replicated because key matches filter)
+	if documentExists "C2" "B2" "match_doc"; then
+		echo "FAILED: match_doc should have been deleted on target (${testType} replicated)"
+		exit 1
+	fi
+	echo "PASSED: match_doc ${testType} was replicated (document not found on target)"
+
+	# nomatch_doc SHOULD still exist (tombstone was filtered because key doesn't match filter)
+	if ! documentExists "C2" "B2" "nomatch_doc"; then
+		echo "FAILED: nomatch_doc should still exist on target (${testType} filtered)"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc ${testType} was filtered (document still exists on target)"
+
+	# Verify item counts: source=2000 (preloaded, test docs deleted), target=1 (only nomatch_doc, preloaded docs filtered by expression)
+	echo "Verifying final doc counts..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 1
+	if (($? != 0)); then
+		echo "FAILED: Target should have 1 doc (preloaded docs filtered, only nomatch_doc remains)"
+		exit 1
+	fi
+	echo "PASSED: Target has 1 doc"
+
+	# Verify stats is working properly
+	local statName="xdcr_expiry_filtered_total"
+	if [[ "$testType" == "deletion" ]]; then
+		statName="xdcr_deletion_filtered_total"
+	fi
+	local delsFiltered=$(getPrometheusStat "C1" "B1" "B2" "$statName")
+	local userDefineFiltered=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_filtered_on_user_defined_filter_total")
+	delsFiltered=${delsFiltered:-0}
+	userDefineFiltered=${userDefineFiltered:-0}
+	if ((delsFiltered != 1)); then
+		# tombstone of nomatch_doc should be filtered.
+		echo "expected that one tombstone ($statName) was filtered, but found: $delsFiltered"
+		exit 1
+	fi
+	if ((userDefineFiltered != 2002)); then
+		# 2000 preloaded docs + nomatch_doc UPR_MUTATION + nomatch_doc tombstone should be filtered
+		echo "expected that 2002 docs was filtered on filter expression, but found: $userDefineFiltered"
+		exit 1
+	fi
+
+	# Step 2: Turn off filterWithExpression and verify ALL tombstones are filtered
+	echo "============================================================================"
+	echo "Step 2: Turning off $filterTombstoneSettingWithExpr"
+	echo "============================================================================"
+
+	# Get log counts before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before: $reinitCountBefore"
+	echo "Found0Ckpt count before: $found0CkptCountBefore"
+
+	# Turn off filterWithExpression (filterToggle stays true, so ALL tombstones filtered)
+	echo "Updating settings: $filterTombstoneSettingWithExpr=false, filterSkipRestream=false..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		"$filterTombstoneSettingWithExpr=false" \
+		"filterSkipRestream=false"
+
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+
+	# Check logs for restream
+	echo "Checking logs for pipeline restart and restream..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after: $reinitCountAfter"
+	echo "Found0Ckpt count after: $found0CkptCountAfter"
+
+	if (($reinitCountAfter <= $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream count to increase (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count increased (pipeline restarted)"
+
+	if (($found0CkptCountAfter <= $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to increase (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count increased (no checkpoints used, restreamed from beginning)"
+
+	# Wait for restream to complete
+	echo "Waiting for changes left to reach 0 after restream..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Write docs to target first, then create tombstones on source
+	echo "Writing 2 new docs to target..."
+	writeJSONDocument "C2" "B2" "match_new" '{"test":"match"}'
+	writeJSONDocument "C2" "B2" "nomatch_new" '{"test":"nomatch"}'
+
+	# Create tombstones on source
+	echo "Creating tombstones for new docs on source..."
+	createTombstone "C1" "B1" "match_new" "$testType"
+	createTombstone "C1" "B1" "nomatch_new" "$testType"
+
+	# Wait for replication
+	echo "Waiting for replication..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify BOTH tombstones were filtered (both docs still exist on target)
+	echo "Verifying both ${testType}s were filtered ($filterTombstoneSettingWithExpr=false means ALL ${testType}s filtered)..."
+
+	if ! documentExists "C2" "B2" "match_new"; then
+		echo "FAILED: match_new should still exist on target (all ${testType}s filtered)"
+		exit 1
+	fi
+	echo "PASSED: match_new ${testType} was filtered (document still exists)"
+
+	if ! documentExists "C2" "B2" "nomatch_new"; then
+		echo "FAILED: nomatch_new should still exist on target (all ${testType}s filtered)"
+		exit 1
+	fi
+	echo "PASSED: nomatch_new ${testType} was filtered (document still exists)"
+
+	# Verify final item counts: source=2000, target=3 (nomatch_doc + match_new + nomatch_new)
+	echo "Verifying final doc counts after step 2..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 3
+	if (($? != 0)); then
+		echo "FAILED: Target should have 3 docs (nomatch_doc + match_new + nomatch_new)"
+		exit 1
+	fi
+	echo "PASSED: Target has 3 docs"
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with create replication API PASSED"
+	echo "============================================================================"
+
+	# Cleanup setup for next tests
+	cleanupBucketReplications
+	cleanupBuckets
+	sleep 5
+}
+
+# Positive Test: filterWithExpression with update settings API (consolidated)
+# Parameter: testType = "deletion" or "expiration"
+# 1. Create replication with filterToggle=true only (all tombstones filtered, no expression)
+# 2. Write match_doc and nomatch_doc to both source and target
+# 3. Create tombstones on source - should be filtered (not replicated)
+# 4. Load 2000 docs on source with prefix "preload_"
+# 5. Verify source=2000, target=2002 (2000 preloaded + 2 test docs)
+# 6. Update settings with filterWithExpression=true and key-only filter
+# 7. Verify pipeline restarts and restreams
+# 8. Verify source=2000, target=2001 (match_doc tombstone replicated after restream, nomatch_doc remains)
+function testPositiveWithFEUpdate {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+	local replPropsName=$(getReplPropsName "$testType" "onlyToggle")
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings API"
+	echo "============================================================================"
+
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Create replication with filterToggle=true only (all tombstones filtered, no expression)
+	echo "Creating replication with $filterToggle=true only (all ${testType}s filtered)..."
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+
+	# Write docs to target first
+	echo "Writing match_doc and nomatch_doc to target..."
+	writeJSONDocument "C2" "B2" "match_doc" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones on source..."
+	createTombstone "C1" "B1" "match_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc" "$testType"
+
+	# Load 2000 docs on source bucket
+	echo "Loading 2000 docs on source bucket with prefix 'preload_'..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+
+	# Wait for replication (tombstones should be filtered)
+	echo "Waiting for replication (${testType}s should be filtered)..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=2002 (2000 preloaded + 2 test docs, all tombstones filtered)
+	echo "Verifying doc counts: source should be 2000, target should be 2002..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2002
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2002 docs (2000 preloaded + 2 test docs, ${testType}s filtered)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2002 docs (${testType}s were filtered)"
+
+	# Get count of PipelineReinitStream and Found0Ckpt logs before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before settings update: $reinitCountBefore"
+	echo "Found0Ckpt count before settings update: $found0CkptCountBefore"
+
+	# Update settings with filterWithExpression=true and key-only filter
+	echo "Updating replication settings with $filterTombstoneSettingWithExpr=true and filterExpression..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		"$filterTombstoneSettingWithExpr=true" \
+		'filterExpression=REGEXP_CONTAINS(META().id,"^match")' \
+		"filterSkipRestream=false"
+
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+
+	# Check logs for pipeline restart
+	echo "Checking logs for pipeline restart..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after settings update: $reinitCountAfter"
+	echo "Found0Ckpt count after settings update: $found0CkptCountAfter"
+
+	if (($reinitCountAfter <= $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream count to increase (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count increased (pipeline restarted)"
+
+	if (($found0CkptCountAfter <= $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to increase (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count increased (pipeline restreamed from beginning)"
+
+	# Wait for changes left to be 0
+	echo "Waiting for changes left to be 0 after restream..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=2001 (match_doc tombstone replicated after restream, nomatch_doc remains)
+	echo "Verifying final doc counts: source should be 2000, target should be 2001..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2001
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2001 docs (match_doc ${testType} replicated, nomatch_doc remains)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2001 docs"
+
+	# Verify it's nomatch_doc that remains
+	if ! documentExists "C2" "B2" "nomatch_doc"; then
+		echo "FAILED: nomatch_doc should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc is the remaining document on target"
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings API PASSED"
+	echo "============================================================================"
+
+	# Cleanup setup for next tests
+	cleanupBucketReplications
+	cleanupBuckets
+
+	sleep 5
+}
+
+# Positive Test: filterWithExpression upgrade after passthrough (consolidated)
+# Parameter: testType = "deletion" or "expiration"
+# filterExpression already exists but filterToggle does not, so tombstones are passthrough
+# 1. Load 2000 docs on source with prefix "preload_" (won't be replicated due to filterExpression)
+# 2. Create replication with filterExpression (but NOT filterWithExpression and NOT filterToggle)
+# 3. Write match_doc and nomatch_doc to both source and target
+# 4. Create tombstones on source - passthrough (replicated to target)
+# 5. Verify source=2000, target=0 (preload_ not replicated, test docs tombstones passed through)
+# 6. Update settings to add filterWithExpression=true and filterToggle=true
+# 7. Verify pipeline restarts and restreams
+# 8. Write and create tombstones for match_doc_new and nomatch_doc_new
+# 9. Verify source=2000, target=1 (match_doc_new tombstone replicated, nomatch_doc_new remains)
+function testPositiveWithFEUpgradeAfterPassthrough {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+	local replPropsName=$(getReplPropsName "$testType" "withExpr")
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade (filterExpression already exists)"
+	echo "============================================================================"
+
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Load 2000 docs on source bucket (prefix doesn't match filter)
+	echo "Loading 2000 docs on source bucket with prefix 'preload_' (won't match filter)..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+
+	# Create replication with filterExpression (but NOT filterWithExpression)
+	echo "Creating replication with filterExpression (no $filterTombstoneSettingWithExpr)..."
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+
+	# Write docs to target first
+	echo "Writing match_doc and nomatch_doc to target..."
+	writeJSONDocument "C2" "B2" "match_doc" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones on source..."
+	createTombstone "C1" "B1" "match_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc" "$testType"
+
+	# Wait for replication (tombstones should be passthrough)
+	echo "Waiting for replication (all ${testType}s should be passthrough)..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=0 (preload_ docs not replicated, test docs tombstones passed through)
+	echo "Verifying doc counts: source should be 2000, target should be 0..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 0
+	if (($? != 0)); then
+		echo "FAILED: Target should have 0 docs (preload_ filtered, test docs tombstones passed through)"
+		exit 1
+	fi
+	echo "PASSED: Target has 0 docs (preload_ filtered, ${testType}s were passthrough)"
+
+	# Get count of PipelineReinitStream and Found0Ckpt logs before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before settings update: $reinitCountBefore"
+	echo "Found0Ckpt count before settings update: $found0CkptCountBefore"
+
+	# Update settings to add filterWithExpression=true
+	echo "Updating replication settings to add $filterTombstoneSettingWithExpr=true..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		"$filterToggle=true" \
+		"$filterTombstoneSettingWithExpr=true" \
+		"filterSkipRestream=false"
+
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+
+	# Check logs for pipeline restart
+	echo "Checking logs for pipeline restart..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after settings update: $reinitCountAfter"
+	echo "Found0Ckpt count after settings update: $found0CkptCountAfter"
+
+	if (($reinitCountAfter <= $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream count to increase (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count increased (pipeline restarted)"
+
+	if (($found0CkptCountAfter <= $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to increase (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count increased (pipeline restreamed from beginning)"
+
+	# Write docs to target first
+	echo "Writing match_doc_new and nomatch_doc_new to target..."
+	writeJSONDocument "C2" "B2" "match_doc_new" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc_new" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones for new docs on source..."
+	createTombstone "C1" "B1" "match_doc_new" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc_new" "$testType"
+
+	sleep 5
+	echo "Waiting for changes left to be 0 after restream..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=1 (match_doc_new tombstone replicated, nomatch_doc_new remains)
+	echo "Verifying final doc counts: source should be 2000, target should be 1..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 1
+	if (($? != 0)); then
+		echo "FAILED: Target should have 1 doc (match_doc_new ${testType} replicated, nomatch_doc_new remains)"
+		exit 1
+	fi
+	echo "PASSED: Target has 1 doc"
+
+	# Verify it's nomatch_doc_new that remains
+	if ! documentExists "C2" "B2" "nomatch_doc_new"; then
+		echo "FAILED: nomatch_doc_new should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc_new is the remaining document on target"
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade PASSED"
+	echo "============================================================================"
+
+	# Cleanup setup for next tests
+	cleanupBucketReplications
+	cleanupBuckets
+
+	sleep 5
+}
+
+# Positive Test: filterWithExpression upgrade after filtered (consolidated)
+# Parameter: testType = "deletion" or "expiration"
+# filterExpression and filterToggle already exist, so tombstones are originally filtered
+# 1. Load 2000 docs on source with prefix "preload_" (won't be replicated due to filterExpression)
+# 2. Create replication with filterExpression and filterToggle (but NOT filterWithExpression)
+# 3. Write match_doc and nomatch_doc to both source and target
+# 4. Create tombstones on source - all filtered due to filterToggle
+# 5. Verify source=2000, target=2 (preload_ not replicated, tombstones filtered)
+# 6. Update settings to add filterWithExpression=true
+# 7. Verify pipeline restarts and restreams
+# 8. Verify source=2000, target=1 (match_doc tombstone replicated after restream, nomatch_doc remains)
+# 9. Create new tombstones for match_doc_new and nomatch_doc_new
+# 10. Verify source=2000, target=2 (nomatch_doc + nomatch_doc_new remain)
+function testPositiveWithFEUpgradeAfterFiltered {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+	local replPropsName=$(getReplPropsName "$testType" "withExpr2")
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade (filterExpression and $filterToggle already exist)"
+	echo "============================================================================"
+
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Load 2000 docs on source bucket (prefix doesn't match filter)
+	echo "Loading 2000 docs on source bucket with prefix 'preload_' (won't match filter)..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+
+	# Create replication with filterExpression and filterToggle (but NOT filterWithExpression)
+	echo "Creating replication with filterExpression and $filterToggle (no $filterTombstoneSettingWithExpr)..."
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+
+	# Write docs to target first
+	echo "Writing match_doc and nomatch_doc to target..."
+	writeJSONDocument "C2" "B2" "match_doc" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones on source..."
+	createTombstone "C1" "B1" "match_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc" "$testType"
+
+	# Wait for replication (tombstones should be filtered)
+	echo "Waiting for replication (all ${testType}s should be filtered)..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=2 (preload_ docs not replicated, tombstones filtered)
+	echo "Verifying doc counts: source should be 2000, target should be 2..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2 docs (preload_ filtered, ${testType}s are filtered)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2 docs (preload_ filtered, ${testType}s were filtered)"
+
+	# Get count of PipelineReinitStream and Found0Ckpt logs before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before settings update: $reinitCountBefore"
+	echo "Found0Ckpt count before settings update: $found0CkptCountBefore"
+
+	# Update settings to add filterWithExpression=true
+	echo "Updating replication settings to add $filterTombstoneSettingWithExpr=true..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		"$filterTombstoneSettingWithExpr=true" \
+		"filterSkipRestream=false"
+
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+
+	# Check logs for pipeline restart
+	echo "Checking logs for pipeline restart..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after settings update: $reinitCountAfter"
+	echo "Found0Ckpt count after settings update: $found0CkptCountAfter"
+
+	if (($reinitCountAfter <= $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream count to increase (was $reinitCountBefore, now $reinitCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count increased (pipeline restarted)"
+
+	if (($found0CkptCountAfter <= $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to increase (was $found0CkptCountBefore, now $found0CkptCountAfter)"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count increased (pipeline restreamed from beginning)"
+
+	sleep 5
+	echo "Waiting for changes left to be 0 after restream..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=1 (match_doc tombstone replicated after restream, nomatch_doc remains)
+	echo "Verifying doc counts after restream: source should be 2000, target should be 1..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 1
+	if (($? != 0)); then
+		echo "FAILED: Target should have 1 doc (match_doc ${testType} replicated after restream, nomatch_doc remains)"
+		exit 1
+	fi
+	echo "PASSED: Target has 1 doc"
+
+	# Verify it's nomatch_doc that remains
+	if ! documentExists "C2" "B2" "nomatch_doc"; then
+		echo "FAILED: nomatch_doc should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc is the remaining document on target"
+
+	# Write docs to target first
+	echo "Writing match_doc_new and nomatch_doc_new to target..."
+	writeJSONDocument "C2" "B2" "match_doc_new" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc_new" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones for new docs on source..."
+	createTombstone "C1" "B1" "match_doc_new" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc_new" "$testType"
+
+	sleep 5
+	echo "Waiting for changes left to be 0..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=2 (nomatch_doc + nomatch_doc_new remain)
+	echo "Verifying final doc counts: source should be 2000, target should be 2..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2 docs (nomatch_doc + nomatch_doc_new remain)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2 docs"
+
+	# Verify both nomatch docs remain
+	if ! documentExists "C2" "B2" "nomatch_doc_new"; then
+		echo "FAILED: nomatch_doc_new should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc_new is a remaining document on target"
+
+	if ! documentExists "C2" "B2" "nomatch_doc"; then
+		echo "FAILED: nomatch_doc should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_doc is a remaining document on target"
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade (after filtered) PASSED"
+	echo "============================================================================"
+
+	# Cleanup setup for next tests
+	cleanupBucketReplications
+	cleanupBuckets
+
+	sleep 5
+}
+
+# Positive Test: filterWithExpression with update settings and skipRestream=true (consolidated)
+# Parameter: testType = "deletion" or "expiration"
+# 1. Create replication with filterToggle=true (all tombstones filtered, no expression)
+# 2. Write match_doc and nomatch_doc to both source and target
+# 3. Create tombstones on source - should be filtered (not replicated)
+# 4. Load 2000 docs on source with prefix "preload_"
+# 5. Verify source=2000, target=2002 (2000 preloaded + 2 test docs)
+# 6. Update settings with filterWithExpression=true, filter, and skipRestream=true
+# 7. Verify pipeline does NOT restream (no Found0Ckpt increase, no PipelineReinitStream)
+# 8. Target should still have 2002 docs (old tombstones not reprocessed)
+# 9. Write 2 new docs, create tombstones, verify filter works for new mutations
+# 10. Final: source=2000, target=2003 (2000 preloaded + 2 old test + 1 new nomatch)
+function testPositiveWithFEUpdateSkipRestream {
+	local testType=$1
+	local filterToggle=$(getFilterToggle "$testType")
+	local filterTombstoneSettingWithExpr=$(getFilterTombstoneSettingWithExpr "$testType")
+	local replPropsName=$(getReplPropsName "$testType" "onlyToggle")
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings (skipRestream=true)"
+	echo "============================================================================"
+
+	# Clear logs at the beginning of the test
+	clearInternalNodeXdcrLog "C1"
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Create replication with filterToggle=true only (all tombstones filtered, no expression)
+	echo "Creating replication with $filterToggle=true only (all ${testType}s filtered)..."
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+	if (($? != 0)); then
+		echo "Failed to create replication"
+		exit 1
+	fi
+	sleep 5
+
+	# Write docs to target first
+	echo "Writing match_doc and nomatch_doc to target..."
+	writeJSONDocument "C2" "B2" "match_doc" '{"match":true}'
+	writeJSONDocument "C2" "B2" "nomatch_doc" '{"match":false}'
+
+	# Create tombstones on source
+	echo "Creating tombstones on source..."
+	createTombstone "C1" "B1" "match_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_doc" "$testType"
+
+	# Load 2000 docs on source bucket
+	echo "Loading 2000 docs on source bucket with prefix 'preload_'..."
+	runCbWorkloadGenBucket "C1" "B1" 2000 "preload_"
+
+	# Wait for replication (tombstones should be filtered)
+	echo "Waiting for replication (${testType}s should be filtered)..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify source=2000, target=2002 (2000 preloaded + 2 test docs, all tombstones filtered)
+	echo "Verifying doc counts: source should be 2000, target should be 2002..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2002
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2002 docs (2000 preloaded + 2 test docs, ${testType}s filtered)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2002 docs (${testType}s were filtered)"
+
+	# Get count of PipelineReinitStream and Found0Ckpt logs before settings update
+	local logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountBefore=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountBefore=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountBefore=${reinitCountBefore:-0}
+	found0CkptCountBefore=${found0CkptCountBefore:-0}
+	echo "PipelineReinitStream count before settings update: $reinitCountBefore"
+	echo "Found0Ckpt count before settings update: $found0CkptCountBefore"
+
+	# Update settings with filterWithExpression=true, filter, and skipRestream=true
+	echo "Updating replication settings with $filterTombstoneSettingWithExpr=true, filterExpression, and filterSkipRestream=true..."
+	setReplicationSettings "C1" "B1" "C2" "B2" \
+		"$filterTombstoneSettingWithExpr=true" \
+		'filterExpression=REGEXP_CONTAINS(META().id,"^match")' \
+		"filterSkipRestream=true"
+
+	# Wait for pipeline to restart
+	echo "Waiting 10s for pipeline to restart..."
+	sleep 10
+
+	# Check logs - There should be no PipelineReinitStream and pipeline should restart from checkpoints
+	echo "Checking logs for pipeline restart (but no restream)..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	local reinitCountAfter=$(echo "$logs" | grep -c "$REINIT_STREAM_LOG" | tr -d '[:space:]')
+	local found0CkptCountAfter=$(echo "$logs" | grep -c "$FOUND_0_CKPT_LOG" | tr -d '[:space:]')
+	reinitCountAfter=${reinitCountAfter:-0}
+	found0CkptCountAfter=${found0CkptCountAfter:-0}
+	echo "PipelineReinitStream count after settings update: $reinitCountAfter"
+	echo "Found0Ckpt count after settings update: $found0CkptCountAfter"
+
+	if (($reinitCountAfter != $reinitCountBefore)); then
+		echo "FAILED: Expected PipelineReinitStream to remain same (from $reinitCountBefore), but got $reinitCountAfter"
+		exit 1
+	fi
+	echo "PASSED: PipelineReinitStream count remained same (no restream)"
+
+	if (($found0CkptCountAfter != $found0CkptCountBefore)); then
+		echo "FAILED: Expected Found0Ckpt count to stay the same (skipRestream=true), was $found0CkptCountBefore, now $found0CkptCountAfter"
+		exit 1
+	fi
+	echo "PASSED: Found0Ckpt count unchanged (no restream)"
+
+	# Wait for changes left to be 0
+	echo "Waiting for changes left to be 0..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify target still has 2002 docs (old tombstones were not reprocessed)
+	echo "Verifying target still has 2002 docs (old tombstones not reprocessed)..."
+	checkItemCnt "C2" "B2" 2002
+	if (($? != 0)); then
+		echo "FAILED: Target should still have 2002 docs (no restream)"
+		exit 1
+	fi
+	echo "PASSED: Target still has 2002 docs (old tombstones not reprocessed)"
+
+	# Write docs to target first
+	echo "Writing 2 new docs to target..."
+	writeJSONDocument "C2" "B2" "match_new_doc" '{"match":true,"new":true}'
+	writeJSONDocument "C2" "B2" "nomatch_new_doc" '{"match":false,"new":true}'
+
+	# Create tombstones on source
+	echo "Creating tombstones for new docs on source..."
+	createTombstone "C1" "B1" "match_new_doc" "$testType"
+	createTombstone "C1" "B1" "nomatch_new_doc" "$testType"
+
+	# Wait for replication
+	echo "Waiting for replication of new tombstones..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify: match_new_doc deleted (filter matched), nomatch_new_doc remains (filter didn't match)
+	echo "Verifying new ${testType}s filter behavior..."
+
+	if documentExists "C2" "B2" "match_new_doc"; then
+		echo "FAILED: match_new_doc should have been deleted on target"
+		exit 1
+	fi
+	echo "PASSED: match_new_doc ${testType} was replicated"
+
+	if ! documentExists "C2" "B2" "nomatch_new_doc"; then
+		echo "FAILED: nomatch_new_doc should still exist on target"
+		exit 1
+	fi
+	echo "PASSED: nomatch_new_doc ${testType} was filtered (document remains)"
+
+	# Final verification: source=2000, target=2003 (2000 preloaded + 2 old test docs + 1 new nomatch doc)
+	echo "Verifying final doc counts: source should be 2000, target should be 2003..."
+	checkItemCnt "C1" "B1" 2000
+	if (($? != 0)); then
+		echo "FAILED: Source should have 2000 docs"
+		exit 1
+	fi
+	echo "PASSED: Source has 2000 docs"
+
+	checkItemCnt "C2" "B2" 2003
+	if (($? != 0)); then
+		echo "FAILED: Target should have 2003 docs (2000 preloaded + 2 old + 1 new nomatch)"
+		exit 1
+	fi
+	echo "PASSED: Target has 2003 docs"
+
+	echo "============================================================================"
+	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings (skipRestream=true) PASSED"
+	echo "============================================================================"
+
+	# Cleanup setup for next tests
+	cleanupBucketReplications
+	cleanupBuckets
+
+	sleep 5
+}
+
+# Helper function to run all tests for a given testType (deletion or expiration)
+function runAllTestsForType {
+	local testType=$1
+
+	echo "============================================================================"
+	echo "Running all $testType filter tests"
+	echo "============================================================================"
+
+	# Default settings negative tests (no replication needed)
+	echo "Running default settings tests for $testType..."
+	testDefaultSettingsWithFEWithoutToggle "$testType"
+
+	# Create replication negative tests (no replication needed, these try to create and fail)
+	echo "Running replication creation negative tests for $testType..."
+	testCreateWithFEWithoutToggle "$testType"
+	testCreateEmptyFilterExpr "$testType"
+	testCreateBodyFilterExpr "$testType"
+	testCreateXattrFilterExpr "$testType"
+	testCreateKeyAndXattrFilterExpr "$testType"
+	testCreateKeyAndBodyFilterExpr "$testType"
+	testCreateKeyBodyXattrFilterExpr "$testType"
+
+	# Update settings negative tests (need a replication)
+	echo "Creating test replication for update settings tests..."
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 5
+
+	echo "Running update settings negative tests for $testType..."
+	testUpdateSettingsWithFEWithoutToggle "$testType"
+
+	cleanupBucketReplications
+	sleep 5
+
+	# Positive tests (each handles its own setup/cleanup)
+	echo "Running positive tests for $testType..."
+	testPositiveWithFECreate "$testType"
+	testPositiveWithFEUpdate "$testType"
+	testPositiveWithFEUpgradeAfterPassthrough "$testType"
+	testPositiveWithFEUpgradeAfterFiltered "$testType"
+	testPositiveWithFEUpdateSkipRestream "$testType"
+
+	echo "============================================================================"
+	echo "All $testType filter tests PASSED"
+	echo "============================================================================"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running deletion and expiration filter tests"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Run all tests for each type
+	for testType in "expiration" "deletion"; do
+		setupTopologies
+		if (($? != 0)); then
+			exit $?
+		fi
+
+		# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+		sleep 5
+		createRemoteClusterReference "C1" "C2"
+		sleep 1
+
+		runAllTestsForType "$testType"
+	done
+
+	grepForPanics
+	cleanupRemoteClusterRefs
+
+	echo "============================================================================"
+	echo "ALL TESTS PASSED"
+	echo "============================================================================"
+}

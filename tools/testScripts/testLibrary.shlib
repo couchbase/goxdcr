@@ -2120,3 +2120,78 @@ function validatePrometheusPipelineStatusIs1 {
 
 	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
 }
+
+# Check if a document exists in a bucket
+# Returns 0 if document exists, 1 if not found
+# Usage: documentExists <cluster> <bucket> <docKey>
+function documentExists {
+	local clusterName=$1
+	local bucketName=$2
+	local docKey=$3
+
+	local docCount=$(getJSONDocument "$clusterName" "$bucketName" "$docKey" 2>/dev/null | jq 2>/dev/null | grep -c "\"id\": \"$docKey\"" | tr -d '[:space:]' || echo "0")
+	docCount=${docCount:-0}
+
+	if (($docCount >= 1)); then
+		return 0 # Document exists
+	else
+		return 1 # Document not found
+	fi
+}
+
+# Wait until a document expires by repeatedly calling getJSONDocument
+# The GET should trigger lazy expiration. Retries up to 10 times with 10s delay.
+# Therefore, the function assumes that the expiry should be less than 100s.
+# Returns 0 if document expired (not found), 1 if still exists after all attempts.
+# Usage: waitUntilDocumentExpiry <cluster> <bucket> <docKey>
+function waitUntilDocumentExpiry {
+	local clusterName=$1
+	local bucketName=$2
+	local docKey=$3
+	local maxAttempts=10
+	local delaySeconds=10
+
+	for ((i = 1; i <= maxAttempts; i++)); do
+		if ! documentExists "$clusterName" "$bucketName" "$docKey"; then
+			echo "Document $docKey expired after $i attempt(s)"
+			return 0
+		fi
+		echo "Attempt $i/$maxAttempts: Document $docKey still exists, waiting ${delaySeconds}s..."
+		sleep $delaySeconds
+	done
+
+	echo "FAILED: Document $docKey did not expire after $maxAttempts attempts"
+	return 1
+}
+
+# Helper function to create a tombstone (write doc + delete/expire) based on tombstone type
+# For "deletion": writes the document without expiry, then deletes it
+# For "expiration": writes the document with 10s expiry, then waits for it to expire
+# Returns 0 on success, exits with 1 on failure
+# Usage: createTombstone <cluster> <bucket> <docKey> [tombstoneType]
+# - cluster: cluster name (e.g., "C1")
+# - bucket: bucket name (e.g., "B1")
+# - docKey: document key
+# - tombstoneType: "deletion" (default) or "expiration"
+function createTombstone {
+	local cluster=$1
+	local bucket=$2
+	local docKey=$3
+	local tombstoneType=${4:-deletion} # Default to "deletion"
+	local jsonData='{"tombstone":true}'
+	local expiryTimeSec=10
+
+	if [[ "$tombstoneType" == "deletion" ]]; then
+		# Write document without expiry, then delete
+		writeJSONDocument "$cluster" "$bucket" "$docKey" "$jsonData"
+		deleteJSONDocument "$cluster" "$bucket" "$docKey"
+	else
+		# Write document with expiry, then wait for it to expire
+		writeJSONDocument "$cluster" "$bucket" "$docKey" "$jsonData" "$expiryTimeSec"
+		waitUntilDocumentExpiry "$cluster" "$bucket" "$docKey"
+		if (($? != 0)); then
+			echo "FAILED: Document $docKey did not expire on $cluster:$bucket"
+			exit 1
+		fi
+	fi
+}
