@@ -32,7 +32,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 conflictLoggingMap="{\"bucket\":\"B2\", \"collection\": \"_default._default\"}"
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true" ["mobile"]="Active")
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["conflictLogging"]=$conflictLoggingMap ["filterBinary"]="true" ["mobile"]="Active")
 
 function runDataLoad {
 	echo "RUNNING dataload..."

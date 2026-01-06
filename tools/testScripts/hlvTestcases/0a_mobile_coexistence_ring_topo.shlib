@@ -18,7 +18,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
 
-declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
+declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
 
 function waitForChangesLeft0ForTopology {
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"

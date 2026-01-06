@@ -28,11 +28,11 @@ insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B6" BucketProperty # conflict bucket for C3.B3
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty # bucket to test conflict records are not replicated
 
-declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
+declare -A BucketReplProperties1=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
-declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
+declare -A BucketReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
-declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
+declare -A BucketReplProperties3=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["mobile"]="Active")
 
 # Bucket -> Scopes
 # -----------------
