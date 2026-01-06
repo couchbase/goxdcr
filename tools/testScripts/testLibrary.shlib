@@ -387,34 +387,36 @@ function waitForChangesLeft0 {
 		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
 	fi
 
+	local prefix="$srcCluster.$srcBucket->$targetCluster.$targetBucket"
+
 	for ((i = 0; $i < $changesLeftMaxCheck; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($? != 0)); then
-			echo "Failed to get changes_left"
+			echo "$prefix: Failed to get changes_left"
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 		if [[ -z "${changesLeft:-}" ]]; then
-			echo "Changes left is empty. Trying again..."
+			echo "$prefix: Changes left is empty. Trying again..."
 			sleep $CHANGES_LEFT_0_WAIT_SECS
 			continue
 		elif [[ "$changesLeft" == "null" ]]; then
-			echo "Changes left is null. Trying again..."
+			echo "$prefix: Changes left is null. Trying again..."
 			sleep $CHANGES_LEFT_0_WAIT_SECS
 			continue
 		elif (($changesLeft > 0)); then
-			echo "Changes left $changesLeft is not 0 yet..."
+			echo "$prefix: Changes left $changesLeft is not 0 yet..."
 		elif (($changesLeft == 0)); then
 			return 0
 		else
-			echo "Changes left unknown value: $changesLeft"
+			echo "$prefix: Changes left unknown value: $changesLeft"
 		fi
 		if (($changesLeft == $lastChangesLeft)); then
-			echo "Changes left is not going down. It is still $changesLeft"
+			echo "$prefix: Changes left is not going down. It is still $changesLeft"
 		else
 			lastChangesLeft=$changesLeft
 			i=$(($i - 1))
-			echo "Changes left is not 0. It is $changesLeft... it is decreasing"
+			echo "$prefix: Changes left is not 0. It is $changesLeft... it is decreasing"
 		fi
 		sleep $CHANGES_LEFT_0_WAIT_SECS
 	done
