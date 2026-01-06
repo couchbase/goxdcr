@@ -25,8 +25,8 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3"}')
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3"}')
 
 # Bucket -> Scopes
 # -----------------

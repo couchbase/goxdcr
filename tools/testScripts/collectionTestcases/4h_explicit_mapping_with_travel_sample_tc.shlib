@@ -24,9 +24,9 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500
 	["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"inventory":"inventory", "inventory.airport":"inventory.airport1", "inventory.landmark":"inventory.landmark1"}' ["collectionsOSOMode"]="false")
-declare -A ExplicitReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+declare -A ExplicitReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500
 	["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"inventory":"S1", "inventory.airport":"S1.col1", "inventory.landmark":"S1.col2"}' ["collectionsOSOMode"]="false")
 
 # Bucket -> Scopes

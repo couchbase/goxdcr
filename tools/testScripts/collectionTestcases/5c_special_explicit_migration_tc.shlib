@@ -25,7 +25,7 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 mappingRule="{\"_default._default\":\"S3.col1\"}"
 
-declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500
 	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
 
 # Bucket -> Scopes
