@@ -457,8 +457,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
 	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
-	dcpFeedDataChanLengthChanged := oldSettings.GetDCPFeedDataChanLength() != newSettings.GetDCPFeedDataChanLength()
-	dcpConnectionBufferSizeChanged := oldSettings.GetDCPConnectionBufferSize() != newSettings.GetDCPConnectionBufferSize()
+	dcpFlowControlThrottleChanged := oldSettings.GetDCPFlowControlThrottle() != newSettings.GetDCPFlowControlThrottle()
 	componentEventsChanLengthChanged := oldSettings.GetComponentEventsChanLength() != newSettings.GetComponentEventsChanLength()
 
 	// the following may qualify for live update in the future.
@@ -470,7 +469,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
 		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
-		dcpFeedDataChanLengthChanged || dcpConnectionBufferSizeChanged || componentEventsChanLengthChanged
+		dcpFlowControlThrottleChanged || componentEventsChanLengthChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()

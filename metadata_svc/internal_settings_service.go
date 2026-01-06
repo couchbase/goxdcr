@@ -232,13 +232,13 @@ func (service *InternalSettingsSvc) constructV2InternalSettingsObject(value []by
 		case metadata.DeprecatedUprFeedDataChanLengthKey:
 			oldConnBufferSize, _ := settingValue.(int)
 			if oldConnBufferSize != int(base.MaxDCPConnectionBufferSize) {
-				msg = fmt.Sprintf("connection_buffer_size value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldConnBufferSize, metadata.DeprecatedUprFeedBufferSizeKey, base.DCPConnectionBufferSizeKey)
+				msg = fmt.Sprintf("connection_buffer_size value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldConnBufferSize, metadata.DeprecatedUprFeedBufferSizeKey, base.DCPFlowControlThrottleKey)
 			}
 
 		case metadata.DeprecatedUprFeedBufferSizeKey:
 			oldDataChanLen, _ := settingValue.(int)
 			if oldDataChanLen != base.MaxDCPFeedDataChanLength {
-				msg = fmt.Sprintf("data-channel length value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldDataChanLen, metadata.DeprecatedUprFeedDataChanLengthKey, base.DCPFeedDataChanLengthKey)
+				msg = fmt.Sprintf("data-channel length value %v (previously set via internal-setting %v) will be overridden by the new replication-setting %v on this node", oldDataChanLen, metadata.DeprecatedUprFeedDataChanLengthKey, base.DCPFlowControlThrottleKey)
 			}
 		}
 

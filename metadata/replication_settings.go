@@ -132,11 +132,8 @@ const (
 
 	DisableHlvBasedShortCircuitKey = base.DisableHlvBasedShortCircuitKey
 
-	// length of data channel between DCP nozzle and gomemcached
-	DCPFeedDataChanLengthKey = base.DCPFeedDataChanLengthKey
-
-	// value for the 'connection_buffer_size' control parameter, to be set for the DCP connection
-	DCPConnectionBufferSizeKey = base.DCPConnectionBufferSizeKey
+	// percentage value to apply on both the DCP 'connection_buffer_size' and length of data channel between DCP nozzle and gomemcached
+	DCPFlowControlThrottleKey = base.DCPFlowControlThrottleKey
 
 	// length of data channel queue between component-events listener and handler
 	ComponentEventsChanLengthKey = base.ComponentEventsChanLengthKey
@@ -190,7 +187,7 @@ var MultiValueMap map[string]string = map[string]string{
 }
 
 // settings that require validation
-var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey, DCPFeedDataChanLengthKey, DCPConnectionBufferSizeKey}
+var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey}
 
 var MaxBatchCount = 10000
 
@@ -285,8 +282,7 @@ var PipelineReinitHashConfig = &SettingsConfig{"", nil}
 // of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
 var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 
-var DCPFeedDataChanLengthConfig = &SettingsConfig{base.MaxDCPFeedDataChanLength, &Range{base.MaxDCPFeedDataChanLength / 10, base.MaxDCPFeedDataChanLength}}
-var DCPConnectionBufferSizeConfig = &SettingsConfig{int(base.MaxDCPConnectionBufferSize), &Range{int(base.MaxDCPConnectionBufferSize) / 10, int(base.MaxDCPConnectionBufferSize)}}
+var DCPFlowControlThrottleConfig = &SettingsConfig{base.MaxDCPFlowControlThrottle, &Range{base.MaxDCPFlowControlThrottle / 20, base.MaxDCPFlowControlThrottle}}
 
 var ComponentEventsChanLengthConfig = &SettingsConfig{base.MaxEventChanSize, &Range{base.MaxEventChanSize / 10, base.MaxEventChanSize}}
 
@@ -348,8 +344,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	PipelineReinitHashKey:                PipelineReinitHashConfig,
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
-	DCPFeedDataChanLengthKey:             DCPFeedDataChanLengthConfig,
-	DCPConnectionBufferSizeKey:           DCPConnectionBufferSizeConfig,
+	DCPFlowControlThrottleKey:            DCPFlowControlThrottleConfig,
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
 
 	DevReplOptsKey: DevReplOptsConfig,
@@ -1209,13 +1204,8 @@ func (s *ReplicationSettings) GetPipelineReinitHash() string {
 	return s.GetStringSettingValue(PipelineReinitHashKey)
 }
 
-func (s *ReplicationSettings) GetDCPFeedDataChanLength() int {
-	val, _ := s.GetSettingValueOrDefaultValue(DCPFeedDataChanLengthKey)
-	return val.(int)
-}
-
-func (s *ReplicationSettings) GetDCPConnectionBufferSize() int {
-	val, _ := s.GetSettingValueOrDefaultValue(DCPConnectionBufferSizeKey)
+func (s *ReplicationSettings) GetDCPFlowControlThrottle() int {
+	val, _ := s.GetSettingValueOrDefaultValue(DCPFlowControlThrottleKey)
 	return val.(int)
 }
 
@@ -1580,4 +1570,4 @@ func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *Repli
 // which is a string encoded json map. If the validation is successful, returns the corresponding map.
 var ValidateAndConvertStrToCLogMapping func(settingStr string) (base.ConflictLoggingMappingInput, error)
 
-var UpgradeReplicationSettings = [...]string{DCPFeedDataChanLengthKey, DCPConnectionBufferSizeKey, ComponentEventsChanLengthKey}
+var UpgradeReplicationSettings = [...]string{DCPFlowControlThrottleKey, ComponentEventsChanLengthKey}

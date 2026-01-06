@@ -800,43 +800,12 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	if shouldValidateSettings {
 		performRemoteValidation := CheckIfRemoteValidationRequired(justValidate, replSpec.Settings.ToMap(false), settings)
 
-		// populate the missing setting with default value - required for validation
-		_, dataChanFound := settings[metadata.DCPFeedDataChanLengthKey]
-		_, connBuffFound := settings[metadata.DCPConnectionBufferSizeKey]
-		if dataChanFound || connBuffFound {
-			if !dataChanFound {
-				settings[metadata.DCPFeedDataChanLengthKey] = replSpec.Settings.GetDCPFeedDataChanLength()
-			}
-			if !connBuffFound {
-				settings[metadata.DCPConnectionBufferSizeKey] = replSpec.Settings.GetDCPConnectionBufferSize()
-			}
-		}
-
 		validateRoutineErrorMap, validateErr, warnings = ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName, replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings, performRemoteValidation)
-		if validateErr == base.ErrDCPFlowControlSettings {
-			validateErr = nil // reset err since ErrDCPFlowControlSettings conveys a user error, to be populated in the errorMap instead
 
-			if dataChanFound {
-				validateRoutineErrorMap[metadata.DCPFeedDataChanLengthKey] = fmt.Errorf("(%v * %v) cannot be lesser than %v", metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize, metadata.DCPConnectionBufferSizeKey)
-			}
-			if connBuffFound {
-				validateRoutineErrorMap[metadata.DCPConnectionBufferSizeKey] = fmt.Errorf("%v cannot be greater than (%v * %v)", metadata.DCPConnectionBufferSizeKey, metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize)
-			}
-		}
 		if len(validateRoutineErrorMap) > 0 {
 			return validateRoutineErrorMap, nil, nil
 		} else if validateErr != nil {
 			return nil, validateErr, nil
-		}
-
-		// remove the extra settings added for validation
-		if dataChanFound || connBuffFound {
-			if !dataChanFound {
-				delete(settings, metadata.DCPFeedDataChanLengthKey)
-			}
-			if !connBuffFound {
-				delete(settings, metadata.DCPConnectionBufferSizeKey)
-			}
 		}
 	}
 
@@ -994,42 +963,10 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 		return nil, nil, err, nil
 	}
 
-	// populate the missing setting with default value - required for validation
-	_, dataChanFound := settings[metadata.DCPFeedDataChanLengthKey]
-	_, connBuffFound := settings[metadata.DCPConnectionBufferSizeKey]
-	if dataChanFound || connBuffFound {
-		if !dataChanFound {
-			settings[metadata.DCPFeedDataChanLengthKey] = replSettings.GetDCPFeedDataChanLength()
-		}
-		if !connBuffFound {
-			settings[metadata.DCPConnectionBufferSizeKey] = replSettings.GetDCPConnectionBufferSize()
-		}
-	}
-
 	// validate that everything is alright with the replication configuration before actually creating it
 	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings, manifests := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
-	if err == base.ErrDCPFlowControlSettings {
-		err = nil // reset err since ErrDCPFlowControlSettings conveys a user error, to be populated in the errorMap instead
-
-		if dataChanFound {
-			errorMap[metadata.DCPFeedDataChanLengthKey] = fmt.Errorf("(%v * %v) cannot be lesser than %v", metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize, metadata.DCPConnectionBufferSizeKey)
-		}
-		if connBuffFound {
-			errorMap[metadata.DCPConnectionBufferSizeKey] = fmt.Errorf("%v cannot be greater than (%v * %v)", metadata.DCPConnectionBufferSizeKey, metadata.DCPFeedDataChanLengthKey, base.MinimumMutationSize)
-		}
-	}
 	if err != nil || len(errorMap) > 0 {
 		return nil, errorMap, err, nil
-	}
-
-	// remove the extra settings added for validation
-	if dataChanFound || connBuffFound {
-		if !dataChanFound {
-			delete(settings, metadata.DCPFeedDataChanLengthKey)
-		}
-		if !connBuffFound {
-			delete(settings, metadata.DCPConnectionBufferSizeKey)
-		}
 	}
 
 	spec, err := metadata.NewReplicationSpecification(sourceBucket, sourceBucketUUID, targetClusterRef.Uuid(), targetBucket, targetBucketUUID)

@@ -61,15 +61,13 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	// settings map
 	settingsMap := make(map[string]interface{})
 	settingsMap[DCP_VBTimestampUpdater] = vbReturner
+	settingsMap[metadata.DCPFlowControlThrottleKey] = base.MaxDCPFlowControlThrottle
 
 	// statsInterval needs to be fed something
 	settingsMap[DCP_Nozzle_Stats_Interval] = 88888888
 
 	// Enable compression by default
 	settingsMap[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
-
-	settingsMap[metadata.DCPFeedDataChanLengthKey] = base.MaxDCPFeedDataChanLength
-	settingsMap[base.DCPConnectionBufferSizeKey] = int(base.MaxDCPConnectionBufferSize)
 
 	return xdcrTopologyMock, utilitiesMock, nozzle, settingsMap, clientIface, uprfeedIface, vbTimestamp
 }

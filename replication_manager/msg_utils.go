@@ -123,8 +123,7 @@ const (
 	CLogConnPoolReapIntervalKey       = base.CLogConnPoolReapInterval
 	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
 	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
-	DCPFeedDataChanLengthKey          = base.DCPFeedDataChanLengthKey
-	DCPConnectionBufferSizeKey        = base.DCPConnectionBufferSizeKey
+	DCPFlowControlThrottleKey         = base.DCPFlowControlThrottleKey
 	ComponentEventsChanLengthKey      = base.ComponentEventsChanLengthKey
 	DevReplOptsKey                    = base.DevReplOptsKey
 )
@@ -264,8 +263,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CLogConnPoolReapIntervalKey:       metadata.CLogConnPoolReapIntervalKey,
 	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
 	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
-	DCPFeedDataChanLengthKey:          metadata.DCPFeedDataChanLengthKey,
-	DCPConnectionBufferSizeKey:        metadata.DCPConnectionBufferSizeKey,
+	DCPFlowControlThrottleKey:         metadata.DCPFlowControlThrottleKey,
 	ComponentEventsChanLengthKey:      metadata.ComponentEventsChanLengthKey,
 	DevReplOptsKey:                    metadata.DevReplOptsKey,
 }
@@ -336,8 +334,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
-	metadata.DCPFeedDataChanLengthKey:             DCPFeedDataChanLengthKey,
-	metadata.DCPConnectionBufferSizeKey:           DCPConnectionBufferSizeKey,
+	metadata.DCPFlowControlThrottleKey:            DCPFlowControlThrottleKey,
 	metadata.ComponentEventsChanLengthKey:         ComponentEventsChanLengthKey,
 	metadata.DevReplOptsKey:                       DevReplOptsKey,
 }

@@ -750,27 +750,6 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 	}
 
-	// Validate DCP data channel length and connection buffer size settings
-	dataChanLenRaw, dataChanFound := settings[metadata.DCPFeedDataChanLengthKey]
-	connBuffSizeRaw, connBuffFound := settings[metadata.DCPConnectionBufferSizeKey]
-
-	if (dataChanFound && !connBuffFound) || (!dataChanFound && connBuffFound) {
-		return fmt.Errorf("internal error: unable to validate %v and %v", metadata.DCPFeedDataChanLengthKey, metadata.DCPConnectionBufferSizeKey)
-	}
-
-	if dataChanFound && connBuffFound {
-		dataChanLen, dataChanOk := dataChanLenRaw.(int)
-		connBuffSize, connBuffOk := connBuffSizeRaw.(int)
-
-		if !dataChanOk || !connBuffOk {
-			return fmt.Errorf("internal error: both %v and %v need to be of type int for validation", metadata.DCPFeedDataChanLengthKey, metadata.DCPConnectionBufferSizeKey)
-		}
-
-		if connBuffSize > dataChanLen*base.MinimumMutationSize {
-			return base.ErrDCPFlowControlSettings
-		}
-	}
-
 	return nil
 }
 func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {

@@ -1451,8 +1451,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	}
 
 	dcpNozzleSettings[metadata.EnableDcpPurgeRollback] = metadata.GetSettingFromSettingsMap(settings, metadata.EnableDcpPurgeRollback, false)
-	dcpNozzleSettings[metadata.DCPFeedDataChanLengthKey] = metadata.GetSettingFromSettingsMap(settings, metadata.DCPFeedDataChanLengthKey, base.MaxDCPFeedDataChanLength)
-	dcpNozzleSettings[metadata.DCPConnectionBufferSizeKey] = metadata.GetSettingFromSettingsMap(settings, metadata.DCPConnectionBufferSizeKey, int(base.MaxDCPConnectionBufferSize))
+	dcpNozzleSettings[metadata.DCPFlowControlThrottleKey] = metadata.GetSettingFromSettingsMap(settings, metadata.DCPFlowControlThrottleKey, base.MaxDCPFlowControlThrottle)
 
 	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpNozzleSettings, repSettings,
 		pipeline); err != nil {

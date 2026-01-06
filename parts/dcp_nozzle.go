@@ -796,10 +796,11 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		dcp.Logger().Infof("%v with OSO mode requested", dcp.Id())
 	}
 
-	dcp.connectionBufferSize = uint32(settings[metadata.DCPConnectionBufferSizeKey].(int))
-	if dcp.connectionBufferSize == 0 {
-		return fmt.Errorf("received invalid value (0) for replication setting %v", metadata.DCPConnectionBufferSizeKey)
+	effectiveConnectionBufferSize := (int(base.MaxDCPConnectionBufferSize) * settings[metadata.DCPFlowControlThrottleKey].(int)) / 100
+	if effectiveConnectionBufferSize == 0 {
+		return fmt.Errorf("received invalid value (%v) for replication setting %v", settings[metadata.DCPFlowControlThrottleKey], metadata.DCPFlowControlThrottleKey)
 	}
+	dcp.connectionBufferSize = uint32(effectiveConnectionBufferSize)
 
 	err = dcp.initializeUprFeed()
 	if err != nil {
@@ -863,7 +864,11 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 
 	uprFeed := dcp.getUprFeed()
 	if uprFeed != nil {
-		uprFeed.StartFeedWithConfig(settings[metadata.DCPFeedDataChanLengthKey].(int))
+		effectiveFeedDataChanLength := (base.MaxDCPFeedDataChanLength * settings[metadata.DCPFlowControlThrottleKey].(int)) / 100
+		if effectiveFeedDataChanLength == 0 {
+			return fmt.Errorf("received invalid value (%v) for replication setting %v", settings[metadata.DCPFlowControlThrottleKey], metadata.DCPFlowControlThrottleKey)
+		}
+		uprFeed.StartFeedWithConfig(effectiveFeedDataChanLength)
 	}
 
 	//start datachan length stats collection
