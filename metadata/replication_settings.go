@@ -148,7 +148,7 @@ const (
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
 	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey}
+	CollectionsDelVbBackfillKey, DismissEventKey, MobileCompatibleKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{FilterSystemScopeKey}
