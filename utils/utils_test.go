@@ -1410,3 +1410,43 @@ func TestGetServerVBucketsMapWithTerseInfo(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestGetServerVBucketsMapWithTerseInfo =================")
 }
+
+func TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked =================")
+	defer fmt.Println("============== Test case end: TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked =================")
+	assert := assert.New(t)
+
+	// Save original value and restore after test
+	originalNetTCP := base.NetTCP
+	defer func() { base.NetTCP = originalNetTCP }()
+
+	// Set IPv4 blocked (IPv6 only mode)
+	base.NetTCP = base.TCP6
+
+	// Read test data from JSON file
+	// Test data has:
+	// - 5 nodes, first 3 with KV service, last 2 without KV
+	// - Internal hostnames are IPv4 addresses (192.168.1.101-105)
+	// - External hostnames are IPv6 addresses
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "externalIPv6NodesServices.json")
+	testData, _, err := readJsonHelper(fileName)
+	assert.Nil(err)
+	assert.NotNil(testData)
+
+	nodesExt, ok := testData[base.NodeExtKey]
+	assert.True(ok)
+	nodesList, ok := nodesExt.([]interface{})
+	assert.True(ok)
+
+	defaultConnStr := "abc.com"
+	useSecurePort := false
+	useExternal := true
+
+	// Eventhough internal addresses are IPv4 and IPv4 is blocked,
+	// the function should not fail given we have valid external addresses.
+	portsMap, hostAddrs, _, err := testUtils.GetPortsAndHostAddrsFromNodeServices(
+		nodesList, defaultConnStr, useSecurePort, useExternal, logger)
+	assert.Nil(err)
+	assert.Greater(len(portsMap), 0)
+	assert.Equal(len(hostAddrs), len(portsMap))
+}
