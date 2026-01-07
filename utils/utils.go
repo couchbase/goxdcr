@@ -1300,7 +1300,15 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}
 		// instead of a host address with port
 		hostName, missingHostname, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("%v | err=%v", nodeServicesInfoParseError(nodesList, logger), err)
+			if useExternal && extHostnameExists {
+				// Ignore the error since it was for internal address parsing, but the user intent
+				// is external. Eventhough internal addresses will always be configured, they might belong
+				// to a IP family which is blocked in the current environment. In such cases we will
+				// hit this block. See MapToSupportedIpFamily for more information.
+				u.logger_utils.Warnf("ignoring the error parsing internal address as user intent is external, err=%v, desc=%v", err, nodeServicesInfoParseError(nodesList, logger))
+			} else {
+				return nil, nil, false, fmt.Errorf("%v | err=%v", nodeServicesInfoParseError(nodesList, logger), err)
+			}
 		}
 
 		if missingHostname {
