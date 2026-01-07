@@ -2198,8 +2198,9 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 			metric_map[service_def.DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[service_def.SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
-		} else if uprEvent.IsSystemEvent() {
-			// ignore system events
+		} else if uprEvent.IsSystemEvent() ||
+			uprEvent.Opcode == mc.UPR_EXPIRATION {
+			// ignore system events and expiration events.
 		} else {
 			dcp_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataReceived event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
