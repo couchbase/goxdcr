@@ -1,0 +1,140 @@
+{
+  "nodesExt": [
+    {
+      "alternateAddresses": {
+        "external": {
+          "hostname": "240b:c0e0:104:5400:b423:2:1:0",
+          "ports": {
+            "capi": 32322,
+            "capiSSL": 30774,
+            "kv": 30900,
+            "kvSSL": 31223,
+            "mgmt": 31427,
+            "mgmtSSL": 30284
+          }
+        }
+      },
+      "hostname": "192.168.1.101",
+      "serverGroup": "Group 1",
+      "services": {
+        "capi": 8092,
+        "capiSSL": 18092,
+        "kv": 11210,
+        "kvSSL": 11207,
+        "mgmt": 8091,
+        "mgmtSSL": 18091,
+        "projector": 9999
+      }
+    },
+    {
+      "alternateAddresses": {
+        "external": {
+          "hostname": "240b:c0e0:104:5400:b423:2:3:0",
+          "ports": {
+            "capi": 30816,
+            "capiSSL": 32532,
+            "kv": 30745,
+            "kvSSL": 31181,
+            "mgmt": 32731,
+            "mgmtSSL": 32020
+          }
+        }
+      },
+      "hostname": "192.168.1.102",
+      "serverGroup": "Group 1",
+      "services": {
+        "capi": 8092,
+        "capiSSL": 18092,
+        "kv": 11210,
+        "kvSSL": 11207,
+        "mgmt": 8091,
+        "mgmtSSL": 18091,
+        "projector": 9999
+      }
+    },
+    {
+      "alternateAddresses": {
+        "external": {
+          "hostname": "240b:c0e0:104:5400:b423:2:9:0",
+          "ports": {
+            "capi": 30533,
+            "capiSSL": 30144,
+            "kv": 32586,
+            "kvSSL": 31676,
+            "mgmt": 32018,
+            "mgmtSSL": 32193
+          }
+        }
+      },
+      "hostname": "192.168.1.103",
+      "serverGroup": "Group 1",
+      "services": {
+        "capi": 8092,
+        "capiSSL": 18092,
+        "kv": 11210,
+        "kvSSL": 11207,
+        "mgmt": 8091,
+        "mgmtSSL": 18091,
+        "projector": 9999
+      }
+    },
+    {
+      "alternateAddresses": {
+        "external": {
+          "hostname": "240b:c0e0:104:5400:b423:2:7:0",
+          "ports": {
+            "mgmt": 30441,
+            "mgmtSSL": 31060,
+            "n1ql": 30709,
+            "n1qlSSL": 31485
+          }
+        }
+      },
+      "hostname": "192.168.1.104",
+      "serverGroup": "Group 1",
+      "services": {
+        "indexAdmin": 9100,
+        "indexHttp": 9102,
+        "indexHttps": 19102,
+        "indexScan": 9101,
+        "indexStreamCatchup": 9104,
+        "indexStreamInit": 9103,
+        "indexStreamMaint": 9105,
+        "mgmt": 8091,
+        "mgmtSSL": 18091,
+        "n1ql": 8093,
+        "n1qlSSL": 18093
+      },
+      "thisNode": true
+    },
+    {
+      "alternateAddresses": {
+        "external": {
+          "hostname": "240b:c0e0:104:5400:b423:2:2:0",
+          "ports": {
+            "mgmt": 30326,
+            "mgmtSSL": 30679,
+            "n1ql": 30123,
+            "n1qlSSL": 31017
+          }
+        }
+      },
+      "hostname": "192.168.1.105",
+      "serverGroup": "Group 1",
+      "services": {
+        "indexAdmin": 9100,
+        "indexHttp": 9102,
+        "indexHttps": 19102,
+        "indexScan": 9101,
+        "indexStreamCatchup": 9104,
+        "indexStreamInit": 9103,
+        "indexStreamMaint": 9105,
+        "mgmt": 8091,
+        "mgmtSSL": 18091,
+        "n1ql": 8093,
+        "n1qlSSL": 18093
+      }
+    }
+  ]
+}
+
