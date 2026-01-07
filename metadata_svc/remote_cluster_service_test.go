@@ -1239,7 +1239,7 @@ func TestAddThenSetConcurrent(t *testing.T) {
 	// Add op can modify the ref above
 	setRef := ref.Clone()
 
-	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0*time.Second /*networkDelay*/) }
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 2*time.Second /*networkDelay*/) }
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
