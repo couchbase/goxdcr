@@ -353,14 +353,17 @@ function getDataReplicated {
 function getChangesLeft {
 	local srcCluster=$1
 	local srcBucket=$2
+	# TODO - targetCluster is not properly parsed
 	local targetCluster=$3
 	local targetBucket=$4
 
-	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "changes_left")
-	if (($? != 0)); then
-		echo "Failed to get stats"
-		return 1
-	fi
+	local mainPipelineChangesLeft
+	local backfillPipelineChangesLeft
+
+	mainPipelineChangesLeft=$(getPrometheusStat "$srcCluster" "$srcBucket" "$targetBucket" "xdcr_changes_left_total")
+	backfillPipelineChangesLeft=$(getPrometheusStat "$srcCluster" "$srcBucket" "$targetBucket" "xdcr_changes_left_total" "Backfill")
+
+  echo $(($mainPipelineChangesLeft + $backfillPipelineChangesLeft))
 }
 
 function getDocsProcessed {
@@ -384,7 +387,7 @@ function waitForChangesLeft0 {
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
 	if [[ ! -z "$seedArg" ]]; then
-		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
+		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 5))
 	fi
 
 	local prefix="$srcCluster.$srcBucket->$targetCluster.$targetBucket"

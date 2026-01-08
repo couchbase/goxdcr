@@ -137,6 +137,8 @@ function runTestCase {
 	sleep 30
 	printGlobalScopeAndCollectionInfo
 
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
 	# After sleeping, the backfill manager should have triggered the backfill
 	# 1412 items total for the above filters
 	checkItemCnt "C2" "B2" 1412
