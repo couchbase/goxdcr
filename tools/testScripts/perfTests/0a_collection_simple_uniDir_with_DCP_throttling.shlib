@@ -15,7 +15,7 @@ CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1")
+cluster1BucketsArr=("B1")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
@@ -25,13 +25,12 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S2.col2":"S3.col2"}')
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["dcpFlowControlThrottle"]=5)
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------
@@ -40,10 +39,9 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
-	runCbWorkloadGenCollection "C1" "B1" "S2" "col2"
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 }
-
-declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function runTestCase {
 	OLD_ITEM_COUNT=$CBWORKLOAD_COLLECTION_NUM_ITEMS
@@ -54,29 +52,28 @@ function runTestCase {
 	CHANGES_LEFT_0_WAIT_SECS=5
 	CHECK_CHANGES_LEFT_MAX=300
 
-	echo "============================================================================"
-	echo "Running basic explicit mapping test case - new explicit map replication"
-	echo "============================================================================"
-	testForClusterRun
-	if (($? != 0)); then
-		exit $?
-	fi
+	local startTime
+	local endTime
 
-	# First setup mis-matching mapping meaning all the data reside in C1
+	echo "============================================================================"
+	echo "Running simple collection unidirectional perf test case with DCP Flow Control Throttling"
+	echo "============================================================================"
 	setupTopologies
 	if (($? != 0)); then
-		exit $?
+		exit 1
 	fi
-
-	runDataLoad
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
+
+	# For perf test, load data first
+	runDataLoad
+
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 
-	runPeriodicPprof "C1" 5 10 "profile" "$(PWD)/testPprofOut/perf_1/" &
+	runPeriodicPprof "C1" 5 10 "profile" "$(PWD)/testPprofOut/perf_0a/" &
 
 	startTime=$(date +%s)
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
