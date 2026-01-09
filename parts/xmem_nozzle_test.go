@@ -1748,10 +1748,30 @@ func verifyStatsForDone(a *assert.Assertions, srcNode, tgtNode int) {
 	srcPromPort := srcNode - 9000 + 13000
 	tgtPromPort := tgtNode - 9000 + 13000
 	// changes left should be 0 on both source and target
-	srcPromStats := changesLeft(srcPromPort)
-	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), srcPromStats)
-	tgtPromStats := changesLeft(tgtPromPort)
-	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), tgtPromStats)
+	changesLeftRegex := regexp.MustCompile("changes_left.*} [1-9]")
+
+	maxRetries := 10
+	retryInterval := 10 * time.Second
+
+	var srcPromStats, tgtPromStats string
+	for i := 0; i < maxRetries; i++ {
+		srcPromStats = changesLeft(srcPromPort)
+		tgtPromStats = changesLeft(tgtPromPort)
+
+		srcMatch := changesLeftRegex.MatchString(srcPromStats)
+		tgtMatch := changesLeftRegex.MatchString(tgtPromStats)
+
+		if !srcMatch && !tgtMatch {
+			// no match means changes_left is 0
+			return
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	// Final assertion after all retries exhausted
+	a.NotRegexp(changesLeftRegex, srcPromStats)
+	a.NotRegexp(changesLeftRegex, tgtPromStats)
 }
 
 func verifyCasPoisonProtectionStats(t *testing.T, a *assert.Assertions, srcNode int, protectionMode string, count int) {
