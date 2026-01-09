@@ -350,6 +350,16 @@ function getDataReplicated {
 	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "data_replicated")
 }
 
+function getBackfillChangesLeft {
+	local srcCluster=$1
+	local srcBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local backfillPipelineChangesLeft
+
+	echo $(getPrometheusStatsWithRemCluster "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "xdcr_changes_left_total" "Backfill")
+}
+
 function getChangesLeft {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -372,11 +382,14 @@ function getDocsProcessed {
 	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "docs_processed")
 }
 
+# optArg can be:
+#   "backfill" - to check backfill changes left instead of normal changes left
 function waitForChangesLeft0 {
 	local srcCluster=$1
 	local srcBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+	local optArg=${5:-}
 	local changesLeft
 	local lastChangesLeft=-1
 	local i
@@ -384,13 +397,17 @@ function waitForChangesLeft0 {
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
 	if [[ ! -z "$seedArg" ]]; then
-		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
+		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 5))
 	fi
 
 	local prefix="$srcCluster.$srcBucket->$targetCluster.$targetBucket"
 
 	for ((i = 0; $i < $changesLeftMaxCheck; i = $(($i + 1)))); do
-		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if [[ "$optArg" == "backfill" ]]; then
+			changesLeft=$(getBackfillChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		else
+			changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		fi
 		if (($? != 0)); then
 			echo "$prefix: Failed to get changes_left"
 			dumpDebugInfoBeforeExit
@@ -2479,6 +2496,34 @@ function getPrometheusStat {
 	prometheusOut=$(getPrometheusStats "$node")
 	local count
 	count=$(echo "$prometheusOut" | grep pipelineType | grep "$pipelineType" | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	# Strip out non-numerics since vssh prints out newlines
+	count=$(echo "$count" | sed 's/[^0-9]//g')
+
+	echo $count
+}
+
+function getPrometheusStatsWithRemCluster {
+	local node=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local prometheusStatsName=$5
+	local pipelineType=${6:-Main}
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+
+	restId=$(getRestIDFromExportedData "$node" "$sourceBucket" "$targetCluster" "$targetBucket")
+	if (($? != 0)); then
+		return $?
+	fi
+
+	local remClusterUUID="${restId%%\%2F*}"
+
+	prometheusOut=$(getPrometheusStats "$node")
+	local count
+	count=$(echo "$prometheusOut" | grep "$remClusterUUID" | grep pipelineType | grep "$pipelineType" | grep $prometheusStatsName |
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
 	# Strip out non-numerics since vssh prints out newlines
