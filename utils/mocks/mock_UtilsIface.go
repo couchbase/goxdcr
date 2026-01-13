@@ -3819,38 +3819,38 @@ func (_c *UtilsIface_GetMapFromExpvarMap_Call) RunAndReturn(run func(*expvar.Map
 	return _c
 }
 
-// GetMaxCasStatsForVBs provides a mock function with given fields: vbnos, conn, statsMap, recycledVbSeqnoMap
-func (_m *UtilsIface) GetMaxCasStatsForVBs(vbnos []uint16, conn memcached.ClientIface, statsMap *map[string]string, recycledVbSeqnoMap *map[uint16]uint64) (map[uint16]uint64, []uint16, error) {
-	ret := _m.Called(vbnos, conn, statsMap, recycledVbSeqnoMap)
+// GetMaxCasStatsForVBs provides a mock function with given fields: vbnos, conn
+func (_m *UtilsIface) GetMaxCasStatsForVBs(vbnos []uint16, conn memcached.ClientIface) (base.VBucketStatsMap, []uint16, error) {
+	ret := _m.Called(vbnos, conn)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetMaxCasStatsForVBs")
 	}
 
-	var r0 map[uint16]uint64
+	var r0 base.VBucketStatsMap
 	var r1 []uint16
 	var r2 error
-	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) (map[uint16]uint64, []uint16, error)); ok {
-		return rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface) (base.VBucketStatsMap, []uint16, error)); ok {
+		return rf(vbnos, conn)
 	}
-	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) map[uint16]uint64); ok {
-		r0 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface) base.VBucketStatsMap); ok {
+		r0 = rf(vbnos, conn)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[uint16]uint64)
+			r0 = ret.Get(0).(base.VBucketStatsMap)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) []uint16); ok {
-		r1 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface) []uint16); ok {
+		r1 = rf(vbnos, conn)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) error); ok {
-		r2 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface) error); ok {
+		r2 = rf(vbnos, conn)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -3866,25 +3866,23 @@ type UtilsIface_GetMaxCasStatsForVBs_Call struct {
 // GetMaxCasStatsForVBs is a helper method to define mock.On call
 //   - vbnos []uint16
 //   - conn memcached.ClientIface
-//   - statsMap *map[string]string
-//   - recycledVbSeqnoMap *map[uint16]uint64
-func (_e *UtilsIface_Expecter) GetMaxCasStatsForVBs(vbnos interface{}, conn interface{}, statsMap interface{}, recycledVbSeqnoMap interface{}) *UtilsIface_GetMaxCasStatsForVBs_Call {
-	return &UtilsIface_GetMaxCasStatsForVBs_Call{Call: _e.mock.On("GetMaxCasStatsForVBs", vbnos, conn, statsMap, recycledVbSeqnoMap)}
+func (_e *UtilsIface_Expecter) GetMaxCasStatsForVBs(vbnos interface{}, conn interface{}) *UtilsIface_GetMaxCasStatsForVBs_Call {
+	return &UtilsIface_GetMaxCasStatsForVBs_Call{Call: _e.mock.On("GetMaxCasStatsForVBs", vbnos, conn)}
 }
 
-func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Run(run func(vbnos []uint16, conn memcached.ClientIface, statsMap *map[string]string, recycledVbSeqnoMap *map[uint16]uint64)) *UtilsIface_GetMaxCasStatsForVBs_Call {
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Run(run func(vbnos []uint16, conn memcached.ClientIface)) *UtilsIface_GetMaxCasStatsForVBs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16), args[1].(memcached.ClientIface), args[2].(*map[string]string), args[3].(*map[uint16]uint64))
+		run(args[0].([]uint16), args[1].(memcached.ClientIface))
 	})
 	return _c
 }
 
-func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Return(_a0 map[uint16]uint64, _a1 []uint16, _a2 error) *UtilsIface_GetMaxCasStatsForVBs_Call {
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Return(_a0 base.VBucketStatsMap, _a1 []uint16, _a2 error) *UtilsIface_GetMaxCasStatsForVBs_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) RunAndReturn(run func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) (map[uint16]uint64, []uint16, error)) *UtilsIface_GetMaxCasStatsForVBs_Call {
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) RunAndReturn(run func([]uint16, memcached.ClientIface) (base.VBucketStatsMap, []uint16, error)) *UtilsIface_GetMaxCasStatsForVBs_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6586,68 +6584,6 @@ func (_c *UtilsIface_ParseClientCertOutput_Call) RunAndReturn(run func(map[strin
 	return _c
 }
 
-// ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, output
-func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string) {
-	ret := _m.Called(vbnos, stats_map, output)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ParseHighSeqnoAndVBUuidFromStats")
-	}
-
-	var r0 []uint16
-	var r1 map[uint16]string
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)); ok {
-		return rf(vbnos, stats_map, output)
-	}
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
-		r0 = rf(vbnos, stats_map, output)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]uint16)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) map[uint16]string); ok {
-		r1 = rf(vbnos, stats_map, output)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(map[uint16]string)
-		}
-	}
-
-	return r0, r1
-}
-
-// UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseHighSeqnoAndVBUuidFromStats'
-type UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call struct {
-	*mock.Call
-}
-
-// ParseHighSeqnoAndVBUuidFromStats is a helper method to define mock.On call
-//   - vbnos []uint16
-//   - stats_map map[string]string
-//   - output base.VBucketStatsMap
-func (_e *UtilsIface_Expecter) ParseHighSeqnoAndVBUuidFromStats(vbnos interface{}, stats_map interface{}, output interface{}) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	return &UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call{Call: _e.mock.On("ParseHighSeqnoAndVBUuidFromStats", vbnos, stats_map, output)}
-}
-
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Run(run func(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
-	})
-	return _c
-}
-
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) Return(_a0 []uint16, _a1 map[uint16]string) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, map[uint16]string)) *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ParseHighSeqnoStat provides a mock function with given fields: vbnos, stats_map, highseqno_map
 func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	ret := _m.Called(vbnos, stats_map, highseqno_map)
@@ -6708,29 +6644,29 @@ func (_c *UtilsIface_ParseHighSeqnoStat_Call) RunAndReturn(run func([]uint16, ma
 	return _c
 }
 
-// ParseMaxCasStat provides a mock function with given fields: vbnos, statsMap, output
-func (_m *UtilsIface) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error) {
-	ret := _m.Called(vbnos, statsMap, output)
+// ParseVBStats provides a mock function with given fields: vbnos, statsMap, output, statField
+func (_m *UtilsIface) ParseVBStats(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap, statField base.VBStatField) ([]uint16, error) {
+	ret := _m.Called(vbnos, statsMap, output, statField)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ParseMaxCasStat")
+		panic("no return value specified for ParseVBStats")
 	}
 
 	var r0 []uint16
 	var r1 error
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)); ok {
-		return rf(vbnos, statsMap, output)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap, base.VBStatField) ([]uint16, error)); ok {
+		return rf(vbnos, statsMap, output, statField)
 	}
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap) []uint16); ok {
-		r0 = rf(vbnos, statsMap, output)
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, base.VBucketStatsMap, base.VBStatField) []uint16); ok {
+		r0 = rf(vbnos, statsMap, output, statField)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]uint16)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap) error); ok {
-		r1 = rf(vbnos, statsMap, output)
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, base.VBucketStatsMap, base.VBStatField) error); ok {
+		r1 = rf(vbnos, statsMap, output, statField)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -6738,32 +6674,33 @@ func (_m *UtilsIface) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string
 	return r0, r1
 }
 
-// UtilsIface_ParseMaxCasStat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseMaxCasStat'
-type UtilsIface_ParseMaxCasStat_Call struct {
+// UtilsIface_ParseVBStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseVBStats'
+type UtilsIface_ParseVBStats_Call struct {
 	*mock.Call
 }
 
-// ParseMaxCasStat is a helper method to define mock.On call
+// ParseVBStats is a helper method to define mock.On call
 //   - vbnos []uint16
 //   - statsMap map[string]string
 //   - output base.VBucketStatsMap
-func (_e *UtilsIface_Expecter) ParseMaxCasStat(vbnos interface{}, statsMap interface{}, output interface{}) *UtilsIface_ParseMaxCasStat_Call {
-	return &UtilsIface_ParseMaxCasStat_Call{Call: _e.mock.On("ParseMaxCasStat", vbnos, statsMap, output)}
+//   - statField base.VBStatField
+func (_e *UtilsIface_Expecter) ParseVBStats(vbnos interface{}, statsMap interface{}, output interface{}, statField interface{}) *UtilsIface_ParseVBStats_Call {
+	return &UtilsIface_ParseVBStats_Call{Call: _e.mock.On("ParseVBStats", vbnos, statsMap, output, statField)}
 }
 
-func (_c *UtilsIface_ParseMaxCasStat_Call) Run(run func(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap)) *UtilsIface_ParseMaxCasStat_Call {
+func (_c *UtilsIface_ParseVBStats_Call) Run(run func(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap, statField base.VBStatField)) *UtilsIface_ParseVBStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap))
+		run(args[0].([]uint16), args[1].(map[string]string), args[2].(base.VBucketStatsMap), args[3].(base.VBStatField))
 	})
 	return _c
 }
 
-func (_c *UtilsIface_ParseMaxCasStat_Call) Return(_a0 []uint16, _a1 error) *UtilsIface_ParseMaxCasStat_Call {
+func (_c *UtilsIface_ParseVBStats_Call) Return(_a0 []uint16, _a1 error) *UtilsIface_ParseVBStats_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *UtilsIface_ParseMaxCasStat_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap) ([]uint16, error)) *UtilsIface_ParseMaxCasStat_Call {
+func (_c *UtilsIface_ParseVBStats_Call) RunAndReturn(run func([]uint16, map[string]string, base.VBucketStatsMap, base.VBStatField) ([]uint16, error)) *UtilsIface_ParseVBStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

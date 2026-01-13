@@ -86,15 +86,6 @@ type RemoteAgentManifestOps interface {
 	GetManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error)
 }
 
-// RemoteClusterAgentBucketOps defines the methods to fetch bucket related info from remote cluster.
-// This interface is only implemented by RemoteClusterAgent.
-type RemoteClusterAgentBucketOps interface {
-	// GetMaxCasGetter returns a getter func to fetch maxCas for a given bucket.
-	GetMaxCasGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error)
-	// GetBucketInfoGetter returns a getter func to fetch bucket info for a given bucket from the remote cluster.
-	GetBucketInfoGetter(bucketName string) (service_def.BucketInfoGetter, error)
-}
-
 // AgentConfig defines the setter methods for configuring the remote agent.
 type RemoteAgentConfig interface {
 	// SetCapability sets the cluster compatibility of the remote cluster.

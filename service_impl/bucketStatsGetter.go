@@ -148,7 +148,7 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 	return nil
 }
 
-// InitDone indicates whether the provider has been fully initialized
+// InitDone indicates whether the provider has been fully initialized successfully
 func (provider *ClusterBucketStatsProvider) InitDone() bool {
 	return provider.initialized.Load()
 }
@@ -195,6 +195,29 @@ func (provider *ClusterBucketStatsProvider) canStartOp() error {
 		return errors.New("ClusterBucketStatsProvider is closed")
 	}
 	return nil
+}
+
+// getServerListAndVbList is a helper function to get the list of servers and vbuckets from the target kv vb map
+func (provider *ClusterBucketStatsProvider) getServerListAndVbList(ctx context.Context) (map[string]struct{}, []uint16, error) {
+	serverSet := make(map[string]struct{})
+	vblist := make([]uint16, 0)
+
+	// if the context is cancelled, return the error
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
+	kvVbMap, err := provider.remoteMemcachedComponent.TargetKvVbMap()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for server, vbs := range kvVbMap {
+		serverSet[server] = struct{}{}
+		vblist = append(vblist, vbs...)
+	}
+
+	return serverSet, vblist, nil
 }
 
 // getServerListFromVbList is a helper function to get the server list from a vbucket list
@@ -301,9 +324,18 @@ func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.Fai
 		}
 	}()
 
-	serverSet, err := provider.getServerListFromVbList(reqCtx, requestOpts.VBuckets)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GetFailoverLog: failed to get server list from vbucket list: %w", err)
+	var serverSet map[string]struct{}
+	var err error
+	if requestOpts.AllVBuckets {
+		serverSet, requestOpts.VBuckets, err = provider.getServerListAndVbList(reqCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetFailoverLog: failed to get server list and vbucket list: %w", err)
+		}
+	} else {
+		serverSet, err = provider.getServerListFromVbList(reqCtx, requestOpts.VBuckets)
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetFailoverLog: failed to get server list from vbucket list: %w", err)
+		}
 	}
 
 	var (
@@ -357,6 +389,7 @@ func (provider *ClusterBucketStatsProvider) GetFailoverLog(requestOpts *base.Fai
 	}
 
 	if len(failoverlogResult.FailoverLogMap) != len(requestOpts.VBuckets) {
+		missingVbList = make([]uint16, 0, len(requestOpts.VBuckets)-len(failoverlogResult.FailoverLogMap))
 		for _, vb := range requestOpts.VBuckets {
 			if _, ok := failoverlogResult.FailoverLogMap[vb]; !ok {
 				missingVbList = append(missingVbList, vb)
@@ -447,9 +480,18 @@ func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VB
 		}
 	}()
 
-	serverSet, err := provider.getServerListFromVbList(reqCtx, requestOpts.VBuckets)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get server list from vbucket list: %w", err)
+	var serverSet map[string]struct{}
+	var err error
+	if requestOpts.AllVBuckets {
+		serverSet, requestOpts.VBuckets, err = provider.getServerListAndVbList(reqCtx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetVBucketStats: failed to get server list and vbucket list: %w", err)
+		}
+	} else {
+		serverSet, err = provider.getServerListFromVbList(reqCtx, requestOpts.VBuckets)
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetVBucketStats: failed to get server list from vbucket list: %w", err)
+		}
 	}
 
 	var (
@@ -495,6 +537,7 @@ func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VB
 	}
 
 	if len(bucketVBStats.VBStatsMap) != len(requestOpts.VBuckets) {
+		missingVbList = make([]uint16, 0, len(requestOpts.VBuckets)-len(bucketVBStats.VBStatsMap))
 		for _, vb := range requestOpts.VBuckets {
 			if _, ok := bucketVBStats.VBStatsMap[vb]; !ok {
 				missingVbList = append(missingVbList, vb)
@@ -680,7 +723,7 @@ func (provider *CngBucketStatsProvider) Close() error {
 	return nil
 }
 
-// InitDone indicates whether the provider has been fully initialized
+// InitDone indicates whether the provider has been fully initialized successfully
 func (provider *CngBucketStatsProvider) InitDone() bool {
 	return provider.initialized.Load()
 }

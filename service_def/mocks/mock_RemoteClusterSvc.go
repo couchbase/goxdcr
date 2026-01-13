@@ -187,65 +187,6 @@ func (_c *RemoteClusterSvc_DelRemoteCluster_Call) RunAndReturn(run func(string) 
 	return _c
 }
 
-// GetBucketInfoGetter provides a mock function with given fields: ref, bucketName
-func (_m *RemoteClusterSvc) GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.BucketInfoGetter, error) {
-	ret := _m.Called(ref, bucketName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetBucketInfoGetter")
-	}
-
-	var r0 service_def.BucketInfoGetter
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) (service_def.BucketInfoGetter, error)); ok {
-		return rf(ref, bucketName)
-	}
-	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) service_def.BucketInfoGetter); ok {
-		r0 = rf(ref, bucketName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.BucketInfoGetter)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference, string) error); ok {
-		r1 = rf(ref, bucketName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RemoteClusterSvc_GetBucketInfoGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBucketInfoGetter'
-type RemoteClusterSvc_GetBucketInfoGetter_Call struct {
-	*mock.Call
-}
-
-// GetBucketInfoGetter is a helper method to define mock.On call
-//   - ref *metadata.RemoteClusterReference
-//   - bucketName string
-func (_e *RemoteClusterSvc_Expecter) GetBucketInfoGetter(ref interface{}, bucketName interface{}) *RemoteClusterSvc_GetBucketInfoGetter_Call {
-	return &RemoteClusterSvc_GetBucketInfoGetter_Call{Call: _e.mock.On("GetBucketInfoGetter", ref, bucketName)}
-}
-
-func (_c *RemoteClusterSvc_GetBucketInfoGetter_Call) Run(run func(ref *metadata.RemoteClusterReference, bucketName string)) *RemoteClusterSvc_GetBucketInfoGetter_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*metadata.RemoteClusterReference), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *RemoteClusterSvc_GetBucketInfoGetter_Call) Return(_a0 service_def.BucketInfoGetter, _a1 error) *RemoteClusterSvc_GetBucketInfoGetter_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RemoteClusterSvc_GetBucketInfoGetter_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, string) (service_def.BucketInfoGetter, error)) *RemoteClusterSvc_GetBucketInfoGetter_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetCapability provides a mock function with given fields: ref
 func (_m *RemoteClusterSvc) GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error) {
 	ret := _m.Called(ref)
@@ -526,65 +467,6 @@ func (_c *RemoteClusterSvc_GetManifestByUuid_Call) Return(manifest *metadata.Col
 }
 
 func (_c *RemoteClusterSvc_GetManifestByUuid_Call) RunAndReturn(run func(*base.GetManifestOpts) (*metadata.CollectionsManifest, error)) *RemoteClusterSvc_GetManifestByUuid_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetMaxVBStatsGetter provides a mock function with given fields: ref, bucketName
-func (_m *RemoteClusterSvc) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
-	ret := _m.Called(ref, bucketName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetMaxVBStatsGetter")
-	}
-
-	var r0 service_def.MaxVBCasStatsGetter
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) (service_def.MaxVBCasStatsGetter, error)); ok {
-		return rf(ref, bucketName)
-	}
-	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) service_def.MaxVBCasStatsGetter); ok {
-		r0 = rf(ref, bucketName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.MaxVBCasStatsGetter)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference, string) error); ok {
-		r1 = rf(ref, bucketName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RemoteClusterSvc_GetMaxVBStatsGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaxVBStatsGetter'
-type RemoteClusterSvc_GetMaxVBStatsGetter_Call struct {
-	*mock.Call
-}
-
-// GetMaxVBStatsGetter is a helper method to define mock.On call
-//   - ref *metadata.RemoteClusterReference
-//   - bucketName string
-func (_e *RemoteClusterSvc_Expecter) GetMaxVBStatsGetter(ref interface{}, bucketName interface{}) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
-	return &RemoteClusterSvc_GetMaxVBStatsGetter_Call{Call: _e.mock.On("GetMaxVBStatsGetter", ref, bucketName)}
-}
-
-func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) Run(run func(ref *metadata.RemoteClusterReference, bucketName string)) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*metadata.RemoteClusterReference), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) Return(_a0 service_def.MaxVBCasStatsGetter, _a1 error) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, string) (service_def.MaxVBCasStatsGetter, error)) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
 	_c.Call.Return(run)
 	return _c
 }

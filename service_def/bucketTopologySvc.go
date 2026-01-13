@@ -89,7 +89,7 @@ type SourceNotification interface {
 	GetEnableCrossClusterVersioning() bool
 	GetVersionPruningWindowHrs() int
 	GetHlvVbMaxCas() []interface{}
-	GetVBMaxCasStats() base.HighSeqnosMapType
+	GetVBMaxCasStats() map[uint16]uint64
 }
 
 type TargetNotification interface {
@@ -99,7 +99,8 @@ type TargetNotification interface {
 	GetTargetBucketInfo() base.BucketInfoMapType
 	GetTargetStorageBackend() string
 	GetVersionPruningWindowHrs() int
-	GetVBMaxCasStats() base.HighSeqnosMapType
+	GetVBMaxCasStats() map[uint16]uint64
 	GetTargetHlvVbMaxCas() []interface{}
 	GetTargetEnableCrossClusterVersioning() bool
+	GetTargetVbUuidStat() map[uint16]uint64
 }

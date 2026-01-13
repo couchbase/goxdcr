@@ -9,6 +9,7 @@
 package service_impl
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher"
 	"github.com/couchbase/goxdcr/v8/utils"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
 type BucketTopologyObjsPool struct {
@@ -100,7 +102,7 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 
 	var waitGrp sync.WaitGroup
 	for _, spec := range specs {
-		waitGrp.Add(3)
+		waitGrp.Add(2)
 		specCpy := spec.Clone()
 		go func() {
 			defer waitGrp.Done()
@@ -129,32 +131,7 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 		}()
 		go func() {
 			defer waitGrp.Done()
-
-			var watcher *BucketTopologySvcWatcher
-			retryOp := func() error {
-				if watcher == nil {
-					var createErr error
-					watcher, createErr = b.getOrCreateRemoteWatcher(specCpy)
-					if createErr != nil {
-						b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", createErr)
-						return createErr
-					}
-				}
-				startErr := watcher.Start()
-				if startErr != nil && startErr != ErrorWatcherAlreadyStarted {
-					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
-					return startErr
-				}
-				return nil
-			}
-			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
-			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
-			}
-		}()
-		go func() {
-			defer waitGrp.Done()
+			// Initialize the stats provider for the target cluster
 			var statsProvider service_def.BucketStatsProvider
 			retryStatsOp := func() error {
 				if statsProvider == nil {
@@ -177,8 +154,31 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				}
 				return nil
 			}
+
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish initializing stats provider within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
+			}
+
+			// Start the remote watcher for the target cluster
+			retryOp := func() error {
+				watcher, startErr := b.getOrCreateRemoteWatcher(specCpy)
+				if startErr != nil {
+					b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", startErr)
+					return startErr
+				}
+
+				// Start the watcher
+				startErr = watcher.Start()
+				if startErr != nil && startErr != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
+					return startErr
+				}
+				return nil
+			}
+			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
 			if retryErr != nil {
 				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
 			}
@@ -233,8 +233,8 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		if base.IsCasPoisoningPreCheckEnabled() {
 			maxVBCasStatsInterval := time.Duration(metadata.DefaultMaxCasIntervalSec) * time.Second
 			maxVBCasFunc := b.getMaxCasUpdater(spec, watcher)
-			intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
-			intervalFuncMap[MAXCAS][maxVBCasStatsInterval] = maxVBCasFunc
+			intervalFuncMap[VBSTATS] = make(IntervalInnerFuncMap)
+			intervalFuncMap[VBSTATS][maxVBCasStatsInterval] = maxVBCasFunc
 		}
 
 		watcher.intervalFuncMap = intervalFuncMap
@@ -420,6 +420,32 @@ func getTargetWatcherKey(spec *metadata.ReplicationSpecification) string {
 	return fmt.Sprintf("%v_%v", spec.TargetClusterUUID, spec.TargetBucketName)
 }
 
+// getRemoteVBStatsOpts determines which VB stats need to be monitored for a target bucket.
+// Returns nil if no VB stats monitoring is required.
+//
+// VB stats monitoring is required when:
+//   - CAS poisoning pre-check is enabled (needs maxCas)
+//   - Target is CNG (needs vbuuid for vbucket tracking)
+func (b *BucketTopologyService) getRemoteVBStatsOpts(isCNG bool) *VBStatsOpts {
+	var opts VBStatsOpts
+
+	// CAS poisoning pre-check requires maxCas
+	if base.IsCasPoisoningPreCheckEnabled() {
+		opts.IncludeMaxCas = true
+	}
+
+	if isCNG {
+		opts.IncludeVbUuid = true
+	}
+
+	// Return nil if no stats are needed
+	if !opts.IncludeMaxCas && !opts.IncludeVbUuid {
+		return nil
+	}
+
+	return &opts
+}
+
 func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.ReplicationSpecification) (*BucketTopologySvcWatcher, error) {
 	if spec == nil {
 		return nil, base.ErrorNilPtr
@@ -433,43 +459,37 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		return nil, fmt.Errorf("Empty target cluster UUID for spec %v", spec.Id)
 	}
 
-	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to find remote cluster reference for spec %v", spec.Id)
-	}
-
-	bucketInfoGetter, err := b.remClusterSvc.GetBucketInfoGetter(ref, spec.TargetBucketName)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to get remote bucketInfo getter for spec %v", spec.Id)
-	}
-
-	terseBucketInfoGetter, err := b.remClusterSvc.GetTerseBucketInfoGetter(ref, spec.TargetBucketName)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get terse remote bucketInfo getter for spec %v", spec.Id)
-	}
-
-	maxCasGetter, err := b.remClusterSvc.GetMaxVBStatsGetter(ref, spec.TargetBucketName)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to get remote maxCasGetter for spec %v", spec.Id)
-	}
-
 	b.tgtBucketWatchersMtx.Lock()
 	defer b.tgtBucketWatchersMtx.Unlock()
 	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if !exists {
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
+
+		// Initialize the stats provider for the watcher
+		statsProvider, err := b.GetRemoteBucketStatsProvider(spec)
+		if err != nil {
+			return nil, err
+		}
+
+		watcher.SetStatsProvider(statsProvider)
+
 		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 
-		topologyUpdateFunc := b.getRemoteTopologyUpdateFunc(spec, bucketInfoGetter, terseBucketInfoGetter, watcher)
+		topologyUpdateFunc := b.getRemoteTopologyUpdateFunc(spec, watcher)
 
 		intervalFuncMap := make(IntervalFuncMap)
 		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[TOPOLOGY][b.refreshInterval] = topologyUpdateFunc
 
-		if base.IsCasPoisoningPreCheckEnabled() {
-			maxCasGetterFunc := b.getRemoteMaxCasUpdater(spec, maxCasGetter, watcher)
-			intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
-			intervalFuncMap[MAXCAS][b.refreshInterval] = maxCasGetterFunc
+		remoteRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if vbStatsOpts := b.getRemoteVBStatsOpts(remoteRef.IsCNG()); vbStatsOpts != nil {
+			vbStatsUpdaterFunc := b.getRemoteVBStatsUpdater(spec, watcher, vbStatsOpts)
+			intervalFuncMap[VBSTATS] = make(IntervalInnerFuncMap)
+			intervalFuncMap[VBSTATS][b.refreshInterval] = vbStatsUpdaterFunc
 		}
 
 		watcher.intervalFuncMap = intervalFuncMap
@@ -506,6 +526,9 @@ func (b *BucketTopologyService) getGrpcOpts(spec *metadata.ReplicationSpecificat
 	return grpcOpts, nil
 }
 
+// getOrCreateTargetStatsProvider creates a new stats provider for the target cluster if one doesn't
+// exist, or returns the existing one. This function ALWAYS increments the reference count for
+// lifecycle management purposes.
 func (b *BucketTopologyService) getOrCreateTargetStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsProvider, error) {
 	b.tgtBucketStatsProvidersMtx.Lock()
 	defer b.tgtBucketStatsProvidersMtx.Unlock()
@@ -544,29 +567,58 @@ func (b *BucketTopologyService) getOrCreateTargetStatsProvider(spec *metadata.Re
 	return provider, nil
 }
 
-func (b *BucketTopologyService) getRemoteMaxCasUpdater(spec *metadata.ReplicationSpecification, maxCasGetter service_def.MaxVBCasStatsGetter, watcher *BucketTopologySvcWatcher) func() error {
-	maxCasGetterFunc := func() error {
-		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) { //By default it is set false
-			return fmt.Errorf("in getRemoteMaxCasUpdater: dev error injection")
+// getRemoteVBStatsUpdater returns a function that fetches VB stats from the remote cluster
+// and populates the notification cache based on the provided options.
+//
+// The opts parameter specifies which stats to include in the notification:
+//   - IncludeMaxCas: populates MaxVbCasStatsMap (for CAS poisoning pre-check)
+//   - IncludeVbUuid: populates VbUuidMap (for CNG vbucket tracking)
+func (b *BucketTopologyService) getRemoteVBStatsUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher, opts *VBStatsOpts) func() error {
+	return func() error {
+		// Dev error injection (disabled by default)
+		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) {
+			return fmt.Errorf("getRemoteVBStatsUpdater: dev error injection")
 		}
-		maxCasMap, err := maxCasGetter()
+
+		reqFinCh := make(chan bool)
+		defer close(reqFinCh)
+
+		requestOpts := &base.VBucketStatsRequest{
+			AllVBuckets: true,
+			MaxCasOnly:  opts.IncludeMaxCas,
+			FinCh:       reqFinCh,
+		}
+
+		// Darshan TODO: MB-70804 - Track data transfer
+		vbStatsMap, errMap, err := watcher.statsProvider.GetVBucketStats(requestOpts, nil)
 		if err != nil {
 			return err
 		}
+		if len(errMap) > 0 {
+			return fmt.Errorf("getRemoteVBStatsUpdater: failed to get stats for some vbuckets: %w", errors.New(base.FlattenErrorMap(errMap)))
+		}
+
 		watcher.latestCacheMtx.Lock()
 		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-		replacementNotification.MaxVbCasStatsMap = &maxCasMap
+
+		// Populate only the requested stats
+		if opts.IncludeMaxCas {
+			replacementNotification.MaxVbCasStatsMap = vbStatsMap.ToMaxCasMap()
+		}
+		if opts.IncludeVbUuid {
+			replacementNotification.VbUuidMap = vbStatsMap.ToVbucketUuidMap()
+		}
+
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
 		watcher.latestCacheMtx.Unlock()
 		return nil
 	}
-	return maxCasGetterFunc
 }
 
-func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, bucketInfoGetter, terseBucketInfoGetter service_def.BucketInfoGetter, watcher *BucketTopologySvcWatcher) func() error {
+func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	topologyUpdateFunc := func() error {
-		targetBucketInfo, shouldUseExternal, connStr, err := bucketInfoGetter()
+		targetBucketInfo, shouldUseExternal, connStr, err := b.getTgtBucketInfoGetter(spec)
 		if err != nil {
 			return err
 		}
@@ -597,7 +649,7 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 
 			bucketInfoForKvVBMap := targetBucketInfo
 			if shouldUseTerseInfo {
-				terseTargetBucketInfo, shouldUseExternal, connStr, err := terseBucketInfoGetter()
+				terseTargetBucketInfo, err := b.getTgtTerseBucketInfoGetter(spec)
 				if err != nil {
 					return err
 				}
@@ -726,18 +778,18 @@ func (b *BucketTopologyService) SubscribeToRemoteKVStatsFeed(spec *metadata.Repl
 	if err != nil {
 		return nil, nil, err
 	}
-	retCh := watcher.registerAndGetCh(spec, subscriberId, MAXCAS, nil).(chan service_def.TargetNotification)
-	errCh, err := watcher.registerAndGetErrCh(spec, subscriberId, MAXCAS)
+	retCh := watcher.registerAndGetCh(spec, subscriberId, VBSTATS, nil).(chan service_def.TargetNotification)
+	errCh, err := watcher.registerAndGetErrCh(spec, subscriberId, VBSTATS)
 	if err != nil {
 		// Should unRegister notification channel to prevent memory leak
-		watcher.unregisterCh(spec, subscriberId, MAXCAS)
+		watcher.unregisterCh(spec, subscriberId, VBSTATS)
 		return nil, nil, err
 	}
 	return retCh, errCh, err
 }
 
 func (b *BucketTopologyService) UnSubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, MAXCAS, false /*isSource*/, true /*errChannelPresent */)
+	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, VBSTATS, false /*isSource*/, true /*errChannelPresent */)
 }
 
 func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpecification) error {
@@ -826,7 +878,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 	if oldSpec == nil && newSpec != nil {
 		var waitGrp sync.WaitGroup
-		waitGrp.Add(3)
+		waitGrp.Add(2)
 
 		go func() {
 			defer waitGrp.Done()
@@ -855,32 +907,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 		go func() {
 			defer waitGrp.Done()
-			var remoteWatcher *BucketTopologySvcWatcher
-			retryRemoteOp := func() error {
-				if remoteWatcher == nil {
-					var remoteErr error
-					remoteWatcher, remoteErr = b.getOrCreateRemoteWatcher(newSpec)
-					if remoteErr != nil {
-						b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
-						return remoteErr
-					}
-				}
-				remoteStartErr := remoteWatcher.Start()
-				if remoteStartErr != nil && remoteStartErr != ErrorWatcherAlreadyStarted {
-					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
-					return remoteStartErr
-				}
-				return nil
-			}
-			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemote",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryRemoteOp)
-			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service (remote) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
-			}
-		}()
-
-		go func() {
-			defer waitGrp.Done()
+			// Initialize the stats provider for the target cluster
 			var statsProvider service_def.BucketStatsProvider
 			retryStatsOp := func() error {
 				if statsProvider == nil {
@@ -906,7 +933,29 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemoteStats",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish initializing stats provider within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+			}
+
+			// Start the remote watcher for the target cluster
+			retryRemoteOp := func() error {
+				remoteWatcher, remoteErr := b.getOrCreateRemoteWatcher(newSpec)
+				if remoteErr != nil {
+					b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
+					return remoteErr
+				}
+
+				// Start the watcher
+				remoteStartErr := remoteWatcher.Start()
+				if remoteStartErr != nil && remoteStartErr != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
+					return remoteStartErr
+				}
+				return nil
+			}
+			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemote",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryRemoteOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service (remote) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
 			}
 		}()
 
@@ -1043,6 +1092,12 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 	return updaterFunc
 }
 
+// getMaxCasUpdater returns a function that fetches maxCas stats from the local/source cluster.
+// This is used for CAS poisoning pre-check on the source side.
+//
+// Note: Unlike getRemoteVBStatsUpdater which can fetch multiple VB stats (maxCas, vbuuid),
+// this function only fetches maxCas since the source is always a local Couchbase cluster
+// and doesn't require vbuuid tracking (which is needed for CNG targets).
 func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	updateFunc := func() error {
 		if spec.Settings.GetDevPreCheckMaxCasErrorInjection(spec.Settings) { //by default it is set to false
@@ -1063,9 +1118,7 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 		var features utils.HELOFeatures
 		features.CompressionType = base.CompressionTypeNone
 
-		// MaxCasUpdater should not be run too often - no need for data pools
-		nodesMaxCasMap := make(base.HighSeqnosMapType)
-		vbSeqnoMap := make(map[uint16]uint64)
+		maxCasMap := make(map[uint16]uint64)
 
 		// Temp notification is used for if partial VBs are not parsed
 		watcher.latestCacheMtx.RLock()
@@ -1073,18 +1126,14 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 		watcher.latestCacheMtx.RUnlock()
 		defer temporaryNotification.Recycle()
 
-		var vbsUnableToParse []uint16
-
 		watcher.kvMemClientsMtx.Lock()
 		for serverAddr, vbnos := range kv_vb_map {
-			var err error
 			client, err := b.utils.GetMemcachedClient(serverAddr, watcher.bucketName, watcher.kvMemClients, userAgent, base.KeepAlivePeriod, watcher.logger, features)
 			if err != nil {
 				watcher.kvMemClientsMtx.Unlock()
 				return err
 			}
-			vbSeqnoMap, vbsUnableToParse, err = b.utils.GetMaxCasStatsForVBs(vbnos, client, nil, &vbSeqnoMap)
-
+			vbStatsMap, vbsUnableToParse, err := b.utils.GetMaxCasStatsForVBs(vbnos, client)
 			if err != nil {
 				if err == base.ErrorNoVbSpecified {
 					err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)
@@ -1106,29 +1155,26 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 					// then we could try our best to set so that the stats will be as accurate as possible...
 					// instead of getting stuck, use the previous instance of the statsMap to find old data
 					lastCachedData := temporaryNotification.MaxVbCasStatsMap
-					if lastCachedData == nil || len(*lastCachedData) == 0 || (*lastCachedData)[serverAddr] == nil {
-						// cache not instantiated yet... just use whatever we have and do replacement at the end
-					} else {
-						lastMaxCasMap := (*lastCachedData)[serverAddr]
+					if lastCachedData != nil && len(lastCachedData) > 0 {
 						for _, failedVB := range vbsUnableToParse {
-							var casToReuse uint64
-							if lastMaxCasMap != nil {
-								if cas, exists := (*lastMaxCasMap)[failedVB]; exists {
-									casToReuse = cas
-									vbSeqnoMap[failedVB] = casToReuse
+							if maxCas, exists := lastCachedData[failedVB]; exists {
+								vbStatsMap[failedVB] = &base.VBucketStats{
+									MaxCas: maxCas,
 								}
 							}
 						}
 					}
 				}
-				nodesMaxCasMap[serverAddr] = &vbSeqnoMap
+				for vbno, stats := range vbStatsMap {
+					maxCasMap[vbno] = stats.MaxCas
+				}
 			}
 		}
 		watcher.kvMemClientsMtx.Unlock()
 
 		watcher.latestCacheMtx.Lock()
 		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-		replacementNotification.MaxVbCasStatsMap = &nodesMaxCasMap
+		replacementNotification.MaxVbCasStatsMap = maxCasMap
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
 		watcher.latestCacheMtx.Unlock()
@@ -1136,6 +1182,60 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 	}
 
 	return updateFunc
+}
+
+func (b *BucketTopologyService) getTgtBucketInfoGetter(spec *metadata.ReplicationSpecification) (map[string]interface{}, bool, string, error) {
+	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		return nil, false, "", fmt.Errorf("unable to fetch remote cluster reference for spec %v: %w", spec.Id, err)
+	}
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		return nil, false, "", err
+	}
+	req := &utilities.GetBucketInfoReq{
+		FromCNG:           ref.IsCNG(),
+		HostAddr:          connStr,
+		BucketName:        spec.TargetBucketName,
+		Username:          ref.UserName(),
+		Password:          ref.Password(),
+		HTTPAuthMech:      ref.HttpAuthMech(),
+		Certificate:       ref.Certificates(),
+		SanInCertificate:  ref.SANInCertificate(),
+		ClientCertificate: ref.ClientCertificate(),
+		ClientKey:         ref.ClientKey(),
+	}
+	bucketInfo, err := b.utils.GetBucketInfo(b.logger, req)
+	if err != nil {
+		return nil, false, "", err
+	}
+	useExternal, err := b.remClusterSvc.ShouldUseAlternateAddress(ref)
+	if err != nil {
+		return nil, false, "", err
+	}
+	return bucketInfo, useExternal, connStr, nil
+}
+
+// getTgtTerseBucketInfoGetter returns terse bucket info from pools/default/b/<bucketName> endpoint.
+func (b *BucketTopologyService) getTgtTerseBucketInfoGetter(spec *metadata.ReplicationSpecification) (map[string]interface{}, error) {
+	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch remote cluster reference for spec %v before terse info: %w", spec.Id, err)
+	}
+	connStr, err := ref.MyConnectionStr()
+	if err != nil {
+		b.logger.Errorf("Error getting connection string from reference for terse info, id=%v, err=%v", ref.Uuid(), err)
+		return nil, err
+	}
+
+	terseTargetBucketInfo, err := b.utils.GetTerseBucketInfo(connStr, spec.TargetBucketName, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(),
+		ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), b.logger)
+	if err != nil {
+		b.logger.Errorf("Error getting terse bucket info from reference for terse info, id=%s, bucket=%s, err=%v", ref.Uuid(), spec.TargetBucketName, err)
+		return nil, err
+	}
+
+	return terseTargetBucketInfo, nil
 }
 
 // Returns a duration updater
@@ -1237,18 +1337,18 @@ func (b *BucketTopologyService) SubscribeToLocalBucketMaxVbCasStatFeed(spec *met
 	if !exists {
 		return nil, nil, fmt.Errorf("subscribeToLocalBucketMaxVbCasStatFeed could not find watcher for %v", spec.SourceBucketName)
 	}
-	retCh := watcher.registerAndGetCh(spec, subscriberId, MAXCAS, nil).(chan service_def.SourceNotification)
-	errCh, err := watcher.registerAndGetErrCh(spec, subscriberId, MAXCAS)
+	retCh := watcher.registerAndGetCh(spec, subscriberId, VBSTATS, nil).(chan service_def.SourceNotification)
+	errCh, err := watcher.registerAndGetErrCh(spec, subscriberId, VBSTATS)
 	if err != nil {
 		// Should unRegister notification channel to prevent memory leak
-		watcher.unregisterCh(spec, subscriberId, MAXCAS)
+		watcher.unregisterCh(spec, subscriberId, VBSTATS)
 		return nil, nil, err
 	}
 	return retCh, errCh, nil
 }
 
 func (b *BucketTopologyService) UnSubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, MAXCAS, true /*isSource*/, true /* errChPresent */)
+	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, VBSTATS, true /*isSource*/, true /* errChPresent */)
 }
 
 func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
@@ -1264,6 +1364,9 @@ func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketN
 	return watcher.RegisterGarbageCollect(specId, vbno, requestId, gcFunc, timeToFire)
 }
 
+// GetRemoteBucketStatsProvider returns the stats provider for the target cluster without
+// incrementing the reference count. This is a read-only lookup that assumes the provider
+// has already been registered via getOrCreateTargetStatsProvider.
 func (b *BucketTopologyService) GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsOps, error) {
 	b.tgtBucketStatsProvidersMtx.RLock()
 	defer b.tgtBucketStatsProvidersMtx.RUnlock()
@@ -1291,14 +1394,14 @@ type BucketTopologySvcWatcher struct {
 	highSeqnosChs          map[string]interface{}
 	highSeqnosLegacyChsMtx sync.RWMutex
 	highSeqnosLegacyChs    map[string]interface{}
-	maxCasChsMtx           sync.RWMutex
-	maxCasChs              map[string]interface{}
+	vbStatsChsMtx          sync.RWMutex
+	vbStatsChs             map[string]interface{}
 
 	//error channels to notify the listeners of any errors during the update process
 	topologyErrChsMtx sync.RWMutex
 	topologyErrChs    map[string]chan error
-	maxCasErrChsMtx   sync.RWMutex
-	maxCasErrChs      map[string]chan error
+	vbStatsErrChsMtx  sync.RWMutex
+	vbStatsErrChs     map[string]chan error
 
 	latestCacheMtx sync.RWMutex
 	latestCached   *Notification
@@ -1367,6 +1470,9 @@ type BucketTopologySvcWatcher struct {
 	nonKVNodeLastTimeWarnedMtx sync.Mutex
 
 	streamApi streamApiWatcher.StreamApiWatcher
+
+	// statsProvider is used to get bucket specific statistics from the designated cluster
+	statsProvider service_def.BucketStatsOps
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1391,13 +1497,24 @@ const (
 	TOPOLOGY         = "topology"
 	HIGHSEQNOS       = "vbHighSeqnos"
 	HIGHSEQNOSLEGACY = "vbHighSeqnosLegacy" // Legacy means it only receives default collection high seqnos
-	MAXCAS           = "vbMaxCas"
+	VBSTATS          = "vbStats"            // Encompasses maxCas, vbuuid, and other VB-level stats
 )
+
+// VBStatsOpts specifies which VB stats fields should be populated in notifications.
+// This allows callers to request only the stats they need.
+type VBStatsOpts struct {
+	// IncludeMaxCas indicates whether to populate MaxVbCasStatsMap in notifications.
+	// Required for CAS poisoning pre-check.
+	IncludeMaxCas bool
+	// IncludeVbUuid indicates whether to populate VbUuidMap in notifications.
+	// Required for CNG targets to track vbucket UUIDs.
+	IncludeVbUuid bool
+}
 
 // If no one is subscribed, no need to run the updater except for
 // - TOPOLOGY, which is for sure needed
 // - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
-// - MAXCAS, this is needed as part of pipeline start to check for cas poison
+// - VBSTATS, this is needed as part of pipeline start to check for cas poison and for CNG vbuuid tracking
 // If we don't update HIGHSEQNOS when there is no subscriber, paused replication status will not be accurate,
 // and if topology change causing server name change, we will incorrectly report total_changes as 0 and changes_left as negative for paused pipeline.
 func needToRunInitially(subscriptionType string) bool {
@@ -1408,8 +1525,9 @@ func needToRunInitially(subscriptionType string) bool {
 		return true
 	case HIGHSEQNOSLEGACY:
 		return true
-	case MAXCAS:
+	case VBSTATS:
 		//return true
+		// Darshan TODO: false seems to be correct even with the current changes. Double check.
 		return false
 	default:
 		return false
@@ -1453,8 +1571,8 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		gcPruneMap:                    GcMapPruneMapType{},
 		gcPruneWindow:                 base.BucketTopologyGCPruneTime,
 		objsPool:                      sharedPool,
-		maxCasChs:                     map[string]interface{}{},
-		maxCasErrChs:                  map[string]chan error{},
+		vbStatsChs:                    map[string]interface{}{},
+		vbStatsErrChs:                 map[string]chan error{},
 		topologyErrChs:                map[string]chan error{},
 		latestErrMap:                  map[string]error{},
 	}
@@ -1686,11 +1804,11 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	case HIGHSEQNOSLEGACY:
 		channelsMap = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
-	case MAXCAS:
-		channelsMap = bw.maxCasChs
-		mutex = &bw.maxCasChsMtx
-		errChannelsMap = bw.maxCasErrChs
-		errMutex = &bw.maxCasErrChsMtx
+	case VBSTATS:
+		channelsMap = bw.vbStatsChs
+		mutex = &bw.vbStatsChsMtx
+		errChannelsMap = bw.vbStatsErrChs
+		errMutex = &bw.vbStatsErrChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type: %v", updateType))
 	}
@@ -1816,9 +1934,9 @@ func (bw *BucketTopologySvcWatcher) registerAndGetErrCh(spec *metadata.Replicati
 	case TOPOLOGY:
 		specifiedErrChs = bw.topologyErrChs
 		mutex = &bw.topologyErrChsMtx
-	case MAXCAS:
-		specifiedErrChs = bw.maxCasErrChs
-		mutex = &bw.maxCasErrChsMtx
+	case VBSTATS:
+		specifiedErrChs = bw.vbStatsErrChs
+		mutex = &bw.vbStatsErrChsMtx
 	//In future other updaters can be added here
 	default:
 		return nil, fmt.Errorf("failed to register error chan for subscriber %v. err=unknown channel type %v", subscriberId, chType)
@@ -1852,9 +1970,9 @@ func (bw *BucketTopologySvcWatcher) unregisterErrCh(spec *metadata.ReplicationSp
 	case TOPOLOGY:
 		specifiedErrChs = bw.topologyErrChs
 		mutex = &bw.topologyErrChsMtx
-	case MAXCAS:
-		specifiedErrChs = bw.maxCasErrChs
-		mutex = &bw.maxCasErrChsMtx
+	case VBSTATS:
+		specifiedErrChs = bw.vbStatsErrChs
+		mutex = &bw.vbStatsErrChsMtx
 	//In future other updaters can be added here
 	default:
 		return fmt.Errorf("unknown type %v", chType)
@@ -1887,9 +2005,9 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 		specifiedChs = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
 		defer bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), true)
-	case MAXCAS:
-		specifiedChs = bw.maxCasChs
-		mutex = &bw.maxCasChsMtx
+	case VBSTATS:
+		specifiedChs = bw.vbStatsChs
+		mutex = &bw.vbStatsChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -1958,9 +2076,9 @@ func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpeci
 		specifiedChs = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
 		bw.cleanupHighSeqnosInternalData(spec, subscriberId, true)
-	case MAXCAS:
-		specifiedChs = bw.maxCasChs
-		mutex = &bw.maxCasChsMtx
+	case VBSTATS:
+		specifiedChs = bw.vbStatsChs
+		mutex = &bw.vbStatsChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -2219,6 +2337,11 @@ func (bw *BucketTopologySvcWatcher) handleSpecDeletion(specId string) {
 	bw.gcMapMtx.Unlock()
 }
 
+// SetStatsProvider sets the stats provider for the bucket topology service watcher
+func (bw *BucketTopologySvcWatcher) SetStatsProvider(statsProvider service_def.BucketStatsOps) {
+	bw.statsProvider = statsProvider
+}
+
 type Notification struct {
 	Source     bool
 	ObjPool    *BucketTopologyObjsPool
@@ -2253,8 +2376,11 @@ type Notification struct {
 	TargetVbucketsMaxCas               []interface{}
 
 	// Source & Target
-	MaxVbCasStatsMap        *base.HighSeqnosMapType
+	MaxVbCasStatsMap        base.VbSeqnoMapType
 	VersionPruningWindowHrs int
+
+	// vbUuidMap is used to store the mapping of vbuckets to their UUIDs
+	VbUuidMap base.VbSeqnoMapType
 }
 
 func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
@@ -2270,7 +2396,7 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 	targetReplicasMap := make(base.VbHostsMapType)
 	targetReplicasTranslateMap := make(base.StringStringMap)
 
-	maxCasMap := make(base.HighSeqnosMapType)
+	maxCasMap := make(map[uint16]uint64)
 
 	return &Notification{
 		Source:                     isSource,
@@ -2288,7 +2414,7 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 		TargetReplicasMap:          &targetReplicasMap,
 		TargetReplicasTranslateMap: &targetReplicasTranslateMap,
 
-		MaxVbCasStatsMap: &maxCasMap,
+		MaxVbCasStatsMap: maxCasMap,
 	}
 }
 
@@ -2364,7 +2490,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		// Check call paths to ensure no one has called recycle before it's done
 		panic("Should not be 0")
 	}
-	maxCasClone := n.MaxVbCasStatsMap.Clone()
+
 	return &Notification{
 		ObjPool:    n.ObjPool,
 		Source:     n.Source,
@@ -2397,7 +2523,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		TargetEnableCrossClusterVersioning: n.TargetEnableCrossClusterVersioning,
 		TargetVbucketsMaxCas:               n.TargetVbucketsMaxCas,
 
-		MaxVbCasStatsMap: &maxCasClone,
+		MaxVbCasStatsMap: n.MaxVbCasStatsMap.Clone(),
 	}
 }
 
@@ -2471,11 +2597,11 @@ func (n *Notification) GetHlvVbMaxCas() []interface{} {
 	return []interface{}{}
 }
 
-func (n *Notification) GetVBMaxCasStats() base.HighSeqnosMapType {
+func (n *Notification) GetVBMaxCasStats() map[uint16]uint64 {
 	if n.MaxVbCasStatsMap == nil {
 		return nil
 	}
-	return *n.MaxVbCasStatsMap
+	return n.MaxVbCasStatsMap
 }
 
 func (n *Notification) GetTargetHlvVbMaxCas() []interface{} {
@@ -2487,4 +2613,8 @@ func (n *Notification) GetTargetHlvVbMaxCas() []interface{} {
 
 func (n *Notification) GetTargetEnableCrossClusterVersioning() bool {
 	return n.TargetEnableCrossClusterVersioning
+}
+
+func (n *Notification) GetTargetVbUuidStat() map[uint16]uint64 {
+	return n.VbUuidMap
 }

@@ -4225,6 +4225,38 @@ func (vs *VBucketStats) IsSame(other *VBucketStats) bool {
 // VBucketStatsMap is a map of vbucket number to VBucketStats
 type VBucketStatsMap map[uint16]*VBucketStats
 
+// ToMaxCasMap converts the VBucketStatsMap to a map of vbucket number to max CAS
+func (vbm VBucketStatsMap) ToMaxCasMap() VbSeqnoMapType {
+	if vbm == nil {
+		return nil
+	}
+
+	ret := make(VbSeqnoMapType)
+
+	for vbno, stats := range vbm {
+		if stats == nil {
+			continue
+		}
+		ret[vbno] = stats.MaxCas
+	}
+	return ret
+}
+
+// ToVbucketUuidMap converts the VBucketStatsMap to a map of vbucket number to vbucket UUID
+func (vbm VBucketStatsMap) ToVbucketUuidMap() VbSeqnoMapType {
+	if vbm == nil {
+		return nil
+	}
+	ret := make(VbSeqnoMapType)
+	for vbno, stats := range vbm {
+		if stats == nil {
+			continue
+		}
+		ret[vbno] = stats.Uuid
+	}
+	return ret
+}
+
 // BucketVBStats is a struct that encapsulates the vbucket statistics for a bucket
 type BucketVBStats struct {
 	// VBStatsMap is a map of vbucket number to VBucketStats
@@ -4267,6 +4299,26 @@ func (vbm *BucketVBStats) LoadFrom(vbList []uint16, other VBucketStatsMap) {
 	}
 }
 
+// ToMaxCasMap converts the BucketVBStats to a map of vbucket number to max CAS
+func (vbm *BucketVBStats) ToMaxCasMap() VbSeqnoMapType {
+	if vbm == nil {
+		return nil
+	}
+	vbm.Mutex.RLock()
+	defer vbm.Mutex.RUnlock()
+	return vbm.VBStatsMap.ToMaxCasMap()
+}
+
+// ToVbucketUuidMap converts the BucketVBStats to a map of vbucket number to vbucket UUID
+func (vbm *BucketVBStats) ToVbucketUuidMap() VbSeqnoMapType {
+	if vbm == nil {
+		return nil
+	}
+	vbm.Mutex.RLock()
+	defer vbm.Mutex.RUnlock()
+	return vbm.VBStatsMap.ToVbucketUuidMap()
+}
+
 // Diff returns the difference between the current BucketVBStats and the other BucketVBStats
 func (vbm *BucketVBStats) Diff(other *BucketVBStats) VBucketStatsMap {
 	if vbm == nil {
@@ -4293,7 +4345,9 @@ func (vbm *BucketVBStats) Diff(other *BucketVBStats) VBucketStatsMap {
 }
 
 type VBucketStatsRequest struct {
-	// VBuckets is the list of vbucket numbers for which the VBucketStats are requested
+	// AllVBuckets is a flag to indicate if the stats for all vbuckets should be returned
+	AllVBuckets bool
+	// VBuckets is the list of vbucket numbers for which the VBucketStats are requested, if AllVBuckets is false
 	VBuckets []uint16
 	// MaxCasOnly is a flag to indicate if only the max CAS should be returned for the vbuckets in the list
 	MaxCasOnly bool
@@ -4306,8 +4360,11 @@ func (req *VBucketStatsRequest) Validate() error {
 	if req == nil {
 		return errors.New("VBucketStatsRequest is nil")
 	}
-	if len(req.VBuckets) == 0 {
+	if !req.AllVBuckets && len(req.VBuckets) == 0 {
 		return errors.New("VBuckets is empty in VBucketStatsRequest")
+	}
+	if req.AllVBuckets && len(req.VBuckets) > 0 {
+		return errors.New("VBuckets is not empty in VBucketStatsRequest when AllVBuckets is true")
 	}
 	if req.FinCh == nil {
 		return errors.New("FinCh is nil in VBucketStatsRequest")
@@ -4316,6 +4373,8 @@ func (req *VBucketStatsRequest) Validate() error {
 }
 
 type FailoverLogRequest struct {
+	// AllVBuckets is a flag to indicate if the stats for all vbuckets should be returned
+	AllVBuckets bool
 	// VBuckets is the list of vbuckets for which the FailoverLog is requested
 	VBuckets []uint16
 	// finCh is used to denote the end of the lifecycle of the FailoverLogRequest
@@ -4327,8 +4386,11 @@ func (req *FailoverLogRequest) Validate() error {
 	if req == nil {
 		return errors.New("FailoverLogRequest is nil")
 	}
-	if len(req.VBuckets) == 0 {
+	if !req.AllVBuckets && len(req.VBuckets) == 0 {
 		return errors.New("VBuckets is empty in FailoverLogRequest")
+	}
+	if req.AllVBuckets && len(req.VBuckets) > 0 {
+		return errors.New("VBuckets is not empty in FailoverLogRequest when AllVBuckets is true")
 	}
 	if req.FinCh == nil {
 		return errors.New("FinCh is nil in FailoverLogRequest")
@@ -4351,3 +4413,13 @@ func NewCommitOpaque(uuid uint64, seqno uint64) *CommitOpaque {
 		Seqno: seqno,
 	}
 }
+
+// VBStatField specifies which stat field to parse from a stats map.
+type VBStatField int
+
+const (
+	// VBStatFieldHighSeqno indicates parsing of high sequence number stats.
+	VBStatFieldHighSeqno VBStatField = iota
+	// VBStatFieldMaxCas indicates parsing of max CAS stats.
+	VBStatFieldMaxCas
+)

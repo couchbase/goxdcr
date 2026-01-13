@@ -642,10 +642,9 @@ func (genericPipeline *GenericPipeline) getlocalMaxCasMap(spec *metadata.Replica
 	for !nonEmptyResultFound {
 		select {
 		case maxCasNotification := <-localMaxCasNotificationCh:
-			vbMaxCasMap := maxCasNotification.GetVBMaxCasStats()
-			if len(vbMaxCasMap) != 0 {
+			localMaxCasMap = maxCasNotification.GetVBMaxCasStats()
+			if len(localMaxCasMap) != 0 {
 				nonEmptyResultFound = true
-				localMaxCasMap = vbMaxCasMap.DedupAndGetMax()
 			}
 			maxCasNotification.Recycle()
 		case err := <-localMaxCasErrCh:
@@ -674,10 +673,9 @@ func (genericPipeline *GenericPipeline) getRemoteMinCasMap(spec *metadata.Replic
 	for !nonEmptyResultFound {
 		select {
 		case maxCasNotification := <-remoteMaxNotificationCh:
-			vbMaxCasMap := maxCasNotification.GetVBMaxCasStats()
-			if len(vbMaxCasMap) != 0 {
+			remoteMinCasMap = maxCasNotification.GetVBMaxCasStats()
+			if len(remoteMinCasMap) != 0 {
 				nonEmptyResultFound = true
-				remoteMinCasMap = vbMaxCasMap.DedupAndGetMin()
 			}
 			maxCasNotification.Recycle()
 		case err := <-remoteMaxCasErrCh:

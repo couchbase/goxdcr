@@ -419,20 +419,67 @@ func (_c *TargetNotification_GetTargetStorageBackend_Call) RunAndReturn(run func
 	return _c
 }
 
+// GetTargetVbUuidStat provides a mock function with no fields
+func (_m *TargetNotification) GetTargetVbUuidStat() map[uint16]uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetVbUuidStat")
+	}
+
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	return r0
+}
+
+// TargetNotification_GetTargetVbUuidStat_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetVbUuidStat'
+type TargetNotification_GetTargetVbUuidStat_Call struct {
+	*mock.Call
+}
+
+// GetTargetVbUuidStat is a helper method to define mock.On call
+func (_e *TargetNotification_Expecter) GetTargetVbUuidStat() *TargetNotification_GetTargetVbUuidStat_Call {
+	return &TargetNotification_GetTargetVbUuidStat_Call{Call: _e.mock.On("GetTargetVbUuidStat")}
+}
+
+func (_c *TargetNotification_GetTargetVbUuidStat_Call) Run(run func()) *TargetNotification_GetTargetVbUuidStat_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetVbUuidStat_Call) Return(_a0 map[uint16]uint64) *TargetNotification_GetTargetVbUuidStat_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetNotification_GetTargetVbUuidStat_Call) RunAndReturn(run func() map[uint16]uint64) *TargetNotification_GetTargetVbUuidStat_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVBMaxCasStats provides a mock function with no fields
-func (_m *TargetNotification) GetVBMaxCasStats() base.HighSeqnosMapType {
+func (_m *TargetNotification) GetVBMaxCasStats() map[uint16]uint64 {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetVBMaxCasStats")
 	}
 
-	var r0 base.HighSeqnosMapType
-	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(base.HighSeqnosMapType)
+			r0 = ret.Get(0).(map[uint16]uint64)
 		}
 	}
 
@@ -456,12 +503,12 @@ func (_c *TargetNotification_GetVBMaxCasStats_Call) Run(run func()) *TargetNotif
 	return _c
 }
 
-func (_c *TargetNotification_GetVBMaxCasStats_Call) Return(_a0 base.HighSeqnosMapType) *TargetNotification_GetVBMaxCasStats_Call {
+func (_c *TargetNotification_GetVBMaxCasStats_Call) Return(_a0 map[uint16]uint64) *TargetNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *TargetNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base.HighSeqnosMapType) *TargetNotification_GetVBMaxCasStats_Call {
+func (_c *TargetNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() map[uint16]uint64) *TargetNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

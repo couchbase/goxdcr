@@ -188,14 +188,8 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	replSpecSvc.On("AllReplicationSpecs").Return(replMap, nil)
 
 	remClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(ref, nil)
-	bucketInfoGetter := func() (map[string]interface{}, bool, string, error) {
-		return bucketInfo, false, connStr, nil
-	}
-	remClusterSvc.On("GetBucketInfoGetter", mock.Anything, mock.Anything).Return(service_def.BucketInfoGetter(bucketInfoGetter), nil)
-	remClusterSvc.On("GetTerseBucketInfoGetter", mock.Anything, mock.Anything).Return(nil, nil)
 	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
 	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
-	remClusterSvc.On("GetMaxVBStatsGetter", mock.Anything, mock.Anything).Return(nil, nil)
 
 	mcClient.On("StatsMap", mock.Anything).Return(nil, nil)
 
@@ -536,4 +530,54 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	assert.Equal(0, len(watcher1.gcMap[spec.Id][512]))
 	assert.Equal(0, len(watcher1.gcMap[spec.Id]))
 	assert.Equal(0, len(watcher1.gcMap))
+}
+
+func TestBucketTopologyService_VbUuidMonitoring_CNG(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketTopologyService_VbUuidMonitoring_CNG =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyService_VbUuidMonitoring_CNG =================")
+	assert := assert.New(t)
+
+	// Boilerplate mocks
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
+	bucketMap, kvNames := getBucketMap()
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
+
+	// Mark remote reference as CNG so that CNG path is active
+	cngRef := getTestRemRef()
+	cngRef.SetRemoteType(metadata.RemoteTypeCng)
+	remClusterSvc.ExpectedCalls = nil
+	remClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(cngRef, nil)
+	remClusterSvc.On("GetCapability", mock.Anything).Return(getCapability(), nil)
+	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
+
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 50*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc, getMockStreamApiWatcher)
+	assert.NotNil(bts)
+	assert.Nil(err)
+
+	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
+	// Create a watcher directly to bypass provider factory logic
+	watcher := NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, bts.logger, false, bts.xdcrCompTopologySvc)
+	// Use the default-initialized cache set by NewBucketTopologySvcWatcher (includes NumReaders)
+
+	// Mock stats provider to return vbuuid values
+	mockProvider := &mocks.BucketStatsOps{}
+	vbStats := make(base.VBucketStatsMap)
+	vbStats[0] = &base.VBucketStats{Uuid: 111}
+	vbStats[1] = &base.VBucketStats{Uuid: 222}
+	mockProvider.On("GetVBucketStats", mock.Anything, mock.Anything).Return(&base.BucketVBStats{VBStatsMap: vbStats}, nil, nil)
+	watcher.SetStatsProvider(mockProvider)
+
+	// Execute VB stats updater with IncludeVbUuid=true
+	opts := &VBStatsOpts{IncludeVbUuid: true}
+	updater := bts.getRemoteVBStatsUpdater(spec, watcher, opts)
+	err = updater()
+	assert.NoError(err)
+
+	// Verify VbUuidMap populated in notification cache
+	watcher.latestCacheMtx.RLock()
+	uuidMap := watcher.latestCached.GetTargetVbUuidStat()
+	watcher.latestCacheMtx.RUnlock()
+	assert.NotNil(uuidMap)
+	assert.Equal(uint64(111), uuidMap[0])
+	assert.Equal(uint64(222), uuidMap[1])
 }

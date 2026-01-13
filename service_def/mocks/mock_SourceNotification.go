@@ -606,19 +606,19 @@ func (_c *SourceNotification_GetSourceVBMapRO_Call) RunAndReturn(run func() base
 }
 
 // GetVBMaxCasStats provides a mock function with no fields
-func (_m *SourceNotification) GetVBMaxCasStats() base.HighSeqnosMapType {
+func (_m *SourceNotification) GetVBMaxCasStats() map[uint16]uint64 {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetVBMaxCasStats")
 	}
 
-	var r0 base.HighSeqnosMapType
-	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(base.HighSeqnosMapType)
+			r0 = ret.Get(0).(map[uint16]uint64)
 		}
 	}
 
@@ -642,12 +642,12 @@ func (_c *SourceNotification_GetVBMaxCasStats_Call) Run(run func()) *SourceNotif
 	return _c
 }
 
-func (_c *SourceNotification_GetVBMaxCasStats_Call) Return(_a0 base.HighSeqnosMapType) *SourceNotification_GetVBMaxCasStats_Call {
+func (_c *SourceNotification_GetVBMaxCasStats_Call) Return(_a0 map[uint16]uint64) *SourceNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *SourceNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base.HighSeqnosMapType) *SourceNotification_GetVBMaxCasStats_Call {
+func (_c *SourceNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() map[uint16]uint64) *SourceNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

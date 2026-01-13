@@ -266,90 +266,83 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	return unableToParseVBs, nil
 }
 
-func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap) ([]uint16, error) {
-	var unableToParseVBs []uint16
-	if len(vbnos) == 0 {
-		return nil, base.ErrorNoVbSpecified
+// ParseVBStats parses vbucket stats from a stats map based on the specified stat field.
+// It always parses the VBucket UUID alongside the specified stat field.
+func (u *Utilities) ParseVBStats(vbnos []uint16, statsMap map[string]string, output base.VBucketStatsMap, statField base.VBStatField) ([]uint16, error) {
+	var (
+		// unableToParseVBs is a list of vbnos that were not able to be parsed from the stats map
+		unableToParseVBs []uint16
+		// statName is the name of the stat that is being parsed
+		statName string
+		// keyComposeFunc is a function that composes the key for the stat that is being parsed
+		keyComposeFunc func(uint16) string
+		// warnings is a map of vbnos to warning messages
+		warnings map[uint16]string = make(map[uint16]string)
+		// addWarning is a function that adds a warning message to the warnings map and adds the vbno to the unableToParseVBs list
+		addWarning func(vbno uint16, msg string) = func(vbno uint16, msg string) {
+			if _, exists := warnings[vbno]; !exists {
+				warnings[vbno] = msg
+			}
+			unableToParseVBs = append(unableToParseVBs, vbno)
+		}
+	)
+
+	switch statField {
+	case base.VBStatFieldHighSeqno:
+		statName = "high_seqno"
+		keyComposeFunc = base.ComposeVBHighSeqnoStatsKey
+	case base.VBStatFieldMaxCas:
+		statName = "max_cas"
+		keyComposeFunc = base.ComposeVBMaxCasStatsKey
+	default:
+		return nil, fmt.Errorf("unknown stat field: %v", statField)
 	}
 
 	for _, vbno := range vbnos {
-		statsKey := base.ComposeVBMaxCasStatsKey(vbno)
-		maxCasStr, ok := statsMap[statsKey]
-		if !ok || maxCasStr == "" {
-			unableToParseVBs = append(unableToParseVBs, vbno)
+		primaryStatsKey := keyComposeFunc(vbno)
+		primaryStatStr, ok := statsMap[primaryStatsKey]
+		if !ok || primaryStatStr == "" {
+			addWarning(vbno, fmt.Sprintf("Can't find %s for vbno=%v in stats map. Topology may have changed.", statName, vbno))
 			continue
 		}
 
-		maxCas, parseIntErr := strconv.ParseUint(maxCasStr, 10, 64)
-		if parseIntErr != nil {
-			u.logger_utils.Errorf("maxCas stats for vbno=%v in stats map is not a valid uint64. maxCas=%v", vbno, maxCasStr)
-			unableToParseVBs = append(unableToParseVBs, vbno)
-			continue
-		}
-		output[vbno] = &base.VBucketStats{
-			MaxCas: maxCas,
-		}
-	}
-	if len(unableToParseVBs) == len(vbnos) {
-		return nil, fmt.Errorf("All Requested VBs %v were not able to be parsed from statsMap %v", vbnos, statsMap)
-	} else if len(unableToParseVBs) > 0 {
-		u.logger_utils.Warnf("(Requested VBs: %v) Can't find maxCas for vbnos=%v in stats map. Source topology may have changed", vbnos, unableToParseVBs)
-	}
-	return unableToParseVBs, nil
-}
-
-// convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
-func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, output base.VBucketStatsMap) ([]uint16, map[uint16]string) {
-	invalidVbnos := make([]uint16, 0)
-	warnings := make(map[uint16]string)
-	for _, vbno := range vbnos {
-		high_seqno_stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
-		highseqnostr, ok := stats_map[high_seqno_stats_key]
-		if !ok {
-			invalidVbnos = append(invalidVbnos, vbno)
-			if _, ok := warnings[vbno]; !ok {
-				warnings[vbno] = fmt.Sprintf("Can't find high seqno for vbno=%v in stats map. Target topology may have changed.\n", vbno)
-			}
-			continue
-		}
-		high_seqno, err := strconv.ParseUint(highseqnostr, 10, 64)
+		primaryStatVal, err := strconv.ParseUint(primaryStatStr, 10, 64)
 		if err != nil {
-			invalidVbnos = append(invalidVbnos, vbno)
-			if _, ok := warnings[vbno]; !ok {
-				warnings[vbno] = fmt.Sprintf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
-			}
+			addWarning(vbno, fmt.Sprintf("%s for vbno=%v is not a valid uint64. value=%v", statName, vbno, primaryStatStr))
 			continue
 		}
 
-		vbuuid_stats_key := fmt.Sprintf(base.VBUCKET_UUID_STAT_KEY_FORMAT, vbno)
-		vbuuidstr, ok := stats_map[vbuuid_stats_key]
-		if !ok {
-			invalidVbnos = append(invalidVbnos, vbno)
-			if _, ok := warnings[vbno]; !ok {
-				warnings[vbno] = fmt.Sprintf("Can't find vbuuid for vbno=%v in stats map. Target topology may have changed.\n", vbno)
-			}
+		vbuuidStatsKey := fmt.Sprintf(base.VBUCKET_UUID_STAT_KEY_FORMAT, vbno)
+		vbuuidStr, ok := statsMap[vbuuidStatsKey]
+		if !ok || vbuuidStr == "" {
+			addWarning(vbno, fmt.Sprintf("Can't find vbuuid for vbno=%v in stats map. Topology may have changed.", vbno))
 			continue
 		}
-		vbuuid, err := strconv.ParseUint(vbuuidstr, 10, 64)
+
+		vbuuid, err := strconv.ParseUint(vbuuidStr, 10, 64)
 		if err != nil {
-			invalidVbnos = append(invalidVbnos, vbno)
-			if _, ok := warnings[vbno]; !ok {
-				warnings[vbno] = fmt.Sprintf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid=%v\n", vbno, vbuuidstr)
-			}
+			addWarning(vbno, fmt.Sprintf("vbuuid for vbno=%v is not a valid uint64. vbuuid=%v", vbno, vbuuidStr))
 			continue
 		}
 
-		output[vbno] = &base.VBucketStats{
-			HighSeqno: high_seqno,
-			Uuid:      vbuuid,
+		// Populate the output based on stat field type
+		stats := &base.VBucketStats{Uuid: vbuuid}
+		if statField == base.VBStatFieldHighSeqno {
+			stats.HighSeqno = primaryStatVal
+		} else {
+			stats.MaxCas = primaryStatVal
 		}
+		output[vbno] = stats
 	}
 
 	if len(warnings) > 0 {
-		u.logger_utils.Warnf("Warnings encountered when parsing high seqno and vbuuid from statsMap: %v", warnings)
+		u.logger_utils.Warnf("Warnings encountered when parsing %s from statsMap: %v", statName, warnings)
 	}
 
-	return invalidVbnos, warnings
+	if len(unableToParseVBs) == len(vbnos) {
+		return nil, fmt.Errorf("all requested VBs %v failed to parse from statsMap: %v", vbnos, warnings)
+	}
+	return unableToParseVBs, nil
 }
 
 // encode data in a map into a byte array, which can then be used as
@@ -3721,30 +3714,26 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	}
 }
 
-// These are the actual max cas's from KV stats
-func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface, statsMap *map[string]string, vbMaxCasMap *map[uint16]uint64) (map[uint16]uint64, []uint16, error) {
+// GetMaxCasStatsForVBs retrieves max CAS stats for the specified vbuckets from KV.
+// Returns the stats map, list of VBs that couldn't be parsed, and any connection error.
+// The caller is expected to handle partial success by checking unableToBeParsedVBs.
+func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface) (base.VBucketStatsMap, []uint16, error) {
 	if len(vbnos) == 0 {
 		return nil, nil, base.ErrorNoVbSpecified
 	}
 
-	var err error
-	if statsMap != nil && *statsMap != nil {
-		sanitizeHighSeqnoStatsMap(vbnos, statsMap)
-		err = conn.StatsMapForSpecifiedStats(base.VBUCKET_DETAILS_NAME, *statsMap)
-	} else {
-		statsMap = &map[string]string{}
-		*statsMap, err = conn.StatsMap(base.VBUCKET_DETAILS_NAME)
-	}
+	statsMap, err := conn.StatsMap(base.VBUCKET_DETAILS_NAME)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	vbMaxCasMapType := make(base.VBucketStatsMap)
-	unableToBeParsedVBs, _ := u.ParseMaxCasStat(vbnos, *statsMap, vbMaxCasMapType)
-	for vbno, vbStats := range vbMaxCasMapType {
-		(*vbMaxCasMap)[vbno] = vbStats.MaxCas
-	}
-	return *vbMaxCasMap, unableToBeParsedVBs, nil
+	// Error from ParseVBStats is intentionally not propagated here.
+	// ParseVBStats returns error only when ALL VBs fail to parse,
+	// which would mean unableToBeParsedVBs == vbnos. The caller handles
+	// partial failures via unableToBeParsedVBs (e.g., falling back to cached data).
+	unableToBeParsedVBs, _ := u.ParseVBStats(vbnos, statsMap, vbMaxCasMapType, base.VBStatFieldMaxCas)
+	return vbMaxCasMapType, unableToBeParsedVBs, nil
 }
 
 // Ensure that only the VBs being requested are entries in the stats_map
@@ -4193,10 +4182,16 @@ func (u *Utilities) GetVBucketStats(requestOpts *base.VBucketStatsRequest, conn 
 		return nil, err
 	}
 
+	statField := base.VBStatFieldHighSeqno
 	if requestOpts.MaxCasOnly {
-		u.ParseMaxCasStat(requestOpts.VBuckets, resp, output)
-	} else {
-		u.ParseHighSeqnoAndVBUuidFromStats(requestOpts.VBuckets, resp, output)
+		statField = base.VBStatFieldMaxCas
+	}
+
+	// Error is returned only when ALL requested VBs fail to parse.
+	// Partial success populates output and returns nil error.
+	// The higher-level ClusterBucketStatsProvider.GetVBucketStats performs VB mismatch validation.
+	if _, err := u.ParseVBStats(requestOpts.VBuckets, resp, output, statField); err != nil {
+		return nil, err
 	}
 
 	if dataTransferCtx != nil {
