@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -205,12 +206,12 @@ func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateRe
 		checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.ReplicationSpecId)
 		if err != nil {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return errors.New(base.FlattenErrorMap(errMap))
 		}
 		if pushReq.InternalSpecId != "" && pushReq.InternalSpecId != checkSpec.InternalId {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
 				checkSpec.Id, checkSpec.InternalId, pushReq.InternalSpecId)
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return errors.New(base.FlattenErrorMap(errMap))
 		}
 		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.MainPipeline, sender)
 		if err != nil && !strings.Contains(err.Error(), base.ErrorNoBackfillNeeded.Error()) {
@@ -223,13 +224,13 @@ func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateRe
 			checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.ReplicationSpecId)
 			if err != nil {
 				errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
-				return fmt.Errorf(base.FlattenErrorMap(errMap))
+				return errors.New(base.FlattenErrorMap(errMap))
 			}
 		}
 		if pushReq.InternalSpecId != "" && pushReq.InternalSpecId != checkSpec.InternalId {
 			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
 				checkSpec.Id, checkSpec.InternalId, pushReq.InternalSpecId)
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return errors.New(base.FlattenErrorMap(errMap))
 		}
 		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.BackfillPipeline, sender)
 		if err != nil && !strings.Contains(err.Error(), base.ErrorNoBackfillNeeded.Error()) {
@@ -240,7 +241,7 @@ func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateRe
 	if len(errMap) == 0 {
 		return nil
 	} else {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	}
 }
 

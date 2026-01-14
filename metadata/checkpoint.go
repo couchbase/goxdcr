@@ -2565,7 +2565,7 @@ func (v *VBsCkptsDocMap) SnappyCompress() (VBsCkptsDocSnappyMap, ShaMappingCompr
 	}
 
 	if len(errorMap) > 0 {
-		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return nil, nil, errors.New(base.FlattenErrorMap(errorMap))
 	}
 	return snapCkptMap, snapShaMap, nil
 }
@@ -2647,7 +2647,7 @@ func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompresse
 	}
 
 	if len(errMap) > 0 {
-		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+		return nil, errors.New(base.FlattenErrorMap(errMap))
 	}
 	return regularMap, nil
 }
@@ -3055,7 +3055,7 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, brokenMap ShaToCollection
 
 	base.MergeErrorMaps(errMap, errMap2, false)
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	}
 	return nil
 }
@@ -3151,7 +3151,7 @@ func (g *GlobalInfoCompressedDoc) ToShaMap() (ShaToGlobalInfoMap, error) {
 	var err error
 	if len(errorMap) > 0 {
 		errStr := base.FlattenErrorMap(errorMap)
-		err = fmt.Errorf(errStr)
+		err = errors.New(errStr)
 	}
 	return shaMap, err
 

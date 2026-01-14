@@ -14,6 +14,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -1386,7 +1387,7 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 	if !valid {
 		return ErrorNoBootableSRVEntryFound
 	} else if len(atLeastOneErr) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(atLeastOneErr))
+		return errors.New(base.FlattenErrorMap(atLeastOneErr))
 	}
 	return nil
 }

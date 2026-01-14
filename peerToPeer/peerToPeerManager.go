@@ -226,7 +226,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			}
 			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc, p.sendToEachPeerOnce, p.GetLifecycleId)
 		default:
-			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
+			return fmt.Errorf("Unknown opcode %v", i)
 		}
 	}
 
@@ -453,7 +453,7 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 		defer peersToRetryMtx.Unlock()
 		peersToRetry = peersToRetryReplacement
 		if len(peersToRetry) > 0 {
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return errors.New(base.FlattenErrorMap(errMap))
 		} else {
 			return nil
 		}
@@ -569,7 +569,7 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNod
 				retMap[serverNameCpy].RespPtr = pair.RespPtr
 				response := pair.RespPtr.(Response)
 				if response.GetErrorString() != "" {
-					retErrMap[serverNameCpy].err = fmt.Errorf(response.GetErrorString())
+					retErrMap[serverNameCpy].err = errors.New(response.GetErrorString())
 				}
 				sentTime, sentTimeErr := s.GetSentTime(serverNameCpy)
 				if sentTimeErr == nil {
@@ -681,7 +681,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 	}
 	var flattenedErr error
 	if len(errMap) > 0 {
-		flattenedErr = fmt.Errorf(base.FlattenErrorMap(errMap))
+		flattenedErr = errors.New(base.FlattenErrorMap(errMap))
 	}
 	return respMap, flattenedErr
 }
@@ -779,7 +779,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 				}
 				if len(getReqErrMap) > 0 {
 					errMapMtx.Lock()
-					errMap[fmt.Sprintf("%v_getReqFunc", host)] = fmt.Errorf(base.FlattenErrorMap(getReqErrMap))
+					errMap[fmt.Sprintf("%v_getReqFunc", host)] = errors.New(base.FlattenErrorMap(getReqErrMap))
 					errMapMtx.Unlock()
 				}
 				if len(*okList) == 0 {
@@ -813,7 +813,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 	waitGrp.Wait()
 
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	}
 	return nil
 }

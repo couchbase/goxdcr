@@ -564,10 +564,10 @@ func (genericPipeline *GenericPipeline) preCheckCasCheck(spec *metadata.Replicat
 	}()
 	maxVbWaitGrp.Wait()
 	if localErrMap != nil {
-		errMap[fmt.Sprintf("%v.local", PreCheckCasCheck)] = fmt.Errorf(base.FlattenErrorMap(localErrMap))
+		errMap[fmt.Sprintf("%v.local", PreCheckCasCheck)] = errors.New(base.FlattenErrorMap(localErrMap))
 	}
 	if remoteErrMap != nil {
-		errMap[fmt.Sprintf("%v.remote", PreCheckCasCheck)] = fmt.Errorf(base.FlattenErrorMap(remoteErrMap))
+		errMap[fmt.Sprintf("%v.remote", PreCheckCasCheck)] = errors.New(base.FlattenErrorMap(remoteErrMap))
 	}
 	if len(errMap) > 0 {
 		return errMap

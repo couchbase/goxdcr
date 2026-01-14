@@ -2614,7 +2614,7 @@ func (ckmgr *CheckpointManager) enhanceTgtTimestampWithCollection(vbno uint16, t
 			}
 		}
 		if len(errMap) > 0 {
-			return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+			return nil, errors.New(base.FlattenErrorMap(errMap))
 		}
 		globalTs := metadata.GlobalTimestamp(tgtVbTimestampMap)
 		return &globalTs, nil
@@ -3901,7 +3901,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	if !needToReturnErr {
 		return nil
 	} else {
-		return fmt.Errorf(strings.Join(errStrs, " "))
+		return errors.New(strings.Join(errStrs, " "))
 	}
 }
 

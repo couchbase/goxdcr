@@ -2389,7 +2389,7 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		if vStr, ok := v.(string); ok && vStr == "" {
 			errStr += " value is empty "
 		}
-		return fmt.Errorf(errStr)
+		return errors.New(errStr)
 	case explicitRuleOneToOne:
 		// Shouldn't have duplicated keys, but check anyway
 		_, exists := e.oneToOneRules[k]

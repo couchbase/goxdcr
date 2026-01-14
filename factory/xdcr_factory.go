@@ -1303,7 +1303,7 @@ func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, src
 		}
 	}
 	if len(errMap) > 0 {
-		err = fmt.Errorf(base.FlattenErrorMap(errMap))
+		err = errors.New(base.FlattenErrorMap(errMap))
 	}
 	return err
 }

@@ -9,6 +9,7 @@
 package backfill_manager
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -214,7 +215,7 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 				return retErr
 			}
 		}
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
 	}
@@ -819,7 +820,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		if exists {
 			errMsg := fmt.Sprintf("%v - A duplicate spec creation is under way", newSpec.Id)
 			b.logger.Errorf(errMsg)
-			return fmt.Errorf(errMsg)
+			return errors.New(errMsg)
 		}
 		b.replSpecHandlerMap[newSpec.Id] = NewReplSpecHandler(b, newSpec)
 		b.replSpecHandlerMap[newSpec.Id].HandleNewSpec()
@@ -2364,7 +2365,7 @@ func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses
 			return nil
 		} else {
 			// Case 3 - return everything
-			return fmt.Errorf(base.FlattenErrorMap(errMap))
+			return errors.New(base.FlattenErrorMap(errMap))
 		}
 	} else {
 		return nil

@@ -800,7 +800,7 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 	if unmappedNamespaces.IsSame(matchedNamespaces) {
 		errMsg := fmt.Sprintf("target manifest version %v does not include %v - mutations with this mapping may need to be backfilled", manifestId, unmappedNamespaces.String())
 		// All are unmapped - need to raise error
-		err = fmt.Errorf(errMsg)
+		err = errors.New(errMsg)
 		if c.collectionMode.IsMigrationOn() {
 			// migration routing means that the target mapping is empty. Pick one unmapped and get it rdy for brokenMap
 			for _, tgtNamespaces := range unmappedNamespaces {
@@ -1526,7 +1526,7 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
 	}
