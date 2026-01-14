@@ -10,12 +10,14 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"sync"
 )
 
 /**
@@ -161,7 +163,7 @@ func (m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecificat
 	wg.Wait()
 
 	if len(errorMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return errors.New(base.FlattenErrorMap(errorMap))
 	} else {
 		return nil
 	}

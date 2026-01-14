@@ -548,7 +548,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) DelReplicationSpec(spec *metada
 	if err1 != nil {
 		top_detect_svc.logger.Errorf("Error deleting replication spec %v. err=%v\n", spec.Id, err1)
 	}
-	return fmt.Errorf(logMessage)
+	return errors.New(logMessage)
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) UpdateSettings(settings metadata.ReplicationSettingsMap) error {

@@ -168,7 +168,7 @@ func targetXmemIsUpAndCorrectSetupExists(connStr, port, bname string) bool {
 		return clusterReady
 	}
 	clusterChecked = true
-	_, err := net.Listen("tcp4", fmt.Sprintf(":"+port))
+	_, err := net.Listen("tcp4", ":"+port)
 	if err == nil {
 		clusterReady = false
 		return false

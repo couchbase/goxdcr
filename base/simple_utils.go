@@ -925,7 +925,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 	// If it is in bracket, it is ipv6 address
 	if IsIpAddressEnclosedInBrackets(hostname) {
 		if IsIpV6Blocked() == true {
-			return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+			return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
 		} else {
 			return connStr, nil
 		}
@@ -937,13 +937,13 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 			if !IsIpV4Blocked() {
 				return connStr, nil
 			} else {
-				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+				return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
 			}
 		} else { // IPV6
 			if !IsIpV6Blocked() {
 				return connStr, nil
 			} else {
-				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+				return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
 			}
 		}
 	}
@@ -992,7 +992,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(IpFamilyAddressNotFoundMessageFmt, hostname))
+	return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(IpFamilyAddressNotFoundMessageFmt, hostname))
 }
 
 func ShuffleStringsList(list []string) {
@@ -2246,7 +2246,7 @@ func ValidateRemoteClusterName(name string, errorsMap map[string]error) {
 	if WhiteSpaceCharsRegex.MatchString(name) {
 		errMsg = errMsg + ". It contains white-space characters like space, newline, tabspace etc"
 	}
-	errorsMap[RemoteClusterName] = fmt.Errorf(errMsg)
+	errorsMap[RemoteClusterName] = errors.New(errMsg)
 	return
 }
 

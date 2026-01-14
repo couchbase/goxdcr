@@ -2492,7 +2492,7 @@ func (agent *RemoteClusterAgent) GetManifest(bucketName string, forceRefresh boo
 		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", bucketName)
 		agent.logger.Warnf(errMsg)
 		agent.bucketMtx.RUnlock()
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 	agent.bucketMtx.RUnlock()
 

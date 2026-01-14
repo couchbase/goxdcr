@@ -951,7 +951,7 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 			return nil, fmt.Errorf("Master index is out of range. connStr=%v, bucketName=%v, index=%v\n", connStr, bucketName, indexInt)
 		} else if indexInt < 0 {
 			// During rebalancing or topology changes, it's possible ns_server may return a -1 for index. Callers should treat it as an transient error.
-			return nil, fmt.Errorf(fmt.Sprintf("%v connStr=%v, bucketName=%v, index=%v\n", base.ErrorMasterNegativeIndex, connStr, bucketName, indexInt))
+			return nil, fmt.Errorf("%v connStr=%v, bucketName=%v, index=%v\n", base.ErrorMasterNegativeIndex, connStr, bucketName, indexInt)
 		}
 
 		server := servers[indexInt]
@@ -1186,7 +1186,7 @@ func nodeServicesInfoParseError(nodeServicesInfo interface{}, logger *log.Common
 	if logger != nil {
 		logger.Errorf(detailedErrMsg)
 	}
-	return fmt.Errorf(errMsg)
+	return errors.New(errMsg)
 }
 
 func getExternalInfoFromServicesMap(logger *log.CommonLogger, nodeExtMap map[string]interface{}) (string, bool, map[string]interface{}, bool) {
@@ -1355,7 +1355,7 @@ func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, err 
 	errMsg := fmt.Sprintf("Error parsing memcached ssl port of remote cluster, err=%v. ", err)
 	detailedErrMsg := errMsg + fmt.Sprintf("bucketInfo=%v", bucketInfo)
 	logger.Errorf(detailedErrMsg)
-	return fmt.Errorf(errMsg)
+	return errors.New(errMsg)
 }
 
 // The input is a non-https address, potentially with or without a port
@@ -1405,7 +1405,7 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 	if !ok {
 		errMsg := "Failed to parse port info. ssl port is missing."
 		logger.Errorf("%v. portInfo=%v", errMsg, portInfo)
-		internalSSLErr = fmt.Errorf(errMsg)
+		internalSSLErr = errors.New(errMsg)
 		return
 	}
 

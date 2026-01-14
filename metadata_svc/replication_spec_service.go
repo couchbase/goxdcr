@@ -853,7 +853,7 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 	} else if !isEnterprise {
 		errMsg := fmt.Sprintf("Compression feature is available only on Enterprise Edition")
 		service.logger.Error(errMsg)
-		errorMap[errKey] = fmt.Errorf(errMsg)
+		errorMap[errKey] = errors.New(errMsg)
 		return err
 	}
 
@@ -909,15 +909,15 @@ func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluste
 	} else if err != nil {
 		errMsg := fmt.Sprintf("Error validating %v bucket '%v'. err=%v", qualifier, bucketName, err)
 		service.logger.Error(errMsg)
-		errorMap[errKey] = fmt.Errorf(errMsg)
+		errorMap[errKey] = errors.New(errMsg)
 	} else if bucketType != base.CouchbaseBucketType && bucketType != base.EphemeralBucketType {
 		errMsg := fmt.Sprintf("Incompatible %v bucket '%v' as it's bucketType is '%v'", qualifier, bucketName, bucketType)
 		service.logger.Error(errMsg)
-		errorMap[errKey] = fmt.Errorf(errMsg)
+		errorMap[errKey] = errors.New(errMsg)
 	} else if bucketType == base.EphemeralBucketType && !isEnterprise {
 		errMsg := fmt.Sprintf("XDCR replication for ephemeral bucket '%v' is available only on Enterprise Edition", bucketName)
 		service.logger.Error(errMsg)
-		errorMap[errKey] = fmt.Errorf(errMsg)
+		errorMap[errKey] = errors.New(errMsg)
 	}
 }
 
@@ -1510,7 +1510,7 @@ func (service *ReplicationSpecService) callMetadataChangeCb(specId string, newSp
 	if len(errMap) == 0 {
 		return nil
 	}
-	return fmt.Errorf(base.FlattenErrorMap(errMap))
+	return errors.New(base.FlattenErrorMap(errMap))
 }
 
 func (service *ReplicationSpecService) executeCallbackWithPriority(specId string, newSpec *metadata.ReplicationSpecification, oldSpec *metadata.ReplicationSpecification, op callbackOp, priority base.MetadataChangeHandlerPriority) error {
@@ -1656,7 +1656,7 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 	cache := service.getCache()
 	cachedVal, ok := cache.Get(specId)
 	if !ok || cachedVal == nil {
-		return fmt.Errorf(base.ReplicationSpecNotFoundErrorMessage)
+		return errors.New(base.ReplicationSpecNotFoundErrorMessage)
 	}
 	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
 	if !ok {
@@ -1686,7 +1686,7 @@ func (service *ReplicationSpecService) GetDerivedObj(specId string) (interface{}
 	// we get a consistent value.
 	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
-		return nil, fmt.Errorf(base.ReplicationSpecNotFoundErrorMessage)
+		return nil, errors.New(base.ReplicationSpecNotFoundErrorMessage)
 	}
 
 	cachedObj, ok := cachedVal.(*ReplicationSpecVal)

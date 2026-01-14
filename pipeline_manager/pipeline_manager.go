@@ -413,7 +413,7 @@ func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
 		for _, spec := range replSpecsList {
 			shouldRetry := spec.Settings.GetRetryOnRemoteAuthErr()
 			if shouldRetry {
-				pipelineMgr.Update(spec.Id, fmt.Errorf(getCredentialErrMsg(ref.Name(), spec.Id)))
+				pipelineMgr.Update(spec.Id, errors.New(getCredentialErrMsg(ref.Name(), spec.Id)))
 			} else {
 				pipelineMgr.AutoPauseReplication(spec.Id)
 				msg := getCredentialErrPauseMsg(ref.Name(), spec.Id)
@@ -577,7 +577,7 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	if !collectionsMode.IsImplicitMapping() && len(collectionsMappingRules) == 0 {
 		errString := fmt.Sprintf("spec %v - %v", spec.Id, ErrorExplicitMappingWoRules.Error())
 		pipelineMgr.logger.Error(errString)
-		return fmt.Errorf(errString)
+		return errors.New(errString)
 	}
 
 	// refresh remote cluster reference when retrieving it, hence making sure that all fields,
@@ -933,7 +933,7 @@ func (pipelineMgr *PipelineManager) PauseReplication(topic string) error {
 	pauseMap[metadata.ActiveKey] = false
 	_, errorMap := currentSpec.Settings.UpdateSettingsFromMap(pauseMap)
 	if len(errorMap) > 0 {
-		err = fmt.Errorf(base.FlattenErrorMap(errorMap))
+		err = errors.New(base.FlattenErrorMap(errorMap))
 		return fmt.Errorf("Pipeline %v updateSettings: %v", topic, err)
 	}
 
