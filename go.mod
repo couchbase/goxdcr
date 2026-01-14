@@ -2,8 +2,6 @@ module github.com/couchbase/goxdcr/v8
 
 go 1.24.0
 
-toolchain go1.24.4
-
 replace github.com/couchbase/eventing => ../eventing
 
 replace github.com/couchbase/eventing-ee => ../eventing-ee
