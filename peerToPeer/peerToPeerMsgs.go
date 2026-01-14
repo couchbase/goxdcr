@@ -10,6 +10,7 @@ package peerToPeer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -759,7 +760,7 @@ func (v *ReplicationPayload) loadCkptInternal(ckptDocs map[uint16]*metadata.Chec
 	}
 
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ package metadata
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -1714,7 +1715,7 @@ func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (
 		}
 	}
 	if len(errMap) > 0 {
-		err = fmt.Errorf(base.FlattenErrorMap(errMap))
+		err = errors.New(base.FlattenErrorMap(errMap))
 	}
 	filterCollectionList = make([]uint32, 0, len(collectionIdDedupMap))
 	for cid := range collectionIdDedupMap {

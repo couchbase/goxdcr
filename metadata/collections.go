@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -1513,7 +1514,7 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 		}
 	}
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
 	}
@@ -1960,7 +1961,7 @@ func (b *CollectionNsMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error
 	var err error
 	if len(errorMap) > 0 {
 		errStr := base.FlattenErrorMap(errorMap)
-		err = fmt.Errorf(errStr)
+		err = errors.New(errStr)
 	}
 	return shaMap, err
 }
@@ -2265,7 +2266,7 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	}
 
 	if len(errorMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return errors.New(base.FlattenErrorMap(errorMap))
 	} else {
 		return nil
 	}
@@ -2571,7 +2572,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 	}
 
 	if len(sourceDNEmap) > 0 {
-		return nil, fmt.Errorf(base.FlattenErrorMap(sourceDNEmap))
+		return nil, errors.New(base.FlattenErrorMap(sourceDNEmap))
 	}
 
 	return outNamespace, nil

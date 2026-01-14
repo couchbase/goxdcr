@@ -3261,7 +3261,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	if !needToReturnErr {
 		return nil
 	} else {
-		return fmt.Errorf(strings.Join(errStrs, " "))
+		return errors.New(strings.Join(errStrs, " "))
 	}
 }
 

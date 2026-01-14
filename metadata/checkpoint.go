@@ -10,6 +10,7 @@ package metadata
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -965,7 +966,7 @@ func (v *VBsCkptsDocMap) SnappyCompress() (VBsCkptsDocSnappyMap, ShaMappingCompr
 	}
 
 	if len(errorMap) > 0 {
-		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return nil, nil, errors.New(base.FlattenErrorMap(errorMap))
 	}
 	return snapCkptMap, snapShaMap, nil
 }
@@ -1005,7 +1006,7 @@ func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompresse
 	}
 
 	if len(errMap) > 0 {
-		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+		return nil, errors.New(base.FlattenErrorMap(errMap))
 	}
 	return regularMap, nil
 }
@@ -1256,7 +1257,7 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 	}
 
 	if len(errorMap) > 0 {
-		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
+		return nil, nil, errors.New(base.FlattenErrorMap(errorMap))
 	}
 
 	return snappy.Encode(nil, marshalledBytes), snapShaMap, nil
@@ -1299,7 +1300,7 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 	}
 
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	}
 	return nil
 }

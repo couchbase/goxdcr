@@ -211,7 +211,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 			errMsg := fmt.Sprintf("Failed to delete checkpoints docs for %v - manual clean up may be required\n", replicationId)
 			ckpt_svc.logger.Errorf(errMsg)
 			errMtx.Lock()
-			errMap["1"] = fmt.Errorf(errMsg)
+			errMap["1"] = errors.New(errMsg)
 			errMtx.Unlock()
 		}
 	}()
@@ -224,7 +224,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 			errMsg := fmt.Sprintf("Failed to clean up internal counter for %v : %v - manual clean up may be required\n", replicationId, cleanupErr)
 			ckpt_svc.logger.Errorf(errMsg)
 			errMtx.Lock()
-			errMap["2"] = fmt.Errorf(errMsg)
+			errMap["2"] = errors.New(errMsg)
 			errMtx.Unlock()
 		}
 
@@ -241,7 +241,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	if len(errMap) == 0 {
 		return nil
 	}
-	return fmt.Errorf(base.FlattenErrorMap(errMap))
+	return errors.New(base.FlattenErrorMap(errMap))
 }
 
 // Need to have correct accounting after deleting checkpoingsDocs
@@ -457,7 +457,7 @@ func (ckpt_svc *CheckpointsService) upsertCheckpointsDoc(replicationId string, c
 	}
 
 	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
+		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
 	}
