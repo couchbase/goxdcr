@@ -106,7 +106,7 @@ func TestPreReplicateMapWithTerseBucketInfo(t *testing.T) {
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_aws_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json"),
-		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndpoints1.json"),
 	}
 
 	for _, fileName := range jsonFiles {

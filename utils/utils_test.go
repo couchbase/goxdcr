@@ -1313,12 +1313,12 @@ func TestShouldUseTerseBucketInfo(t *testing.T) {
 	bucketName := "B1"
 
 	// 1. Positive case - pools_default_buckets_gcp_private_links.json (GCP private endpoints),
-	// privateEndPoints.json & privateEndPoints1.json (AWS private endpoints)
+	// privateEndPoints.json & privateEndpoints1.json (AWS private endpoints)
 	positiveFiles := []string{
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_gcp_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "pools_default_buckets_aws_private_links.json"),
 		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json"),
-		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json"),
+		fmt.Sprintf("%v%v", testExternalDataDir, "privateEndpoints1.json"),
 	}
 
 	for _, fileName := range positiveFiles {

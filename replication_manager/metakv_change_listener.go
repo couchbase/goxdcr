@@ -446,10 +446,6 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
 	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
-	oldExpDelMode := oldSettings.GetExpDelMode()
-	newExpDelMode := newSettings.GetExpDelMode()
-	delFilterWithFEChanged := oldExpDelMode.IsFilterDeletionsWithFESet() != newExpDelMode.IsFilterDeletionsWithFESet()
-	expFilterWithFEChanged := oldExpDelMode.IsFilterExpirationsWithFESet() != newExpDelMode.IsFilterExpirationsWithFESet()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -459,8 +455,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
-		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
-		delFilterWithFEChanged || expFilterWithFEChanged
+		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()
@@ -472,16 +467,12 @@ func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettin
 
 	// Filter changed that require restart
 	skip := false
-	oldExpDelMode := oldSettings.GetExpDelMode()
-	newExpDelMode := newSettings.GetExpDelMode()
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
-	delFilterWithFEChanged := oldExpDelMode.IsFilterDeletionsWithFESet() != newExpDelMode.IsFilterDeletionsWithFESet()
-	expFilterWithFEChanged := oldExpDelMode.IsFilterExpirationsWithFESet() != newExpDelMode.IsFilterExpirationsWithFESet()
 
 	if val, ok := newSettings.Values[metadata.FilterSkipRestreamKey]; ok {
 		skip = val.(bool)
 	}
-	if !skip && (filterChanged || delFilterWithFEChanged || expFilterWithFEChanged) {
+	if !skip && filterChanged {
 		return true
 	}
 

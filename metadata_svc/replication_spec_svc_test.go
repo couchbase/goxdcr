@@ -680,7 +680,7 @@ func TestInvalidPrivateEndpointsSetup(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	tgtBucketInfofileName := fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints1.json")
+	tgtBucketInfofileName := fmt.Sprintf("%v%v", testExternalDataDir, "privateEndpoints1.json")
 	setupMocks(base.ConflictResolutionType_Lww, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability, tgtBucketInfofileName)
 
 	// Assume XMEM replication type
@@ -698,10 +698,10 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 	fmt.Println("============== Test case start: TestValidateDeletionFilterExprForTombstones =================")
 	defer fmt.Println("============== Test case end: TestValidateDeletionFilterExprForTombstones =================")
 
-	// Version 8.1.0 encoded
-	version81Compat := base.EncodeVersionToEffectiveVersion(base.VersionForKeyOnlyDeletionFilterExpr)
-	// Version 8.0.0 encoded
-	preVersion81Compat := base.EncodeVersionToEffectiveVersion(base.VersionForCLoggerSupport)
+	// Version 8.0.1 encoded
+	version80Compat := base.EncodeVersionToEffectiveVersion(base.VersionForKeyOnlyDeletionFilterExpr)
+	// Version 7.2.0 encoded
+	preversion80Compat := base.EncodeVersionToEffectiveVersion(base.Version7_2_1)
 
 	// Helper function to create settings with proper expDelMode bitmask
 	createSettings := func(filterDelWithFE, filterExpWithFE, filterDel, filterExp bool, filterExpr string) *metadata.ReplicationSettings {
@@ -738,19 +738,19 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Neither toggle enabled - no validation needed",
 			settings:         createSettings(false, false, false, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "Both toggles explicitly disabled - no validation needed",
 			settings:         createSettings(false, false, false, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "FilterDeletionsWithFEKey true but FilterDelKey is false",
 			settings:         createSettings(true, false, false, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "must be true when",
@@ -758,7 +758,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "FilterExpirationsWithFEKey true but FilterExpKey is false",
 			settings:         createSettings(false, true, false, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterExpirationsWithFEKey,
 			expectedErrMsg:   "must be true when",
@@ -766,7 +766,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "FilterDeletionsWithFEKey enabled but filter expression missing",
 			settings:         createSettings(true, false, true, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "is mandatory when",
@@ -774,7 +774,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "FilterExpirationsWithFEKey enabled but filter expression missing",
 			settings:         createSettings(false, true, false, true, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterExpirationsWithFEKey,
 			expectedErrMsg:   "is mandatory when",
@@ -782,23 +782,23 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Filter expression is empty",
 			settings:         createSettings(true, false, true, false, ""),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "is mandatory when",
 		},
 		{
-			name:             "Cluster version below 8.1.0",
+			name:             "Cluster version below 8.0.1",
 			settings:         createSettings(true, false, true, false, `META().id = "test"`),
-			clusterVersion:   preVersion81Compat,
+			clusterVersion:   preversion80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
-			expectedErrMsg:   "must be upgraded to atleast 8.1.0",
+			expectedErrMsg:   "must be upgraded to atleast 8.0.1",
 		},
 		{
 			name:             "Filter expression is not key-only",
 			settings:         createSettings(true, false, true, false, "field = 100"),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "should be referencing only the document key",
@@ -806,31 +806,31 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Valid FilterDeletionsWithFEKey with key-only expression",
 			settings:         createSettings(true, false, true, false, `REGEXP_CONTAINS(META().id, "^test")`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "Valid FilterExpirationsWithFEKey with key-only expression",
 			settings:         createSettings(false, true, false, true, `META().id = "doc123"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "Valid both toggles enabled with key-only expression",
 			settings:         createSettings(true, true, true, true, `META().id > "prefix"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "Filter expression with META().id comparison",
 			settings:         createSettings(true, false, true, false, `META().id >= "abc" AND META().id <= "xyz"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 0,
 		},
 		{
 			name:             "Error key uses FilterExpirationsWithFEKey when only it is enabled",
 			settings:         createSettings(false, true, false, true, "body.field = 1"),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterExpirationsWithFEKey,
 			expectedErrMsg:   "should be referencing only the document key",
@@ -838,7 +838,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Both toggles enabled but FilterDelKey is false - fails on FilterDeletionsWithFEKey",
 			settings:         createSettings(true, true, false, true, `META().id = "test"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "must be true when",
@@ -846,7 +846,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Both toggles enabled but FilterExpKey is false - fails on FilterExpirationsWithFEKey",
 			settings:         createSettings(true, true, true, false, `META().id = "test"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterExpirationsWithFEKey,
 			expectedErrMsg:   "must be true when",
@@ -854,7 +854,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 		{
 			name:             "Both toggles enabled but both FilterDelKey and FilterExpKey are false - fails on FilterDeletionsWithFEKey first",
 			settings:         createSettings(true, true, false, false, `META().id = "test"`),
-			clusterVersion:   version81Compat,
+			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
 			expectedErrMsg:   "must be true when",
