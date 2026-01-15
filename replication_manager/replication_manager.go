@@ -695,20 +695,6 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 		}
 	}
 
-	if filterDelsWithFEVal, ok := changedSettingsMap[metadata.FilterDeletionsWithFEKey]; ok {
-		filterDelsWithFE, ok := filterDelsWithFEVal.(bool)
-		if ok && filterDelsWithFE != oldExpDelMode.IsFilterDeletionsWithFESet() {
-			return true
-		}
-	}
-
-	if filterExpsWithFEVal, ok := changedSettingsMap[metadata.FilterExpirationsWithFEKey]; ok {
-		filterExpsWithFE, ok := filterExpsWithFEVal.(bool)
-		if ok && filterExpsWithFE != oldExpDelMode.IsFilterExpirationsWithFESet() {
-			return true
-		}
-	}
-
 	return false
 }
 
