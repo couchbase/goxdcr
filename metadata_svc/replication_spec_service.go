@@ -1713,7 +1713,7 @@ func (service *ReplicationSpecService) getManifests(sourceBucket string, targetB
 // 1. filterDeletion must be true if filterDeletionWithExpression is true.
 // 2. filterExpiration must be true if filterExpirationWithExpression is true.
 // 3. Filter expression is mandatory.
-// 4. Cluster should be atleast 8.1.0 and filter expression must be key-only.
+// 4. Cluster should be atleast 7.6.10 and filter expression must be key-only.
 func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSettings, isDefaultSettings bool, xdcrCompTopology service_def.XDCRCompTopologySvc, errorMap base.ErrorMap) {
 	if errorMap == nil {
 		errorMap = make(base.ErrorMap)
@@ -1778,7 +1778,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 		return
 	}
 
-	// The filter expression must be key-only from 8.1.0. There might be support for body and xattrs based
+	// The filter expression must be key-only from 7.6.10. There might be support for body and xattrs based
 	// in future versions, but not right now.
 	switch {
 	case base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr):
