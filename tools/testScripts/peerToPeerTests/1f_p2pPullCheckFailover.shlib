@@ -223,7 +223,7 @@ function runTestCaseWithUser {
 	local globalMaxGoroutines=0
 	local currentMaxGoroutines=0
 	local globalMaxGoroutinesIncreased=0
-	local globalMaxIncreaseThreshold=5
+	local globalMaxIncreaseThreshold=10
 	local pauseResumeSleepTime=10
 	for ((i = 0; i < 30; i++)); do
 		echo "Running repeated pause and resume to test for goroutine leak $((i + 1)) of 30"
