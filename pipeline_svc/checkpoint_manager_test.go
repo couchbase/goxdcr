@@ -530,7 +530,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	}).Return(nil, nil)
 
 	for kvName, client := range mcMap {
-		utilsMock.On("GetRemoteMemcachedConnection", kvName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(client, nil)
+		utilsMock.On("GetRemoteMemcachedConnection", kvName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(client, nil)
 	}
 
 	for input, output := range preReplicateMap {

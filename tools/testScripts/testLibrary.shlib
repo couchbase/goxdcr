@@ -2363,6 +2363,38 @@ function validateVBTasksProgress {
 	IFS="$OLDIFS"
 }
 
+# validates that it received data (non-0) for the heartbeat metric
+function validateHeartbeatNon0 {
+	local node=$1
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	local filteredOut
+
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+	filteredOut=$(echo "$prometheusOut" | grep xdcr_remote_cluster_monitoring_metadata_received_bytes | grep -v HELP | grep -v TYPE)
+
+	# filteredOut should look like:
+	#xdcr_remote_cluster_monitoring_metadata_received_bytes {targetClusterUUID="3e989fe70c1b93345a2552a53279159c"} 10564
+	#xdcr_remote_cluster_monitoring_metadata_received_bytes {targetClusterUUID="somethingElse"} 10564
+
+	local line
+	local foundNon0=0
+	while read -r line; do
+		local value
+		value=$(echo "$line" | awk '{print $NF}')
+		if ((value > 0)); then
+			foundNon0=1
+			break
+		fi
+	done <<<"$filteredOut"
+	if ((foundNon0 == 0)); then
+		echo "No heartbeat metric with non-0 value found"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+}
+
 # Validates that the result is greater than 0
 function validatePrometheusStatsNon0 {
 	local node=$1
@@ -2377,6 +2409,12 @@ function validatePrometheusStatsNon0 {
 	local count
 	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if [[ -z "${count:-}" ]]; then
+		echo "Stat $prometheusStatsName not found" >&2
+		echo "$prometheusOut"
+		exit 1
+	fi
 
 	if (($count == 0)); then
 		echo "Stat $prometheusStatsName shows 0"

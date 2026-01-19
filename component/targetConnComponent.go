@@ -41,6 +41,8 @@ type RemoteMemcachedComponent struct {
 	UserAgent string
 
 	AlternateAddressCheck func(reference *metadata.RemoteClusterReference) (bool, error)
+
+	DataTransferredIncrementer func(int)
 }
 
 func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string) *RemoteMemcachedComponent {
@@ -83,6 +85,13 @@ func (r *RemoteMemcachedComponent) SetUserAgent(id string) *RemoteMemcachedCompo
 
 func (r *RemoteMemcachedComponent) SetAlternateAddressChecker(checker func(ref *metadata.RemoteClusterReference) (bool, error)) *RemoteMemcachedComponent {
 	r.AlternateAddressCheck = checker
+	return r
+}
+
+// SetDataTransferredIncrementer sets a callback that RemoteMemcachedComponent will faithfully call
+// to keep track of data sent and received through memcached connections
+func (r *RemoteMemcachedComponent) SetDataTransferredIncrementer(incrementer func(int)) *RemoteMemcachedComponent {
+	r.DataTransferredIncrementer = incrementer
 	return r
 }
 
@@ -141,11 +150,13 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 		return err
 	}
 
+	ctx := r.Utils.GetDataUsageTrackingCtx()
 	ssl_port_map, err := r.Utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
-		r.TargetBucketname, r.LoggerImpl, useExternal)
+		r.TargetBucketname, r.LoggerImpl, useExternal, ctx)
 	if err != nil {
 		return err
 	}
+	r.updateDataTransferred(ctx)
 
 	r.SslConStrMap = make(map[string]string)
 
@@ -167,6 +178,15 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 	return nil
 }
 
+func (r *RemoteMemcachedComponent) updateDataTransferred(ctx *utilities.Context) {
+	if ctx != nil {
+		totalDataTransferred := ctx.DataReceived + ctx.DataSent
+		if totalDataTransferred > 0 && r.DataTransferredIncrementer != nil {
+			r.DataTransferredIncrementer(int(totalDataTransferred))
+		}
+	}
+}
+
 func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
 	if r.RefGetter().IsFullEncryption() {
 		_, _, _, certificate, san_in_certificate, client_certificate, client_key, err := r.RefGetter().MyCredentials()
@@ -183,9 +203,13 @@ func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string, ini
 			if err != nil {
 				return nil, err
 			}
+			ctx := r.Utils.GetDataUsageTrackingCtx()
 			// hostAddr not used in full encryption mode
 			_, _, _, err = r.Utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
-				r.TargetUsername(), r.TargetPassword(), certificate, client_certificate, client_key, false /*scramShaEnabled*/, r.LoggerImpl)
+				r.TargetUsername(), r.TargetPassword(), certificate, client_certificate, client_key,
+				false /*scramShaEnabled*/, r.LoggerImpl, ctx)
+			r.updateDataTransferred(ctx)
+
 			if err != nil {
 				return nil, err
 			}

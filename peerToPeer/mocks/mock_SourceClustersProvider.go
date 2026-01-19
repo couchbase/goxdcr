@@ -22,8 +22,55 @@ func (_m *SourceClustersProvider) EXPECT() *SourceClustersProvider_Expecter {
 	return &SourceClustersProvider_Expecter{mock: &_m.Mock}
 }
 
+// GetHeartbeatSizesReceived provides a mock function with no fields
+func (_m *SourceClustersProvider) GetHeartbeatSizesReceived() map[string]int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHeartbeatSizesReceived")
+	}
+
+	var r0 map[string]int64
+	if rf, ok := ret.Get(0).(func() map[string]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int64)
+		}
+	}
+
+	return r0
+}
+
+// SourceClustersProvider_GetHeartbeatSizesReceived_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetHeartbeatSizesReceived'
+type SourceClustersProvider_GetHeartbeatSizesReceived_Call struct {
+	*mock.Call
+}
+
+// GetHeartbeatSizesReceived is a helper method to define mock.On call
+func (_e *SourceClustersProvider_Expecter) GetHeartbeatSizesReceived() *SourceClustersProvider_GetHeartbeatSizesReceived_Call {
+	return &SourceClustersProvider_GetHeartbeatSizesReceived_Call{Call: _e.mock.On("GetHeartbeatSizesReceived")}
+}
+
+func (_c *SourceClustersProvider_GetHeartbeatSizesReceived_Call) Run(run func()) *SourceClustersProvider_GetHeartbeatSizesReceived_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SourceClustersProvider_GetHeartbeatSizesReceived_Call) Return(_a0 map[string]int64) *SourceClustersProvider_GetHeartbeatSizesReceived_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SourceClustersProvider_GetHeartbeatSizesReceived_Call) RunAndReturn(run func() map[string]int64) *SourceClustersProvider_GetHeartbeatSizesReceived_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSourceClustersInfoV1 provides a mock function with no fields
-func (_m *SourceClustersProvider) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error) {
+func (_m *SourceClustersProvider) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
@@ -35,8 +82,9 @@ func (_m *SourceClustersProvider) GetSourceClustersInfoV1() (map[string]string, 
 	var r2 map[string][]string
 	var r3 map[string]time.Time
 	var r4 map[string]time.Time
-	var r5 error
-	if rf, ok := ret.Get(0).(func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error)); ok {
+	var r5 map[string]int64
+	var r6 error
+	if rf, ok := ret.Get(0).(func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error)); ok {
 		return rf()
 	}
 	if rf, ok := ret.Get(0).(func() map[string]string); ok {
@@ -79,13 +127,21 @@ func (_m *SourceClustersProvider) GetSourceClustersInfoV1() (map[string]string, 
 		}
 	}
 
-	if rf, ok := ret.Get(5).(func() error); ok {
+	if rf, ok := ret.Get(5).(func() map[string]int64); ok {
 		r5 = rf()
 	} else {
-		r5 = ret.Error(5)
+		if ret.Get(5) != nil {
+			r5 = ret.Get(5).(map[string]int64)
+		}
 	}
 
-	return r0, r1, r2, r3, r4, r5
+	if rf, ok := ret.Get(6).(func() error); ok {
+		r6 = rf()
+	} else {
+		r6 = ret.Error(6)
+	}
+
+	return r0, r1, r2, r3, r4, r5, r6
 }
 
 // SourceClustersProvider_GetSourceClustersInfoV1_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSourceClustersInfoV1'
@@ -105,12 +161,12 @@ func (_c *SourceClustersProvider_GetSourceClustersInfoV1_Call) Run(run func()) *
 	return _c
 }
 
-func (_c *SourceClustersProvider_GetSourceClustersInfoV1_Call) Return(_a0 map[string]string, _a1 map[string][]*metadata.ReplicationSpecification, _a2 map[string][]string, _a3 map[string]time.Time, _a4 map[string]time.Time, _a5 error) *SourceClustersProvider_GetSourceClustersInfoV1_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5)
+func (_c *SourceClustersProvider_GetSourceClustersInfoV1_Call) Return(_a0 map[string]string, _a1 map[string][]*metadata.ReplicationSpecification, _a2 map[string][]string, _a3 map[string]time.Time, _a4 map[string]time.Time, _a5 map[string]int64, _a6 error) *SourceClustersProvider_GetSourceClustersInfoV1_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5, _a6)
 	return _c
 }
 
-func (_c *SourceClustersProvider_GetSourceClustersInfoV1_Call) RunAndReturn(run func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, error)) *SourceClustersProvider_GetSourceClustersInfoV1_Call {
+func (_c *SourceClustersProvider_GetSourceClustersInfoV1_Call) RunAndReturn(run func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, map[string]time.Time, map[string]time.Time, map[string]int64, error)) *SourceClustersProvider_GetSourceClustersInfoV1_Call {
 	_c.Call.Return(run)
 	return _c
 }

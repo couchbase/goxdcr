@@ -535,6 +535,12 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 
 	// So that unit test can override this and test it
 	ckmgr.periodicMerger = ckmgr.periodicMergerImpl
+
+	// SetDataTransferredIncrementer can only be set once ckmgr is declared
+	ckmgr.SetDataTransferredIncrementer(func(size int) {
+		ckmgr.RaiseEvent(common.NewEvent(common.SystemMetadataTransferred, size, ckmgr, nil, nil))
+	})
+
 	return ckmgr, nil
 }
 

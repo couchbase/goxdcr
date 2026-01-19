@@ -75,6 +75,11 @@ type Utilities struct {
  * passed down level by levels.
  * Currently, this method is being called in many places, and each place that is using
  * this method should ideally be using a passed in interface from another parent level.
+ *
+ * Utilities can provide data usage tracking, but needs to be enabled first
+ * Upon enabling data usage tracking, there are two operational modes:
+ * 1 - Context is provided for each operation - bytes are tracked within the context
+ * 2 - Context is not provided for each operation - bytes are tracked at the utilities level
  */
 func NewUtilities() *Utilities {
 	retVar := &Utilities{
@@ -1038,10 +1043,10 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
  */
 // This method is used to get the SSL port for target nodes - will use alternate fields if requested
 func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
-	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
+	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool, ctx ...*Context) (base.SSLPortMap, error) {
 	logger.Infof("GetMemcachedSSLPort, connStr=%v, useExternal=%v, authMech=%v", connStr, useExternal, authMech)
 
-	bucketInfo, err := u.GetClusterInfo(connStr, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	bucketInfo, err := u.GetClusterInfo(connStr, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, ctx...)
 	if err != nil {
 		return nil, err
 	}
@@ -1423,17 +1428,17 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 	return
 }
 
-func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int) {
+func (u *Utilities) GetClusterInfoWStatusCode(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, error, int) {
 	clusterInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, path, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger, nil)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, path, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &clusterInfo, nil, false, logger, nil, ctx...)
 	if err != nil || statusCode != http.StatusOK {
 		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, path, err, statusCode), statusCode
 	}
 	return clusterInfo, nil, statusCode
 }
 
-func (u *Utilities) GetClusterInfo(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
-	clusterInfo, err, _ := u.GetClusterInfoWStatusCode(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+func (u *Utilities) GetClusterInfo(hostAddr, path, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, error) {
+	clusterInfo, err, _ := u.GetClusterInfoWStatusCode(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, ctx...)
 	return clusterInfo, err
 }
 
@@ -2626,36 +2631,25 @@ func (u *Utilities) QueryRestApiWithAuth(
 	keep_client_alive bool,
 	logger *log.CommonLogger,
 	clientCertKeyPair []tls.Certificate,
+	ctx ...*Context,
 ) (err error, statusCode int) {
 	var http_client *http.Client
 	if authMech != base.HttpAuthMechScramSha {
 		var req *http.Request
-		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, clientCertKeyPair)
+		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, clientCertKeyPair, ctx...)
 		if err != nil {
 			return
 		}
 		err, statusCode = u.doRestCall(req, timeout, out, http_client, logger)
 	} else {
-		err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger)
+		err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger, ctx...)
 
 	}
 	u.cleanupAfterRestCall(keep_client_alive, err, statusCode, http_client, logger)
 	return
 }
 
-func (u *Utilities) queryRestApiWithScramShaAuth(
-	baseURL string,
-	path string,
-	preservePathEncoding bool,
-	username string,
-	password string,
-	httpCommand string,
-	contentType string,
-	body []byte,
-	timeout time.Duration,
-	out interface{},
-	client *http.Client,
-	logger *log.CommonLogger) (error, int, *http.Client) {
+func (u *Utilities) queryRestApiWithScramShaAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, logger *log.CommonLogger, ctx ...*Context) (error, int, *http.Client) {
 
 	logger.Debugf("SCRAM-SHA authentication for user %v%v%v, baseURL=%v, path=%v\n", base.UdTagBegin, username, base.UdTagEnd, baseURL, path)
 
@@ -2676,7 +2670,10 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 		timeout = base.DefaultHttpTimeout
 	}
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{
+			Timeout:   timeout,
+			Transport: u.GetTrackedTransport(ctx...),
+		}
 	} else {
 		client.Timeout = timeout
 	}
@@ -2718,23 +2715,7 @@ func (u *Utilities) GetAuthMode(username string, clientCertificate []byte, path 
 	return userAuthMode
 }
 
-func (u *Utilities) prepareForRestCall(baseURL string,
-	path string,
-	preservePathEncoding bool,
-	username string,
-	password string,
-	authMech base.HttpAuthMech,
-	certificate []byte,
-	san_in_certificate bool,
-	clientCertificate []byte,
-	clientKey []byte,
-	httpCommand string,
-	contentType string,
-	body []byte,
-	client *http.Client,
-	logger *log.CommonLogger,
-	clientCertKeyPair []tls.Certificate,
-) (*http.Client, *http.Request, error) {
+func (u *Utilities) prepareForRestCall(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, client *http.Client, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, context ...*Context) (*http.Client, *http.Request, error) {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
@@ -2746,7 +2727,7 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	}
 
 	if ret_client == nil {
-		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l, clientCertKeyPair)
+		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l, clientCertKeyPair, context...)
 		if err != nil {
 			// req body could be long and unreadable... print just the header
 			redactedReq := base.CloneAndTagHttpRequest(req)
@@ -2896,7 +2877,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 }
 
-func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate) (*http.Client, error) {
+func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, clientCertKeyPair []tls.Certificate, context ...*Context) (*http.Client, error) {
 	var client *http.Client
 	if authMech == base.HttpAuthMechHttps {
 		//using a separate tls connection to verify certificate
@@ -2908,11 +2889,15 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 		conn.Close()
 
 		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
-		client = &http.Client{Transport: tr,
+		wrappedTr := u.GetTLSTrackedTransport(tr, context...)
+		client = &http.Client{Transport: wrappedTr,
 			Timeout: base.DefaultHttpTimeout}
 
 	} else {
-		client = &http.Client{Timeout: base.DefaultHttpTimeout}
+		client = &http.Client{
+			Timeout:   base.DefaultHttpTimeout,
+			Transport: u.GetTrackedTransport(),
+		}
 	}
 	return client, nil
 }
@@ -3186,7 +3171,7 @@ func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, init
 // or called from remote cluster reference refresh code, where a pre-mature timeout can be tolerated
 // This method also returns defaultPoolInfo of target for more flexibility
 // CALLER BEWARE: defaultPoolInfo is returned ONLY when either scram sha or ssl is enabled, so as to avoid unnecessary work
-func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, statusCode int, err error) {
+func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger, ctx ...*Context) (httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, statusCode int, err error) {
 	if !scramShaEnabled && len(certificate) == 0 {
 		// security settings are irrelevant if we are not using scram sha or ssl
 		// note that a nil defaultPoolInfo is returned in this case
@@ -3196,7 +3181,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if scramShaEnabled {
 		// if scram sha is enabled, we will first try to connect to target ns_server using scram sha authentication
 		// even if certificate/clientCert have been provided, we will not use them here because they are not needed by scram sha authentication
-		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger)
+		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger, ctx...)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechScramSha
 		} else if err != TargetMayNotSupportScramShaError {
@@ -3219,7 +3204,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		// if we get here, either scram sha is not enabled, or scram sha is enabled and target ns_server returned 401 error on our scram sha attempt
 		// either way, it is implied that certificate has been provided. use https to connect to target
 		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
-			certificate, clientCertificate, clientKey, logger)
+			certificate, clientCertificate, clientKey, logger, ctx...)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
@@ -3250,8 +3235,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
 		// Cluster is not ScramSha compatible. We need to fallback to https.
 		// Before doing so, we will get default pool using https again to make sure it works
-		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
-			certificate, clientCertificate, clientKey, logger)
+		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger, ctx...)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
@@ -3261,9 +3245,9 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	return httpAuthMech, defaultPoolInfo, statusCode, nil
 }
 
-func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, int, error) {
+func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, int, error) {
 	defaultPoolInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil, ctx...)
 	if err == nil && statusCode == http.StatusOK {
 		// target supports scram sha
 		return defaultPoolInfo, statusCode, nil
@@ -3276,12 +3260,11 @@ func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password
 	}
 }
 
-func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password string,
-	certificate []byte, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, int, error) {
+func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, int, error) {
 	defaultPoolInfo := make(map[string]interface{})
 
 	// we do not know the correct values of sanInCertificate. set sanInCertificate set to true for better security
-	err, statusCode := u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
+	err, statusCode := u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil, ctx...)
 	if err == nil && statusCode == http.StatusOK {
 		return defaultPoolInfo, statusCode, nil
 	} else {
@@ -3290,7 +3273,7 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 			// make a second try with sanInCertificate set to false
 			// after we retrieve target cluster version, we will then re-set sanInCertificate to the appropriate value
 			logger.Debugf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostHttpsAddr)
-			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil)
+			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger, nil, ctx...)
 			if err == nil && statusCode == http.StatusOK {
 				return defaultPoolInfo, statusCode, nil
 			} else if statusCode == http.StatusUnauthorized {
@@ -3996,4 +3979,33 @@ func (u *Utilities) GetTerseBucketInfo(hostAddr, bucketName, username, password 
 		logger.Errorf("Failed to get terse bucket info for bucket '%v'. host=%v, err=%v, statusCode=%v", bucketName, hostAddr, err, statusCode)
 		return nil, fmt.Errorf("failed to get terse bucket info")
 	}
+}
+
+func (u *Utilities) GetTrackedTransport(ctx ...*Context) http.RoundTripper {
+	if len(ctx) > 0 && ctx[0] != nil && ctx[0].TrackDataSentAndReceived {
+		return &onetimeTrackedTransport{
+			Transport: http.DefaultTransport,
+			BytesSent: &ctx[0].DataSent,
+			BytesRecv: &ctx[0].DataReceived,
+		}
+	}
+
+	return http.DefaultTransport
+}
+
+// GetDataUsageTrackingCtx() is used to create a context that tracks data usage
+// If it is not used, the data will be accounted in a untracked "bucket"
+func (u *Utilities) GetDataUsageTrackingCtx() *Context {
+	return NewDataTrackingCtx()
+}
+
+func (u *Utilities) GetTLSTrackedTransport(tr *http.Transport, ctx ...*Context) http.RoundTripper {
+	if len(ctx) > 0 && ctx[0] != nil && ctx[0].TrackDataSentAndReceived && tr != nil {
+		return &onetimeTrackedTransport{
+			Transport: tr,
+			BytesSent: &ctx[0].DataSent,
+			BytesRecv: &ctx[0].DataReceived,
+		}
+	}
+	return tr
 }

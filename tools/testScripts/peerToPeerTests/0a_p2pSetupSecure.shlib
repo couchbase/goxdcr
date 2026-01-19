@@ -71,6 +71,9 @@ function runOneReplicationCycleAndPause {
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 
+	sleep 5
+	validatePrometheusStatsNon0 "C1" "B0" "B1" "xdcr_sys_metadata_transferred_bytes"
+
 	echo "Waiting 20 seconds before checking item count"
 	sleep 20
 	checkItemCnt "C1" "B0" $CBWORKLOAD_COLLECTION_NUM_ITEMS
@@ -136,6 +139,9 @@ function runOneRebalanceCycle {
 
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
+
+	validateHeartbeatNon0 "C1"
+	validateHeartbeatNon0 "C2"
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
