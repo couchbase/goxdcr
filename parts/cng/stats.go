@@ -24,6 +24,9 @@ type Stats struct {
 
 	// Number of items enqueuing was blocked due to full queue
 	enqueueBlocked uint64
+
+	// Number of times upstream error reporter was missing for a vb
+	errUpstreamReporterMissingCount uint64
 }
 
 func NewStats() *Stats {
@@ -54,6 +57,10 @@ func (s *Stats) IncEnqueueBlocked(count uint64) {
 	atomic.AddUint64(&s.enqueueBlocked, count)
 }
 
+func (s *Stats) IncErrReporterMissingCount(count uint64) {
+	atomic.AddUint64(&s.errUpstreamReporterMissingCount, count)
+}
+
 func (s *Stats) String() string {
 	docsSent := atomic.LoadUint64(&s.docsSent)
 	bytesSent := atomic.LoadUint64(&s.bytesSent)
@@ -61,9 +68,10 @@ func (s *Stats) String() string {
 	connRetryCount := atomic.LoadUint64(&s.connRetryCount)
 	itemsInQueue := atomic.LoadUint64(&s.itemsInQueue)
 	enqueuedBlocked := atomic.LoadUint64(&s.enqueueBlocked)
+	errUpstreamReporterMissingCount := atomic.LoadUint64(&s.errUpstreamReporterMissingCount)
 
-	return fmt.Sprintf("DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v",
-		docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked)
+	return fmt.Sprintf("DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v",
+		docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount)
 }
 
 // handleNozzleStats updates the nozzle stats based on the transfer result

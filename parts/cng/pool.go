@@ -282,9 +282,9 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 				return
 			}
 
-			cngErrCode := mapErrorToCode(err)
+			cngErr := mapToCNGError(err)
 			// Check if it's a network error that requires connection recreation
-			if !p.isRetryableError(err, cngErrCode) {
+			if !p.isRetryableError(err, cngErr.Code) {
 				err = fmt.Errorf("non-network error, connIndex=%d, err: %w", index, err)
 				return
 			}
@@ -292,7 +292,7 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
 			st.RetryCount++
 
-			if cngErrCode == ERR_GRPC_DEADLINE_EXCEEDED {
+			if cngErr.Code == ERR_GRPC_DEADLINE_EXCEEDED {
 				// For deadline exceeded errors, we do not attempt to recreate the connection
 				continue
 			}

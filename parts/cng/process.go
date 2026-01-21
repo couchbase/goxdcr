@@ -11,6 +11,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// processReq is an entry point to handle a single mutation request
+// The error during processing is mapped to CNGError always.
+// The mapping of the error assigns appropriate CNGErrorCode to the error
+// these codes are used by the downstream logic like retries, event raising etc.
 func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (err error) {
 	trace, err := getTrace(ctx)
 	if err != nil {
@@ -20,6 +24,10 @@ func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (er
 	callStat, err := n.connPool.WithConn(func(client XDCRClient) (err error) {
 		return n.transfer(ctx, client, req)
 	})
+
+	if err != nil {
+		err = mapToCNGError(err)
+	}
 
 	trace.retryCount = callStat.RetryCount
 
@@ -112,12 +120,13 @@ func (c *conflictCheckRsp) String() string {
 // An error returned indicates that the conflict check failed.
 // The caller must check sourceWon only if err is nil
 func (n *Nozzle) conflictCheck(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp conflictCheckRsp, err error) {
-	// CNG TODO: check for optimistic replication
 	_, err = n.CheckDocument(ctx, client, req)
 	err = handleConflictCheckErr(err, &rsp)
 	return
 }
 
+// handleConflictCheckErr inspects the error returned from CheckDocument RPC
+// It only checks for error pertaining to conflict resolution and the rest are returned as is
 func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
 	err = origErr
 	if err == nil {
@@ -146,10 +155,6 @@ func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
 					err = nil
 					rsp.sourceWon = true
 					rsp.reason = ConflictReasonDocMissing
-				case ResourceTypeCollection:
-					err = ErrCollectionNotFound
-				case ResourceTypeScope:
-					err = ErrScopeNotFound
 				}
 			}
 		}
