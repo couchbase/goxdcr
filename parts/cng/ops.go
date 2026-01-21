@@ -63,6 +63,9 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
 	defer cancel()
 	rsp, err = client.CheckDocument(ctxWithTimeout, checkDocReq)
+	if err != nil {
+		n.Logger().Tracef("error in checkDoc rpc err=%v", err)
+	}
 	return
 }
 

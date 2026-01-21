@@ -20,11 +20,12 @@ func (n *Nozzle) raiseErrorEvent(req *base.WrappedMCRequest, t *Trace, err error
 
 	n.Logger().Tracef("mutation failed, err=%v", err)
 
-	errCode := mapErrorToCode(err)
-	if errCode == ERR_UNKNOWN {
+	cngErr := mapToCNGError(err)
+
+	if cngErr.Code == ERR_UNKNOWN {
 		n.RaiseEvent(common.NewEvent(common.DataSentFailedUnknownStatus, nil, n, []any{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, nil))
 	} else {
-		n.RaiseEvent(common.NewEvent(common.DataSentFailed, errCode, n, []any{req.GetSourceVB(), req.GetTargetVB(), req.Seqno, errCode}, nil))
+		n.RaiseEvent(common.NewEvent(common.DataSentFailed, cngErr.Code, n, []any{req.GetSourceVB(), req.GetTargetVB(), req.Seqno, cngErr.Code}, nil))
 	}
 }
 

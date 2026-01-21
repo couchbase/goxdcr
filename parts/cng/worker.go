@@ -41,16 +41,37 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 			trace.commitTime = time.Since(req.Start_time)
 
 			n.handleNozzleStats(&trace, err)
+			n.raiseUpstreamErr(req, err)
 			n.raiseEvents(req, &trace, err)
 			if err == nil {
 				return
 			}
 
-			if !isErrorRetryable(err) {
+			if !isMutationRetryable(err) {
 				return
 			}
 
 			time.Sleep(ProcessRetryInterval)
 		}
 	}
+}
+
+// raiseUpstreamErr raises errors back to upstream if applicable
+func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) {
+	if err == nil {
+		return
+	}
+
+	if !isErrorUpstreamReportable(err) {
+		return
+	}
+
+	vbno := req.GetSourceVB()
+	reportFn, exists := n.upstreamErrReporterMap[vbno]
+	if !exists {
+		n.stats.IncErrReporterMissingCount(1)
+		return
+	}
+
+	reportFn(req)
 }
