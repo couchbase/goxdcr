@@ -176,8 +176,7 @@ func run_testcase() error {
 func testPreReplicate(capi_svc *service_impl.CAPIService, remoteBucket *service_def.RemoteBucketInfo, vbno uint16) (metadata.TargetVBOpaque, error) {
 
 	knownRemoteVBStatus := &service_def.RemoteVBReplicationStatus{VBNo: vbno, VBOpaque: &metadata.TargetVBUuid{0}, VBSeqno: 0}
-	bVBMatch, current_remoteVBUUID, err := capi_svc.PreReplicate(remoteBucket,
-		knownRemoteVBStatus, true)
+	bVBMatch, current_remoteVBUUID, err := capi_svc.PreReplicate(remoteBucket, knownRemoteVBStatus, true, nil)
 
 	logger.Infof("_pre_replicate returns for vb=%v:\n", knownRemoteVBStatus.VBNo)
 	logger.Infof("bVBMatch=%v, current_remteVBUUID=%v, err=%v\n", bVBMatch, current_remoteVBUUID, err)

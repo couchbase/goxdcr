@@ -198,7 +198,7 @@ func TestCheckpointsValidityWithPreReplicate(t *testing.T) {
 	capiSvcErr := &service_def.CAPIService{}
 	var preReplicateCounter uint32
 	// capiSvc that returns error
-	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		atomic.AddUint32(&preReplicateCounter, 1)
 	}).Return(false, nil, fmt.Errorf("dummy"))
 	ckptMgr.capi_svc = capiSvcErr
@@ -212,7 +212,7 @@ func TestCheckpointsValidityWithPreReplicate(t *testing.T) {
 
 	// Replace with a customized one that returns positive results, like positive match
 	capiSvcGood := &service_def.CAPIService{}
-	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		atomic.AddUint32(&preReplicateCounter, 1)
 	}).Return(true, nil, nil)
 	ckptMgr.capi_svc = capiSvcGood
@@ -529,12 +529,14 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 		utilsReal.ExponentialBackoffExecutorWithFinishSignal(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc2), args.Get(5), args.Get(6).(chan bool))
 	}).Return(nil, nil)
 
+	utilsMock.On("GetDataUsageTrackingCtx").Return(nil)
+
 	for kvName, client := range mcMap {
 		utilsMock.On("GetRemoteMemcachedConnection", kvName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(client, nil)
 	}
 
 	for input, output := range preReplicateMap {
-		capiSvc.On("PreReplicate", mock.Anything, input, mock.Anything).Return(true, output, nil)
+		capiSvc.On("PreReplicate", mock.Anything, input, mock.Anything, mock.Anything, mock.Anything).Return(true, output, nil)
 	}
 
 	statsMgr.On("SetVBCountMetrics", mock.Anything, mock.Anything).Return(nil)
@@ -1343,7 +1345,7 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 	capiSvcErr := &service_def.CAPIService{}
 	var preReplicateCounter uint32
 	// capiSvc that returns error
-	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		atomic.AddUint32(&preReplicateCounter, 1)
 	}).Return(false, nil, fmt.Errorf("dummy"))
 	ckptMgr.capi_svc = capiSvcErr
@@ -1354,12 +1356,12 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 	dummyRemBucketInfo := &service_def_real.RemoteBucketInfo{}
 	tgtTs := &service_def_real.RemoteVBReplicationStatus{}
 
-	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs, nil)
 	assert.NotNil(err)
 	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
 	assert.Len(cacheCtx.lastQueriedTimers, 1)
 	// Immediately do another pull, call should not increment, same error
-	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs, nil)
 	assert.NotNil(err)
 	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
 	assert.Len(cacheCtx.lastQueriedTimers, 1)
@@ -1370,19 +1372,19 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 
 	// Replace with a customized one that returns positive results, like positive match
 	capiSvcGood := &service_def.CAPIService{}
-	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		atomic.AddUint32(&preReplicateCounter, 1)
 	}).Return(true, nil, nil)
 	ckptMgr.capi_svc = capiSvcGood
 
 	cacheCtx = ckptMgr.newGlobalCkptPrereplicateCacheCtx(1*time.Second, 250*time.Millisecond)
-	match, _, err := cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	match, _, err := cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs, nil)
 	assert.Nil(err)
 	assert.True(match)
 	assert.Equal(uint32(2), atomic.LoadUint32(&preReplicateCounter))
 	assert.Len(cacheCtx.lastQueriedTimers, 1)
 	// Immediately do another pull, call should not increment, same error
-	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs, nil)
 	assert.Nil(err)
 	assert.True(match)
 	assert.Equal(uint32(2), atomic.LoadUint32(&preReplicateCounter))

@@ -293,6 +293,11 @@ func newCheckpointSyncHelper() *checkpointSyncHelper {
 	return helper
 }
 
+type preReplicateCtx struct {
+	globalCtx       *globalCkptPrereplicateCacheCtx
+	dataTrackingCtx *utilities.Context
+}
+
 // globalCkptPrereplicateCtx is used to cache retrieved target pre-replicate information to be reused
 // with the caveat that if a period of time has passed, the cache will expire to ensure that
 // no outdateed information is reused
@@ -305,7 +310,7 @@ type globalCkptPrereplicateCacheCtx struct {
 	expireThreshold   time.Duration
 	errorThreshold    time.Duration
 
-	_preReplicate func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error)
+	_preReplicate func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error)
 }
 
 // write-lock must be held already
@@ -324,7 +329,7 @@ func (g *globalCkptPrereplicateCacheCtx) createTimer(tgtTs *service_def.RemoteVB
 	})
 }
 
-func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.RemoteBucketInfo, tgtTs *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error) {
+func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.RemoteBucketInfo, tgtTs *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
 	var needToExecuteRPC bool
 
 	for !needToExecuteRPC {
@@ -356,7 +361,7 @@ func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.
 	}
 
 	// At this point, need to query
-	bMatch, currentRemoteVBOpaque, err := g._preReplicate(remoteBucket, tgtTs)
+	bMatch, currentRemoteVBOpaque, err := g._preReplicate(remoteBucket, tgtTs, ctx)
 	// store the info for others to pull
 	g.mtx.Lock()
 	if _, exists := g.lastQueriedTimers[tgtTs.String()]; !exists {
@@ -381,7 +386,17 @@ func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.
 	return bMatch, currentRemoteVBOpaque, err
 }
 
+func (ckptMgr *CheckpointManager) trackDataTransfer(ctx *utilities.Context) {
+	if ctx == nil {
+		return
+	}
+	totalDataTransferred := ctx.DataReceived + ctx.DataSent
+	if totalDataTransferred > 0 && ckptMgr.DataTransferredIncrementer != nil {
+		ckptMgr.DataTransferredIncrementer(int(totalDataTransferred))
+	}
+}
 func (ckptMgr *CheckpointManager) newGlobalCkptPrereplicateCacheCtx(expireThreshold, errThreshold time.Duration) *globalCkptPrereplicateCacheCtx {
+
 	return &globalCkptPrereplicateCacheCtx{
 		lastQueriedTimers: map[string]*time.Timer{},
 		lastQueriedbMatch: map[string]bool{},
@@ -390,8 +405,8 @@ func (ckptMgr *CheckpointManager) newGlobalCkptPrereplicateCacheCtx(expireThresh
 		mtx:               &sync.RWMutex{},
 		expireThreshold:   expireThreshold,
 		errorThreshold:    errThreshold,
-		_preReplicate: func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus) (bool, metadata.TargetVBOpaque, error) {
-			return ckptMgr.capi_svc.PreReplicate(info, status, true)
+		_preReplicate: func(info *service_def.RemoteBucketInfo, status *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
+			return ckptMgr.capi_svc.PreReplicate(info, status, true, ctx)
 		},
 	}
 }
@@ -1300,11 +1315,14 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	var lowestLastSuccessfulSourceManifestId uint64
 	var vbtsStartedWithNon0 uint32
 
-	var preReplicateCacheCtx *globalCkptPrereplicateCacheCtx
+	ckmgrPreReplicateCtx := &preReplicateCtx{
+		dataTrackingCtx: ckmgr.utils.GetDataUsageTrackingCtx(),
+	}
 	if ckmgr.isVariableVBMode() {
-		preReplicateCacheCtx = ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
+		ckmgrPreReplicateCtx.globalCtx = ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
 			time.Duration(base.GlobalPreReplicateCacheErrorExpireTimeSecs)*time.Second)
 	}
+	defer ckmgr.trackDataTransfer(ckmgrPreReplicateCtx.dataTrackingCtx)
 
 	for {
 		end_index := start_index + workload
@@ -1313,7 +1331,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, getter_wait_grp, err_ch, &lowestLastSuccessfulSourceManifestId, &vbtsStartedWithNon0, preReplicateCacheCtx)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, getter_wait_grp, err_ch, &lowestLastSuccessfulSourceManifestId, &vbtsStartedWithNon0, ckmgrPreReplicateCtx)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -1591,13 +1609,13 @@ func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata
 	}
 }
 
-func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc, waitGrp *sync.WaitGroup, err_ch chan interface{}, sharedLowestSuccessfulManifestId *uint64, vbtsStartedNon0 *uint32, preReplicateCacheCtx *globalCkptPrereplicateCacheCtx) {
+func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc, waitGrp *sync.WaitGroup, err_ch chan interface{}, sharedLowestSuccessfulManifestId *uint64, vbtsStartedNon0 *uint32, preReplicateCtx *preReplicateCtx) {
 	ckmgr.logger.Infof("StartSeqnoGetter %v is started to do _pre_prelicate for vbs %v\n", getter_id, listOfVbs)
 	defer waitGrp.Done()
 
 	for _, vbno := range listOfVbs {
 		seqnoMax := ckmgr.getMaxSeqno(vbno)
-		vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCacheCtx)
+		vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCtx)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
@@ -1636,7 +1654,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	}
 }
 
-func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx *globalCkptPrereplicateCacheCtx) error {
+func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx *preReplicateCtx) error {
 	obj, ok := ckmgr.cur_ckpts[vbno]
 	if !ok {
 		err := fmt.Errorf("trying to check vbopaque on vb=%v which is not in MyVBList", vbno)
@@ -1672,7 +1690,7 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 			return err
 		}
 	} else {
-		_, err := ckmgr.populateTargetVBOpaque(vbno, service_def.NewEmptyRemoteVBReplicationStatus(vbno))
+		_, err := ckmgr.populateTargetVBOpaque(vbno, service_def.NewEmptyRemoteVBReplicationStatus(vbno), ctx)
 		if err != nil {
 			ckmgr.logger.Errorf("populateTargetVBOpaque for vb %v had err %v", vbno, err)
 			return err
@@ -1681,8 +1699,8 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 	return nil
 }
 
-func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus) (bMatch bool, err error) {
-	bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, ckmgr.support_ckpt)
+func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bMatch bool, err error) {
+	bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, ckmgr.support_ckpt, ctx.dataTrackingCtx)
 	if err != nil {
 		ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 		return
@@ -1696,9 +1714,9 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimest
 	return
 }
 
-func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *globalCkptPrereplicateCacheCtx) (bool, error) {
+func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bool, error) {
 	for targetVbno, oneTargetTs := range globalTs {
-		bMatch, current_remoteVBOpaque, err := ctx.preReplicate(ckmgr.remote_bucket, oneTargetTs)
+		bMatch, current_remoteVBOpaque, err := ctx.globalCtx.preReplicate(ckmgr.remote_bucket, oneTargetTs, ctx.dataTrackingCtx)
 		if err != nil {
 			ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 			return false, err
@@ -1713,7 +1731,7 @@ func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, global
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, base.VBCountMetric, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *preReplicateCtx) (*base.VBTimestamp, base.VBCountMetric, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -1805,11 +1823,11 @@ POPULATE:
 	return vbts, vbStatMap, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingPair, nil
 }
 
-func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *globalCkptPrereplicateCacheCtx) (bool, error) {
+func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bool, error) {
 	if ckmgr.isVariableVBMode() {
 		return ckmgr.populateGlobalTargetVBOpaque(vbno, globalTs, ctx)
 	} else {
-		return ckmgr.populateTargetVBOpaque(vbno, targetTimestamp)
+		return ckmgr.populateTargetVBOpaque(vbno, targetTimestamp, ctx)
 	}
 }
 
@@ -1944,7 +1962,7 @@ type globalCkptResumeData struct {
 	globalTsBrokenMaps map[uint16]metadata.CollectionNamespaceMapping
 }
 
-func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16, ctx *globalCkptPrereplicateCacheCtx) (*base.VBTimestamp, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
+func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16, ctx *preReplicateCtx) (*base.VBTimestamp, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	if ckmgr.isVariableVBMode() {
 		vbts.ManifestIDs.GlobalTargetManifestIds = make(map[uint16]uint64)
@@ -3064,13 +3082,15 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	ckmgr.logger.Infof("vb=%v, current_start_seqno=%v, max_seqno=%v\n", vbno, pipeline_start_seqno.Seqno, max_seqno)
 
-	var rollbackCtx *globalCkptPrereplicateCacheCtx
+	rollbackPreReplicateCtx := &preReplicateCtx{
+		dataTrackingCtx: ckmgr.utils.GetDataUsageTrackingCtx(),
+	}
 	if ckmgr.isVariableVBMode() {
 		// If one VB starts rollback, it'll affect many other VBs in the same timeframe. Get a single instance of rollback context
-		rollbackCtx = ckmgr.getRollbackCtx()
+		rollbackPreReplicateCtx.globalCtx = ckmgr.getRollbackCtx()
 	}
-	//vbts, vbStats, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackCtx)
-	vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackCtx)
+	vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackPreReplicateCtx)
+	defer ckmgr.trackDataTransfer(rollbackPreReplicateCtx.dataTrackingCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -4336,8 +4356,12 @@ func (ckmgr *CheckpointManager) ClearBrokenmapHistory(tgtManifestIdsUsed map[uin
 }
 
 func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps []metadata.VBsCkptsDocMap) []metadata.VBsCkptsDocMap {
-	preReplicateCtx := ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
-		time.Duration(base.GlobalPreReplicateCacheErrorExpireTimeSecs)*time.Second)
+	ctx := &preReplicateCtx{
+		globalCtx: ckmgr.newGlobalCkptPrereplicateCacheCtx(time.Duration(base.GlobalPreReplicateCacheExpireTimeSecs)*time.Second,
+			time.Duration(base.GlobalPreReplicateCacheErrorExpireTimeSecs)*time.Second),
+		dataTrackingCtx: ckmgr.utils.GetDataUsageTrackingCtx(),
+	}
+	defer ckmgr.trackDataTransfer(ctx.dataTrackingCtx)
 
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
@@ -4366,7 +4390,7 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 					continue
 				}
 
-				bMatch, err := ckmgr.IsCkptRecordValidBasedOnPreReplicate(ckptRecord, preReplicateCtx, vbno)
+				bMatch, err := ckmgr.IsCkptRecordValidBasedOnPreReplicate(ckptRecord, ctx, vbno)
 				if err != nil {
 					continue
 				}
@@ -4453,7 +4477,7 @@ func IsCkptRecordValidBasedOnTgtFailover(ckptRecord *metadata.CheckpointRecord, 
 	return true
 }
 
-func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord *metadata.CheckpointRecord, preReplicateCtx *globalCkptPrereplicateCacheCtx, vbno uint16) (bool, error) {
+func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord *metadata.CheckpointRecord, ctx *preReplicateCtx, vbno uint16) (bool, error) {
 	if ckptRecord == nil {
 		return false, nil
 	}
@@ -4464,7 +4488,7 @@ func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord 
 			VBSeqno:  ckptRecord.Target_Seqno,
 			VBNo:     vbno,
 		}
-		bmatch, _, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, true)
+		bmatch, _, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, true, ctx.dataTrackingCtx)
 		if err != nil {
 			ckmgr.logger.Errorf("IsCkptRecordValidBasedOnPreReplicate targetTimeStamp (%v,%v,%v) error: %v",
 				vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
@@ -4477,7 +4501,7 @@ func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord 
 			VBSeqno:  tgtTs.Target_Seqno,
 			VBNo:     tgtno,
 		}
-		bmatch, _, err := preReplicateCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp)
+		bmatch, _, err := ctx.globalCtx.preReplicate(ckmgr.remote_bucket, targetTimestamp, ctx.dataTrackingCtx)
 		if err != nil {
 			ckmgr.logger.Errorf("IsCkptRecordValidBasedOnPreReplicate tgtTs (%v,%v,%v) error: %v",
 				tgtno, tgtTs.Target_vb_opaque, tgtTs.Target_Seqno, err)

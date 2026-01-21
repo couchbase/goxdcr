@@ -2881,7 +2881,8 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 	out interface{},
 	client *http.Client,
 	keep_client_alive bool,
-	logger *log.CommonLogger, num_retry int) (err error, statusCode int) {
+	logger *log.CommonLogger, num_retry int,
+	ctx ...*Context) (err error, statusCode int) {
 
 	var http_client *http.Client = nil
 	var req *http.Request = nil
@@ -2889,7 +2890,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 	for i := 0; i < num_retry; i++ {
 		if authMech != base.HttpAuthMechScramSha {
-			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, nil)
+			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, nil, ctx...)
 			if err == nil {
 				err, statusCode = u.doRestCall(req, timeout, out, http_client, logger)
 			}
@@ -2898,7 +2899,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 				break
 			}
 		} else {
-			err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger)
+			err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger, ctx...)
 			if err == nil {
 				break
 			}
@@ -2937,7 +2938,7 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 	} else {
 		client = &http.Client{
 			Timeout:   base.DefaultHttpTimeout,
-			Transport: u.GetTrackedTransport(),
+			Transport: u.GetTrackedTransport(context...),
 		}
 	}
 	return client, nil

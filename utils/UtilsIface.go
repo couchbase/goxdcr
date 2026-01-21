@@ -203,7 +203,7 @@ type UtilsIface interface {
 	InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech,
 		certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte,
 		insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration,
-		out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int)
+		out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int, ctx ...*Context) (error, int)
 	LocalPool(localConnectStr string) (couchbase.Pool, error)
 	NewTCPConn(hostName string) (*net.TCPConn, error)
 	QueryRestApi(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, logger *log.CommonLogger) (error, int)

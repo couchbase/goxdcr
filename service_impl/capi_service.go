@@ -109,8 +109,7 @@ func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface)
 //	err
 //
 // Refer to ns_server/deps/ns_couchdb/src/capi_replication.erl for server side source code
-func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
-	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
+func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo, knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool, ctx *utilities.Context) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, knownRemoteVBStatus.VBNo, PRE_REPLICATE_CMD)
 	if err != nil {
 		return
@@ -123,8 +122,9 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	if capi_svc.logger.GetLogLevel() >= log.LogLevelDebug {
 		capi_svc.logger.Debugf("request to _pre_replicate = %v\n", api_base.CloneAndRedact())
 	}
+
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
+	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService, ctx)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
 		capi_svc.logger.Errorf("Calling _pre_replicate on %v failed for vb=%v, err=%v\n", api_base.url, knownRemoteVBStatus.VBNo, err)
@@ -158,7 +158,7 @@ func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.Remot
 	api_base.body["vb"] = vbno
 	api_base.body["vbopaque"] = remoteVBOpaque.Value()
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService)
+	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService, nil)
 
 	if err == nil && status_code == 400 {
 		vbOpaque, err := getVBOpaqueFromRespMap(status_code, respMap, vbno)
@@ -289,14 +289,14 @@ func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, known
 	return nil
 }
 
-func (capi_svc *CAPIService) send_post(api_base *apiRequest, client *http.Client, num_retry int) (int, map[string]interface{}, error) {
+func (capi_svc *CAPIService) send_post(api_base *apiRequest, client *http.Client, num_retry int, ctx *utilities.Context) (int, map[string]interface{}, error) {
 	var ret_map = make(map[string]interface{})
 	body, err := json.Marshal(api_base.body)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	err, statusCode := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, api_base.path, false, api_base.username, api_base.password, api_base.httpAuthMech, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, false, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry)
+	err, statusCode := capi_svc.utils.InvokeRestWithRetryWithAuth(api_base.url, api_base.path, false, api_base.username, api_base.password, api_base.httpAuthMech, api_base.certificate, api_base.SANInCertificate, api_base.clientCertificate, api_base.clientKey, false, base.MethodPost, base.JsonContentType, body, 0, &ret_map, client, true, capi_svc.logger, num_retry, ctx)
 	return statusCode, ret_map, err
 }
 

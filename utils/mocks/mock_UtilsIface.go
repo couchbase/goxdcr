@@ -5697,9 +5697,16 @@ func (_c *UtilsIface_InvokeRestWithRetry_Call) RunAndReturn(run func(string, str
 	return _c
 }
 
-// InvokeRestWithRetryWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
-func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int) {
-	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+// InvokeRestWithRetryWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry, ctx
+func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int, ctx ...*utils.Context) (error, int) {
+	_va := make([]interface{}, len(ctx))
+	for _i := range ctx {
+		_va[_i] = ctx[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for InvokeRestWithRetryWithAuth")
@@ -5707,17 +5714,17 @@ func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, p
 
 	var r0 error
 	var r1 int
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) (error, int)); ok {
-		return rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int, ...*utils.Context) (error, int)); ok {
+		return rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry, ctx...)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) error); ok {
-		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int, ...*utils.Context) error); ok {
+		r0 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry, ctx...)
 	} else {
 		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) int); ok {
-		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+	if rf, ok := ret.Get(1).(func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int, ...*utils.Context) int); ok {
+		r1 = rf(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry, ctx...)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
@@ -5751,13 +5758,21 @@ type UtilsIface_InvokeRestWithRetryWithAuth_Call struct {
 //   - keep_client_alive bool
 //   - logger *log.CommonLogger
 //   - num_retry int
-func (_e *UtilsIface_Expecter) InvokeRestWithRetryWithAuth(baseURL interface{}, path interface{}, preservePathEncoding interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, insecureSkipVerify interface{}, httpCommand interface{}, contentType interface{}, body interface{}, timeout interface{}, out interface{}, client interface{}, keep_client_alive interface{}, logger interface{}, num_retry interface{}) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
-	return &UtilsIface_InvokeRestWithRetryWithAuth_Call{Call: _e.mock.On("InvokeRestWithRetryWithAuth", baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)}
+//   - ctx ...*utils.Context
+func (_e *UtilsIface_Expecter) InvokeRestWithRetryWithAuth(baseURL interface{}, path interface{}, preservePathEncoding interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, san_in_certificate interface{}, clientCertificate interface{}, clientKey interface{}, insecureSkipVerify interface{}, httpCommand interface{}, contentType interface{}, body interface{}, timeout interface{}, out interface{}, client interface{}, keep_client_alive interface{}, logger interface{}, num_retry interface{}, ctx ...interface{}) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
+	return &UtilsIface_InvokeRestWithRetryWithAuth_Call{Call: _e.mock.On("InvokeRestWithRetryWithAuth",
+		append([]interface{}{baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry}, ctx...)...)}
 }
 
-func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) Run(run func(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int)) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
+func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) Run(run func(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int, ctx ...*utils.Context)) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(string), args[4].(string), args[5].(base.HttpAuthMech), args[6].([]byte), args[7].(bool), args[8].([]byte), args[9].([]byte), args[10].(bool), args[11].(string), args[12].(string), args[13].([]byte), args[14].(time.Duration), args[15].(interface{}), args[16].(*http.Client), args[17].(bool), args[18].(*log.CommonLogger), args[19].(int))
+		variadicArgs := make([]*utils.Context, len(args)-20)
+		for i, a := range args[20:] {
+			if a != nil {
+				variadicArgs[i] = a.(*utils.Context)
+			}
+		}
+		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(string), args[4].(string), args[5].(base.HttpAuthMech), args[6].([]byte), args[7].(bool), args[8].([]byte), args[9].([]byte), args[10].(bool), args[11].(string), args[12].(string), args[13].([]byte), args[14].(time.Duration), args[15].(interface{}), args[16].(*http.Client), args[17].(bool), args[18].(*log.CommonLogger), args[19].(int), variadicArgs...)
 	})
 	return _c
 }
@@ -5767,7 +5782,7 @@ func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) Return(_a0 error, _a1 int
 	return _c
 }
 
-func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) RunAndReturn(run func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int) (error, int)) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
+func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) RunAndReturn(run func(string, string, bool, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, bool, string, string, []byte, time.Duration, interface{}, *http.Client, bool, *log.CommonLogger, int, ...*utils.Context) (error, int)) *UtilsIface_InvokeRestWithRetryWithAuth_Call {
 	_c.Call.Return(run)
 	return _c
 }

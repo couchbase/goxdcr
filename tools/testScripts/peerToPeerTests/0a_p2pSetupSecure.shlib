@@ -71,6 +71,8 @@ function runOneReplicationCycleAndPause {
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 
+	# When creating a secure replication, there will be secure VB Map data trasnferred. Use this
+	# information to validate prometheus stats
 	sleep 5
 	validatePrometheusStatsNon0 "C1" "B0" "B1" "xdcr_sys_metadata_transferred_bytes"
 

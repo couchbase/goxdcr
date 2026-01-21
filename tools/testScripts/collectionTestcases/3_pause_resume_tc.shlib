@@ -105,6 +105,10 @@ function pauseAndResumeMultiples {
 		checkUnidirectionalChangesLeft
 		grepForPanics
 
+		# After kill, stats would be 0 - and this should validate pre-replicate actually incremented the stats
+		# for checkpointing
+		validatePrometheusStatsNon0 "C1" "B1" "B2" "xdcr_sys_metadata_transferred_bytes"
+
 		# Run data load again
 		oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
 		runDataLoad "$i"
