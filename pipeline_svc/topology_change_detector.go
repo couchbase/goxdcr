@@ -57,18 +57,13 @@ type TopologyChangeDetectorSvc struct {
 	// list of vbs managed by the current node in the last topology change check time
 	// used for source topology change detection
 	vblist_last []uint16
-	// vb server map of target bucket when pipeline was first started
-	// used for target topology change detection
-	target_vb_server_map_original map[uint16]string
-	// kvVbMap of target bucket when pipeline was first started
-	// used for logging only
-	targetKvVbMapOriginal base.KvVBMapType
-	// vb server map of target bucket in the last topology change check time
-	// used for target topology change detection
-	target_vb_server_map_last map[uint16]string
 	// number of nodes in source cluster
 	number_of_source_nodes int
 
+	// CNG mode flag - true if target is CNG
+	isCNG bool
+	// target topology view for change detection
+	targetTopologyView *base.TargetTopologyView
 	// Timer to restart due to source side topology change
 	sourceTopologyMaxWait           *time.Timer
 	sourceTopologyMaxWaitTime       time.Time
@@ -110,9 +105,12 @@ type TopologyChangeDetectorSvc struct {
 
 	// variableVBMode indicates if the source and target have different number of VBs
 	variableVBMode bool
+	// In non-variable vb mode, targetVBList will be same as vblist_original. In variable vb mode,
+	// it'll have all vbs of the target cluster.
+	targetVBList []uint16
 }
 
-func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, variableVBMode bool) *TopologyChangeDetectorSvc {
+func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, variableVBMode bool, isCNG bool) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
 		remote_cluster_svc:     remote_cluster_svc,
@@ -127,6 +125,8 @@ func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopology
 		bucketTopologySvc:      bucketTopologySvc,
 		vblistOriginalInitDone: make(chan bool),
 		variableVBMode:         variableVBMode,
+		isCNG:                  isCNG,
+		targetTopologyView:     &base.TargetTopologyView{},
 	}
 }
 
@@ -422,7 +422,60 @@ func (top_detect_svc *TopologyChangeDetectorSvc) postTopologyEstTime(source bool
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff_vb_list []uint16, target_vb_server_map map[uint16]string, err_in error) error {
+func (top_detect_svc *TopologyChangeDetectorSvc) checkTargetTopologyStability(currentTopology base.TargetTopologyData) error {
+	isStable, stableErr := top_detect_svc.targetTopologyView.IsStable(currentTopology)
+	if stableErr != nil && stableErr != base.ErrLastObservedNotSet {
+		// Type mismatch indicates a programming error - log the error and return it
+		// Should never happen
+		top_detect_svc.logger.Errorf("Error checking topology stability: %v", stableErr)
+		return stableErr
+	}
+
+	if !isStable {
+		top_detect_svc.target_topology_stable_count = 0
+		top_detect_svc.targetTopologyView.SetLastObserved(currentTopology)
+		return nil
+	}
+
+	top_detect_svc.target_topology_stable_count++
+	if top_detect_svc.target_topology_stable_count == 1 {
+		secsForMaxStableTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyStableCountBeforeRestart)
+		top_detect_svc.targetTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
+		top_detect_svc.needToPostTargetTopologyEvent = true
+	}
+	top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline is %v\n", top_detect_svc.target_topology_stable_count)
+	if top_detect_svc.target_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
+		// restart pipeline if target topology change has stopped for a while and is assumbly completed
+		err := fmt.Errorf("Target topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
+		top_detect_svc.restartPipeline(err)
+		return err
+	}
+
+	// otherwise, keep pipeline running for now.
+	top_detect_svc.targetTopologyView.SetLastObserved(currentTopology)
+	return nil
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) postTargetTopologyEstTimeIfNeeded() {
+	if !top_detect_svc.needToPostTargetTopologyEvent {
+		return
+	}
+	var times []time.Time
+	if top_detect_svc.targetTopologyMaxWaitTime.After(time.Now()) {
+		times = append(times, top_detect_svc.targetTopologyMaxWaitTime)
+	}
+	if top_detect_svc.targetTopologyMaxStableWaitTime.After(time.Now()) {
+		times = append(times, top_detect_svc.targetTopologyMaxStableWaitTime)
+	}
+	err := top_detect_svc.postTopologyEstTime(false, times)
+	if err != nil {
+		top_detect_svc.logger.Errorf("Unable to post estimated times for target: %v", err)
+	} else {
+		top_detect_svc.needToPostTargetTopologyEvent = false
+	}
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff_vb_list []uint16, currentTopology base.TargetTopologyData, err_in error) error {
 
 	var err error
 	// first check if relevant problematic vbs in pipeline are due to target topology changes.
@@ -450,46 +503,15 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 			top_detect_svc.restartPipeline(err)
 			return err
 		}
-
-		if target_vb_server_map != nil {
-			if base.AreVBServerMapsTheSame(top_detect_svc.target_vb_server_map_last, target_vb_server_map) {
-				top_detect_svc.target_topology_stable_count++
-				if top_detect_svc.target_topology_stable_count == 1 {
-					secsForMaxStableTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyStableCountBeforeRestart)
-					top_detect_svc.targetTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
-					top_detect_svc.needToPostTargetTopologyEvent = true
-				}
-				top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline is %v\n", top_detect_svc.target_topology_stable_count)
-				if top_detect_svc.target_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
-					// restart pipeline if target topology change has stopped for a while and is assumbly completed
-					err = fmt.Errorf("Target topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
-					top_detect_svc.restartPipeline(err)
-					return err
-				}
-			} else {
-				top_detect_svc.target_topology_stable_count = 0
+		if currentTopology != nil {
+			err = top_detect_svc.checkTargetTopologyStability(currentTopology)
+			if err != nil {
+				return err
 			}
-
-			// otherwise, keep pipeline running for now.
-			top_detect_svc.target_vb_server_map_last = target_vb_server_map
 		}
 	}
 
-	if top_detect_svc.needToPostTargetTopologyEvent {
-		var times []time.Time
-		if top_detect_svc.targetTopologyMaxWaitTime.After(time.Now()) {
-			times = append(times, top_detect_svc.targetTopologyMaxWaitTime)
-		}
-		if top_detect_svc.targetTopologyMaxStableWaitTime.After(time.Now()) {
-			times = append(times, top_detect_svc.targetTopologyMaxStableWaitTime)
-		}
-		err = top_detect_svc.postTopologyEstTime(false, times)
-		if err != nil {
-			top_detect_svc.logger.Errorf("Unable to post estimated times for target: %v", err)
-		} else {
-			top_detect_svc.needToPostTargetTopologyEvent = false
-		}
-	}
+	top_detect_svc.postTargetTopologyEstTimeIfNeeded()
 
 	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline handleTargetTopologyChange(%v mod %v) completed", top_detect_svc.targetMonitorCnt, top_detect_svc.logFrequency)
 	return nil
@@ -682,6 +704,61 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 	return
 }
 
+// extractTopologyData extracts topology data from notification based on mode (CNG vs non-CNG).
+// For CNG: returns VBUuidTopology based on vbuuid stats
+// For non-CNG: returns VBServerTopology based on server->vb map
+func (top_detect_svc *TopologyChangeDetectorSvc) extractTopologyData(notification service_def.TargetNotification, vbList []uint16) (base.TargetTopologyData, error) {
+	if top_detect_svc.isCNG {
+		return base.NewVBUuidTopology(vbList, notification.GetTargetVbUuidStat())
+	}
+
+	return base.NewVBServerTopology(vbList, notification.GetTargetServerVBMap()), nil
+}
+
+// unsubscribeTarget unsubscribes from target bucket feed based on mode (CNG vs non-CNG).
+func (top_detect_svc *TopologyChangeDetectorSvc) unsubscribeTarget(spec *metadata.ReplicationSpecification, pipelineInstanceId string) {
+	var err error
+	if top_detect_svc.isCNG {
+		err = top_detect_svc.bucketTopologySvc.UnSubscribeToRemoteKVStatsFeed(spec, top_detect_svc.bucketTopSubscriberId)
+	} else {
+		err = top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+	}
+	if err != nil {
+		top_detect_svc.logger.Warnf("topology change detector: unsubscribing remote bucket feed for %v resulted in %v", pipelineInstanceId, err)
+	}
+}
+
+// initialiseTargetVbList initialises the target vb list that needs to be monitored.
+// In variable vb mode, all vbs of the cluster need to be monitored and in non-variable vb mode, just the vbs
+// owned by the current source cluster node need to be monitored.
+func (top_detect_svc *TopologyChangeDetectorSvc) initialiseTargetVbList(firstNotification service_def.TargetNotification) {
+	targetVBList := top_detect_svc.vblist_original
+	if top_detect_svc.variableVBMode {
+		// In variable VB mode, all target VBs need to be monitored
+		switch {
+		case top_detect_svc.isCNG:
+			vbUuidMap := firstNotification.GetTargetVbUuidStat()
+			targetVBList = make([]uint16, 0, len(vbUuidMap))
+			for vbno, _ := range vbUuidMap {
+				targetVBList = append(targetVBList, vbno)
+			}
+		default:
+			kvVBMap := firstNotification.GetTargetServerVBMap()
+
+			numVbs := 0
+			for _, vbs := range kvVBMap {
+				numVbs += len(vbs)
+			}
+			targetVBList = make([]uint16, 0, numVbs)
+
+			for _, vbs := range kvVBMap {
+				targetVBList = append(targetVBList, vbs...)
+			}
+		}
+	}
+	top_detect_svc.targetVBList = targetVBList
+}
+
 func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.WaitGroup, initErr *error) {
 	var spec *metadata.ReplicationSpecification
 	top_detect_svc.pipelinesMtx.RLock()
@@ -695,64 +772,75 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
-	targetVbUpdateCh, errCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+
+	// Wait for vblistOriginal to be done first
+	// monitorSource must have had occurred first already
+	<-top_detect_svc.vblistOriginalInitDone
+
+	var targetNotifyCh chan service_def.TargetNotification
+	var targetErrCh chan error
+	// Subscribe based on mode (CNG vs non-CNG)
+	var subscribeErr error
+	if top_detect_svc.isCNG {
+		targetNotifyCh, targetErrCh, subscribeErr = top_detect_svc.bucketTopologySvc.SubscribeToRemoteKVStatsFeed(spec, top_detect_svc.bucketTopSubscriberId)
+	} else {
+		targetNotifyCh, targetErrCh, subscribeErr = top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+	}
 	if subscribeErr != nil {
 		*initErr = subscribeErr
 		initWg.Done()
 		return
 	}
-	initWg.Done()
 
 	// Init with initial info - select on notification or error
+	var firstNotification service_def.TargetNotification
 	select {
-	case firstNotification := <-targetVbUpdateCh:
-		target_server_vb_map := firstNotification.GetTargetServerVBMap()
-
-		// Wait for vblistOriginal to be done first
-		// monitorSource must have had occurred first already
-		<-top_detect_svc.vblistOriginalInitDone
-
-		switch top_detect_svc.variableVBMode {
-		case true:
-			top_detect_svc.target_vb_server_map_original = target_server_vb_map.CompileLookupIndex()
-		case false:
-			top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
-		}
-		top_detect_svc.targetKvVbMapOriginal = target_server_vb_map
-
-		if spec != nil && spec.Settings != nil {
-			top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
-		}
-	case errFromErrCh := <-errCh:
+	case firstNotification = <-targetNotifyCh:
+		top_detect_svc.initialiseTargetVbList(firstNotification)
+	case errFromErrCh := <-targetErrCh:
 		*initErr = errFromErrCh
 		// unsubscribe before returning
-		unsubErr := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
-		if unsubErr != nil {
-			top_detect_svc.Logger().Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), unsubErr)
-		}
+		top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
 		initWg.Done()
 		return
+	}
+
+	// Initialize the appropriate baseline topology based on mode
+	baseline, baselineErr := top_detect_svc.extractTopologyData(firstNotification, top_detect_svc.targetVBList)
+	if baselineErr != nil {
+		*initErr = fmt.Errorf("error extracting baseline topology data: %w", baselineErr)
+		// unsubscribe before returning
+		top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
+		initWg.Done()
+		return
+	}
+
+	top_detect_svc.targetTopologyView.SetBaseline(baseline)
+
+	// Now that the baseline is set, we can signal the initWg that the initialization is complete.
+	initWg.Done()
+	// recycle the notification after use
+	firstNotification.Recycle()
+
+	if spec != nil && spec.Settings != nil {
+		top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
 	}
 
 	go func() {
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
-				if err != nil {
-					top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
-				}
+				top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc validateTargetTopology completed")
 				return
-			case notification := <-targetVbUpdateCh:
+			case err := <-targetErrCh:
+				top_detect_svc.logger.Warnf("topology change detector: error fetching target bucket stats: %v", err)
+			case notification := <-targetNotifyCh:
 				top_detect_svc.targetMonitorCnt++
 
 				if top_detect_svc.pipelineHasStopped() {
 					notification.Recycle()
-					err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
-					if err != nil {
-						top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
-					}
+					top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
 					return
 				}
 				targetBucketUUID := notification.GetTargetBucketUUID()
@@ -767,25 +855,26 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					}
 				}
 
-				targetServerVBMap := notification.GetTargetServerVBMap()
-				var target_vb_server_map map[uint16]string
-
-				// check for target topology changes
-				switch top_detect_svc.variableVBMode {
-				case true:
-					target_vb_server_map = targetServerVBMap.CompileLookupIndex()
-				case false:
-					target_vb_server_map = base.ConstructVbServerMap(top_detect_svc.vblist_original, targetServerVBMap)
+				// Extract the current appropriate topology based on mode
+				currentTopology, extractErr := top_detect_svc.extractTopologyData(notification, top_detect_svc.targetVBList)
+				if extractErr != nil {
+					// Incomplete topology data - log and wait for next cycle
+					top_detect_svc.logger.Warnf("Error extracting topology data: %v. Waiting for next cycle.", extractErr)
+					notification.Recycle()
+					continue
 				}
-				diff_vb_list, err := base.DiffVBServerMaps(top_detect_svc.target_vb_server_map_original, target_vb_server_map)
-				if err != nil {
-					// should never happen
-					top_detect_svc.logger.Warnf("Error diffing target vb server maps. err=%v", err)
+
+				// Get diff from baseline
+				diffVBList, diffErr := top_detect_svc.targetTopologyView.GetDiffFromBaseline(top_detect_svc.targetVBList, currentTopology)
+				if diffErr != nil {
+					// Type mismatch indicates a programming error - log and skip this notification
+					// Should never happen
+					top_detect_svc.logger.Errorf("Error getting topology diff from baseline: %v", diffErr)
 					notification.Recycle()
 					continue
 				}
 				var errToHandleTargetChange error
-				if len(diff_vb_list) > 0 {
+				if len(diffVBList) > 0 {
 					errToHandleTargetChange = target_topology_changedErr
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when validating target topology change. err=%v", errToHandleTargetChange)
 				}
@@ -800,10 +889,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				logFrequency := top_detect_svc.logFrequency
 				if currentCnt%logFrequency == 0 {
 					// By default, for every pipeline this log line will be printed once every 5 hours.
-					top_detect_svc.logger.Infof("Actual target kvVbMap=%v; Cached kvVbMap=%v, vbList=%v", targetServerVBMap, top_detect_svc.targetKvVbMapOriginal, top_detect_svc.vblist_original)
+					top_detect_svc.logger.Infof("Current target topology map=%v; Cached baseline topology map=%v, vbList=%v", currentTopology, top_detect_svc.targetTopologyView.GetBaseline(), top_detect_svc.targetVBList)
 				}
 
-				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+				err = top_detect_svc.handleTargetTopologyChange(diffVBList, currentTopology, errToHandleTargetChange)
 
 				newEnableCrossClusterVersioning := notification.GetTargetEnableCrossClusterVersioning()
 				if top_detect_svc.targetEnableCrossClusterVersioning != newEnableCrossClusterVersioning {
@@ -823,8 +912,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					}
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling target topology change. err=%v", err)
 				}
-			case topologyUpdateonceErr := <-errCh:
-				top_detect_svc.logger.Errorf("TopologyChangeDetectorSvc monitorTarget received error from errCh: %v", topologyUpdateonceErr)
 			}
 		}
 	}()

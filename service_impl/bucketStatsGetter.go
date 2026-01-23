@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	Component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
+	"google.golang.org/grpc/codes"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -635,6 +636,12 @@ var _ service_def.BucketStatsProvider = &CngBucketStatsProvider{}
 type CngBucketStatsProvider struct {
 	// bucketName is the name of the target bucket
 	bucketName string
+	// vbucketIds contains the vbucket IDs for the target bucket.
+	// The list is fetched on demand from CNG and cached, since the
+	// vbucket count is fixed for the lifetime of the bucket.
+	vbucketIds []uint32
+	// vbucketIdsMu protects access to vbucketIds
+	vbucketIdsMu sync.Mutex
 	// utils provides access to the utilities
 	utils utils.UtilsIface
 	// logger provides access to the logger
@@ -763,6 +770,18 @@ func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.Failove
 		return nil, nil, fmt.Errorf("GetFailoverLog: %w", err)
 	}
 
+	// Resolve vbucket IDs as uint32 (the format required by gRPC)
+	var vbucketIds []uint32
+	var err error
+	if requestOpts.AllVBuckets {
+		vbucketIds, err = provider.getVBucketList()
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetFailoverLog: failed to get vbucket list: %w", err)
+		}
+	} else {
+		vbucketIds = base.ConvertUint16ToUint32(requestOpts.VBuckets)
+	}
+
 	streamHandler := cngWatcher.NewVbucketInfoHandler()
 
 	includeHistory := true
@@ -774,7 +793,7 @@ func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.Failove
 		Context: ctx,
 		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
 			BucketName:     provider.bucketName,
-			VbucketIds:     base.ConvertUint16ToUint32(requestOpts.VBuckets),
+			VbucketIds:     vbucketIds,
 			IncludeHistory: &includeHistory,
 			IncludeMaxCas:  &includeMaxCas,
 		},
@@ -800,6 +819,18 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 		return nil, nil, fmt.Errorf("GetVBucketStats: %w", err)
 	}
 
+	// Resolve vbucket IDs as uint32 (the format required by gRPC)
+	var vbucketIds []uint32
+	var err error
+	if requestOpts.AllVBuckets {
+		vbucketIds, err = provider.getVBucketList()
+		if err != nil {
+			return nil, nil, fmt.Errorf("GetVBucketStats: failed to get vbucket list: %w", err)
+		}
+	} else {
+		vbucketIds = base.ConvertUint16ToUint32(requestOpts.VBuckets)
+	}
+
 	streamHandler := cngWatcher.NewVbucketInfoHandler()
 
 	includeHistory := false
@@ -811,7 +842,7 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 		Context: ctx,
 		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
 			BucketName:     provider.bucketName,
-			VbucketIds:     base.ConvertUint16ToUint32(requestOpts.VBuckets),
+			VbucketIds:     vbucketIds,
 			IncludeHistory: &includeHistory,
 			IncludeMaxCas:  &includeMaxCas,
 		},
@@ -824,4 +855,39 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 		return nil, nil, fmt.Errorf("failed to get vbucket stats: %w", err)
 	}
 	return result.GetBucketVBStats(), nil, nil
+}
+
+// getVBucketList returns the full vbucket list [0, 1, ..., numVBuckets-1] as uint32.
+func (provider *CngBucketStatsProvider) getVBucketList() ([]uint32, error) {
+	// Protect access to vbucketIds with a mutex since it can be accessed by multiple goroutines concurrently
+	provider.vbucketIdsMu.Lock()
+	defer provider.vbucketIdsMu.Unlock()
+
+	// If vbucketIds is already cached, use it
+	if len(provider.vbucketIds) > 0 {
+		return provider.vbucketIds, nil
+	}
+
+	ctx, cancel := context.WithTimeout(provider.context, base.ShortHttpTimeout)
+	defer cancel()
+	rsp := provider.utils.CngGetBucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
+		Context: ctx,
+		Request: &internal_xdcr_v1.GetBucketInfoRequest{
+			BucketName: provider.bucketName,
+		},
+	})
+	if rsp.Code() != codes.OK {
+		return nil, fmt.Errorf("getVBucketList: failed to get bucket info: %w", rsp.Err())
+	}
+
+	numVBuckets := rsp.Response().GetNumVbuckets()
+	vbucketIds := make([]uint32, numVBuckets)
+	for i := uint32(0); i < numVBuckets; i++ {
+		vbucketIds[i] = i
+	}
+
+	// Cache the vbucket list for future use
+	provider.vbucketIds = vbucketIds
+
+	return vbucketIds, nil
 }

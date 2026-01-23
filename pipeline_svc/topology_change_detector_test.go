@@ -48,6 +48,7 @@ func TestMonitorTarget_InitOriginalMap_SameVBs(t *testing.T) {
 		utils,
 		bucketTopologySvc,
 		false, // variableVBMode = false
+		false,
 	)
 
 	// Setup mock pipeline
@@ -108,17 +109,19 @@ func TestMonitorTarget_InitOriginalMap_SameVBs(t *testing.T) {
 	// Give it a moment to process the initial notification
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify that target_vb_server_map_original was initialized correctly
+	// Verify that baseline target topology was initialized correctly
 	// For variableVBMode = false, it should use ConstructVbServerMap
 	// which filters based on vblist_original
-	assert.NotNil(topDetector.target_vb_server_map_original)
-	assert.Equal(5, len(topDetector.target_vb_server_map_original))
+	baseline, ok := topDetector.targetTopologyView.GetBaseline().(base.VBServerTopology)
+	assert.True(ok)
+	assert.NotNil(baseline)
+	assert.Equal(5, len(baseline))
 
 	// Verify mapping for VBs in vblist_original
-	assert.Equal(5, len(topDetector.target_vb_server_map_original))
+	assert.Equal(len(topDetector.vblist_original), len(baseline))
 	for _, vb := range topDetector.vblist_original {
-		assert.NotNil(topDetector.target_vb_server_map_original[vb])
-		assert.Equal(topDetector.target_vb_server_map_original[vb], target_vb_server_map[vb])
+		assert.NotNil(baseline[vb])
+		assert.Equal(baseline[vb], target_vb_server_map[vb])
 	}
 
 	// Cleanup
@@ -149,6 +152,7 @@ func TestMonitorTarget_InitOriginalMap_DifferentVBs(t *testing.T) {
 		utils,
 		bucketTopologySvc,
 		true, // variableVBMode = true (THIS IS THE KEY CHANGE FOR MB-69159)
+		false,
 	)
 
 	// Setup mock pipeline
@@ -213,14 +217,17 @@ func TestMonitorTarget_InitOriginalMap_DifferentVBs(t *testing.T) {
 	// Verify that target_vb_server_map_original was initialized correctly
 	// For variableVBMode = true, it should use CompileLookupIndex()
 	// which creates a mapping for ALL target VBs (not filtered)
-	assert.NotNil(topDetector.target_vb_server_map_original)
-	assert.Equal(8, len(topDetector.target_vb_server_map_original)) // All target VBs
+	// Darshan TODO: MB-70809: Test variable VB with CNG monitoring.
+	baseline, ok := topDetector.targetTopologyView.GetBaseline().(base.VBServerTopology)
+	assert.True(ok)
+	assert.NotNil(baseline)
+	assert.Equal(8, len(baseline)) // All target VBs
 
 	// Verify mapping includes all target VBs
-	assert.Equal(8, len(topDetector.target_vb_server_map_original))
+	assert.Equal(8, len(baseline))
 	for vb, server := range target_vb_server_map {
-		assert.NotNil(topDetector.target_vb_server_map_original[vb])
-		assert.Equal(topDetector.target_vb_server_map_original[vb], server)
+		assert.NotNil(baseline[vb])
+		assert.Equal(baseline[vb], server)
 	}
 
 	// Cleanup

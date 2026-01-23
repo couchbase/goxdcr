@@ -638,26 +638,6 @@ func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) C
 	return CRMode_RevId
 }
 
-// DiffVBServerMaps compares two vb_server_maps and returns a sorted list of vBuckets
-// whose server assignments differ between the two maps.
-// Both maps are expected to contain the same set of vBucket keys.
-// The caller is responsible for ensuring this precondition.
-func DiffVBServerMaps(vbServerMap1, vbServerMap2 map[uint16]string) ([]uint16, error) {
-	diffVBList := make([]uint16, 0)
-	for vb, server1 := range vbServerMap1 {
-		server2, ok := vbServerMap2[vb]
-		if !ok {
-			// should never happen
-			return nil, fmt.Errorf("vb %v is in vbServerMap1 but not in vbServerMap2", vb)
-		}
-		if server1 != server2 {
-			diffVBList = append(diffVBList, vb)
-		}
-	}
-	SortUint16List(diffVBList)
-	return diffVBList, nil
-}
-
 func DiffVBsList(vbList1, vbList2 []uint16) (added, removed []uint16) {
 	oldSortedVBs := SortUint16List(vbList1)
 	newSortedVBs := SortUint16List(vbList2)
@@ -702,6 +682,49 @@ func AreVBServerMapsTheSame(vbServerMap1, vbServerMap2 map[uint16]string) bool {
 
 	for vb, server := range vbServerMap1 {
 		if server != vbServerMap2[vb] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// get the subset of vbs in vbList that point to different servers in the two vb server maps
+func GetDiffVBList(vbList []uint16, vbServerMap1, vbServerMap2 map[uint16]string) []uint16 {
+	diffVBList := make([]uint16, 0)
+	for _, vb := range vbList {
+		if vbServerMap1[vb] != vbServerMap2[vb] {
+			diffVBList = append(diffVBList, vb)
+		}
+	}
+
+	SortUint16List(diffVBList)
+	return diffVBList
+}
+
+// GetDiffVBListByUuid returns the subset of vbs in vbList that have different uuids in the two maps.
+// Used for CNG topology change detection.
+func GetDiffVBListByUuid(vbList []uint16, uuidMap1, uuidMap2 map[uint16]uint64) []uint16 {
+	diffVBList := make([]uint16, 0)
+	for _, vb := range vbList {
+		if uuidMap1[vb] != uuidMap2[vb] {
+			diffVBList = append(diffVBList, vb)
+		}
+	}
+
+	SortUint16List(diffVBList)
+	return diffVBList
+}
+
+// AreVBUuidMapsTheSame checks if two vb-uuid maps are identical.
+// Used for CNG topology stability detection.
+func AreVBUuidMapsTheSame(uuidMap1, uuidMap2 map[uint16]uint64) bool {
+	if len(uuidMap1) != len(uuidMap2) {
+		return false
+	}
+
+	for vb, uuid := range uuidMap1 {
+		if uuid2, ok := uuidMap2[vb]; !ok || uuid != uuid2 {
 			return false
 		}
 	}

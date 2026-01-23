@@ -486,6 +486,8 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			return nil, err
 		}
 
+		watcher.isCNG = remoteRef.IsCNG()
+
 		if vbStatsOpts := b.getRemoteVBStatsOpts(remoteRef.IsCNG()); vbStatsOpts != nil {
 			vbStatsUpdaterFunc := b.getRemoteVBStatsUpdater(spec, watcher, vbStatsOpts)
 			intervalFuncMap[VBSTATS] = make(IntervalInnerFuncMap)
@@ -1383,6 +1385,7 @@ type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
 	source     bool
+	isCNG      bool
 
 	finCh     chan bool
 	startOnce sync.Once
@@ -1512,12 +1515,14 @@ type VBStatsOpts struct {
 }
 
 // If no one is subscribed, no need to run the updater except for
-// - TOPOLOGY, which is for sure needed
-// - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
-// - VBSTATS, this is needed as part of pipeline start to check for cas poison and for CNG vbuuid tracking
+//   - TOPOLOGY, which is for sure needed
+//   - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
+//   - VBSTATS, this is needed as part of pipeline start to check for cas poison and for CNG vbuuid tracking
+//     For CNG targets, vbuuid tracking is needed to track topology changes and hence we need to run it irrespective of whether there are subscribers or not.
+//
 // If we don't update HIGHSEQNOS when there is no subscriber, paused replication status will not be accurate,
 // and if topology change causing server name change, we will incorrectly report total_changes as 0 and changes_left as negative for paused pipeline.
-func needToRunInitially(subscriptionType string) bool {
+func (bw *BucketTopologySvcWatcher) needToRunInitially(subscriptionType string) bool {
 	switch subscriptionType {
 	case TOPOLOGY:
 		return true
@@ -1526,9 +1531,7 @@ func needToRunInitially(subscriptionType string) bool {
 	case HIGHSEQNOSLEGACY:
 		return true
 	case VBSTATS:
-		//return true
-		// Darshan TODO: false seems to be correct even with the current changes. Double check.
-		return false
+		return bw.isCNG
 	default:
 		return false
 	}
@@ -1813,7 +1816,7 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		panic(fmt.Sprintf("Unknown type: %v", updateType))
 	}
 
-	if !needToRunInitially(updateType) {
+	if !bw.needToRunInitially(updateType) {
 		mutex.RLock()
 		chanLen := len(channelsMap)
 		mutex.RUnlock()
@@ -2398,6 +2401,8 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 
 	maxCasMap := make(map[uint16]uint64)
 
+	vbUuidMap := make(base.VbSeqnoMapType)
+
 	return &Notification{
 		Source:                     isSource,
 		ObjPool:                    pool,
@@ -2415,6 +2420,7 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 		TargetReplicasTranslateMap: &targetReplicasTranslateMap,
 
 		MaxVbCasStatsMap: maxCasMap,
+		VbUuidMap:        vbUuidMap,
 	}
 }
 
@@ -2524,6 +2530,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		TargetVbucketsMaxCas:               n.TargetVbucketsMaxCas,
 
 		MaxVbCasStatsMap: n.MaxVbCasStatsMap.Clone(),
+		VbUuidMap:        n.VbUuidMap.Clone(),
 	}
 }
 
