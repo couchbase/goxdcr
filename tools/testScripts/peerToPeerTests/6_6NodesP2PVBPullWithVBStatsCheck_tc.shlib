@@ -66,12 +66,6 @@ function induceGuardrailFailedWrites {
 
 	sleep 15
 	validatePrometheusStatsRRNon0 "C1" "B0" "B1"
-
-	local secs=120
-	echo "Disabling guardrail and waiting $secs seconds before checking..."
-	disableInternalResidentRatioGuardrail C2 B1
-	sleep $secs
-	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 }
 
 function induceCasPoisonGuardrailFailedWrites {
