@@ -716,38 +716,6 @@ func (_c *UtilsIface_DumpStackTraceAfterThreshold_Call) RunAndReturn(run func(st
 	return _c
 }
 
-// EnableDataUsageTracking provides a mock function with no fields
-func (_m *UtilsIface) EnableDataUsageTracking() {
-	_m.Called()
-}
-
-// UtilsIface_EnableDataUsageTracking_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnableDataUsageTracking'
-type UtilsIface_EnableDataUsageTracking_Call struct {
-	*mock.Call
-}
-
-// EnableDataUsageTracking is a helper method to define mock.On call
-func (_e *UtilsIface_Expecter) EnableDataUsageTracking() *UtilsIface_EnableDataUsageTracking_Call {
-	return &UtilsIface_EnableDataUsageTracking_Call{Call: _e.mock.On("EnableDataUsageTracking")}
-}
-
-func (_c *UtilsIface_EnableDataUsageTracking_Call) Run(run func()) *UtilsIface_EnableDataUsageTracking_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *UtilsIface_EnableDataUsageTracking_Call) Return() *UtilsIface_EnableDataUsageTracking_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *UtilsIface_EnableDataUsageTracking_Call) RunAndReturn(run func()) *UtilsIface_EnableDataUsageTracking_Call {
-	_c.Run(run)
-	return _c
-}
-
 // EncodeHttpRequest provides a mock function with given fields: req
 func (_m *UtilsIface) EncodeHttpRequest(req *http.Request) ([]byte, error) {
 	ret := _m.Called(req)
@@ -5346,61 +5314,6 @@ func (_c *UtilsIface_GetTrackedTransport_Call) Return(_a0 http.RoundTripper) *Ut
 }
 
 func (_c *UtilsIface_GetTrackedTransport_Call) RunAndReturn(run func(...*utils.Context) http.RoundTripper) *UtilsIface_GetTrackedTransport_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetUnAccountedDataUsageStats provides a mock function with no fields
-func (_m *UtilsIface) GetUnAccountedDataUsageStats() (int64, int64) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetUnAccountedDataUsageStats")
-	}
-
-	var r0 int64
-	var r1 int64
-	if rf, ok := ret.Get(0).(func() (int64, int64)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() int64); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	if rf, ok := ret.Get(1).(func() int64); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Get(1).(int64)
-	}
-
-	return r0, r1
-}
-
-// UtilsIface_GetUnAccountedDataUsageStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUnAccountedDataUsageStats'
-type UtilsIface_GetUnAccountedDataUsageStats_Call struct {
-	*mock.Call
-}
-
-// GetUnAccountedDataUsageStats is a helper method to define mock.On call
-func (_e *UtilsIface_Expecter) GetUnAccountedDataUsageStats() *UtilsIface_GetUnAccountedDataUsageStats_Call {
-	return &UtilsIface_GetUnAccountedDataUsageStats_Call{Call: _e.mock.On("GetUnAccountedDataUsageStats")}
-}
-
-func (_c *UtilsIface_GetUnAccountedDataUsageStats_Call) Run(run func()) *UtilsIface_GetUnAccountedDataUsageStats_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *UtilsIface_GetUnAccountedDataUsageStats_Call) Return(sent int64, received int64) *UtilsIface_GetUnAccountedDataUsageStats_Call {
-	_c.Call.Return(sent, received)
-	return _c
-}
-
-func (_c *UtilsIface_GetUnAccountedDataUsageStats_Call) RunAndReturn(run func() (int64, int64)) *UtilsIface_GetUnAccountedDataUsageStats_Call {
 	_c.Call.Return(run)
 	return _c
 }

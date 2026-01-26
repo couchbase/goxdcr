@@ -1133,6 +1133,16 @@
         "notes": "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
         "stability": "committed"
     },
+    "xdcr_remote_cluster_monitoring_metadata_transferred_bytes": {
+        "type": "counter",
+        "help": "The total size of monitoring metadata sent and received to and from the remote cluster",
+        "added": "8.1.0",
+        "unit": "bytes",
+        "labels": [
+            "targetClusterUUID"
+        ],
+        "stability": "internal"
+    },
     "xdcr_resp_wait_time_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",

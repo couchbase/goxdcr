@@ -422,6 +422,9 @@ type RemoteClusterAgent struct {
 	// specsReader is used to avoid circular reference with replication spec svc
 	specsReaderMtx sync.RWMutex
 	specsReader    service_def.ReplicationSpecReader
+
+	dataSentBytes     atomic.Uint64
+	dataReceivedBytes atomic.Uint64
 }
 
 const (
@@ -668,6 +671,25 @@ type refreshContext struct {
 
 	// callback for restarting replications due to auth error being fixed
 	authErrFixedCb func()
+
+	dataSentBytes     *atomic.Uint64
+	dataReceivedBytes *atomic.Uint64
+	trackingCtx       *utilities.Context
+}
+
+func (rctx *refreshContext) updateDataSentAndReceived() {
+	if rctx == nil || rctx.trackingCtx == nil || !rctx.trackingCtx.TrackDataSentAndReceived {
+		return
+	}
+
+	sent := atomic.LoadInt64(&rctx.trackingCtx.DataSent)
+	received := atomic.LoadInt64(&rctx.trackingCtx.DataReceived)
+	if sent > 0 {
+		rctx.dataSentBytes.Add(uint64(sent))
+	}
+	if received > 0 {
+		rctx.dataReceivedBytes.Add(uint64(received))
+	}
 }
 
 // Initializes the context and also populates the credentials for connecting to nodes
@@ -685,6 +707,9 @@ func (rctx *refreshContext) initialize() {
 		rctx.origCapability = rctx.agent.currentCapability.Clone()
 		rctx.origCapabilityLoaded = true
 	}
+	rctx.dataSentBytes = &rctx.agent.dataSentBytes
+	rctx.dataReceivedBytes = &rctx.agent.dataReceivedBytes
+	rctx.trackingCtx = rctx.agent.utils.GetDataUsageTrackingCtx()
 	rctx.agent.refMtx.RUnlock()
 
 	var printNodeListPostBootstrap bool
@@ -696,7 +721,7 @@ func (rctx *refreshContext) initialize() {
 
 		rctx.refCache.PopulateDnsSrvIfNeeded(rctx.agent.logger)
 
-		err := setHostNamesAndSecuritySettings(rctx.agent.logger, rctx.agent.utils, rctx.refCache, rctx.agent.topologySvc.IsMyClusterEncryptionLevelStrict())
+		err := setHostNamesAndSecuritySettings(rctx.agent.logger, rctx.agent.utils, rctx.refCache, rctx.agent.topologySvc.IsMyClusterEncryptionLevelStrict(), rctx.trackingCtx)
 		if err != nil {
 			rctx.agent.logger.Errorf("%s refresh context bootstrap failed: %v", rctx.agent.Id(), err)
 			return
@@ -835,13 +860,13 @@ func (rctx *refreshContext) performRPC(connStr string, updateSecuritySettings bo
 
 	if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 		// if updateSecuritySettings is true, get up to date security settings from target
-		httpAuthMech, defaultPoolInfo, statusCode, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+		httpAuthMech, defaultPoolInfo, statusCode, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger, rctx.trackingCtx)
 		if err != nil {
 			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. statusCode=%v err=%v", rctx.refCache.Id(), connStr, statusCode, err)
 			return httpAuthMech, defaultPoolInfo, statusCode, err
 		}
 	} else {
-		defaultPoolInfo, err, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+		defaultPoolInfo, err, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger, rctx.trackingCtx)
 		if err != nil {
 			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. statusCode=%v err=%v", rctx.refCache.Id(), connStr,
 				statusCode, err)
@@ -1048,6 +1073,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 
 	// At this point, everything below can only be executed by a single refresh context
 	defer agent.cleanupRefreshContext(rctx, &err)
+	defer rctx.updateDataSentAndReceived()
 
 	var useExternal bool
 	useExternal, err = rctx.getAddressPreference()
@@ -1485,10 +1511,27 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReference(rctx *refreshC
 		return err
 	}
 
+	var ctx *utilities.Context
+	if rctx == nil {
+		ctx = agent.utils.GetDataUsageTrackingCtx()
+		defer func() {
+			if ctx != nil {
+				if ctx.DataReceived > 0 {
+					agent.dataReceivedBytes.Add(uint64(ctx.DataReceived))
+				}
+				if ctx.DataSent > 0 {
+					agent.dataSentBytes.Add(uint64(ctx.DataSent))
+				}
+			}
+		}()
+	} else {
+		ctx = rctx.trackingCtx
+	}
+
 	// If refresh context has already done the heavy lifting work of reaching the remote node to get the list
 	// Then just use it to avoid duplicate work
 	if len(nodeList) == 0 {
-		clusterInfo, err := agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		clusterInfo, err := agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger, ctx)
 		if err != nil {
 			agent.logger.Infof("Remote cluster reference %v has a bad connectivity, didn't populate alternative connection strings. err=%v", agent.pendingRef.Id(), err)
 			return err
@@ -3006,6 +3049,26 @@ func (service *RemoteClusterService) ListRemoteClusterUUIDs() ([]string, error) 
 	return remoteClusterUUIDs, nil
 }
 
+// Retrieves a map of remote cluster UUIDs to their data usage stats
+// The first int represents the accumulated data sent
+// The second int represents the accumulated data received
+func (service *RemoteClusterService) GetDataUsages() (map[string][]int64, error) {
+	service.logger.Debugf("Getting remote clusters data usages")
+
+	dataUsagesMap := make(map[string][]int64)
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+
+	for uuid, agent := range service.agentCacheUuidMap {
+		dataSent := int64(agent.dataSentBytes.Load())
+		dataReceived := int64(agent.dataReceivedBytes.Load())
+		dataUsagesMap[uuid] = []int64{dataSent, dataReceived}
+	}
+
+	return dataUsagesMap, nil
+}
+
 // validate that the remote cluster ref itself is valid, and that it does not collide with any of the existing remote clusters.
 func (service *RemoteClusterService) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	return service.validateAddRemoteCluster(ref, false)
@@ -3119,7 +3182,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	if updateRef {
-		err = setHostNamesAndSecuritySettings(service.logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
+		err = setHostNamesAndSecuritySettings(service.logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
 		if err != nil {
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
@@ -3262,7 +3325,7 @@ func getUserIntentFromNodeList(_ *log.CommonLogger, utils utils.UtilsIface, ref 
 
 // setHostNamesAndSecuritySettings sets the hostnames which include active hostnames and httpsHostName
 // A call to DNS SRV lookup is assumed prior to calling this function
-func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool) error {
+func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool, trackingCtx *utilities.Context) error {
 	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("setHostNamesAndSecuritySettings(%v)", ref.Name()), base.DiagNetworkThreshold)
 	defer stopFunc()
 
@@ -3336,7 +3399,8 @@ func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.Utils
 		ref,
 		isClusterEncrLevelStrict,
 		refHostName,
-		refHttpsHostName)
+		refHttpsHostName,
+		trackingCtx)
 	if err != nil {
 		if strings.Contains(err.Error(), base.RESTNoSuchHost) {
 			err = wrapNoSuchHostRecommendationError(err.Error())
@@ -3405,7 +3469,7 @@ func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.Utils
 // then the call below will fail, and we'll need to figure out the SSL port by using getHttpsRemoteHostAddr(), if it's possible
 // The second part of "figuring out https" if the first fails, can be done in parallel to save time
 // This method lets both go at the same time, and whoever comes back first with a valid result wins
-func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool, refHostName string, refHttpsHostNameIn string) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
+func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool, refHostName string, refHttpsHostNameIn string, trackingCtx *utilities.Context) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
 	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("getDefaultPoolInfoAndAuthMech(%v, %v, %v", ref.Name(), refHostName, refHttpsHostNameIn), base.DiagNetworkThreshold)
 	defer stopFunc()
 	// Synchronization primitives for racing
@@ -3454,7 +3518,7 @@ func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.Uti
 	go func() {
 		defer close(firstWinnerCh)
 		// Attempt to retrieve defaultPoolInfo with what the user initially entered
-		refHttpAuthMech, defaultPoolInfo, _, err = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
+		refHttpAuthMech, defaultPoolInfo, _, err = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger, trackingCtx)
 		if err == nil && refHttpAuthMech == base.HttpAuthMechHttps {
 			refSANInCertificate = true
 		}
@@ -3488,7 +3552,7 @@ func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.Uti
 			}
 
 			// now we potentially have valid https address, re-do security settings retrieval
-			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
+			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger, trackingCtx)
 			if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 				bgSANInCertificate = true
 			}
@@ -3500,7 +3564,7 @@ func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.Uti
 					// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 					// as a last resort, try that for a third time
 					bgRefHttpsHostName = bgExternalRefHttpsHostName
-					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
+					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger, trackingCtx)
 					if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 						bgSANInCertificate = true
 					}
@@ -4416,6 +4480,8 @@ func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMet
 		return
 	}
 
+	// NEIL TODO - track data usage
+
 	agent.heartbeatAPIMtx.Lock()
 	agent.lastSentHeartbeatMetadata = hbMetadata
 	agent.heartbeatAPIMtx.Unlock()
@@ -4553,7 +4619,8 @@ func (service *RemoteClusterService) GetBucketTopologySvc() service_def.BucketTo
 
 func (service *RemoteClusterService) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
 	ref.PopulateDnsSrvIfNeeded(logger)
-	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
+	// Before a reference is created, the data usage is not technically associated with it yet
+	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
 }
 
 func (rctx *refreshContext) IsCertificateExpired(statusCode int, err error) bool {

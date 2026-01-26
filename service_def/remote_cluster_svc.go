@@ -40,6 +40,7 @@ type RemoteClusterSvc interface {
 	RemoteClusters() (map[string]*metadata.RemoteClusterReference, error)
 	// Lightweight API to get a list of remote cluster UUIDs
 	ListRemoteClusterUUIDs() ([]string, error)
+	GetDataUsages() (map[string][]int64, error)
 
 	// Remote Cluster Service may need to monitor target bucket info
 	RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error

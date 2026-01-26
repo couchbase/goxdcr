@@ -415,6 +415,63 @@ func (_c *RemoteClusterSvc_GetConnectivityStatus_Call) RunAndReturn(run func(*me
 	return _c
 }
 
+// GetDataUsages provides a mock function with no fields
+func (_m *RemoteClusterSvc) GetDataUsages() (map[string][]int64, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataUsages")
+	}
+
+	var r0 map[string][]int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (map[string][]int64, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() map[string][]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteClusterSvc_GetDataUsages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataUsages'
+type RemoteClusterSvc_GetDataUsages_Call struct {
+	*mock.Call
+}
+
+// GetDataUsages is a helper method to define mock.On call
+func (_e *RemoteClusterSvc_Expecter) GetDataUsages() *RemoteClusterSvc_GetDataUsages_Call {
+	return &RemoteClusterSvc_GetDataUsages_Call{Call: _e.mock.On("GetDataUsages")}
+}
+
+func (_c *RemoteClusterSvc_GetDataUsages_Call) Run(run func()) *RemoteClusterSvc_GetDataUsages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_GetDataUsages_Call) Return(_a0 map[string][]int64, _a1 error) *RemoteClusterSvc_GetDataUsages_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_GetDataUsages_Call) RunAndReturn(run func() (map[string][]int64, error)) *RemoteClusterSvc_GetDataUsages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh, restAPIQuery
 func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(uuid, bucketName, forceRefresh, restAPIQuery)

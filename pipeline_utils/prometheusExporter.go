@@ -24,6 +24,7 @@ import (
 type ExpVarExporter interface {
 	LoadExpVarMap(m *expvar.Map) bool
 	LoadReplicationIds(remClusterUUIDs, replIds []string) error
+	LoadTargetClusterDataUsages(dataUsages map[string][]int64) error
 	LoadSourceClustersInfoV1(srcClusterNames map[string]string, srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string, srcHBSizes map[string]int64)
 	Export() ([]byte, error)
 }
@@ -74,7 +75,8 @@ type PrometheusExporter struct {
 	srcSpecs   map[string][]*metadata.ReplicationSpecification
 	srcHBSizes map[string]int64
 
-	lastKnownTgtReplMap map[string]int
+	lastKnownTgtReplMap    map[string]int
+	lastKnownDataUsagesMap map[string][]int64
 }
 
 func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, labelsTableConstructor PrometheusLabelsConstructorType) *PrometheusExporter {
@@ -237,6 +239,33 @@ func (m *MetricsMapType) RecordTargetClusterReplCount(countMap map[string]int, l
 		}
 
 		targetClusterUUIDToStatsMap[targetClusterUuid].SetValue(count)
+	}
+}
+
+func (m *MetricsMapType) RecordTargetClusterDataUsages(dataUsages map[string][]int64, lookupMap service_def.StatisticsPropertyMap, constructor PrometheusLabelsConstructorType) {
+	var statKey = service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX
+
+	// Every time this is called, information will need to be updated, so reinitialize
+	targetClusterUUIDToStatsMap := IdentifierStatsMap{}
+	(*m)[statKey] = targetClusterUUIDToStatsMap
+
+	for targetClusterUuid, usage := range dataUsages {
+		if len(usage) < 2 {
+			// Invalid data, skip this entry
+			continue
+		}
+
+		_, targetClusterExists := targetClusterUUIDToStatsMap[targetClusterUuid]
+		if !targetClusterExists {
+			statsProperty := lookupMap[statKey]
+			labelsTable := constructor(statKey)
+			targetClusterUUIDToStatsMap[targetClusterUuid] = NewPerTargetClusterStatsType(statsProperty, labelsTable, []byte(statKey), targetClusterUuid)
+		}
+
+		// usage[0] is dataSent, usage[1] is dataReceived
+		// For REMOTE_CLUSTER_MONITORING_METADATA_TX, we record the total (sent + received)
+		totalDataUsage := usage[0] + usage[1]
+		targetClusterUUIDToStatsMap[targetClusterUuid].SetValue(totalDataUsage)
 	}
 }
 
@@ -794,6 +823,44 @@ func (p *PrometheusExporter) LoadReplicationIds(remClusterUUIDs, replIds []strin
 		p.resetOutputBuffer()
 		p.metricsMap.RecordTargetClusterReplCount(targetClusterReplCountMap, p.globalLookupMap, p.labelsTableConstructor)
 		p.lastKnownTgtReplMap = targetClusterReplCountMap
+	}
+	return nil
+}
+
+func (p *PrometheusExporter) LoadTargetClusterDataUsages(dataUsages map[string][]int64) error {
+	// Check if the cache is outdated by comparing with the last known data usages
+	var cacheOutdated bool
+	if len(p.lastKnownDataUsagesMap) != len(dataUsages) {
+		cacheOutdated = true
+	} else {
+		for targetClusterUuid, usage := range dataUsages {
+			cachedUsage, exists := p.lastKnownDataUsagesMap[targetClusterUuid]
+			if !exists || len(cachedUsage) != len(usage) {
+				cacheOutdated = true
+				break
+			}
+			// Compare both dataSent and dataReceived values
+			for i := range usage {
+				if cachedUsage[i] != usage[i] {
+					cacheOutdated = true
+					break
+				}
+			}
+			if cacheOutdated {
+				break
+			}
+		}
+	}
+
+	if cacheOutdated {
+		p.resetOutputBuffer()
+		p.metricsMap.RecordTargetClusterDataUsages(dataUsages, p.globalLookupMap, p.labelsTableConstructor)
+		// Deep copy the dataUsages map for caching
+		p.lastKnownDataUsagesMap = make(map[string][]int64)
+		for k, v := range dataUsages {
+			p.lastKnownDataUsagesMap[k] = make([]int64, len(v))
+			copy(p.lastKnownDataUsagesMap[k], v)
+		}
 	}
 	return nil
 }

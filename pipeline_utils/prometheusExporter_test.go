@@ -358,3 +358,185 @@ func TestPrometheusNumOfReplicationsPerTargetTwoTargets(t *testing.T) {
 	assert.True(twoFound)
 	assert.True(oneFound)
 }
+
+func TestPrometheusLoadTargetClusterDataUsages(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsages =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsages =================")
+
+	var tgtClusterUUID = "tgtUUID"
+
+	// Create fake data usages map
+	// [0] = dataSent, [1] = dataReceived
+	dataUsages := map[string][]int64{
+		tgtClusterUUID: {1024, 2048}, // 1KB sent, 2KB received
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	// Test initial load
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	// Verify the metric was recorded
+	numEntries := exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	assert.Len(numEntries, 1)
+
+	// Verify the value is the sum of dataSent and dataReceived
+	for _, statPerIdentifier := range numEntries {
+		// 1024 + 2048 = 3072
+		assert.Equal(int64(3072), statPerIdentifier.GetValue())
+	}
+
+	// Test that cache works - loading same data again shouldn't change anything
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+	assert.Len(exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX], 1)
+
+	// Test cache invalidation - update data
+	dataUsages[tgtClusterUUID] = []int64{2048, 4096}
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	// Verify the value was updated
+	numEntries = exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	for _, statPerIdentifier := range numEntries {
+		// 2048 + 4096 = 6144
+		assert.Equal(int64(6144), statPerIdentifier.GetValue())
+	}
+}
+
+func TestPrometheusLoadTargetClusterDataUsagesTwoClusters(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsagesTwoClusters =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsagesTwoClusters =================")
+
+	var tgtClusterUUID1 = "tgtUUID1"
+	var tgtClusterUUID2 = "tgtUUID2"
+
+	// Create fake data usages map with two clusters
+	dataUsages := map[string][]int64{
+		tgtClusterUUID1: {1024, 2048}, // 1KB sent, 2KB received = 3KB total
+		tgtClusterUUID2: {4096, 8192}, // 4KB sent, 8KB received = 12KB total
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	// Verify two entries were created
+	numEntries := exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	assert.Len(numEntries, 2)
+
+	// Verify both clusters have the correct values
+	var cluster1Found bool
+	var cluster2Found bool
+	for _, statPerIdentifier := range numEntries {
+		value := statPerIdentifier.GetValue()
+		if value == int64(3072) { // 1024 + 2048
+			cluster1Found = true
+		}
+		if value == int64(12288) { // 4096 + 8192
+			cluster2Found = true
+		}
+	}
+
+	assert.True(cluster1Found)
+	assert.True(cluster2Found)
+}
+
+func TestPrometheusLoadTargetClusterDataUsagesZeroValues(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsagesZeroValues =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsagesZeroValues =================")
+
+	var tgtClusterUUID = "tgtUUID"
+
+	// Test with zero values
+	dataUsages := map[string][]int64{
+		tgtClusterUUID: {0, 0},
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	numEntries := exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	assert.Len(numEntries, 1)
+
+	for _, statPerIdentifier := range numEntries {
+		assert.Equal(int64(0), statPerIdentifier.GetValue())
+	}
+}
+
+func TestPrometheusLoadTargetClusterDataUsagesEmptyMap(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsagesEmptyMap =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsagesEmptyMap =================")
+
+	// Test with empty map
+	dataUsages := map[string][]int64{}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	// Should create the metric entry but with no clusters
+	numEntries := exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	assert.Len(numEntries, 0)
+}
+
+func TestPrometheusLoadTargetClusterDataUsagesCacheInvalidation(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsagesCacheInvalidation =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsagesCacheInvalidation =================")
+
+	var tgtClusterUUID1 = "tgtUUID1"
+	var tgtClusterUUID2 = "tgtUUID2"
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	// Initial load with one cluster
+	dataUsages := map[string][]int64{
+		tgtClusterUUID1: {1024, 2048},
+	}
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+	assert.Len(exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX], 1)
+
+	// Add a second cluster - should invalidate cache
+	dataUsages[tgtClusterUUID2] = []int64{4096, 8192}
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+	assert.Len(exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX], 2)
+
+	// Remove first cluster - should invalidate cache
+	delete(dataUsages, tgtClusterUUID1)
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+	assert.Len(exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX], 1)
+
+	// Verify only second cluster remains
+	for _, statPerIdentifier := range exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX] {
+		assert.Equal(int64(12288), statPerIdentifier.GetValue()) // 4096 + 8192
+	}
+}
+
+func TestPrometheusLoadTargetClusterDataUsagesLargeValues(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPrometheusLoadTargetClusterDataUsagesLargeValues =================")
+	defer fmt.Println("============== Test case end: TestPrometheusLoadTargetClusterDataUsagesLargeValues =================")
+
+	var tgtClusterUUID = "tgtUUID"
+
+	// Test with large values (simulate GB of data)
+	dataUsages := map[string][]int64{
+		tgtClusterUUID: {1073741824, 2147483648}, // 1GB sent, 2GB received
+	}
+
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
+
+	assert.Nil(exporter.LoadTargetClusterDataUsages(dataUsages))
+
+	numEntries := exporter.metricsMap[service_def.REMOTE_CLUSTER_MONITORING_METADATA_TX]
+	assert.Len(numEntries, 1)
+
+	for _, statPerIdentifier := range numEntries {
+		// 1GB + 2GB = 3GB = 3221225472 bytes
+		assert.Equal(int64(3221225472), statPerIdentifier.GetValue())
+	}
+}

@@ -212,6 +212,9 @@ const (
 
 	// Consts for accumulative number of replications
 	TOTAL_REPLICATIONS_COUNT = "number_of_replications"
+
+	// Remote Cluster related stats
+	REMOTE_CLUSTER_MONITORING_METADATA_TX = "remote_cluster_monitoring_metadata_transferred"
 )
 
 const (
@@ -1805,6 +1808,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForVariableVBSupport,
 		Description:  "The total number of replications that exists to replicate to a particular target cluster",
 		Stability:    Committed,
+		Labels:       RemoteClusterSpecificLabels,
+	},
+
+	REMOTE_CLUSTER_MONITORING_METADATA_TX: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMetadataStatsSupport,
+		Description:  "The total size of monitoring metadata sent and received to and from the remote cluster",
+		Stability:    Internal,
 		Labels:       RemoteClusterSpecificLabels,
 	},
 }

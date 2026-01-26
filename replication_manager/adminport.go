@@ -1406,7 +1406,7 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 		return EncodeByteArrayIntoPrometheusResponseWithStatusCode([]byte{}, http.StatusOK)
 	}
 
-	expVarMap, remClusterIds, replIds, err := GetAllStatistics()
+	expVarMap, remClusterIds, replIds, remDataUsages, err := GetAllStatistics()
 	if err != nil {
 		return nil, err
 	}
@@ -1416,6 +1416,12 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 	if err != nil {
 		// Not a critical error, continue
 		logger_ap.Debugf("Unable to load replication IDs due to err %v\n", err)
+	}
+
+	err = adminport.prometheusExporter.LoadTargetClusterDataUsages(remDataUsages)
+	if err != nil {
+		// Not a critical error, continue
+		logger_ap.Debugf("Unable to load target cluster data usages due to err %v\n", err)
 	}
 
 	sourceClusterNames, sourceSpecs, sourceNodes, _, _, hbSizes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
