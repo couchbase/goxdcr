@@ -4474,13 +4474,22 @@ func (agent *RemoteClusterAgent) setReplReader(reader service_def.ReplicationSpe
 
 func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata) {
 	clonedRef := agent.GetReferenceClone()
-	err := agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, hbMetadata)
+	ctx := agent.utils.GetDataUsageTrackingCtx()
+	err := agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, hbMetadata, ctx)
 	if err != nil {
 		agent.logger.Warnf("sending heartbeat to %v has err %v", clonedRef.Name(), err)
 		return
 	}
 
-	// NEIL TODO - track data usage
+	// Track data usage from heartbeat
+	if ctx != nil {
+		if ctx.DataSent > 0 {
+			agent.dataSentBytes.Add(uint64(ctx.DataSent))
+		}
+		if ctx.DataReceived > 0 {
+			agent.dataReceivedBytes.Add(uint64(ctx.DataReceived))
+		}
+	}
 
 	agent.heartbeatAPIMtx.Lock()
 	agent.lastSentHeartbeatMetadata = hbMetadata

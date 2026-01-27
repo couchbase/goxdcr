@@ -67,7 +67,7 @@ type P2PSendType func(req Request, log *log.CommonLogger) (HandlerResult, error)
 type PeerToPeerCommAPI interface {
 	P2PReceive(reqOrResp ReqRespCommon) (HandlerResult, error)
 	P2PSend(req Request, log *log.CommonLogger) (HandlerResult, error)
-	P2PRemoteSend(req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error)
+	P2PRemoteSend(ctx *utils.Context, req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error)
 }
 
 type P2pCommAPIimpl struct {
@@ -165,7 +165,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 	return result, err
 }
 
-func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error) {
+func (p2p *P2pCommAPIimpl) P2PRemoteSend(ctx *utils.Context, req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error) {
 	payload, err := req.Serialize()
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteCluste
 
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRClusterToClusterPath, false, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), base.MethodPost, base.JsonContentType,
-		payload, base.ShortHttpTimeout, &out, nil, false, logger, nil)
+		payload, base.ShortHttpTimeout, &out, nil, false, logger, nil, ctx)
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
 		err = nil

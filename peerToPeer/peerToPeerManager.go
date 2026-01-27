@@ -398,10 +398,15 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 
 				var handlerResult HandlerResult
 				var p2pSendErr error
+				// Use context from cbOpts if available, otherwise create new one
+				var ctx *utils.Context
+				if cbOpts != nil && cbOpts.context != nil {
+					ctx = cbOpts.context
+				}
 				if cbOpts.remoteClusterRef == nil {
 					handlerResult, p2pSendErr = p.commAPI.P2PSend(compiledReq, p.logger)
 				} else {
-					handlerResult, p2pSendErr = p.commAPI.P2PRemoteSend(compiledReq, cbOpts.remoteClusterRef, p.logger)
+					handlerResult, p2pSendErr = p.commAPI.P2PRemoteSend(ctx, compiledReq, cbOpts.remoteClusterRef, p.logger)
 				}
 
 				if p2pSendErr != nil {
@@ -505,6 +510,9 @@ type SendOpts struct {
 	// Non-nil if we plan to send to a remote cluster's XDCR; which leads to the use of
 	// (PeerToPeerCommAPI).P2PRemoteSend() method for inter-cluster communication (/xdcr/c2cCommunications).
 	remoteClusterRef *metadata.RemoteClusterReference
+
+	// Context for tracking data usage
+	context *utils.Context
 }
 
 type SendOptsMap map[string]chan ReqRespPair
@@ -525,6 +533,11 @@ func NewSendOpts(sync bool, timeout time.Duration, maxRetry int) *SendOpts {
 
 func (s *SendOpts) SetRemoteClusterRef(ref *metadata.RemoteClusterReference) *SendOpts {
 	s.remoteClusterRef = ref
+	return s
+}
+
+func (s *SendOpts) SetContext(ctx *utils.Context) *SendOpts {
+	s.context = ctx
 	return s
 }
 
@@ -1184,7 +1197,7 @@ func (p *P2PManagerImpl) SendDelBackfill(specId string) error {
 	return nil
 }
 
-func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hb *metadata.HeartbeatMetadata) error {
+func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hb *metadata.HeartbeatMetadata, ctx ...*utils.Context) error {
 	srcStr, err := p.xdcrCompSvc.MyHostAddr()
 	if err != nil {
 		return err
@@ -1210,6 +1223,10 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 	// Cannot be synchronous because remote cluster may not be able to respond back
 	// This will be a send and forget operation, no ack from the remote
 	opts := NewSendOpts(false, 0, base.PeerToPeerMaxRetry).SetRemoteClusterRef(reference)
+	// Store context in opts so it can be passed to P2PRemoteSend
+	if len(ctx) > 0 {
+		opts.SetContext(ctx[0])
+	}
 	err, failedToSend := p.sendToEachPeerOnce(ReqSrcHeartbeat, getReqFunc, opts)
 	if err != nil {
 		return err

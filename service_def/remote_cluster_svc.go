@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/utils"
 )
 
 // Returns:
@@ -124,7 +125,7 @@ type RemoteClusterSvc interface {
 }
 
 type ClusterHeartbeatAPI interface {
-	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hbMetadata *metadata.HeartbeatMetadata) error
+	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, hbMetadata *metadata.HeartbeatMetadata, ctx ...*utils.Context) error
 
 	// Provides the heartbeats received from source clusters in the form of maps keyed on cluster UUIDs,
 	// pointing to values of:
