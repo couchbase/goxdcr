@@ -166,6 +166,12 @@ const (
 
 	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
 	MinPVLenForMobileKey = base.MinPVLenForMobileKey
+
+	// ConflictRateToPauseReplKey represents the conflict rate (conflicts per second per source cluster node),
+	// if configured, the replication needs to be autopaused during conflict logging. The conflict rate will
+	// be monitored on each node and if any node experiences conflict burst with conflict rate greater than
+	// the threshold, the replication pipeline will be autopaused on every node (i.e. across the cluster).
+	ConflictRateToPauseReplKey = base.ConflictRateToPauseReplKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -340,6 +346,9 @@ var excludeEventRegexConfig = &SettingsConfig{"", nil}
 
 var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
 
+// Conflict rate of 0 indicates that, the pipeline will be not autopaused with any rate of conflict.
+var conflictRateToPauseReplConfig = &SettingsConfig{0, &Range{0, math.MaxInt}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -415,6 +424,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ForwardLocalOnlyKey:                  forwardLocalOnlyConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
 	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
+	ConflictRateToPauseReplKey:           conflictRateToPauseReplConfig,
 	ExcludeEventRegexKey:                 excludeEventRegexConfig,
 }
 
@@ -1666,4 +1676,11 @@ func (s *ReplicationSettings) GetMinPVLenForMobile() int {
 	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
 	len := val.(int)
 	return len
+}
+
+// GetConflictRateToPauseRepl returns the value of ConflictRateToPauseReplKey setting.
+func (s *ReplicationSettings) GetConflictRateToPauseRepl() int {
+	val, _ := s.GetSettingValueOrDefaultValue(ConflictRateToPauseReplKey)
+	rate := val.(int)
+	return rate
 }

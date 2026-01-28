@@ -2035,3 +2035,7 @@ const ForwardLocalOnlyKey = "forwardLocalOnly"
 
 // ExcludeEventRegexKey is a regex pattern to exclude errors from UI error events section
 const ExcludeEventRegexKey string = "excludeUIErrRegex"
+
+// ConflictRateToPauseReplKey denotes the setting to autopause the replication based on the input conflict
+// rate while conflict logging.
+const ConflictRateToPauseReplKey string = "conflictRateToPauseRepl"

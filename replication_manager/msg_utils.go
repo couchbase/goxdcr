@@ -128,6 +128,7 @@ const (
 	DevReplOptsKey                    = base.DevReplOptsKey
 	ExcludeEventRegexKey              = base.ExcludeEventRegexKey
 	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
+	ConflictRateToPauseReplKey        = base.ConflictRateToPauseReplKey
 )
 
 // constants for parsing create/change/view replication response
@@ -286,6 +287,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DevReplOptsKey:                    metadata.DevReplOptsKey,
 	ExcludeEventRegexKey:              metadata.ExcludeEventRegexKey,
 	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
+	ConflictRateToPauseReplKey:        metadata.ConflictRateToPauseReplKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -376,6 +378,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevReplOptsKey:                       DevReplOptsKey,
 	metadata.ExcludeEventRegexKey:                 ExcludeEventRegexKey,
 	metadata.MinPVLenForMobileKey:                 MinPVLenForMobileKey,
+	metadata.ConflictRateToPauseReplKey:           ConflictRateToPauseReplKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
