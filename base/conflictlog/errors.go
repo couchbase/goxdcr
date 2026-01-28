@@ -37,4 +37,7 @@ var (
 	ErrFatalResp         error = errors.New("fatal error")
 	ErrNotMyVBucket      error = errors.New("not my vbucket")
 	ErrUnknownCollection error = errors.New("unknown collection")
+
+	ErrDescConflictCounter error = errors.New("conflict counter decreased")
+	ErrDescTime            error = errors.New("time went backwards")
 )

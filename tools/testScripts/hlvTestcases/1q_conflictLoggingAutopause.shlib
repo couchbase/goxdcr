@@ -1,0 +1,178 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B1" "B4")
+declare -a cluster2BucketsArr
+cluster2BucketsArr=("B2" "B5")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]})
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty # conflict bucket for C1.B1
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty # conflict bucket for C2.B2
+
+conflictLoggingMap="{\"bucket\":\"B4\", \"collection\": \"_default._default\"}"
+
+# Settings for autopause with conflict rate threshold of 10 conflicts/s.
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap ["conflictRateToPauseRepl"]=10)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]} ["B4"]=${scope1Arr[@]} ["B5"]=${scope1Arr[@]})
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function verifyPromStats {
+	numItems=$1
+
+	# verify no data-corruption
+	validateBinaryFilteredIs0 "C1" "B1" "B2"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B1" "B2"
+
+	# verify no unknown clog others
+	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B2"
+
+	checkItemCnt "C1" "B1" $numItems
+	if (($? == 1)); then
+		runDifferFindDifference "C2" "B2" "C1" "B1"
+		exit 1
+	fi
+	checkItemCnt "C2" "B2" $numItems
+	if (($? == 1)); then
+		runDifferFindDifference "C1" "B1" "C2" "B2"
+		exit 1
+	fi
+}
+
+# The conflict rate in this test will be greater than configured threshold and therefore the replication
+# will autopause
+function testReplicationWhichAutoPauses {
+	echo "Running test with conflict logger autopause replication..."
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	sleep 20
+
+	createRemoteClusterReference "C1" "C2"
+
+	echo "Setting enableCrossClusterVersioning to true"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	numItems=5000
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
+
+	# the way this test creates conflicts is by having docs of the same keys on both buckets.
+	# this is hackish and doesn't represent a true conflict.
+	echo runCbWorkloadGenBucket _default._default "C1" "B1" $numItems "conflict"
+	runCbWorkloadGenBucket "C1" "B1" $numItems "conflict"
+
+	echo runCbWorkloadGenBucket _default._default "C2" "B2" $numItems "conflict"
+	runCbWorkloadGenBucket "C2" "B2" $numItems "conflict"
+
+	echo "Replication C1.B1 -> C2.B2"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties
+
+	echo "Sleep 60 seconds to wait for replication to autopause"
+	sleep 60
+
+	#TODO: MB-70285
+	#validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
+	echo "Replication has been successfully autopaused"
+
+	grepForAbnormalities
+	verifyPromStats $numItems
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
+
+# The conflict rate in this test will be 0 and less that the configured threshold and therefore the replication
+# will not autopause
+function testReplicationWhichDoesnotAutoPauses {
+	echo "Running test without conflict logger autopause replication and without hibernation..."
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	sleep 20
+
+	createRemoteClusterReference "C1" "C2"
+
+	echo "Setting enableCrossClusterVersioning to true"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	numItems=5000
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
+
+	# Donot write conflicting docs on target to ensure conflict rate = 0
+	echo runCbWorkloadGenBucket _default._default "C1" "B1" $numItems "conflict"
+	runCbWorkloadGenBucket "C1" "B1" $numItems "conflict"
+
+	echo "Replication C1.B1 -> C2.B2"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties
+
+	echo "Sleep 60 seconds for replication to complete"
+	sleep 60
+
+	#TODO: MB-70285
+	#validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	echo "Replication is still running"
+
+	# changes_left should be 0
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	grepForAbnormalities
+	verifyPromStats $numItems
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running conflict logging autopause test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	sleep 2
+	testReplicationWhichAutoPauses
+	testReplicationWhichDoesnotAutoPauses
+
+	echo "============================================================================"
+	echo "Running conflict logging autopause test case passed"
+	echo "============================================================================"
+}

@@ -92,7 +92,7 @@ func main() {
 
 	xsvc.Utils = utils.NewUtilities()
 
-	conflictlog.InitManager(log.DefaultLoggerContext, xsvc.TopSvc, xsvc.Utils, xsvc.SecuritySvc, nil,
+	conflictlog.InitManager(log.DefaultLoggerContext, xsvc.TopSvc, xsvc.Utils, xsvc.SecuritySvc, nil, nil,
 		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
 		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
 		base.DefaultCLogPoolConnLimit,

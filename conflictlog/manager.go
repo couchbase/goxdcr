@@ -37,6 +37,7 @@ type Manager interface {
 	ConnPool() iopool.ConnPool
 	SetConnLimit(limit int)
 	SetIOPSLimit(limit int64)
+	StartMonitor(monitor Monitor)
 }
 
 type SecurityInfo interface {
@@ -50,6 +51,13 @@ type managerSingleton struct {
 	once sync.Once
 }
 
+// monitorSingleton is a type which enforces that the monitor is a
+// singleton in the process.
+type monitorSingleton struct {
+	once    sync.Once
+	monitor Monitor
+}
+
 // GetManager returns the global conflict manager
 func GetManager() (Manager, error) {
 	if manager == nil {
@@ -60,7 +68,14 @@ func GetManager() (Manager, error) {
 }
 
 // InitManager intializes global conflict manager
-func InitManager(loggerCtx *log.LoggerContext, topSvc service_def.XDCRCompTopologySvc, utils utils.UtilsIface, securityInfo SecurityInfo, throttler throttlerSvc.ThroughputThrottlerSvc, poolGCInterval, poolReapInterval time.Duration, connLimit int) {
+func InitManager(loggerCtx *log.LoggerContext,
+	topSvc service_def.XDCRCompTopologySvc,
+	utils utils.UtilsIface,
+	securityInfo SecurityInfo,
+	throttler throttlerSvc.ThroughputThrottlerSvc,
+	replSpecSvc service_def.ReplicationSpecReader,
+	poolGCInterval, poolReapInterval time.Duration,
+	connLimit int) {
 	singleton.once.Do(func() {
 		logger := log.NewLogger(ConflictManagerLoggerName, loggerCtx)
 
@@ -76,6 +91,8 @@ func InitManager(loggerCtx *log.LoggerContext, topSvc service_def.XDCRCompTopolo
 			connLimit:        connLimit,
 			throttlerSvc:     throttler,
 			topSvc:           topSvc,
+			replSpecSvc:      replSpecSvc,
+			monitor:          monitorSingleton{},
 		}
 
 		impl.setConnPool()
@@ -99,6 +116,7 @@ type managerImpl struct {
 	manifestCache *ManifestCache
 	throttlerSvc  throttlerSvc.ThroughputThrottlerSvc
 	topSvc        service_def.XDCRCompTopologySvc
+	replSpecSvc   service_def.ReplicationSpecReader
 
 	poolGCInterval   time.Duration
 	poolReapInterval time.Duration
@@ -106,6 +124,10 @@ type managerImpl struct {
 	connLimit int
 
 	skipTlsVerify bool
+
+	// monitor is the conflict rate monitor to take necessary actions
+	// when appropriately configured.
+	monitor monitorSingleton
 }
 
 func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error) {
@@ -162,4 +184,20 @@ func (m *managerImpl) newMemcachedConn(bucketUUID string, params interface{}) (c
 func (m *managerImpl) connPoolBucketDelFn(bucketUUID string) {
 	m.logger.Infof("deleting bucketUUID=%s from bucket cache", bucketUUID)
 	m.manifestCache.DeleteByUUID(bucketUUID)
+}
+
+// StartMonitor will set the input monitor for the CLog manager and start the monitoring
+// goroutine.
+func (m *managerImpl) StartMonitor(monitor Monitor) {
+	m.monitor.once.Do(func() {
+		mtr := &monitorImpl{
+			Monitor:        monitor,
+			statsToMonitor: make(map[string]*stats),
+			replSpecSvc:    m.replSpecSvc,
+			logger:         m.logger,
+		}
+
+		m.monitor.monitor = mtr
+		mtr.Start()
+	})
 }
