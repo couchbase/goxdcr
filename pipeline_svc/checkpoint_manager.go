@@ -1700,7 +1700,11 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 }
 
 func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bMatch bool, err error) {
-	bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, ckmgr.support_ckpt, ctx.dataTrackingCtx)
+	var trackingCtx *utilities.Context
+	if ctx != nil {
+		trackingCtx = ctx.dataTrackingCtx
+	}
+	bMatch, current_remoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, targetTimestamp, ckmgr.support_ckpt, trackingCtx)
 	if err != nil {
 		ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 		return
@@ -1715,8 +1719,12 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimest
 }
 
 func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bool, error) {
+	var trackingCtx *utilities.Context
+	if ctx != nil {
+		trackingCtx = ctx.dataTrackingCtx
+	}
 	for targetVbno, oneTargetTs := range globalTs {
-		bMatch, current_remoteVBOpaque, err := ctx.globalCtx.preReplicate(ckmgr.remote_bucket, oneTargetTs, ctx.dataTrackingCtx)
+		bMatch, current_remoteVBOpaque, err := ctx.globalCtx.preReplicate(ckmgr.remote_bucket, oneTargetTs, trackingCtx)
 		if err != nil {
 			ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 			return false, err

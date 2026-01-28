@@ -50,12 +50,13 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 	utilsMock.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsReal.ExponentialBackoffExecutor(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc))
 	}).Return(nil)
+	utilsMock.On("GetDataUsageTrackingCtx").Return(nil)
 
 	for i, peerNodeAddr := range peerNodes {
 		utilsMock.On("QueryRestApiWithAuth", peerNodeAddr, mock.Anything, mock.Anything, mock.Anything,
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-			mock.Anything, mock.Anything).Return(queryErrs[i], queryStatuses[i])
+			mock.Anything, mock.Anything, mock.Anything).Return(queryErrs[i], queryStatuses[i])
 	}
 
 	xdcrComp.On("PeerNodesAdminAddrs").Return(peerNodes, nil)

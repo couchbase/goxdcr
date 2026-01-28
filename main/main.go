@@ -254,7 +254,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.GetOrCreateContext(base.P2PManagerKey), top_svc, dataTrackingUtils, bucketTopologyService,
+		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.GetOrCreateContext(base.P2PManagerKey), top_svc, utils, bucketTopologyService,
 			replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService, collectionsManifestService,
 			backfillReplService, securitySvc, rm.BackfillManager, remote_cluster_svc)
 		if err != nil {
