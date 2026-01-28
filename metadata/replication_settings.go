@@ -149,6 +149,13 @@ const (
 
 	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
 	MinPVLenForMobileKey = base.MinPVLenForMobileKey
+
+	// ConflictRateToPauseReplKey represents the conflict rate (conflicts per second per source cluster node),
+	// if configured, the replication needs to be autopaused during conflict logging. The conflict rate will
+	// be monitored on each node and if any node experiences conflict burst with conflict rate greater than
+	// the threshold, the replication pipeline will be autopaused on every node (i.e. across the cluster).
+	ConflictRateToPauseReplKey = base.ConflictRateToPauseReplKey
+
 	// CNG Nozzle settings
 	CNGWorkerCountKey = base.CNGWorkerCountKey // number of workers per nozzle to process incoming data
 	CNGQueueSizeKey   = base.CNGQueueSizeKey   // size of the channel buffer between nozzle and workers
@@ -306,6 +313,9 @@ var DevReplOptsConfig = &SettingsConfig{"", nil}
 
 var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
 
+// Conflict rate of 0 indicates that, the pipeline will be not autopaused with any rate of conflict.
+var conflictRateToPauseReplConfig = &SettingsConfig{0, &Range{0, math.MaxInt}}
+
 // CNG Nozzle settings
 var CNGWorkerCountConfig = &SettingsConfig{base.DefaultCNGWorkerCount, &Range{1, 10000}}
 var CNGQueueSizeConfig = &SettingsConfig{base.DefaultCNGQueueSize, &Range{1, 10000}}
@@ -372,6 +382,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
 	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
+	ConflictRateToPauseReplKey:           conflictRateToPauseReplConfig,
 
 	// CNG Nozzle settings
 	CNGWorkerCountKey: CNGWorkerCountConfig,
@@ -1646,4 +1657,11 @@ func (s *ReplicationSettings) GetMinPVLenForMobile() int {
 	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
 	len := val.(int)
 	return len
+}
+
+// GetConflictRateToPauseRepl returns the value of ConflictRateToPauseReplKey setting.
+func (s *ReplicationSettings) GetConflictRateToPauseRepl() int {
+	val, _ := s.GetSettingValueOrDefaultValue(ConflictRateToPauseReplKey)
+	rate := val.(int)
+	return rate
 }

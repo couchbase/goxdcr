@@ -2086,3 +2086,7 @@ const MaxValueLenForLogging = 512
 var ValueTooLongForLogging = []byte("...<value too long to display>")
 
 var ColMappingLargeThreshold = 1000
+
+// ConflictRateToPauseReplKey denotes the setting to autopause the replication based on the input conflict
+// rate while conflict logging.
+const ConflictRateToPauseReplKey string = "conflictRateToPauseRepl"
