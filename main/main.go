@@ -279,6 +279,7 @@ func main() {
 			utils,
 			securitySvc,
 			thThrottler,
+			replication_spec_svc,
 			globalSettings.GetCLogPoolGCInterval(), globalSettings.GetCLogPoolReapInterval(), globalSettings.GetCLogPoolConnLimit())
 
 		// start replication manager in normal mode

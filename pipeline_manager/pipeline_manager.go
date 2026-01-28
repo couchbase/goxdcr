@@ -19,6 +19,7 @@ import (
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/parts"
@@ -175,6 +176,13 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 	pipelineMgrRetVar.serializer = NewPipelineOpSerializer(pipelineMgrRetVar, pipelineMgrRetVar.logger)
 
 	pipelineMgrRetVar.pipeline_factory.SetPipelineStopCallback(pipelineMgrRetVar.UpdateWithStoppedCb)
+
+	conflictMgr, err := conflictlog.GetManager()
+	if err != nil {
+		pipelineMgrRetVar.logger.Fatalf("Conflict manager monitor will not start: %v", err)
+	} else {
+		conflictMgr.StartMonitor(pipelineMgrRetVar)
+	}
 
 	return pipelineMgrRetVar
 }
@@ -2840,4 +2848,46 @@ func (pm *PipelineManager) gcTargetBucket(spec *metadata.ReplicationSpecificatio
 	} else {
 		return false, err
 	}
+}
+
+// GetConflictsCount returns the true_conflicts_detected stat for both main and backfill pipeline.
+func (pm *PipelineManager) GetConflictsCount(topic string) (int64, error) {
+	rs, err := pm.ReplicationStatus(topic)
+	if err != nil {
+		return 0, err
+	}
+
+	curProgress := rs.GetProgress()
+	if curProgress != common.ProgressPipelineRunning {
+		return 0, nil
+	}
+
+	var totalConflicts int64
+	for _, pipelineType := range []common.PipelineType{common.MainPipeline, common.BackfillPipeline} {
+		statsMap := rs.GetOverviewStats(pipelineType)
+		if statsMap == nil {
+			// Backfill pipeline may not exist.
+			continue
+		}
+
+		conflicts, err := base.ParseStats(statsMap, base.TrueConflictsDetected)
+		if err != nil {
+			return 0, err
+		}
+
+		totalConflicts += conflicts
+	}
+
+	return totalConflicts, nil
+}
+
+func (pm *PipelineManager) RaiseUIError(topic string, errMsg string) (int64, error) {
+	pm.uilog_svc.Write(errMsg)
+
+	rs, err := pm.ReplicationStatus(topic)
+	if err != nil {
+		return 0, err
+	}
+
+	return rs.GetEventsProducer().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil), nil
 }

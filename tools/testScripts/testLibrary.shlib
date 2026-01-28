@@ -3120,7 +3120,7 @@ function validatePrometheusPipelineStatusIs1Internal {
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
 	if (($count == 0)); then
-		echo "Pipeline status $pipelineType $statusType shows 0"
+		echo "Pipeline status $sourceBucket $targetBucket $pipelineType $statusType shows 0"
 		echo "Full prometheus output:"
 		echo "$prometheusOut"
 		exit 1
@@ -3569,6 +3569,49 @@ function createTombstone {
 			exit 1
 		fi
 	fi
+}
+
+#xdcr_clog_status {targetClusterUUID="acdf05b792c5bdd9412be67ad2b675da", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="Hibernated"} 0
+#xdcr_clog_status {targetClusterUUID="acdf05b792c5bdd9412be67ad2b675da", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="Running"} 1
+#xdcr_clog_status {targetClusterUUID="acdf05b792c5bdd9412be67ad2b675da", sourceBucketName="B1", targetBucketName="B2", pipelineType="Main", status="DNE"} 0
+function validatePrometheusCLogStatusIs1Internal {
+	local sourceBucket=$1
+	local targetBucket=$2
+	local pipelineType=$3
+	local statusType=$4
+	local prometheusOut="$5"
+
+	local count
+	count=$(echo "$prometheusOut" | grep "xdcr_clog_status" | grep "pipelineType=\"$pipelineType\"" | grep "status=\"$statusType\"" |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if (($count == 0)); then
+		echo "CLog status $sourceBucket $targetBucket $pipelineType $statusType shows 0"
+		echo "Full prometheus output:"
+		echo "$prometheusOut"
+		exit 1
+	fi
+}
+
+function validatePrometheusCLogStatusIs1 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local statusType=$5
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	if [[ -z "${prometheusOut:-}" ]]; then
+		prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+		if [[ -z "${prometheusOut:-}" ]]; then
+			echo "Warning Unable to get prometheus stats"
+			echo "Command is $CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics"
+		fi
+	fi
+
+	validatePrometheusCLogStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
 }
 
 # Helper function to check for the ECCV mismatch UI error
