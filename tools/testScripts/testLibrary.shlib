@@ -2371,11 +2371,11 @@ function validateHeartbeatNon0 {
 	local filteredOut
 
 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
-	filteredOut=$(echo "$prometheusOut" | grep xdcr_remote_cluster_monitoring_metadata_received_bytes | grep -v HELP | grep -v TYPE)
+	filteredOut=$(echo "$prometheusOut" | grep xdcr_remote_cluster_monitoring_metadata_transferred_bytes | grep -v HELP | grep -v TYPE)
 
 	# filteredOut should look like:
-	#xdcr_remote_cluster_monitoring_metadata_received_bytes {targetClusterUUID="3e989fe70c1b93345a2552a53279159c"} 10564
-	#xdcr_remote_cluster_monitoring_metadata_received_bytes {targetClusterUUID="somethingElse"} 10564
+	#xdcr_remote_cluster_monitoring_metadata_transferred_bytes {targetClusterUUID="3e989fe70c1b93345a2552a53279159c"} 10564
+	#xdcr_remote_cluster_monitoring_metadata_transferred_bytes {targetClusterUUID="somethingElse"} 10564
 
 	local line
 	local foundNon0=0

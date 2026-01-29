@@ -124,6 +124,7 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	}
 
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
+	http_client.Transport = capi_svc.utils.GetTrackedTransport(ctx)
 	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService, ctx)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
