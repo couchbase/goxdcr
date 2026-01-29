@@ -1,4 +1,4 @@
-# Copyright 2019-Present Couchbase, Inc.
+# Copyright 2026-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -125,7 +125,7 @@ function cleanupTestCaseInternalSettings {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running collections live rediscover test case variableVB 128VB edition"
+	echo "Running collections live rediscover test case variableVB 128VB edition with secure replication"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -169,8 +169,8 @@ function runTestCase {
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C2" "C1"
+	createSecureRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C2" "C1"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
@@ -183,6 +183,12 @@ function runTestCase {
 	sleep 5
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" 0
+
+	# Validate prometheus stats for secure replication
+	echo "Validating prometheus stats for secure replication..."
+	sleep 5
+	validatePrometheusStatsNon0 "C1" "B1" "B2" "xdcr_sys_metadata_transferred_bytes"
+	validatePrometheusStatsNon0 "C2" "B2" "B1" "xdcr_sys_metadata_transferred_bytes"
 
 	# One broken msg for B1.S1.c1 -> B2.S1.c1 and one for B1.S1.c2 -> B2.S1.c2
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 2))

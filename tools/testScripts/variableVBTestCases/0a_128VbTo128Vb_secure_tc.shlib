@@ -1,4 +1,4 @@
-# Copyright 2019-Present Couchbase, Inc.
+# Copyright 2026-Present Couchbase, Inc.
 #
 # Use of this software is governed by the Business Source License included in
 # the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -20,13 +20,12 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
-declare -A Bucket2Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
-insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
@@ -44,13 +43,19 @@ function runDataLoad {
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 }
 
-function runTestCase {
-	local oldDataReplicated
-	local oldDocsProcessed
+function validateDataLoad {
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
+	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+}
 
+function runTestCase {
 	echo "============================================================================"
-	echo "Running 1024 to 128 VB basic test"
+	echo "Running 128 to 128 VB basic test with secure replication"
 	echo "============================================================================"
+	# Since ns_server has made magma the default, the VBucket count is now 128 by default
 	setupTopologies
 	if (($? != 0)); then
 		exit 1
@@ -65,8 +70,8 @@ function runTestCase {
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C2" "C1"
+	createSecureRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C2" "C1"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
@@ -75,7 +80,6 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	checkUnidirectionalChangesLeft
 
-	sleep 5
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count"
@@ -85,49 +89,13 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
-	oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
-	oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
+	validateDataLoad
 
-	pauseReplication "C1" "B1" "C2" "B2"
-	sleep 30
-	grepForPanics
-	validateInternalLogWithInstance "C1" "$CKPTSEQNO_BACKARD" 0
-
-	resumeReplication "C1" "B1" "C2" "B2"
-	sleep 30
-	checkUnidirectionalChangesLeft
-	grepForPanics
-
-	checkDocsProcessed "C1" "B1" "C2" "B2" "$oldDocsProcessed"
-	checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
-
-	# Kill source goxdcr
-	killGoXdcr "C1"
-	sleepTime=30
-	echo "Sleeping $sleepTime seconds for goxdcr to reboot"
-	sleep $sleepTime
-	checkUnidirectionalChangesLeft
-	grepForPanics
-
-	# Run data load again
-	oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
-	runDataLoad
-	# Changes left should go to 0
-	checkUnidirectionalChangesLeft
-
-	sleep $sleepTime
-	if (($(getDocsProcessed "C1" "B1" "C2" "B2") == $oldDocsProcessed)); then
-		echo "Data processed should not be the same after run"
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
-	if (($(getDataReplicated "C1" "B1" "C2" "B2") == $oldDataReplicated)); then
-		# Because broken mapping should have persisted
-		echo "Data replicated should not be the same after run"
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
-	grepForPanics
+	# Validate prometheus stats for secure replication
+	echo "Validating prometheus stats for secure replication..."
+	sleep 5
+	validatePrometheusStatsNon0 "C1" "B1" "B2" "xdcr_sys_metadata_transferred_bytes"
+	validatePrometheusStatsNon0 "C2" "B2" "B1" "xdcr_sys_metadata_transferred_bytes"
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -135,8 +103,4 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
-
-	cleanupBucketNamePropertyMap
-	# For magma clean up, sleep a bit
-	sleep 20
 }
