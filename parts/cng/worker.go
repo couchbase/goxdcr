@@ -42,6 +42,7 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 
 			n.handleNozzleStats(&trace, err)
 			n.raiseUpstreamErr(req, err)
+			n.handleVBError(req, err)
 			n.raiseEvents(req, &trace, err)
 			if err == nil {
 				return

@@ -36,8 +36,13 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
 
+	// As of now, CheckDocument RPC does not take vbuuid as input param
+	// It should be ok as the vbuuid check happens in PushDocument RPC
+	// This leaves scenario that a document metadata is checked against a doc
+	// with different vbuuid and the source loses the conflict. This should not
+	// be a problem as if the source won, the pushDocument will error out with
+	// vbuuid mismatch error anyway.
 	checkDocReq := &internal_xdcr_v1.CheckDocumentRequest{
-		// CNG TODO: use vbuuid
 		BucketName:     n.cfg.Replication.TargetBucketName,
 		ScopeName:      req.TgtColNamespace.ScopeName,
 		CollectionName: req.TgtColNamespace.CollectionName,

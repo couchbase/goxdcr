@@ -73,6 +73,7 @@ const (
 
 	ERR_COLLECTION_NOT_FOUND CNGErrorCode = 2
 	ERR_SCOPE_NOT_FOUND      CNGErrorCode = 3
+	ERR_VB_MISMATCH          CNGErrorCode = 4
 
 	// GRPC Errors
 	ERR_GRPC_CANCELLED           CNGErrorCode = 10
@@ -179,6 +180,18 @@ func mapGrpcStatusToCNGError(st *status.Status) (cngErr *CNGError) {
 				cngErr.Code = ERR_COLLECTION_NOT_FOUND
 			case ResourceTypeScope:
 				cngErr.Code = ERR_SCOPE_NOT_FOUND
+			}
+		}
+		return
+	case codes.Aborted:
+		for _, d := range st.Details() {
+			errInfo, ok := d.(*errdetails.ErrorInfo)
+			if ok {
+				if errInfo.Reason == CNGAbortReasonVbuuidMismatch {
+					cngErr.Code = ERR_VB_MISMATCH
+					// We bailout on first match as multiple details for same reason is unlikely
+					break
+				}
 			}
 		}
 		return

@@ -15,4 +15,8 @@ const (
 	ResourceTypeDocument   = "document"
 	ResourceTypeCollection = "collection"
 	ResourceTypeScope      = "scope"
+
+	// CNGAbortReasonVbuuidMismatch indicates that the vbuuid from source and target do not match
+	// This is stamped in the details of grpc error for code == Aborted
+	CNGAbortReasonVbuuidMismatch = "VBUUID_MISMATCH"
 )

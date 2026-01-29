@@ -90,3 +90,26 @@ func (n *Nozzle) raiseSuccessEvent(req *base.WrappedMCRequest, t *Trace, err err
 	evt := common.NewEvent(common.DataSent, nil, n, nil, additionalInfo)
 	n.RaiseEvent(evt)
 }
+
+// handleVBError checks if the error is a VB mismatch error
+// If so, it raises a VB error event, which should restart the pipeline
+func (n *Nozzle) handleVBError(req *base.WrappedMCRequest, err error) {
+	if err == nil {
+		return
+	}
+
+	cngErr := mapToCNGError(err)
+	if cngErr.Code != ERR_VB_MISMATCH {
+		return
+	}
+
+	vbno := req.GetTargetVB()
+	n.Logger().Errorf("VB error encountered for req with vb=%v", vbno)
+	additionalInfo := &base.VBErrorEventAdditional{
+		Vbno:      vbno,
+		Error:     err,
+		ErrorType: base.VBErrorType_Target,
+	}
+	evt := common.NewEvent(common.VBErrorEncountered, nil, n, nil, additionalInfo)
+	n.RaiseEvent(evt)
+}
