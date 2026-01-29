@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -85,8 +86,9 @@ func (req *apiRequest) CloneAndRedact() *apiRequest {
 //  3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
 //     has changed due to the topology change, in that case, new vb UUID would be returned
 type CAPIService struct {
-	logger *log.CommonLogger
-	utils  utilities.UtilsIface
+	logger         *log.CommonLogger
+	utils          utilities.UtilsIface
+	clientMutexMap sync.Map // map[*http.Client]*sync.Mutex to protect transport modifications
 }
 
 func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *CAPIService {
@@ -94,6 +96,24 @@ func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface)
 		logger: log.NewLogger("CapiSvc", logger_ctx),
 		utils:  utilsIn,
 	}
+}
+
+// getClientMutex returns a mutex for the given http.Client, creating one if it doesn't exist
+func (capi_svc *CAPIService) getClientMutex(client *http.Client) *sync.Mutex {
+	if client == nil {
+		// This shouldn't happen, but handle gracefully with a new mutex
+		return &sync.Mutex{}
+	}
+
+	// Try to load existing mutex
+	if mu, ok := capi_svc.clientMutexMap.Load(client); ok {
+		return mu.(*sync.Mutex)
+	}
+
+	// Create new mutex and store it (LoadOrStore handles race conditions)
+	newMu := &sync.Mutex{}
+	actual, _ := capi_svc.clientMutexMap.LoadOrStore(client, newMu)
+	return actual.(*sync.Mutex)
 }
 
 // PrePrelicate (_pre_replicate)
@@ -124,7 +144,36 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 	}
 
 	http_client := remoteBucket.RestAddrHttpClientMap[api_base.url]
-	http_client.Transport = capi_svc.utils.GetTrackedTransport(ctx)
+
+	// Get mutex for this specific client to protect transport modification
+	clientMutex := capi_svc.getClientMutex(http_client)
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	// Preserve original transport and temporarily swap it for tracking
+	originalTransport := http_client.Transport
+	defer func() {
+		// Restore original transport when function exits
+		http_client.Transport = originalTransport
+	}()
+
+	if remoteBucket.RemoteClusterRef.IsFullEncryption() {
+		// Extract existing transport to preserve TLS config
+		if existingTransport, ok := originalTransport.(*http.Transport); ok {
+			http_client.Transport = capi_svc.utils.GetTLSTrackedTransport(existingTransport, ctx)
+		} else if originalTransport != nil {
+			// Transport exists but is not *http.Transport (e.g., already wrapped)
+			// In this case, we can't safely wrap it again, so use it as-is
+			http_client.Transport = originalTransport
+		} else {
+			// No transport set, this shouldn't happen but handle gracefully
+			capi_svc.logger.Warnf("No transport found for http_client, using default")
+			http_client.Transport = http.DefaultTransport
+		}
+	} else {
+		http_client.Transport = capi_svc.utils.GetTrackedTransport(ctx)
+	}
+
 	status_code, respMap, err := capi_svc.send_post(api_base, http_client, base.MaxRetryCapiService, ctx)
 	capi_svc.logger.Debugf("response from _pre_replicate is status_code=%v respMap=%v for %v\n", status_code, respMap, knownRemoteVBStatus)
 	if err != nil {
