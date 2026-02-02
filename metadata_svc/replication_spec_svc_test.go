@@ -271,6 +271,7 @@ func setupPipelineMock(
 	testPipeline.On("Specification").Return(spec)
 	testPipeline.On("Topic").Return(testTopic)
 	testPipeline.On("Type").Return(commonReal.MainPipeline)
+	testPipeline.On("Settings").Return(metadata.DefaultReplicationSettings().ToMap(false))
 
 	pipelineMock.On("NewPipeline", testTopic, mock.AnythingOfType("common.PipelineProgressRecorder")).Return(testPipeline, nil)
 	ckptMock.On("DelCheckpointsDocs", mock.Anything).Return(nil)

@@ -97,8 +97,9 @@ type TopologyChangeDetectorSvc struct {
 	// Main pipeline to start or register once
 	startOnce sync.Once
 
-	enableCrossClusterVersioning bool
-	versionPruningWindow         int
+	sourceEnableCrossClusterVersioning bool
+	targetEnableCrossClusterVersioning bool
+	versionPruningWindow               int
 
 	bucketTopologySvc     service_def.BucketTopologySvc
 	bucketTopSubscriberId string
@@ -154,8 +155,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(settings metadata.Replica
 	// Only the first Start() (main pipeline) is the actual start
 	// Secondary starts are to ensure that detachCbs are registered
 
-	if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
-		top_detect_svc.enableCrossClusterVersioning = val.(bool)
+	if val, ok := settings[base.SourceECCV]; ok {
+		top_detect_svc.sourceEnableCrossClusterVersioning = val.(bool)
+	}
+	if val, ok := settings[base.TargetECCV]; ok {
+		top_detect_svc.targetEnableCrossClusterVersioning = val.(bool)
 	}
 	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
 		top_detect_svc.versionPruningWindow = val.(int)
@@ -661,9 +665,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling source topology change. err=%v", err)
 				}
 				newEnableCrossClusterVersioning := notification.GetEnableCrossClusterVersioning()
-				if top_detect_svc.enableCrossClusterVersioning != newEnableCrossClusterVersioning {
-					err = fmt.Errorf("enableCrossClusterVersioning for source bucket has changed from %v to %v. Restarting pipeline", top_detect_svc.enableCrossClusterVersioning, newEnableCrossClusterVersioning)
+				if top_detect_svc.sourceEnableCrossClusterVersioning != newEnableCrossClusterVersioning {
+					err = fmt.Errorf("enableCrossClusterVersioning for source bucket has changed from %v to %v. Restarting pipeline.", top_detect_svc.sourceEnableCrossClusterVersioning, newEnableCrossClusterVersioning)
 					top_detect_svc.restartPipeline(err)
+					// pipeline restart clears the ECCV mismatch UI alert, if there was one
 				}
 				newVersionPruningWindow := notification.GetVersionPruningWindowHrs()
 				if top_detect_svc.versionPruningWindow != newVersionPruningWindow {
@@ -788,6 +793,18 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				}
 
 				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+
+				newEnableCrossClusterVersioning := notification.GetTargetEnableCrossClusterVersioning()
+				if top_detect_svc.targetEnableCrossClusterVersioning != newEnableCrossClusterVersioning {
+					// Once enabled, ECCV cannot be disabled. Hence this change can only mean it went from 'false' to 'true'.
+					top_detect_svc.logger.Infof("enableCrossClusterVersioning for target bucket has changed from %v to %v", top_detect_svc.targetEnableCrossClusterVersioning, newEnableCrossClusterVersioning)
+					top_detect_svc.targetEnableCrossClusterVersioning = newEnableCrossClusterVersioning
+
+					settings := make(map[string]interface{})
+					settings[base.TargetECCV] = top_detect_svc.targetEnableCrossClusterVersioning
+					mainPipeline.UpdateSettings(settings)
+				}
+
 				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {

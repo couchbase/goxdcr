@@ -3403,3 +3403,18 @@ function createTombstone {
 		fi
 	fi
 }
+
+# Helper function to check for the ECCV mismatch UI error
+function checkECCVMismatchUIErrors {
+	local clusterName=$1
+	local maxInstanceCnt=$2
+	echo "Checking for ECCV mismatch warning in the UI errors list"
+	local uiAlertCount=$(getErrorListForMainPipeline $clusterName | jq '.[0] | .ErrorMsg' | grep -c "Mismatch between source and target enableCrossClusterVersioning (ECCV) settings")
+	if (($uiAlertCount != $maxInstanceCnt)); then
+		echo "Error - found $uiAlertCount counts of the warning in the UI errors list, instead of $maxInstanceCnt" >&2
+		dumpDebugInfoBeforeExit
+		exit 1
+	else
+		echo "Found exactly $maxInstanceCnt instances of the warning in the UI errors list"
+	fi
+}

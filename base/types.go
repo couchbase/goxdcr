@@ -182,10 +182,11 @@ type ReplicationInfo struct {
 type EventInfoType int
 
 const (
-	HighPriorityMsg       EventInfoType = iota
-	LowPriorityMsg        EventInfoType = iota
-	PersistentMsg         EventInfoType = iota
-	BrokenMappingInfoType EventInfoType = iota
+	HighPriorityMsg          EventInfoType = iota // "Non-fatal" event that is cleared during StopPipeline()
+	LowPriorityMsg           EventInfoType = iota // "Non-fatal" event that is cleared during StopPipeline(), and can also be dismissed
+	PersistentMsg            EventInfoType = iota // "Fatal" event that persists across pipeline pauses, & is cleared only during StartPipeline()
+	BrokenMappingInfoType    EventInfoType = iota // "Fatal" event that persists as long as there is a broken mapping, and can also be dismissed
+	DismissablePersistentMsg EventInfoType = iota // Same as PersistentMsg, except it can additionally be dismissed
 )
 
 func (e EventInfoType) CanDismiss() bool {
@@ -198,6 +199,8 @@ func (e EventInfoType) CanDismiss() bool {
 		return true
 	case PersistentMsg:
 		return false
+	case DismissablePersistentMsg:
+		return true
 	default:
 		panic("Implement me")
 	}
@@ -213,6 +216,8 @@ func (e EventInfoType) String() string {
 		return "BrokenMappingInfo"
 	case PersistentMsg:
 		return "PersistentMsg"
+	case DismissablePersistentMsg:
+		return "DismissablePersistentMsg"
 	default:
 		return "?? (EventInfoType)"
 	}
@@ -490,11 +495,7 @@ func (e *EventInfo) GetLegacyErrMsg() string {
 		return ""
 	}
 	switch e.EventType {
-	case HighPriorityMsg:
-		return e.GetDescAndExtrasStr()
-	case LowPriorityMsg:
-		return e.GetDescAndExtrasStr()
-	case PersistentMsg:
+	case HighPriorityMsg, LowPriorityMsg, PersistentMsg, DismissablePersistentMsg:
 		return e.GetDescAndExtrasStr()
 	case BrokenMappingInfoType:
 		hint, isString := e.GetHint().(string)
@@ -526,6 +527,15 @@ func (e *EventInfo) GetDescAndExtrasStr() string {
 	}
 	e.EventExtras.GetRWLock().RUnlock()
 	return buffer.String()
+}
+
+func (e *EventInfo) IsFatal() bool {
+	switch e.EventType {
+	case PersistentMsg, BrokenMappingInfoType, DismissablePersistentMsg:
+		return true
+	default:
+		return false
+	}
 }
 
 type ErrorInfo struct {

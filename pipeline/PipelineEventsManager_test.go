@@ -246,6 +246,29 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope(t *testing.T) {
 	assert.Len(eventsList.EventInfos, 0)
 }
 
+func TestPipelineEventsMgr_DismissEvent_DismissablePersistentMsg(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_DismissablePersistentMsg =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_DismissablePersistentMsg =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
+
+	assert.NotNil(eventsMgr)
+
+	eventsMgr.AddEvent(base.DismissablePersistentMsg, "testDismissablePersistentMsg", base.NewEventsMap(), nil)
+	assert.Len(eventsMgr.events.EventInfos, 1)
+
+	events := eventsMgr.GetCurrentEvents()
+	events.Mutex.RLock()
+	dismissID := events.EventInfos[0].EventId
+	assert.Equal(base.DismissablePersistentMsg, events.EventInfos[0].EventType)
+	events.Mutex.RUnlock()
+
+	eventsMgr.DismissEvent(int(dismissID))
+	assert.Len(eventsMgr.events.EventInfos, 0)
+}
+
 func TestPipelineEventsMgr_ResetDismissedHistory(t *testing.T) {
 	fmt.Println("============== Test case start: TestPipelineEventsMgr_ResetDismissedHistory =================")
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_ResetDismissedHistory =================")

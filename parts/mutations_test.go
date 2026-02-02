@@ -701,7 +701,7 @@ func (test mutationTC) executeTest(assert assert.Assertions, bucketName string, 
 			xmem.source_cr_mode = xmemBucket
 			router.sourceCRMode = xmemBucket
 
-			settings[base.EnableCrossClusterVersioningKey] = test.eccv
+			settings[base.SourceECCV] = test.eccv
 			settings[base.VersionPruningWindowHrsKey] = 720
 			mobileSetting := base.MobileCompatibilityOff
 			if test.mobile {

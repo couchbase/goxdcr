@@ -684,7 +684,7 @@ func TestMobilePreserveSync(t *testing.T) {
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
-	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[base.SourceECCV] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
 
@@ -895,7 +895,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
-	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[base.SourceECCV] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
 
@@ -986,7 +986,7 @@ func TestMobileMixedMode(t *testing.T) {
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
-	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[base.SourceECCV] = true
 	settings[base.VersionPruningWindowHrsKey] = 720
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)

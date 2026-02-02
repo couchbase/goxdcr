@@ -575,7 +575,7 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 		if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
 			config.hlvPruningWindowSec = uint32(val.(int)) * 60 * 60
 		}
-		if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
+		if val, ok := settings[base.SourceECCV]; ok {
 			config.crossClusterVers = val.(bool)
 		}
 		if config.crossClusterVers {

@@ -464,9 +464,10 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	}
 
 	// When persistent events are raised, usually they are fatal and pipelines would have paused and the
-	// persistent messages remain while pipelins are paused
-	// Thus, when pipelines are restarted, clear them. If they come back, they'll come back again by themselves
-	rep_status.GetEventsManager().ClearPersistentEvents()
+	// persistent messages remain while pipelins are paused.
+	// Thus, when pipelines are restarted, clear them. If they come back, they'll come back again by themselves.
+	// Same applies to DismissablePersistentMsg events.
+	rep_status.GetEventsManager().ClearFatalEventsExceptBrokenMap()
 
 	if rep_status.RuntimeStatus(true) == pipeline.Replicating {
 		//the pipeline is already running
@@ -510,17 +511,19 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	errMap = p.Start(rep_status.SettingsMap())
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the pipeline %v", p.InstanceId())
-	} else {
-		backfillSpec, _ := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
-		if backfillSpec != nil {
-			// Has backfill pipeline waiting
-			pipelineMgr.logger.Infof("%s: backfill pipeline started by main pipeline", backfillSpec.Id)
-			backfillStartQueueErr := pipelineMgr.StartBackfill(topic)
-			if backfillStartQueueErr != nil {
-				pipelineMgr.logger.Errorf("Unable to queue backfill pipeline start for %v", topic)
-			}
+		return errMap
+	}
+
+	backfillSpec, _ := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
+	if backfillSpec != nil {
+		// Has backfill pipeline waiting
+		pipelineMgr.logger.Infof("%s: backfill pipeline started by main pipeline", backfillSpec.Id)
+		backfillStartQueueErr := pipelineMgr.StartBackfill(topic)
+		if backfillStartQueueErr != nil {
+			pipelineMgr.logger.Errorf("Unable to queue backfill pipeline start for %v", topic)
 		}
 	}
+
 	return errMap
 }
 
