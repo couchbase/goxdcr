@@ -746,6 +746,10 @@ func (top_svc *XDCRTopologySvc) IsOrchestratorNode() (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("Wrong type for orchestratorAddress: %v", reflect.TypeOf(orchestratorNodeAddressRaw))
 	}
+	if orchestratorAddress == base.OrchestratorAddressUndefined {
+		// local node is unaware of the orchestrator-location - see https://docs.couchbase.com/server/current/rest-api/rest-identify-orchestrator.html
+		return false, fmt.Errorf("received value '%v' for the %v attribute in terseClusterInfo response", orchestratorAddress, base.OrchestratorNodeKey)
+	}
 
 	//"n_0@127.0.0.1"
 	hostInfo, err := top_svc.getHostInfo()

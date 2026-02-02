@@ -126,6 +126,8 @@ var OrchestratorNodeKey = "orchestrator"
 var OtpNodeKey = "otpNode"
 var NumVBucketsKey = "numVBuckets"
 
+const OrchestratorAddressUndefined = "undefined"
+
 // Value for StorageBackendKey
 var Magma = "magma"
 var Couchstore = "couchstore"
@@ -533,6 +535,8 @@ const (
 	ProblematicVBTarget = "ProblematicVBTarget"
 	VBTimestamps        = "VBTimestamps"
 	CollectionNsMapping = "CollectionNsMapping"
+	SourceECCV          = "SourceECCV" // Source bucket ECCV setting
+	TargetECCV          = "TargetECCV" // Target bucket ECCV setting
 )
 
 // flag for requesting datatype in GetMeta request
@@ -1664,7 +1668,7 @@ const (
 	VersionPruningWindowHrsKey = "versionPruningWindowHrs"
 	// Bucket setting for enable versioning when CR mode is not custom CR
 	EnableCrossClusterVersioningKey = "enableCrossClusterVersioning"
-	// Bucket setting for starting timestamp (CAS) to eanble versioning
+	// Bucket setting for starting timestamp (CAS) to enable versioning
 	HlvVbMaxCasKey = "vbucketsMaxCas"
 	// The target cluster counterparts for above.
 	TargetHlvVbMaxCasKey = "targetVbucketsMaxCas"

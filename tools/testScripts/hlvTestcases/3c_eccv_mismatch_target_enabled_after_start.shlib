@@ -1,0 +1,78 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1000)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+# Replication properties
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running ECCV Mismatch (Target Enabled After Replication Start) Test Case"
+	echo "============================================================================"
+
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	clearInternalNodeXdcrLog "C1"
+
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	echo "Creating unidirectional replication C1/B1 -> C2/B2 and run data load"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties
+	runCbWorkloadGenCollection "C1" "B1" "_default" "_default"
+
+	# Enable ECCV only on Target bucket
+	echo "Setting enableCrossClusterVersioning to true on Target bucket C2/B2"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	echo "Waiting 10 seconds for warnings to be logged"
+	sleep 10
+
+	echo "Checking for ECCV mismatch warning in logs and UI"
+	local maxInstanceCnt=1
+	validateInternalLogWithInstance "C1" "ECCV settings mismatch.*source=false.*target=true" $maxInstanceCnt
+	checkECCVMismatchUIErrors "C1" $maxInstanceCnt
+
+	# Enable ECCV on Source bucket to resolve the UI warning
+	echo "Setting enableCrossClusterVersioning to true on Source bucket C1/B1"
+	setCrossClusterVersioningForBucket "C1" "B1"
+
+	echo "Waiting 10 seconds to check UI warning dismissal"
+	sleep 10
+	maxInstanceCnt=0
+	checkECCVMismatchUIErrors "C1" $maxInstanceCnt
+
+	grepForAbnormalities
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}
