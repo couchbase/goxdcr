@@ -61,11 +61,11 @@ function pauseAndResumeMultiples {
 
 		# Verify prometheus stats for running is correct
 		pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Running" | awk '{print $NF}')
-		if ((!$pauseResumeStatus == 1)); then
+		if (($pauseResumeStatus == 0)); then
 			# try again
 			sleep 30
 			pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Running" | awk '{print $NF}')
-			if ((!$pauseResumeStatus == 0)); then
+			if (($pauseResumeStatus == 0)); then
 				echo "Pipeline running should have status 1. Got $pauseResumeStatus"
 				exit 1
 			fi

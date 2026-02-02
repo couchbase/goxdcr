@@ -772,6 +772,54 @@ function getInternalNodeXdcrLog {
 	cat $goxdcrLogFile
 }
 
+function getInternalNodeNsServerInfoLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName" >&2
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "info.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local nsServerInfoLog=${logfileDir}/info.log
+	if ! [[ -f "$nsServerInfoLog" ]]; then
+		echo "Unable to find file $nsServerInfoLog" >&2
+		return 1
+	fi
+
+	cat $nsServerInfoLog
+}
+
+function getInternalNodeNsServerErrorLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName" >&2
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "error.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local nsServerErrorLog=${logfileDir}/error.log
+	if ! [[ -f "$nsServerErrorLog" ]]; then
+		echo "Unable to find file $nsServerErrorLog" >&2
+		return 1
+	fi
+
+	cat $nsServerErrorLog
+}
+
 function getInternalNodeMetaKvLog {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}

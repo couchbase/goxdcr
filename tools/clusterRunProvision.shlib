@@ -1497,7 +1497,7 @@ function setupBulkScopeAndCollection {
 	#echo "For cluster $clusterName bucket $bucketName CREATING scopes and collections with payload: $payload"
 
 	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -H "Content-Type: application/json" -d "$payload" >/dev/null
 	else
 		# For Vagrant, we need to use the VM IP address
 		idx="$(getClusterIdx "$clusterName")"
@@ -2393,11 +2393,15 @@ function getCollectionIdFromManifestCache {
 
 	# Look up scope checksum
 	local combinedKey="${manifestCksum},${scopeName}"
+	if [[ -z "${combinedKey:-}" ]]; then
+		echo "combinedKey is empty" >&2
+		exit 1
+	fi
 	local scopeCksum="${MANIFEST_CKSUM_SCOPE_MAP[$combinedKey]:-}"
-	if [[ -z "$scopeCksum" ]]; then
+	if [[ -z "${scopeCksum:-}" ]]; then
 		echo "key $combinedKey not found in MANIFEST_CKSUM_SCOPE_MAP" >&2
 		echo ""
-		return 1
+		exit 1
 	fi
 
 	# Look up collection ID

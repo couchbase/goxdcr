@@ -39,16 +39,24 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
 #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
+	local collectionsToRunLoad=500
+	local itemsPerCollection=10
+
+	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
 	# Run CBWorkloadgen in parallel
-	for ((i = 1; i <= 5; i = (($i + 1)))); do
+	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
 		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
 	done
 	waitForBgJobs
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
 }
 
 declare -a collectionArray=()
 function runTestCase {
-	local maxCollectionCnt=2000
+	# TODO MB-68226 is preventing > 4000 from being created
+	local maxCollectionCnt=4000
+
 	echo "============================================================================"
 	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections"
 	echo "============================================================================"
@@ -106,10 +114,28 @@ function runTestCase {
 	# This large number of collections will not allow data to flow - simply check for timeout messages
 	echo "Waiting 60 seconds to see if pipeline start had errors"
 	sleep 60
-
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
 
+	grepForPanics
+
+	echo "Pausing replication"
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 30 seconds for pipeline to really pause"
+	sleep 30
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 30 seconds for resume to finish"
+	sleep 30
+
+	# Kill source goxdcr
+	killGoXdcr "C1"
+	echo "Sleeping 15 seconds for goxdcr to reboot"
+	sleep 15
+	checkUnidirectionalChangesLeft
 	grepForPanics
 
 	echo "============================================================================"
