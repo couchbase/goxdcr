@@ -66,6 +66,7 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 		WithMaxErrorCount(settings.GetCLogMaxErrorCount()),
 		WithErrorTimeWindow(settings.GetCLogErrorTimeWindow()),
 		WithReattemptDuration(settings.GetCLogReattemptDuration()),
+		WithAutopauseConflictRate(settings.GetConflictRateToPauseRepl()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error getting a new conflict logger for %v. err=%v", conflictLoggingMap, err)

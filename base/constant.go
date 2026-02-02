@@ -653,6 +653,7 @@ var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
 var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 0, 1}
 var VersionForForwardLocalOnly = ServerVersion{8, 0, 2}
+var VersionForConflictRateBasedAutopause = ServerVersion{8, 0, 2}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1629,6 +1630,10 @@ const (
 	DefaultCLogConnPoolGCIntervalMs = 60000 // in milliseconds
 	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
 	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
+
+	// DefaultConflictRateToAutopauseRepl of 0 represents that the default QoS strategy
+	// for conflict logger is hibernation.
+	DefaultConflictRateToAutopauseRepl = 0
 )
 
 // Used for internal testing with self-signed certs.

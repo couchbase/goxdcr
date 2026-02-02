@@ -24,17 +24,18 @@ var gLoggerId uint64
 
 // LoggerOptions defines optional args for a logger implementation
 type LoggerOptions struct {
-	rules                *baseclog.Rules
-	mapper               Mapper
-	logQueueCap          int
-	workerCount          int
-	networkRetryCount    int
-	networkRetryInterval time.Duration
-	poolGetTimeout       time.Duration
-	setMetaTimeout       time.Duration
-	maxErrorCount        int
-	errorTimeWindow      time.Duration
-	reattemptDuration    time.Duration
+	rules                    *baseclog.Rules
+	mapper                   Mapper
+	logQueueCap              int
+	workerCount              int
+	networkRetryCount        int
+	networkRetryInterval     time.Duration
+	poolGetTimeout           time.Duration
+	setMetaTimeout           time.Duration
+	maxErrorCount            int
+	errorTimeWindow          time.Duration
+	reattemptDuration        time.Duration
+	conflictRateForPauseRepl int
 
 	// this is off by default and only present for
 	// local testing changeable through internal setting.
@@ -127,6 +128,12 @@ func WithErrorTimeWindow(val time.Duration) LoggerOpt {
 func WithReattemptDuration(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
 		o.reattemptDuration = val
+	}
+}
+
+func WithAutopauseConflictRate(val int) LoggerOpt {
+	return func(o *LoggerOptions) {
+		o.conflictRateForPauseRepl = val
 	}
 }
 
