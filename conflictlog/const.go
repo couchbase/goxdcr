@@ -47,3 +47,37 @@ const (
 	// Monitor constants
 	MonitorCleanupFreq = 300
 )
+
+// qosType represents the fault tolerance technique in which the conflict logger
+// will react to maintain a reliable performance of the replication to which it
+// is attached to. It details the behaviour of the logger when too many conflicts
+// are detected for a replication.
+type qosType uint32
+
+const (
+	// hibernation represents the default QoS mechanism of the conflict logger,
+	// wherein the logger will stop accepting requests for some duration, if it
+	// observes certain number of errors in a given interval of time. The errors
+	// include throttling and timeout errors observed when too many conflicts are
+	// detected for a replication.
+	hibernation qosType = iota
+
+	// autopauseReplication represents an optional and configurable mechanism wherein
+	// the replication will be autopaused if the number of conflicts detected for the
+	// replication is greater than a given threshold. When this is the QoS type for a
+	// logger, the monitoring of the conflict rate will be done by the CLog manager
+	// at the process level and not by individual replication conflict logger instance.
+	autopauseReplication
+)
+
+// String converts q into a stringer representation.
+func (q qosType) String() string {
+	switch q {
+	case hibernation:
+		return "hibernation"
+	case autopauseReplication:
+		return "autopause_replication"
+	default:
+		return "<unknown>"
+	}
+}

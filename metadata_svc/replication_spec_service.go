@@ -844,6 +844,19 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 	}
 
+	if conflictRateThreshold, ok := settings[metadata.ConflictRateToPauseReplKey].(int); ok && conflictRateThreshold > 0 {
+		clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+		if err != nil {
+			const msg = "Unable to get local cluster compatibility as part of replSpec validation for autopause threshold"
+			service.logger.Errorf("%s: %v", msg, err)
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+
+		if !base.IsClusterCompatible(clusterCompat, base.VersionForConflictRateBasedAutopause) {
+			return fmt.Errorf("all source cluster nodes should be upgraded to atleast %s, for using the %s setting", base.VersionForConflictRateBasedAutopause, metadata.ConflictRateToPauseReplKey)
+		}
+	}
+
 	return nil
 }
 func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {

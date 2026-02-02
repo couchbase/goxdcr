@@ -522,7 +522,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) ||
 		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
 		oldSettings.GetXmemNozzleNetworkIOFaultPercent(oldSettings) != newSettings.GetXmemNozzleNetworkIOFaultPercent(newSettings) ||
-		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() {
+		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() ||
+		oldSettings.GetConflictRateToPauseRepl() != newSettings.GetConflictRateToPauseRepl() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

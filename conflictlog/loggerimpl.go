@@ -106,6 +106,10 @@ type LoggerImpl struct {
 	hibernationLock    sync.Mutex
 	hibernationEventId int64
 
+	// qos represents the fault tolerance techniques to uphold the QoS
+	// of a replication to which the conflict logger is attached to.
+	qos atomic.Uint32
+
 	manifestCache *ManifestCache
 }
 
@@ -152,17 +156,18 @@ func calcThrottlerAttempts(setMetaTimeout time.Duration) int {
 func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, security SecurityInfo, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, topSvc service_def.XDCRCompTopologySvc, connPool iopool.ConnPool, eventsProducer common.PipelineEventsProducer, mcache *ManifestCache, opts ...LoggerOpt) (l *LoggerImpl, err error) {
 	// set the defaults
 	options := LoggerOptions{
-		rules:                nil,
-		mapper:               NewConflictMapper(logger),
-		logQueueCap:          base.DefaultCLogQueueCapacity,
-		workerCount:          base.DefaultCLogWorkerCount,
-		networkRetryCount:    base.DefaultCLogNetworkRetryCount,
-		networkRetryInterval: time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
-		poolGetTimeout:       time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
-		setMetaTimeout:       time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
-		maxErrorCount:        base.DefaultCLogMaxErrorCount,
-		errorTimeWindow:      time.Duration(base.DefaultCLogErrorTimeWindowMs) * time.Millisecond,
-		reattemptDuration:    time.Duration(base.DefaultCLogReattemptDurationMs) * time.Millisecond,
+		rules:                    nil,
+		mapper:                   NewConflictMapper(logger),
+		logQueueCap:              base.DefaultCLogQueueCapacity,
+		workerCount:              base.DefaultCLogWorkerCount,
+		networkRetryCount:        base.DefaultCLogNetworkRetryCount,
+		networkRetryInterval:     time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
+		poolGetTimeout:           time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
+		setMetaTimeout:           time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
+		maxErrorCount:            base.DefaultCLogMaxErrorCount,
+		errorTimeWindow:          time.Duration(base.DefaultCLogErrorTimeWindowMs) * time.Millisecond,
+		reattemptDuration:        time.Duration(base.DefaultCLogReattemptDurationMs) * time.Millisecond,
+		conflictRateForPauseRepl: base.DefaultConflictRateToAutopauseRepl,
 	}
 
 	// override the defaults
@@ -199,6 +204,12 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		eventsProducer:     eventsProducer,
 		hibernationEventId: -1,
 		manifestCache:      mcache,
+	}
+
+	if options.conflictRateForPauseRepl == 0 {
+		l.setQOS(hibernation)
+	} else {
+		l.setQOS(autopauseReplication)
 	}
 
 	now := time.Now()
@@ -250,8 +261,8 @@ func (l *LoggerImpl) PrintStatusSummary() {
 		avgPoolGetLatency = float64(l.stats.poolGetLatency.Load() / poolGetCnt)
 	}
 
-	l.logger.Infof("%s stats: conflicts=%v, wait=%v, throttle=%v, preprocess=%v, totalWrite=%v, poolGet=%v, queueLen=%v, errCnt=%v, errStartTime=%v, hib=%v",
-		l.Id(), numRecords, avgWaitTimeLatency, avgThrottleLatency, avgPreprocessLatency, avgTotalWriteLatency, avgPoolGetLatency, len(l.logReqCh), l.errorCnt, l.errorStartTime, l.hibernated.Load())
+	l.logger.Infof("%s stats: conflicts=%v, wait=%v, throttle=%v, preprocess=%v, totalWrite=%v, poolGet=%v, queueLen=%v, errCnt=%v, errStartTime=%v, hib=%v, qos=%s",
+		l.Id(), numRecords, avgWaitTimeLatency, avgThrottleLatency, avgPreprocessLatency, avgTotalWriteLatency, avgPoolGetLatency, len(l.logReqCh), l.errorCnt, l.errorStartTime, l.hibernated.Load(), l.getQOS())
 }
 
 func (l *LoggerImpl) Id() string {
@@ -1168,6 +1179,23 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 		}
 	}
 
+	conflictRateForAutopauseRepl, ok := settings[base.ConflictRateToPauseReplKey]
+	if ok {
+		threshold, ok := conflictRateForAutopauseRepl.(int)
+		if ok {
+			oldQOS := l.getQOS()
+			newQOS := hibernation
+			if threshold > 0 {
+				newQOS = autopauseReplication
+			}
+
+			if newQOS != oldQOS {
+				l.logger.Infof("%s: changed qos config from %s to %s", l.id, oldQOS, newQOS)
+				l.setQOS(newQOS)
+			}
+		}
+	}
+
 	// change of conflict logging rules if needed
 	if conflictLoggingMapExists {
 		// conflict logging is on and its settings needs to be updated.
@@ -1230,11 +1258,15 @@ func (l *LoggerImpl) Detach(pipeline common.Pipeline) error {
 	return nil
 }
 
-// the function handles errors and hibernates the logger on continuous count of specific errors.
+// hibernateIfNeeded handles errors and hibernates the logger on continuous count of specific errors.
 func (l *LoggerImpl) hibernateIfNeeded(err error) {
 	if err != baseclog.ErrRules &&
 		err != baseclog.ErrThrottle &&
 		err != baseclog.ErrTimeout {
+		return
+	}
+
+	if !l.canHibernate() {
 		return
 	}
 
@@ -1297,6 +1329,9 @@ func (l *LoggerImpl) hibernateIfNeeded(err error) {
 	})
 }
 
+// unhibernate brings l out of a previous hibernation state. Note that l.canHibernate is not checked in
+// this function so as to unhibernate at all cost when it's time, irrespective of the current QoS
+// setting of l.
 func (l *LoggerImpl) unhibernate() {
 	l.hibernationLock.Lock()
 	defer l.hibernationLock.Unlock()
@@ -1399,6 +1434,21 @@ func (l *LoggerImpl) fetchBucketUUID(bucketName string) (uuid string, vbCount in
 	}
 
 	return
+}
+
+// setQOS atomically sets the QoS type of l
+func (l *LoggerImpl) setQOS(qosType qosType) {
+	l.qos.Store(uint32(qosType))
+}
+
+// getQOS atomically gets the QoS type of l
+func (l *LoggerImpl) getQOS() qosType {
+	return qosType(l.qos.Load())
+}
+
+// canHibernate returns whether l can hibernated based on it's QoS settings.
+func (l *LoggerImpl) canHibernate() bool {
+	return l.getQOS() == hibernation
 }
 
 func getString(m map[string]interface{}, key string) (val string, err error) {
