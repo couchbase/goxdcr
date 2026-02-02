@@ -95,7 +95,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 	mcache := NewManifestCache()
 	l, err := newLoggerImpl(log.NewLogger("test", log.DefaultLoggerContext), "1234", utils, securitySvc, nil, topoSvc, pool, nil,
 		mcache,
-		WithCapacity(20), WithRules(rules))
+		baseclog.WithCapacity(20), baseclog.WithRules(rules))
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -118,7 +118,7 @@ func TestLoggerImpl_closeWithOutstandingRequest(t *testing.T) {
 // the workers will be shutdown to test the number of workers.
 // so the caller should expect 0 workers in the loggers after this routine exits.
 func testNumWorkers(t *testing.T, l *LoggerImpl, num int) {
-	assert.Equal(t, l.opts.workerCount, num)
+	assert.Equal(t, l.opts.WorkerCount, num)
 
 	for i := 0; i < num; i++ {
 		select {
@@ -153,7 +153,7 @@ func TestLoggerImpl_basicClose(t *testing.T) {
 		newFakeConnection, nil)
 
 	mcache := NewManifestCache()
-	l, err := newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, WithRules(rules))
+	l, err := newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, baseclog.WithRules(rules))
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -182,7 +182,7 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 
 	mcache := NewManifestCache()
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, WithCapacity(20), WithWorkerCount(2), WithRules(rules))
+	l, err := newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithWorkerCount(2), baseclog.WithRules(rules))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -193,19 +193,19 @@ func TestLoggerImpl_UpdateWorker(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, WithCapacity(20), WithWorkerCount(2), WithRules(rules))
+	l, err = newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithWorkerCount(2), baseclog.WithRules(rules))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
 	// more than before
 	err = l.UpdateWorkerCount(4)
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.workerCount, 4)
+	assert.Equal(t, l.opts.WorkerCount, 4)
 	testNumWorkers(t, l, 4)
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, WithCapacity(20), WithWorkerCount(3), WithRules(rules))
+	l, err = newLoggerImpl(nil, "1234", utils, securitySvc, nil, topoSvc, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithWorkerCount(3), baseclog.WithRules(rules))
 	assert.Nil(t, err)
 	assert.Nil(t, l.Start(nil))
 
@@ -235,15 +235,15 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	fakeConnectionSleep = 1 * time.Second
 
 	testCapacity := func(l *LoggerImpl, num int) {
-		assert.Equal(t, l.opts.logQueueCap, num)
+		assert.Equal(t, l.opts.LogQueueCap, num)
 		assert.Equal(t, cap(l.logReqCh), num)
 	}
 
 	mcache := NewManifestCache()
 	// 1. update with same value
-	l, err := newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, WithCapacity(20), WithRules(rules))
+	l, err := newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithRules(rules))
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Equal(t, l.opts.LogQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
 
 	// same as before
@@ -253,9 +253,9 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 2. update with a higher value
-	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, WithCapacity(20), WithRules(rules))
+	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithRules(rules))
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Equal(t, l.opts.LogQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
 
 	// more than before
@@ -265,9 +265,9 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 3. update with a lower value
-	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, WithCapacity(20), WithRules(rules))
+	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, baseclog.WithCapacity(20), baseclog.WithRules(rules))
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.logQueueCap, 20)
+	assert.Equal(t, l.opts.LogQueueCap, 20)
 	assert.Nil(t, l.Start(nil))
 
 	// less than before - cannot be done
@@ -278,9 +278,9 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	// 4. non-empty queue - test conflicts are not lost
 	numItems := 100000
 	readCount := 0
-	l, err = newLoggerImpl(log.NewLogger("logger", log.DefaultLoggerContext), "1234", utils, security, nil, topo, pool, producer, mcache, WithWorkerCount(0), WithCapacity(numItems), WithRules(rules))
+	l, err = newLoggerImpl(log.NewLogger("logger", log.DefaultLoggerContext), "1234", utils, security, nil, topo, pool, producer, mcache, baseclog.WithWorkerCount(0), baseclog.WithCapacity(numItems), baseclog.WithRules(rules))
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.logQueueCap, numItems)
+	assert.Equal(t, l.opts.LogQueueCap, numItems)
 	assert.Nil(t, l.Start(nil))
 
 	// simulate conflict writes
@@ -331,13 +331,253 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	assert.Nil(t, l.Stop())
 
 	// 5. test that the worker count remains the same
-	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, WithWorkerCount(10), WithRules(rules))
+	l, err = newLoggerImpl(nil, "1234", utils, security, nil, topo, pool, nil, mcache, baseclog.WithWorkerCount(10), baseclog.WithRules(rules))
 	assert.Nil(t, err)
-	assert.Equal(t, l.opts.workerCount, 10)
+	assert.Equal(t, l.opts.WorkerCount, 10)
 	assert.Nil(t, l.Start(nil))
 
 	err = l.UpdateQueueCapcity(numItems + 1) // increase the capacity
 	testNumWorkers(t, l, 10)
-	assert.Equal(t, l.opts.workerCount, 10)
+	assert.Equal(t, l.opts.WorkerCount, 10)
+	assert.Nil(t, l.Stop())
+}
+
+func TestLoggerImpl_HibernateIfNeeded(t *testing.T) {
+	topo, security, utils, producer := setupMocks()
+	rules := &baseclog.Rules{Target: baseclog.NewTarget("B1", "S1", "C1")}
+
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newFakeConnection, nil)
+
+	mcache := NewManifestCache()
+
+	tests := []struct {
+		name                 string
+		errorType            error
+		maxErrorCount        int
+		errorTimeWindow      time.Duration
+		reattemptDuration    time.Duration
+		numErrors            int
+		waitBetweenErrors    time.Duration
+		shouldHibernate      bool
+		testUnhibernate      bool
+		conflictRateThreshold int // 0 = hibernation QoS, >0 = autopause QoS
+	}{
+		{
+			name:                 "HibernateOnRulesError",
+			errorType:            baseclog.ErrRules,
+			maxErrorCount:        3,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3,
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      true,
+			testUnhibernate:      true,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "HibernateOnThrottleError",
+			errorType:            baseclog.ErrThrottle,
+			maxErrorCount:        3,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3,
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      true,
+			testUnhibernate:      true,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "HibernateOnTimeoutError",
+			errorType:            baseclog.ErrTimeout,
+			maxErrorCount:        3,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3,
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      true,
+			testUnhibernate:      true,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "NoHibernateOnOtherError",
+			errorType:            baseclog.ErrTMPFAIL,
+			maxErrorCount:        3,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            5,
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      false,
+			testUnhibernate:      false,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "NoHibernateWhenErrorsOutsideTimeWindow",
+			errorType:            baseclog.ErrRules,
+			maxErrorCount:        3,
+			errorTimeWindow:      50 * time.Millisecond,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3,
+			waitBetweenErrors:    100 * time.Millisecond, // Wait longer than time window
+			shouldHibernate:      false,
+			testUnhibernate:      false,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "NoHibernateWhenBelowThreshold",
+			errorType:            baseclog.ErrRules,
+			maxErrorCount:        5,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3, // Below threshold
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      false,
+			testUnhibernate:      false,
+			conflictRateThreshold: 0,
+		},
+		{
+			name:                 "NoHibernateWithAutopauseQoS",
+			errorType:            baseclog.ErrRules,
+			maxErrorCount:        3,
+			errorTimeWindow:      1 * time.Second,
+			reattemptDuration:    100 * time.Millisecond,
+			numErrors:            3,
+			waitBetweenErrors:    10 * time.Millisecond,
+			shouldHibernate:      false,
+			testUnhibernate:      false,
+			conflictRateThreshold: 100, // Autopause QoS - should not hibernate
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create logger with small config values for faster testing
+			l, err := newLoggerImpl(
+				log.NewLogger("test", log.DefaultLoggerContext),
+				"1234",
+				utils,
+				security,
+				nil,
+				topo,
+				pool,
+				producer,
+				mcache,
+				baseclog.WithCapacity(20),
+				baseclog.WithRules(rules),
+				baseclog.WithMaxErrorCount(tt.maxErrorCount),
+				baseclog.WithErrorTimeWindow(tt.errorTimeWindow),
+				baseclog.WithReattemptDuration(tt.reattemptDuration),
+				baseclog.WithAutopauseConflictRate(tt.conflictRateThreshold),
+			)
+			require.Nil(t, err)
+			assert.Nil(t, l.Start(nil))
+
+			// Initially should not be hibernated
+			assert.False(t, l.hibernated.Load())
+
+			// Trigger errors
+			for i := 0; i < tt.numErrors; i++ {
+				l.hibernateIfNeeded(tt.errorType)
+				if i < tt.numErrors-1 {
+					time.Sleep(tt.waitBetweenErrors)
+				}
+			}
+
+			// Check hibernation state
+			if tt.shouldHibernate {
+				assert.True(t, l.hibernated.Load(), "logger should be hibernated")
+				assert.Equal(t, uint64(tt.maxErrorCount), l.errorCnt)
+
+				// Test that log() method returns ErrLoggerHibernated
+				testRecord := &ConflictRecord{}
+				err := l.log(testRecord)
+				assert.Equal(t, baseclog.ErrLoggerHibernated, err)
+
+				if tt.testUnhibernate {
+					// Wait for automatic unhibernation
+					time.Sleep(tt.reattemptDuration + 50*time.Millisecond)
+					assert.False(t, l.hibernated.Load(), "logger should be unhibernated after reattempt duration")
+					assert.Equal(t, uint64(0), l.errorCnt)
+					assert.Nil(t, l.errorStartTime)
+
+					// Test that log() method works after unhibernation
+					err := l.log(testRecord)
+					assert.Nil(t, err, "log should work after unhibernation")
+				}
+			} else {
+				assert.False(t, l.hibernated.Load(), "logger should not be hibernated")
+
+				// Test that log() method still works
+				testRecord := &ConflictRecord{}
+				err := l.log(testRecord)
+				assert.Nil(t, err, "log should work when not hibernated")
+			}
+
+			assert.Nil(t, l.Stop())
+		})
+	}
+}
+
+func TestLoggerImpl_HibernateUnhibernateRace(t *testing.T) {
+	topo, security, utils, producer := setupMocks()
+	rules := &baseclog.Rules{Target: baseclog.NewTarget("B1", "S1", "C1")}
+
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newFakeConnection, nil)
+
+	mcache := NewManifestCache()
+
+	// Create logger with very short durations for fast testing
+	l, err := newLoggerImpl(
+		log.NewLogger("test", log.DefaultLoggerContext),
+		"1234",
+		utils,
+		security,
+		nil,
+		topo,
+		pool,
+		producer,
+		mcache,
+		baseclog.WithCapacity(20),
+		baseclog.WithRules(rules),
+		baseclog.WithMaxErrorCount(2),
+		baseclog.WithErrorTimeWindow(100*time.Millisecond),
+		baseclog.WithReattemptDuration(50*time.Millisecond),
+		baseclog.WithAutopauseConflictRate(0), // hibernation QoS
+	)
+	require.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
+
+	// Trigger hibernation
+	l.hibernateIfNeeded(baseclog.ErrRules)
+	l.hibernateIfNeeded(baseclog.ErrRules)
+
+	assert.True(t, l.hibernated.Load())
+
+	// Try to log while hibernated
+	testRecord := &ConflictRecord{}
+	err = l.log(testRecord)
+	assert.Equal(t, baseclog.ErrLoggerHibernated, err)
+
+	// Wait for unhibernation
+	time.Sleep(100 * time.Millisecond)
+	assert.False(t, l.hibernated.Load())
+
+	// Log should work now
+	err = l.log(testRecord)
+	assert.Nil(t, err)
+
+	// Trigger hibernation again to test multiple cycles
+	l.hibernateIfNeeded(baseclog.ErrTimeout)
+	l.hibernateIfNeeded(baseclog.ErrTimeout)
+
+	assert.True(t, l.hibernated.Load())
+	err = l.log(testRecord)
+	assert.Equal(t, baseclog.ErrLoggerHibernated, err)
+
 	assert.Nil(t, l.Stop())
 }

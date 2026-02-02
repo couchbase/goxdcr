@@ -10,15 +10,11 @@ licenses/APL2.txt.
 
 package conflictlog
 
-import (
-	"sync/atomic"
-)
+import "crypto/tls"
 
-// gConnId is the counter for all connections created to the cluster
-var gConnId int64
-
-// NewConnId generates new unique connection Id. This is used by the implementations
-// of the Connection interface
-func NewConnId() int64 {
-	return atomic.AddInt64(&gConnId, 1)
+type SecurityInfo interface {
+	IsClusterEncryptionLevelStrict() bool
+	IsClusterEncryptionStrictOrAll() bool
+	GetCACertificates() []byte
+	GetClientCertAndKeyPair() []tls.Certificate
 }

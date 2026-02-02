@@ -119,4 +119,11 @@ packages:
           dir: "replication_manager/mocks"
           outpkg: "mocks"
           mockname: "{{.InterfaceName}}"
+  github.com/couchbase/goxdcr/v8/base/conflictlog:
+    config:
+      recursive: True
+      all: True
+      dir: "base/conflictlog/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
 

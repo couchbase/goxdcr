@@ -43,7 +43,7 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 		return nil, fmt.Errorf("%v maps to nil rules", conflictLoggingMap)
 	}
 
-	var clm Manager
+	var clm baseclog.Manager
 	var conflictLogger baseclog.Logger
 	clm, err = GetManager()
 	if err != nil {
@@ -55,18 +55,18 @@ func NewLoggerWithRules(conflictLoggingMap base.ConflictLoggingMappingInput, rep
 		fileLogger,
 		replId,
 		eventsProducer,
-		WithMapper(NewConflictMapper(logger)),
-		WithRules(rules),
-		WithCapacity(settings.GetCLogQueueCapacity()),
-		WithWorkerCount(settings.GetCLogWorkerCount()),
-		WithSetMetaTimeout(settings.GetCLogSetMetaTimeout()),
-		WithPoolGetTimeout(settings.GetCLogPoolGetTimeout()),
-		WithNetworkRetryInterval(settings.GetCLogNetworkRetryInterval()),
-		WithNetworkRetryCount(settings.GetCLogNetworkRetryCount()),
-		WithMaxErrorCount(settings.GetCLogMaxErrorCount()),
-		WithErrorTimeWindow(settings.GetCLogErrorTimeWindow()),
-		WithReattemptDuration(settings.GetCLogReattemptDuration()),
-		WithAutopauseConflictRate(settings.GetConflictRateToPauseRepl()),
+		baseclog.WithMapper(NewConflictMapper(logger)),
+		baseclog.WithRules(rules),
+		baseclog.WithCapacity(settings.GetCLogQueueCapacity()),
+		baseclog.WithWorkerCount(settings.GetCLogWorkerCount()),
+		baseclog.WithSetMetaTimeout(settings.GetCLogSetMetaTimeout()),
+		baseclog.WithPoolGetTimeout(settings.GetCLogPoolGetTimeout()),
+		baseclog.WithNetworkRetryInterval(settings.GetCLogNetworkRetryInterval()),
+		baseclog.WithNetworkRetryCount(settings.GetCLogNetworkRetryCount()),
+		baseclog.WithMaxErrorCount(settings.GetCLogMaxErrorCount()),
+		baseclog.WithErrorTimeWindow(settings.GetCLogErrorTimeWindow()),
+		baseclog.WithReattemptDuration(settings.GetCLogReattemptDuration()),
+		baseclog.WithAutopauseConflictRate(settings.GetConflictRateToPauseRepl()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error getting a new conflict logger for %v. err=%v", conflictLoggingMap, err)

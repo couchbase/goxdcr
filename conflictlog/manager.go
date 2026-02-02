@@ -11,7 +11,6 @@ licenses/APL2.txt.
 package conflictlog
 
 import (
-	"crypto/tls"
 	"io"
 	"sync"
 	"time"
@@ -26,26 +25,10 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-var manager Manager
+var manager baseclog.Manager
 var singleton managerSingleton
 
-var _ Manager = (*managerImpl)(nil)
-
-// Manager defines behaviour for conflict manager
-type Manager interface {
-	NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error)
-	ConnPool() iopool.ConnPool
-	SetConnLimit(limit int)
-	SetIOPSLimit(limit int64)
-	StartMonitor(monitor Monitor)
-}
-
-type SecurityInfo interface {
-	IsClusterEncryptionLevelStrict() bool
-	IsClusterEncryptionStrictOrAll() bool
-	GetCACertificates() []byte
-	GetClientCertAndKeyPair() []tls.Certificate
-}
+var _ baseclog.Manager = (*managerImpl)(nil)
 
 type managerSingleton struct {
 	once sync.Once
@@ -55,11 +38,11 @@ type managerSingleton struct {
 // singleton in the process.
 type monitorSingleton struct {
 	once    sync.Once
-	monitor Monitor
+	monitor baseclog.Monitor
 }
 
 // GetManager returns the global conflict manager
-func GetManager() (Manager, error) {
+func GetManager() (baseclog.Manager, error) {
 	if manager == nil {
 		return nil, baseclog.ErrManagerNotInitialized
 	}
@@ -71,7 +54,7 @@ func GetManager() (Manager, error) {
 func InitManager(loggerCtx *log.LoggerContext,
 	topSvc service_def.XDCRCompTopologySvc,
 	utils utils.UtilsIface,
-	securityInfo SecurityInfo,
+	securityInfo baseclog.SecurityInfo,
 	throttler throttlerSvc.ThroughputThrottlerSvc,
 	replSpecSvc service_def.ReplicationSpecReader,
 	poolGCInterval, poolReapInterval time.Duration,
@@ -110,7 +93,7 @@ type connParams struct {
 // managerImpl implements conflict manager
 type managerImpl struct {
 	logger        *log.CommonLogger
-	securityInfo  SecurityInfo
+	securityInfo  baseclog.SecurityInfo
 	utils         utils.UtilsIface
 	connPool      iopool.ConnPool
 	manifestCache *ManifestCache
@@ -130,8 +113,8 @@ type managerImpl struct {
 	monitor monitorSingleton
 }
 
-func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l baseclog.Logger, err error) {
-	opts = append(opts, WithSkipTlsVerify(base.CLogSkipTlsVerify))
+func (m *managerImpl) NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...baseclog.LoggerOpt) (l baseclog.Logger, err error) {
+	opts = append(opts, baseclog.WithSkipTlsVerify(base.CLogSkipTlsVerify))
 	l, err = newLoggerImpl(logger, replId, m.utils, m.securityInfo, m.throttlerSvc, m.topSvc, m.connPool, eventsProducer, m.manifestCache, opts...)
 	return
 }
@@ -188,7 +171,7 @@ func (m *managerImpl) connPoolBucketDelFn(bucketUUID string) {
 
 // StartMonitor will set the input monitor for the CLog manager and start the monitoring
 // goroutine.
-func (m *managerImpl) StartMonitor(monitor Monitor) {
+func (m *managerImpl) StartMonitor(monitor baseclog.Monitor) {
 	m.monitor.once.Do(func() {
 		mtr := &monitorImpl{
 			Monitor:        monitor,

@@ -11,19 +11,16 @@ licenses/APL2.txt.
 package conflictlog
 
 import (
-	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
+	"github.com/couchbase/goxdcr/v8/base/iopool"
+	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 )
 
-type FixedMapper struct {
-	target baseclog.Target
-	logger *log.CommonLogger
-}
-
-func NewFixedMapper(logger *log.CommonLogger, target baseclog.Target) *FixedMapper {
-	return &FixedMapper{logger: logger, target: target}
-}
-
-func (m *FixedMapper) Map(_ *baseclog.Rules, c baseclog.Conflict) (baseclog.Target, error) {
-	return m.target, nil
+// Manager defines behaviour for conflict manager
+type Manager interface {
+	NewLogger(logger *log.CommonLogger, replId string, eventsProducer common.PipelineEventsProducer, opts ...LoggerOpt) (l Logger, err error)
+	ConnPool() iopool.ConnPool
+	SetConnLimit(limit int)
+	SetIOPSLimit(limit int64)
+	StartMonitor(monitor Monitor)
 }
