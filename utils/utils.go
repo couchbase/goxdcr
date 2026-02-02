@@ -3832,6 +3832,15 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 	return vbReplicaMap, kvToNsServerTranslateMap, numOfReplicas, vbListForBeingAReplica, nil
 }
 
+func (u *Utilities) GetTerseInfo(localConnStr string, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	clusterInfo, err := u.GetClusterInfo(localConnStr, base.TerseClusterInfoPath, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return clusterInfo, nil
+}
+
 // IsTerseBucketInfo returns bucketInfo using the pools/default/b/<bucketName> endpoint.
 func (u *Utilities) IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
 	if len(bucketInfo) == 0 {

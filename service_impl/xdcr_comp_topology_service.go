@@ -11,12 +11,13 @@ package service_impl
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/streamApiWatcher"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/streamApiWatcher"
 
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -565,4 +566,61 @@ func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
 	} else {
 		return nodeList, nil
 	}
+}
+
+func (top_svc *XDCRTopologySvc) getTerseInfoOp() (interface{}, error) {
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
+		clientKey, err := top_svc.MyCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	connStr, err := top_svc.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+
+	return top_svc.utils.GetTerseInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_svc.logger)
+}
+
+func (top_svc *XDCRTopologySvc) IsOrchestratorNode() (bool, error) {
+	terseInfoRaw, terseErr := top_svc.getTerseInfoOp()
+	if terseErr != nil {
+		return false, terseErr
+	}
+
+	terseInfo, ok := terseInfoRaw.(map[string]interface{})
+	if !ok {
+		return false, fmt.Errorf("Wrong type for terseInfo: %v", reflect.TypeOf(terseInfoRaw))
+	}
+
+	orchestratorNodeAddressRaw, ok := terseInfo[base.OrchestratorNodeKey]
+	if !ok {
+		return false, fmt.Errorf("%v not found in terseInfo", base.OrchestratorNodeKey)
+	}
+
+	orchestratorAddress, ok := orchestratorNodeAddressRaw.(string)
+	if !ok {
+		return false, fmt.Errorf("Wrong type for orchestratorAddress: %v", reflect.TypeOf(orchestratorNodeAddressRaw))
+	}
+	if orchestratorAddress == base.OrchestratorAddressUndefined {
+		// local node is unaware of the orchestrator-location - see https://docs.couchbase.com/server/current/rest-api/rest-identify-orchestrator.html
+		return false, fmt.Errorf("received value '%v' for the %v attribute in terseClusterInfo response", orchestratorAddress, base.OrchestratorNodeKey)
+	}
+
+	//"n_0@127.0.0.1"
+	hostInfo, err := top_svc.getHostInfo()
+	if err != nil {
+		return false, err
+	}
+
+	otpNodeName, ok := hostInfo[base.OtpNodeKey].(string)
+	if !ok {
+		return false, fmt.Errorf("Uable to find otpNode")
+	}
+
+	if otpNodeName == orchestratorAddress {
+		return true, nil
+	}
+	return false, nil
 }

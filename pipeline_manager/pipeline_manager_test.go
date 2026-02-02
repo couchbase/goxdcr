@@ -121,6 +121,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	testRemoteClusterRef := &metadata.RemoteClusterReference{}
 
 	testPipeline := &common.Pipeline{}
+	testPipeline.On("Settings").Return(metadata.DefaultReplicationSettings().ToMap(false))
 
 	// ReplicationStatusMock for testing replSettingsRevContext
 	repStatusMock := &replicationStatusMock.ReplicationStatusIface{}

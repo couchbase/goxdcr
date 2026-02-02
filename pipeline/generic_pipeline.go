@@ -143,6 +143,12 @@ type GenericPipeline struct {
 	targetTopologyProgressMsg string
 
 	prometheusStatusUpdater PrometheusStatusUpdater
+
+	xdcrTopologySvc               service_def.XDCRCompTopologySvc
+	pipelineEventsProducerFetcher func(string) (common.PipelineEventsProducer, error)
+	sourceECCV                    bool
+	targetECCV                    bool
+	eccvMismatchEventID           *int64
 }
 
 // Get the runtime context of this pipeline
@@ -248,6 +254,109 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 }
 
+// returns if ECCV is enabled on source bucket, pruning window, source vbMaxCasMap, error if any
+func (genericPipeline *GenericPipeline) getLocalHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, int, []interface{}, error) {
+	var hlvVbMaxCas []interface{}
+	stopwatch := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v - getHlvVbMaxCasLocal", spec.UniqueId()), base.DiagInternalThreshold)
+	defer stopwatch()
+
+	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
+	if err != nil {
+		return false, 0, nil, err
+	}
+	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
+
+	var latestNotification service_def.SourceNotification
+	select {
+	case latestNotification = <-notificationCh:
+		defer latestNotification.Recycle()
+	case <-finCh:
+		// should be timed out
+		return false, 0, nil, fmt.Errorf("getLocalHlvInfo closed for %v", spec.UniqueId())
+	}
+
+	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
+	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
+	if hlvEnable {
+		hlvVbMaxCas = latestNotification.GetHlvVbMaxCas()
+	}
+	return hlvEnable, pruningWindow, hlvVbMaxCas, nil
+}
+
+// returns if ECCV is enabled on target bucket, error if any
+func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.ReplicationSpecification, genPipelineId string, finCh chan bool) (bool, error) {
+	stopwatch := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v - getHlvVbMaxCasRemote", spec.UniqueId()), base.DiagNetworkThreshold)
+	defer stopwatch()
+
+	targetNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, genPipelineId)
+	if err != nil {
+		return false, err
+	}
+	defer genericPipeline.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, genPipelineId)
+
+	var latestTargetNotification service_def.TargetNotification
+	select {
+	case latestTargetNotification = <-targetNotificationCh:
+		defer latestTargetNotification.Recycle()
+	case <-finCh:
+		// should be timed out
+		return false, fmt.Errorf("getRemoteHlvInfo closed for %v", spec.UniqueId())
+	}
+
+	targetHlvEnable := latestTargetNotification.GetTargetEnableCrossClusterVersioning()
+
+	return targetHlvEnable, nil
+}
+
+func (genericPipeline *GenericPipeline) setHlvInfoWithTimeout(settings metadata.ReplicationSettingsMap, spec *metadata.ReplicationSpecification, genPipelineId string) error {
+	var localErr, remoteErr error
+	var sourceHlvEnabled, targetHlvEnabled bool
+	var pruningWindow int
+	var sourceHlvVbMaxCasMap []interface{}
+	finCh := make(chan bool)
+	defer close(finCh)
+
+	getHlvInfo := func() error {
+		var wg sync.WaitGroup
+
+		// hlv info from Source bucket
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sourceHlvEnabled, pruningWindow, sourceHlvVbMaxCasMap, localErr = genericPipeline.getLocalHlvInfo(spec, genPipelineId, finCh)
+		}()
+
+		// hlv info from Target bucket
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			targetHlvEnabled, remoteErr = genericPipeline.getRemoteHlvInfo(spec, genPipelineId, finCh)
+		}()
+
+		wg.Wait()
+		if localErr != nil {
+			return localErr
+		}
+		return remoteErr
+	}
+
+	// if the either local or remote RPCs error out, have a bail out path using timeout.
+	// By default it is 15s, which is ample time.
+	err := base.ExecWithTimeout(getHlvInfo, base.RefreshRemoteClusterRefInterval, genericPipeline.logger)
+	if err != nil {
+		return err
+	}
+
+	settings[base.SourceECCV] = sourceHlvEnabled
+	settings[base.TargetECCV] = targetHlvEnabled
+	settings[base.VersionPruningWindowHrsKey] = pruningWindow
+	if sourceHlvEnabled {
+		settings[base.HlvVbMaxCasKey] = sourceHlvVbMaxCasMap
+	}
+
+	return nil
+}
+
 var genericPipelineIteration uint32
 
 // Start starts the pipeline
@@ -282,23 +391,20 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
 		return errMap
 	}
+
 	genPipelineId := "GenericPipeline" + base.GetIterationId(&genericPipelineIteration)
 	spec := genericPipeline.Specification().GetReplicationSpec()
-	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
+
+	err = genericPipeline.setHlvInfoWithTimeout(settings, spec, genPipelineId)
 	if err != nil {
-		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
+		errMap["genericPipeline.setHlvInfoWithTimeout"] = err
 		return errMap
 	}
-	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
-	latestNotification := <-notificationCh
-	defer latestNotification.Recycle()
-	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
-	settings[base.EnableCrossClusterVersioningKey] = hlvEnable
-	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
-	settings[base.VersionPruningWindowHrsKey] = pruningWindow
-	if hlvEnable {
-		hlvVbMaxCas := latestNotification.GetHlvVbMaxCas()
-		settings[base.HlvVbMaxCasKey] = hlvVbMaxCas
+	if srcECCV, ok := settings[base.SourceECCV]; ok {
+		genericPipeline.sourceECCV = srcECCV.(bool)
+	}
+	if targetECCV, ok := settings[base.TargetECCV]; ok {
+		genericPipeline.targetECCV = targetECCV.(bool)
 	}
 
 	errMap = genericPipeline.preCheckCasCheck(spec, genPipelineId, errMap)
@@ -311,6 +417,12 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	settings[base.ProblematicVBTarget] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
 
 	genericPipeline.settings = settings
+
+	// ECCV mismatch check *before* starting TOPOLOGY_CHANGE_DETECT_SVC
+	if genericPipeline.pipelineType == common.MainPipeline &&
+		genericPipeline.sourceECCV != genericPipeline.targetECCV {
+		genericPipeline.RaiseECCVMismatchEvent()
+	}
 
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
@@ -401,6 +513,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
+
 	genericPipeline.logger.Debugf("%v", common.ProgressInNozzleOpened)
 	genericPipeline.ReportProgress(common.ProgressInNozzleOpened)
 
@@ -819,8 +932,15 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc, utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error) *GenericPipeline {
-	pipeline := &GenericPipeline{topic: t,
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle,
+	spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor,
+	connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
+	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc,
+	logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc,
+	utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error,
+	xdcrTopologySvc service_def.XDCRCompTopologySvc, getEventsProducer func(string) (common.PipelineEventsProducer, error)) *GenericPipeline {
+	pipeline := &GenericPipeline{
+		topic:                              t,
 		sources:                            sources,
 		targets:                            targets,
 		spec:                               spec,
@@ -842,6 +962,8 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		mergeCkptFunc:                      mergeCkptFunc,
 		utils:                              utils,
 		prometheusStatusUpdater:            prometheusStatusUpdater,
+		xdcrTopologySvc:                    xdcrTopologySvc,
+		pipelineEventsProducerFetcher:      getEventsProducer,
 	}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()
@@ -1097,6 +1219,9 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 
 	// update settings in pipeline itself
 	genericPipeline.updatePipelineSettings(settings)
+	if genericPipeline.onlyUpdatePipeline(settings) {
+		return nil
+	}
 
 	// update settings on parts and services in pipeline
 	if genericPipeline.partUpdateSetting_constructor != nil {
@@ -1146,12 +1271,21 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 
 }
 
+// Returns true for those ReplicationSettingsMap that only require a pipeline-level update
+func (genericPipeline *GenericPipeline) onlyUpdatePipeline(settings metadata.ReplicationSettingsMap) bool {
+	if _, ok := settings[base.TargetECCV]; ok && len(settings) == 1 {
+		return true
+	}
+	return false
+}
+
 func (genericPipeline *GenericPipeline) updatePipelineSettings(settings metadata.ReplicationSettingsMap) {
 	genericPipeline.settings_lock.RLock()
 	defer genericPipeline.settings_lock.RUnlock()
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBSettings(settings)
 	genericPipeline.updateTopologyProgress(settings)
+	genericPipeline.updateECCVStatus(settings)
 }
 
 func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings metadata.ReplicationSettingsMap) {
@@ -1259,11 +1393,94 @@ func (genericPipeline *GenericPipeline) updateTopologyProgress(settings metadata
 	}
 }
 
+// Receives the update to target bucket's ECCV setting and raises/dismisses ECCV mismatch event accordingly
+func (genericPipeline *GenericPipeline) updateECCVStatus(settings metadata.ReplicationSettingsMap) {
+	targetECCV, ok := settings[base.TargetECCV].(bool)
+	if !ok || len(settings) != 1 {
+		return
+	}
+
+	// A settings update consisting of just the TargetECCV status change occurs only during an iteration of the goroutine
+	// triggered in (*TopologyChangeDetectorSvc).monitorTarget() - which also has a synchronous call hierarchy to this method.
+	// Hence locks are not required since there are no concurrent calls to updateECCVStatus() which have a valid 'settings' object.
+	genericPipeline.targetECCV = targetECCV
+
+	if genericPipeline.sourceECCV == genericPipeline.targetECCV {
+		dismissErr := genericPipeline.DismissECCVMismatchEvent() // no-op for a node that did not raise the event
+		if dismissErr != nil {
+			genericPipeline.logger.Warnf("error dismissing ECCV mismatch event for %v (%v) - may need pipeline restart to clear stale UI event", genericPipeline.spec.GetReplicationSpec().Id, dismissErr)
+		}
+	} else {
+		genericPipeline.RaiseECCVMismatchEvent()
+	}
+}
+
 func (genericPipeline *GenericPipeline) GetRebalanceProgress() (string, string) {
 	genericPipeline.topologyMtx.Lock()
 	defer genericPipeline.topologyMtx.Unlock()
 
 	return genericPipeline.sourceTopologyProgressMsg, genericPipeline.targetTopologyProgressMsg
+}
+
+func (genericPipeline *GenericPipeline) RaiseECCVMismatchEvent() {
+	if genericPipeline.pipelineType != common.MainPipeline ||
+		genericPipeline.sourceECCV == genericPipeline.targetECCV {
+		genericPipeline.logger.Debugf("skipped raising ECCV mismatch event as: pipelineType=%v, srcECCVEnabled=%v, targetECCVEnabled=%v", genericPipeline.pipelineType, genericPipeline.sourceECCV, genericPipeline.targetECCV)
+		return
+	}
+	spec := genericPipeline.spec.GetReplicationSpec()
+	genericPipeline.logger.Warnf("source and target bucket ECCV settings mismatch for %v: source=%v, target=%v", spec.Id, genericPipeline.sourceECCV, genericPipeline.targetECCV)
+
+	isOrchestrator, err := genericPipeline.xdcrTopologySvc.IsOrchestratorNode()
+	if err == nil && !isOrchestrator {
+		genericPipeline.logger.Debugf("skipped raising ECCV mismatch event for %v as not the orchestrator node", genericPipeline.pipelineType)
+		return
+	}
+
+	var problemBucket, problemCluster string
+	if genericPipeline.sourceECCV {
+		problemBucket, problemCluster = "<target bucket>", "<target cluster>"
+	} else {
+		problemBucket, problemCluster = "<source bucket>", "<source cluster>"
+	}
+
+	if spec != nil {
+		if genericPipeline.sourceECCV {
+			problemBucket, problemCluster = spec.TargetBucketName, spec.TargetClusterUUID
+		} else {
+			problemBucket = spec.SourceBucketName
+			if uuid, err := genericPipeline.xdcrTopologySvc.MyClusterUuid(); err == nil {
+				problemCluster = uuid
+			}
+		}
+	}
+
+	eventsProducer, err := genericPipeline.pipelineEventsProducerFetcher(spec.Id)
+	if err != nil {
+		genericPipeline.logger.Errorf("unable to fetch events producer for pipeline %v: %v", spec.Id, err)
+		return
+	}
+
+	uiAlertMsg := fmt.Sprintf("WARN: Mismatch between source and target enableCrossClusterVersioning (ECCV) settings - It's disabled for bucket '%v' on cluster '%v'. ECCV needs to be set true for all buckets in the replication topology for features like 'XDCR Active-Active with Sync Gateway' to ensure data consistency.", problemBucket, problemCluster)
+	eventID := eventsProducer.AddEvent(base.DismissablePersistentMsg, uiAlertMsg, base.NewEventsMap(), nil)
+	genericPipeline.eccvMismatchEventID = &eventID
+}
+
+func (genericPipeline *GenericPipeline) DismissECCVMismatchEvent() error {
+	if genericPipeline.pipelineType != common.MainPipeline ||
+		genericPipeline.eccvMismatchEventID == nil {
+		genericPipeline.logger.Debugf("skipped dismissing ECCV mismatch event as: pipelineType=%v, eccvMismatchEventID=%v", genericPipeline.pipelineType, genericPipeline.eccvMismatchEventID)
+		return nil
+	}
+
+	eventsProducer, err := genericPipeline.pipelineEventsProducerFetcher(genericPipeline.spec.GetReplicationSpec().Id)
+	if err != nil {
+		return err
+	}
+
+	err = eventsProducer.DismissEvent(int(*genericPipeline.eccvMismatchEventID))
+	genericPipeline.eccvMismatchEventID = nil
+	return err
 }
 
 // enforcer for GenericPipeline to implement Pipeline

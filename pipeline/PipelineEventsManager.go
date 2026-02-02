@@ -119,7 +119,7 @@ type PipelineEventsManager interface {
 	ContainsEvent(eventId int) bool
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
-	ClearPersistentEvents()
+	ClearFatalEventsExceptBrokenMap()
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
@@ -239,7 +239,7 @@ func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newE
 // When pipeline is paused, brokenMap events need to stay once pipeline resumes because no further mutations will
 // go through the router and re-trigger the brokenmap events... but other events like warnings, errors,
 // messages, should be reset and then they can be re-triggered as needed
-// Fatal events are defined as of type BrokenMappingInfoType or PersistentMsg type.
+// Fatal events are defined as one of the types: {BrokenMappingInfoType, PersistentMsg, DismissablePersistentMsg}
 // The function clears all the events which are not fatal.
 func (p *PipelineEventsMgr) ClearNonFatalEvents() {
 	p.events.Mutex.Lock()
@@ -249,8 +249,7 @@ func (p *PipelineEventsMgr) ClearNonFatalEvents() {
 	var replacementTime []int64
 
 	for i, event := range p.events.EventInfos {
-		if event.EventType != base.BrokenMappingInfoType &&
-			event.EventType != base.PersistentMsg {
+		if !event.IsFatal() {
 			continue
 		}
 		replacementList = append(replacementList, event)
@@ -261,7 +260,7 @@ func (p *PipelineEventsMgr) ClearNonFatalEvents() {
 	p.events.TimeInfos = replacementTime
 }
 
-func (p *PipelineEventsMgr) ClearPersistentEvents() {
+func (p *PipelineEventsMgr) ClearFatalEventsExceptBrokenMap() {
 	p.events.Mutex.Lock()
 	defer p.events.Mutex.Unlock()
 
@@ -269,7 +268,7 @@ func (p *PipelineEventsMgr) ClearPersistentEvents() {
 	var replacementTime []int64
 
 	for i, event := range p.events.EventInfos {
-		if event.EventType == base.PersistentMsg {
+		if event.IsFatal() && event.EventType != base.BrokenMappingInfoType {
 			continue
 		}
 		replacementList = append(replacementList, event)
@@ -280,7 +279,7 @@ func (p *PipelineEventsMgr) ClearPersistentEvents() {
 	p.events.TimeInfos = replacementTime
 }
 
-// Fatal events are defined as of type BrokenMappingInfoType or PersistentMsg type.
+// Fatal events are defined as one of the types: {BrokenMappingInfoType, PersistentMsg, DismissablePersistentMsg}
 // The function clears all the events which follows all the following condition:
 // 1. not fatal
 // 2. event message contains substr.
@@ -292,9 +291,7 @@ func (p *PipelineEventsMgr) ClearNonFatalEventsWithString(substr string) {
 	var replacementTime []int64
 
 	for i, event := range p.events.EventInfos {
-		if event.EventType != base.BrokenMappingInfoType &&
-			event.EventType != base.PersistentMsg &&
-			strings.Contains(event.EventDesc, substr) {
+		if !event.IsFatal() && strings.Contains(event.EventDesc, substr) {
 			continue
 		}
 
@@ -376,6 +373,8 @@ func (p *PipelineEventsMgr) registerDismissEventAction(event *base.EventInfo) er
 		return p.handleDismissLowPriorityMsg(event)
 	case base.BrokenMappingInfoType:
 		return p.handleDismissBrokenMapEvent(event)
+	case base.DismissablePersistentMsg:
+		return p.handleDismissablePersistentMsg(event)
 	default:
 		// Do nothing
 		return fmt.Errorf("Not implemented")
@@ -461,6 +460,21 @@ func (p *PipelineEventsMgr) getIncomingEventBrokenmapLevelAndDesc(incomingEvent 
 
 // Dismissing a low priority msg simply removes it from the queue
 func (p *PipelineEventsMgr) handleDismissLowPriorityMsg(event *base.EventInfo) error {
+	eventsList := p.GetCurrentEvents()
+	eventsList.Mutex.Lock()
+	defer eventsList.Mutex.Unlock()
+
+	for i, checkEvent := range eventsList.EventInfos {
+		if checkEvent.SameAs(event) {
+			eventsList.EventInfos = append(eventsList.EventInfos[:i], eventsList.EventInfos[i+1:]...)
+			return nil
+		}
+	}
+	return base.ErrorNotFound
+}
+
+// Dismissing a DismissablePersistentMsg simply removes it from the queue
+func (p *PipelineEventsMgr) handleDismissablePersistentMsg(event *base.EventInfo) error {
 	eventsList := p.GetCurrentEvents()
 	eventsList.Mutex.Lock()
 	defer eventsList.Mutex.Unlock()

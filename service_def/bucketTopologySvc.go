@@ -77,4 +77,5 @@ type TargetNotification interface {
 	GetTargetBucketInfo() base.BucketInfoMapType
 	GetTargetStorageBackend() string
 	GetVBMaxCasStats() base.HighSeqnosMapType
+	GetTargetEnableCrossClusterVersioning() bool
 }

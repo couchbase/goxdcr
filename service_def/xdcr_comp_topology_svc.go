@@ -82,4 +82,6 @@ type XDCRCompTopologySvc interface {
 	MyConnectionStr() (string, error)
 	MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error)
 	IsKVNode() (bool, error)
+
+	IsOrchestratorNode() (bool, error)
 }

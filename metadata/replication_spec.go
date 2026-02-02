@@ -10,10 +10,11 @@ package metadata
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/couchbase/goxdcr/base"
 )
 
 /*
@@ -61,6 +62,14 @@ func NewReplicationSpecification(sourceBucketName string, sourceBucketUUID strin
 		TargetBucketName:  targetBucketName,
 		TargetBucketUUID:  targetBucketUUID,
 		Settings:          DefaultReplicationSettings()}, nil
+}
+
+func (spec *ReplicationSpecification) UniqueId() string {
+	if spec == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s-%s", spec.Id, spec.InternalId)
 }
 
 func (spec *ReplicationSpecification) GetReplicationSpec() *ReplicationSpecification {

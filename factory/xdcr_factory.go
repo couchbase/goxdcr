@@ -337,7 +337,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.PrometheusStatusUpdater)
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.PrometheusStatusUpdater,
+		xdcrf.xdcr_topology_svc, xdcrf.GetEventsProducer)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -1165,8 +1166,8 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}
 	xmemSettings[parts.MobileCompatible] = metadata.GetSettingFromSettingsMap(settings, metadata.MobileCompatibleKey, base.MobileCompatibilityOff)
-	if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
-		xmemSettings[base.EnableCrossClusterVersioningKey] = val
+	if val, ok := settings[base.SourceECCV]; ok {
+		xmemSettings[base.SourceECCV] = val
 	}
 	if val, ok := settings[base.HlvVbMaxCasKey]; ok {
 		xmemSettings[base.HlvVbMaxCasKey] = val

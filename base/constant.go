@@ -62,6 +62,7 @@ const DocsPath = "/docs/"
 const CollectionsManifestPath = "/scopes"
 const ScopesPath = "/scopes/"
 const CollectionsPath = "/collections/"
+const TerseClusterInfoPath = "/pools/default/terseClusterInfo"
 
 // Streaming API paths. They are used for source clusters only
 const ObservePoolPath = "/poolsStreaming/default"
@@ -115,6 +116,10 @@ var DeveloperPreviewKey = "isDeveloperPreview"
 var StatusKey = "status"
 var NumberOfReplicas = "numReplicas"
 var StorageBackendKey = "storageBackend"
+var OrchestratorNodeKey = "orchestrator"
+var OtpNodeKey = "otpNode"
+
+const OrchestratorAddressUndefined = "undefined"
 
 // Value for StorageBackendKey
 var Magma = "magma"
@@ -500,6 +505,8 @@ const (
 	ProblematicVBTarget = "ProblematicVBTarget"
 	VBTimestamps        = "VBTimestamps"
 	CollectionNsMapping = "CollectionNsMapping"
+	SourceECCV          = "SourceECCV" // Source bucket ECCV setting
+	TargetECCV          = "TargetECCV" // Target bucket ECCV setting
 )
 
 // flag for requesting datatype in GetMeta request

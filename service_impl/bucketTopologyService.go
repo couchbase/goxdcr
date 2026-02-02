@@ -526,6 +526,9 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 			storageBackend = ""
 		}
 
+		// In mixed mode, this will return false with an error, which is OK
+		targetCrossClusterVer, _ := b.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+
 		watcher.latestCacheMtx.Lock()
 		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
 		replacementNotification.TargetServerVBMap = (*base.KvVBMapType)(&targetServerVBMap)
@@ -537,6 +540,7 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 		replacementNotification.TargetVbReplicasMember = vbReplicaMember
 		replacementNotification.TargetStorageBackend = storageBackend
 		replacementNotification.VersionPruningWindowHrs = versionPruningWindowHrs
+		replacementNotification.TargetEnableCrossClusterVersioning = targetCrossClusterVer
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
 		if !watcher.cachePopulated {
@@ -2002,14 +2006,15 @@ type Notification struct {
 	VbucketsMaxCas                []interface{}
 
 	// Target only
-	TargetBucketUUID           string
-	TargetServerVBMap          *base.KvVBMapType
-	TargetBucketInfo           base.BucketInfoMapType
-	TargetReplicaCnt           int
-	TargetReplicasMap          *base.VbHostsMapType  // len() of 0 if no replicas
-	TargetReplicasTranslateMap *base.StringStringMap // nil if not initialized
-	TargetVbReplicasMember     []uint16
-	TargetStorageBackend       string
+	TargetBucketUUID                   string
+	TargetServerVBMap                  *base.KvVBMapType
+	TargetBucketInfo                   base.BucketInfoMapType
+	TargetReplicaCnt                   int
+	TargetReplicasMap                  *base.VbHostsMapType  // len() of 0 if no replicas
+	TargetReplicasTranslateMap         *base.StringStringMap // nil if not initialized
+	TargetVbReplicasMember             []uint16
+	TargetStorageBackend               string
+	TargetEnableCrossClusterVersioning bool
 
 	// Source & Target
 	MaxVbCasStatsMap        *base.HighSeqnosMapType
@@ -2145,14 +2150,15 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		VbucketsMaxCas:                n.VbucketsMaxCas,
 		VersionPruningWindowHrs:       n.VersionPruningWindowHrs,
 
-		TargetBucketUUID:           n.TargetBucketUUID,
-		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
-		TargetBucketInfo:           n.TargetBucketInfo.Clone(),
-		TargetReplicaCnt:           n.TargetReplicaCnt,
-		TargetReplicasMap:          n.TargetReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
-		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
-		TargetVbReplicasMember:     base.CloneUint16List(n.TargetVbReplicasMember),
-		TargetStorageBackend:       n.TargetStorageBackend,
+		TargetBucketUUID:                   n.TargetBucketUUID,
+		TargetServerVBMap:                  n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		TargetBucketInfo:                   n.TargetBucketInfo.Clone(),
+		TargetReplicaCnt:                   n.TargetReplicaCnt,
+		TargetReplicasMap:                  n.TargetReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
+		TargetReplicasTranslateMap:         n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
+		TargetVbReplicasMember:             base.CloneUint16List(n.TargetVbReplicasMember),
+		TargetStorageBackend:               n.TargetStorageBackend,
+		TargetEnableCrossClusterVersioning: n.TargetEnableCrossClusterVersioning,
 
 		MaxVbCasStatsMap: &maxCasClone,
 	}
@@ -2233,4 +2239,8 @@ func (n *Notification) GetVBMaxCasStats() base.HighSeqnosMapType {
 		return nil
 	}
 	return *n.MaxVbCasStatsMap
+}
+
+func (n *Notification) GetTargetEnableCrossClusterVersioning() bool {
+	return n.TargetEnableCrossClusterVersioning
 }
