@@ -31,7 +31,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-var _ Connection = (*MemcachedConn)(nil)
+var _ baseclog.Connection = (*MemcachedConn)(nil)
 
 const (
 	MCReadTimeout  = 30 * time.Second
@@ -42,7 +42,7 @@ type MemcachedConn struct {
 	id            int64
 	addr          string
 	logger        *log.CommonLogger
-	securityInfo  SecurityInfo
+	securityInfo  baseclog.SecurityInfo
 	topSvc        service_def.XDCRCompTopologySvc
 	bucketName    string
 	bucketUUID    string
@@ -55,7 +55,7 @@ type MemcachedConn struct {
 	skipVerify    bool
 }
 
-func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName, bucketUUID string, vbCount int, addr string, securityInfo SecurityInfo, topSvc service_def.XDCRCompTopologySvc, skipVerifiy bool) (m *MemcachedConn, err error) {
+func NewMemcachedConn(logger *log.CommonLogger, utilsObj utils.UtilsIface, manCache *ManifestCache, bucketName, bucketUUID string, vbCount int, addr string, securityInfo baseclog.SecurityInfo, topSvc service_def.XDCRCompTopologySvc, skipVerifiy bool) (m *MemcachedConn, err error) {
 	if bucketUUID == "" {
 		err = fmt.Errorf("bucketUUID cannot be empty")
 		return

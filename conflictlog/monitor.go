@@ -24,27 +24,14 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
-// Monitor provides the methods to monitor the conflict rate in the system and take
-// necessary actions based on it.
-type Monitor interface {
-	// GetConflictsCount returns the number of conflict detected for a given replication topic.
-	GetConflictsCount(topic string) (int64, error)
-
-	// AutoPauseReplication pauses the replication with the input topic.
-	AutoPauseReplication(topic string) error
-
-	// RaiseUIError alerts the UI with the input errMsg of a given replication.
-	RaiseUIError(topic string, errMsg string) (int64, error)
-}
-
-var _ Monitor = (*monitorImpl)(nil)
+var _ baseclog.Monitor = (*monitorImpl)(nil)
 
 // monitorImpl is the concrete implementation of the Monitor interface.
 type monitorImpl struct {
 	// Monitor takes care of the core monitoring functionalaties and takes actions based
 	// of conflicts detected by all replications in the system during conflict logging.
 	// The Monitor will only be initialised after pipeline manager is initialised.
-	Monitor
+	baseclog.Monitor
 
 	// monitorOnce helps to start the monitoring exactly once.
 	monitorOnce sync.Once

@@ -10,15 +10,9 @@ licenses/APL2.txt.
 
 package conflictlog
 
-import (
-	"sync/atomic"
-)
-
-// gConnId is the counter for all connections created to the cluster
-var gConnId int64
-
-// NewConnId generates new unique connection Id. This is used by the implementations
-// of the Connection interface
-func NewConnId() int64 {
-	return atomic.AddInt64(&gConnId, 1)
+// Mapper evaluates and routes the conflict to the right target bucket
+// It also stores the rules against which the mapping will happen
+type Mapper interface {
+	// Map evaluates and routes the conflict to the right target bucket
+	Map(*Rules, Conflict) (Target, error)
 }

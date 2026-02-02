@@ -13,134 +13,123 @@ package conflictlog
 import (
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
-
-	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
 )
-
-// gLoggerId is the counter for all conflict loggers created
-var gLoggerId uint64
 
 // LoggerOptions defines optional args for a logger implementation
 type LoggerOptions struct {
-	rules                    *baseclog.Rules
-	mapper                   Mapper
-	logQueueCap              int
-	workerCount              int
-	networkRetryCount        int
-	networkRetryInterval     time.Duration
-	poolGetTimeout           time.Duration
-	setMetaTimeout           time.Duration
-	maxErrorCount            int
-	errorTimeWindow          time.Duration
-	reattemptDuration        time.Duration
-	conflictRateForPauseRepl int
+	Rules                    *Rules
+	Mapper                   Mapper
+	LogQueueCap              int
+	WorkerCount              int
+	NetworkRetryCount        int
+	NetworkRetryInterval     time.Duration
+	PoolGetTimeout           time.Duration
+	SetMetaTimeout           time.Duration
+	MaxErrorCount            int
+	ErrorTimeWindow          time.Duration
+	ReattemptDuration        time.Duration
+	ConflictRateForPauseRepl int
 
 	// this is off by default and only present for
 	// local testing changeable through internal setting.
-	skipTlsVerify bool
+	SkipTlsVerify bool
 }
 
 func (l *LoggerOptions) String() string {
 	b := &strings.Builder{}
 
-	b.WriteString(fmt.Sprintf("logQueueCap:%d,", l.logQueueCap))
-	b.WriteString(fmt.Sprintf("workerCount:%d,", l.workerCount))
-	b.WriteString(fmt.Sprintf("networkRetryCount:%d,", l.networkRetryCount))
-	b.WriteString(fmt.Sprintf("networkRetryInterval:%s,", l.networkRetryInterval))
-	b.WriteString(fmt.Sprintf("poolGetTimeout:%s,", l.poolGetTimeout))
-	b.WriteString(fmt.Sprintf("setMetaTimeout:%s,", l.setMetaTimeout))
-	b.WriteString(fmt.Sprintf("maxErrorCount:%v,", l.maxErrorCount))
-	b.WriteString(fmt.Sprintf("errorTimeWindow:%v,", l.errorTimeWindow))
-	b.WriteString(fmt.Sprintf("reattemptDuration:%v", l.reattemptDuration))
-	b.WriteString(fmt.Sprintf("skipTlsVerify:%v", l.skipTlsVerify))
+	b.WriteString(fmt.Sprintf("logQueueCap:%d,", l.LogQueueCap))
+	b.WriteString(fmt.Sprintf("workerCount:%d,", l.WorkerCount))
+	b.WriteString(fmt.Sprintf("networkRetryCount:%d,", l.NetworkRetryCount))
+	b.WriteString(fmt.Sprintf("networkRetryInterval:%s,", l.NetworkRetryInterval))
+	b.WriteString(fmt.Sprintf("poolGetTimeout:%s,", l.PoolGetTimeout))
+	b.WriteString(fmt.Sprintf("setMetaTimeout:%s,", l.SetMetaTimeout))
+	b.WriteString(fmt.Sprintf("maxErrorCount:%v,", l.MaxErrorCount))
+	b.WriteString(fmt.Sprintf("errorTimeWindow:%v,", l.ErrorTimeWindow))
+	b.WriteString(fmt.Sprintf("reattemptDuration:%v", l.ReattemptDuration))
+	b.WriteString(fmt.Sprintf("skipTlsVerify:%v", l.SkipTlsVerify))
+	b.WriteString(fmt.Sprintf("conflictRateForPauseRepl:%v", l.ConflictRateForPauseRepl))
 
 	return b.String()
 }
 
-func WithRules(r *baseclog.Rules) LoggerOpt {
+func WithRules(r *Rules) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.rules = r
+		o.Rules = r
 	}
 }
 
 func WithMapper(m Mapper) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.mapper = m
+		o.Mapper = m
 	}
 }
 
 func WithCapacity(cap int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.logQueueCap = cap
+		o.LogQueueCap = cap
 	}
 }
 
 func WithWorkerCount(val int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.workerCount = val
+		o.WorkerCount = val
 	}
 }
 
 func WithNetworkRetryCount(val int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.networkRetryCount = val
+		o.NetworkRetryCount = val
 	}
 }
 
 func WithNetworkRetryInterval(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.networkRetryInterval = val
+		o.NetworkRetryInterval = val
 	}
 }
 
 func WithPoolGetTimeout(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.poolGetTimeout = val
+		o.PoolGetTimeout = val
 	}
 }
 
 func WithSetMetaTimeout(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.setMetaTimeout = val
+		o.SetMetaTimeout = val
 	}
 }
 
 func WithSkipTlsVerify(v bool) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.skipTlsVerify = v
+		o.SkipTlsVerify = v
 	}
 }
 
 func WithMaxErrorCount(val int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.maxErrorCount = val
+		o.MaxErrorCount = val
 	}
 }
 
 func WithErrorTimeWindow(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.errorTimeWindow = val
+		o.ErrorTimeWindow = val
 	}
 }
 
 func WithReattemptDuration(val time.Duration) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.reattemptDuration = val
+		o.ReattemptDuration = val
 	}
 }
 
 func WithAutopauseConflictRate(val int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.conflictRateForPauseRepl = val
+		o.ConflictRateForPauseRepl = val
 	}
 }
 
 type LoggerOpt func(o *LoggerOptions)
-
-// newLoggerId generates new unique logger Id. This is used by the implementations
-// of the Logger interface
-func newLoggerId() uint64 {
-	return atomic.AddUint64(&gLoggerId, 1)
-}
