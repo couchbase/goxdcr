@@ -1,0 +1,221 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
+
+# Bucket -> Scopes
+# -----------------
+# For this test, first do not create scope for bucket 2
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="")
+
+function runDataLoad {
+	local collectionsToRunLoad=$1
+	local itemsPerCollection=$2
+	local concurrency=25
+
+	initProcessPool $concurrency
+
+	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
+	# Run CBWorkloadgen in parallel
+	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
+		addJobToPool "runCbWorkloadGenCollection" "C1" "B1" "S1" "col$i"
+	done
+
+	runProcessPool
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
+}
+
+declare -a collectionArray=()
+function runTestCase {
+	# TODO MB-68226 is preventing > 4000 from being created
+	local maxCollectionCnt=4000
+
+	# Data load variables
+	local collectionsToRunLoad=2000
+	local itemsPerCollection=5
+	local totalItemsCnt=$(($collectionsToRunLoad * $itemsPerCollection))
+
+	echo "============================================================================"
+	echo "Running large scaled implicit mapping test case with $maxCollectionCnt collections and broken map frequent checkpoint"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local etcDir
+	local oldProfile
+	etcDir=$(findInstallEtcDir)
+	oldProfile=$(cat $etcDir/couchbase/default_profile)
+	echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
+	## need to hard reset nodes for ns_server to pick up the new profile
+	hardResetNodes
+
+	for ((i = 1; i < $maxCollectionCnt; i = (($i + 1)))); do
+		collectionArray[${#collectionArray[@]}]="col$i"
+	done
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArray[@]})
+
+	# With high number of collections, processing will take time, use paralellism
+	setManifestParallelConfig 1 50 100 5
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Now while it's up and running, restore profile back in case the script stops running at any point
+	#echo "$oldProfile" >$etcDir/couchbase/default_profile
+
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# Get current instance
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
+	local currentXdcrLog
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	local currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
+	local currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
+	local currentSetOpErr=$(echo "$currentXdcrLog" | grep -c "$METAKV_SET_OP_ERR")
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+
+	trap killAllBgJobs EXIT
+	runDataLoad "$collectionsToRunLoad" "$itemsPerCollection"
+
+	# This will take a while
+	checkItemCnt "C1" "B1" "$totalItemsCnt"
+
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+
+	grepForPanics
+	validateBrokenMapExists "C1"
+
+	echo "Pausing replication"
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 30 seconds for pipeline to really pause"
+	sleep 30
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 30 seconds for resume to finish"
+	sleep 30
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+	grepForPanics
+
+	# Kill source goxdcr
+	killGoXdcr "C1"
+	echo "Sleeping 15 seconds for goxdcr to reboot"
+	sleep 15
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+	grepForPanics
+
+	local currentXdcrLog
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local backfillTimeToWait=4
+
+	local colIdx=1
+	createScope "C2" "B2" "S1"
+	for colIdx in {1..10}; do
+		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+
+		echo "Creating collection ${colIdx} on target bucket and waiting for backfill"
+		createCollection "C2" "B2" "S1" "col${colIdx}"
+
+		echo "Waiting for backfill to be taken place for collection col${colIdx}"
+		waitForInternalLogInstance "C1" "$BACKFILL_MSG" "$(($currentBackfillInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $BACKFILL_MSG increase"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+		waitForInternalLogInstance "C1" "$VBTASKS_DONE_MSG" "$(($currentVBTasksDoneInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $VBTASKS_DONE_MSG increase"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+		pauseReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 30 seconds for pipeline to really pause"
+		sleep 30
+		grepForPanics
+		validateXDCRCheckpoints "C1"
+		validateXDCRCheckpoints "C2"
+
+		resumeReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 30 seconds for resume to finish"
+		sleep 30
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+		validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+		validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+		validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+		grepForPanics
+
+	done
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	exportProvisionedConfig
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	# Reset the nodes after test to reload non-10k collections
+	hardResetNodes
+}

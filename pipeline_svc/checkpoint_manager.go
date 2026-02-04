@@ -2146,7 +2146,7 @@ done:
 	ticker.Stop()
 }
 
-func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
+func (ckmgr *CheckpointManager) PreCommitBrokenMapping(finch chan bool) error {
 	// Before actually persisting the checkpoint, ensure that the current brokenmap is available before the checkpoints are populated
 	var mapsToPreupsert []metadata.CollectionNamespaceMapping
 	ckmgr.cachedBrokenMap.lock.RLock()
@@ -2157,11 +2157,31 @@ func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 	ckmgr.cachedBrokenMap.lock.RUnlock()
 
 	for _, preUpsertMap := range mapsToPreupsert {
-		err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
+		var err = ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
+		retryCount := 0
+		for errors.Is(err, base.ErrUpsertAlreadyOccurring) {
+			if retryCount >= base.CkptMgrPreUpsertRetryMax {
+				ckmgr.logger.Errorf("PreUpsertBrokenMapping failed after %d retries for %v", retryCount, preUpsertMap.String())
+				return base.ErrorFailedAfterRetry
+			}
+			ckmgr.logger.Warnf("PreUpsertBrokenMapping already occurring for %v, will retry in a while (attempt %d/%d)", preUpsertMap.String(), retryCount+1, base.CkptMgrPreUpsertRetryMax)
+			sleepTimer := time.NewTimer(base.CkptMgrPreUpsertRetryWaitTime)
+			select {
+			case <-sleepTimer.C:
+				retryCount++
+				err = ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
+			case <-finch:
+				sleepTimer.Stop()
+				ckmgr.logger.Errorf("PreCommitBrokenMapping interrupted")
+				return base.ErrorExecutionTimedOut
+			}
+		}
 		if err != nil {
 			ckmgr.logger.Warnf("Unable to pre-persist brokenMapping %v: %v", preUpsertMap.String(), err)
+			return err
 		}
 	}
+	return nil
 }
 
 func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
@@ -2223,7 +2243,10 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	}
 	load_distribution := base.BalanceLoad(number_of_workers, number_of_vbs)
 
-	ckmgr.PreCommitBrokenMapping()
+	err = ckmgr.PreCommitBrokenMapping(fin_ch)
+	if err != nil {
+		return
+	}
 
 	worker_wait_grp := &sync.WaitGroup{}
 	var total_committing_time int64
@@ -2275,6 +2298,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 			ckmgr.logger.Errorf("Skipped checkpointing for replication due to %v", err)
 		}
 	}()
+
 	// vbucketID -> ThroughSeqNumber
 	var through_seqno_map map[uint16]uint64
 	// vBucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid
@@ -2291,7 +2315,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	var total_committing_time int64
 
 	if ckmgr.collectionEnabled() {
-		ckmgr.PreCommitBrokenMapping()
+		err = ckmgr.PreCommitBrokenMapping(fin_ch)
+		if err != nil {
+			return
+		}
 	}
 
 	var dummyWaitGrp sync.WaitGroup
@@ -2877,12 +2904,11 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
-			ckmgr.wait_grp.Add(2)
+			ckmgr.wait_grp.Add(1)
 			// Can do this in the background - manifest updates usually don't happen too often
 			// to warrant a serializer
 			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
-			// Just in case checkpoint operations may use this, ensure that this belongs
-			go ckmgr.preUpsertBrokenMapTask(newerMap)
+
 			go ckmgr.updateReplStatusBrokenMap()
 		}
 		syncCh <- nil

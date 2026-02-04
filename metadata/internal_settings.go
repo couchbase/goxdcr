@@ -36,6 +36,10 @@ const (
 	// timeout for checkpointing attempt before pipeline is stopped (in seconds) -
 	// to put an upper bound on the delay of pipeline stop/restart
 	TimeoutCheckpointBeforeStopKey = "TimeoutCheckpointBeforeStop"
+	// wait time for retrying PreUpsertBrokenMapping operation in checkpoint manager (in seconds)
+	CkptMgrPreUpsertRetryWaitTimeKey = "CkptMgrPreUpsertRetryWaitTime"
+	// max retry count for PreUpsertBrokenMapping operation in checkpoint manager
+	CkptMgrPreUpsertRetryMaxKey = "CkptMgrPreUpsertRetryMax"
 	// capi nozzle data chan size is defined as batchCount*CapiDataChanSizeMultiplier
 	CapiDataChanSizeMultiplierKey = "CapiDataChanSizeMultiplier"
 	// interval for refreshing remote cluster references
@@ -300,6 +304,8 @@ var MaxTopologyChangeCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 30
 var MaxTopologyStableCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 300}}
 var MaxWorkersForCheckpointingConfig = &SettingsConfig{5, &Range{1, 1000}}
 var TimeoutCheckpointBeforeStopConfig = &SettingsConfig{180, &Range{10, 1800}}
+var CkptMgrPreUpsertRetryWaitTimeConfig = &SettingsConfig{5, &Range{1, 60}}
+var CkptMgrPreUpsertRetryMaxConfig = &SettingsConfig{12, &Range{1, 60}}
 var CapiDataChanSizeMultiplierConfig = &SettingsConfig{1, &Range{1, 100}}
 var RefreshRemoteClusterRefIntervalConfig = &SettingsConfig{15, &Range{1, 3600}}
 var CapiMaxRetryBatchUpdateDocsConfig = &SettingsConfig{6, &Range{1, 100}}
@@ -440,6 +446,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxTopologyStableCountBeforeRestartKey:        MaxTopologyStableCountBeforeRestartConfig,
 	MaxWorkersForCheckpointingKey:                 MaxWorkersForCheckpointingConfig,
 	TimeoutCheckpointBeforeStopKey:                TimeoutCheckpointBeforeStopConfig,
+	CkptMgrPreUpsertRetryWaitTimeKey:              CkptMgrPreUpsertRetryWaitTimeConfig,
+	CkptMgrPreUpsertRetryMaxKey:                   CkptMgrPreUpsertRetryMaxConfig,
 	CapiDataChanSizeMultiplierKey:                 CapiDataChanSizeMultiplierConfig,
 	RefreshRemoteClusterRefIntervalKey:            RefreshRemoteClusterRefIntervalConfig,
 	CapiMaxRetryBatchUpdateDocsKey:                CapiMaxRetryBatchUpdateDocsConfig,

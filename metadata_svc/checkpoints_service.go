@@ -535,9 +535,9 @@ func (ckpt_svc *CheckpointsService) PreUpsertGlobalInfo(replicationId string, sp
 		errMap["register_global_counters"] = err
 	}
 	// Attempt to upsert mappings to metaKV
-	// Note: If an upsert is already in progress, this will return errUpsertAlreadyOccurring and the persistence will be retried later.
-	// Hence ok to ignore errUpsertAlreadyOccurring.
-	if err := ckpt_svc.globalInfoRefCountSvc.UpsertGlobalInfo(replicationId, specInternalId, false); err != nil && err != errUpsertAlreadyOccurring {
+	// Note: If an upsert is already in progress, this will return ErrUpsertAlreadyOccurring and the persistence will be retried later.
+	// Hence ok to ignore ErrUpsertAlreadyOccurring.
+	if err := ckpt_svc.globalInfoRefCountSvc.UpsertGlobalInfo(replicationId, specInternalId, false); err != nil && err != base.ErrUpsertAlreadyOccurring {
 		errMap["upsert_to_metakv"] = err
 	}
 	return errMap

@@ -788,8 +788,6 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 	return c.upsertInternal(specInternalId, cleanup, c.upsertMapping, getShaMapToLoad)
 }
 
-var errUpsertAlreadyOccurring = fmt.Errorf("Error upserting mapping as an operation is happening already")
-
 func (c *MapShaRefCounter) upsertInternal(specInternalId string, cleanup bool,
 	retryFunc func(string, bool) error,
 	getShamapToLoad func() (map[string]metadata.SnappyCompressableVal, error)) error {
@@ -857,7 +855,7 @@ func (c *MapShaRefCounter) upsertInternal(specInternalId string, cleanup bool,
 		err = c.upsertCompressedMappingDoc(mappingDoc, false /*new*/)
 		return err
 	default:
-		return errUpsertAlreadyOccurring
+		return base.ErrUpsertAlreadyOccurring
 	}
 }
 

@@ -984,6 +984,12 @@ var XmemMaxBatchSize = 50
 // interval between retries on batchUpdateDocs
 var CapiRetryInterval = 500 * time.Millisecond
 
+// wait time for retrying PreUpsertBrokenMapping operation
+var CkptMgrPreUpsertRetryWaitTime = 5 * time.Second
+
+// max retry count for PreUpsertBrokenMapping operation
+var CkptMgrPreUpsertRetryMax = 12
+
 // maximum number of snapshot markers to store for each vb
 // once the maximum is reached, the oldest snapshot marker is dropped to make room for the new one
 var MaxLengthSnapshotHistory = 200
@@ -1185,7 +1191,8 @@ var TempMCErrorDisplayDelayFactor = 20
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
-	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
+	timeoutCheckpointBeforeStop time.Duration, ckptMgrPreUpsertRetryWaitTime time.Duration,
+	ckptMgrPreUpsertRetryMax int, capiDataChanSizeMultiplier int,
 	refreshRemoteClusterRefInterval time.Duration, clusterVersion string,
 	capiMaxRetryBatchUpdateDocs int, capiBatchTimeout time.Duration,
 	capiWriteTimeout time.Duration, capiReadTimeout time.Duration,
@@ -1263,6 +1270,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
 	MaxWorkersForCheckpointing = maxWorkersForCheckpointing
 	TimeoutCheckpointBeforeStop = timeoutCheckpointBeforeStop
+	CkptMgrPreUpsertRetryWaitTime = ckptMgrPreUpsertRetryWaitTime
+	CkptMgrPreUpsertRetryMax = ckptMgrPreUpsertRetryMax
 	CapiDataChanSizeMultiplier = capiDataChanSizeMultiplier
 	RefreshRemoteClusterRefInterval = refreshRemoteClusterRefInterval
 	if len(clusterVersion) > 0 {

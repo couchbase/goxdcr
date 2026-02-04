@@ -242,6 +242,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.MaxTopologyStableCountBeforeRestartKey].(int),
 		internal_settings.Values[metadata.MaxWorkersForCheckpointingKey].(int),
 		time.Duration(internal_settings.Values[metadata.TimeoutCheckpointBeforeStopKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.CkptMgrPreUpsertRetryWaitTimeKey].(int))*time.Second,
+		internal_settings.Values[metadata.CkptMgrPreUpsertRetryMaxKey].(int),
 		internal_settings.Values[metadata.CapiDataChanSizeMultiplierKey].(int),
 		time.Duration(internal_settings.Values[metadata.RefreshRemoteClusterRefIntervalKey].(int))*time.Second,
 		version,

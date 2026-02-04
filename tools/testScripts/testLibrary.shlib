@@ -46,6 +46,7 @@ CHANGES_LEFT_0_WAIT_SECS=10
 VAGRANT_LOG_DIR="/opt/couchbase/var/lib/couchbase/logs"
 GETHIGHSEQNO_COLID_DNE="getHighSeqno could not find collection ID"
 REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline"
+METAKV_SET_OP_ERR="metakv_svc_setOp encountered error"
 
 # HLV Test sleep configs
 HLV_TESTS_INIT_SLEEP_SECS=30

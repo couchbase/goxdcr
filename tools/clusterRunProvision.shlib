@@ -1510,12 +1510,12 @@ function setupBulkScopeAndCollection {
 	fi
 
 	if [[ ! -z "${output:-}" ]] && [[ $(echo "$output" | grep -c "error") -gt 0 ]]; then
-    echo "Error creating scopes and collections for bucket $bucketName on cluster $clusterName: $output"
-    exit 1
-  else
-    echo "Successfully created scopes and collections for bucket $bucketName on cluster $clusterName"
-    return 0
-  fi
+		echo "Error creating scopes and collections for bucket $bucketName on cluster $clusterName: $output"
+		exit 1
+	else
+		echo "Successfully created scopes and collections for bucket $bucketName on cluster $clusterName"
+		return 0
+	fi
 }
 
 # inputs

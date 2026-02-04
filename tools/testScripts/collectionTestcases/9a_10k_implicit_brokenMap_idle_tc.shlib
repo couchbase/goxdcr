@@ -25,8 +25,8 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=1200 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=1200 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true")
 
 # Bucket -> Scopes
 # -----------------
@@ -36,7 +36,7 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="")
 function runDataLoad {
 	local collectionsToRunLoad=$1
 	local itemsPerCollection=$2
-	local concurrency=25
+	local concurrency=50
 
 	initProcessPool $concurrency
 
@@ -69,13 +69,13 @@ function runTestCase {
 		exit $?
 	fi
 
-	#local etcDir
-	#local oldProfile
-	#etcDir=$(findInstallEtcDir)
-	#oldProfile=$(cat $etcDir/couchbase/default_profile)
-	#echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
+	local etcDir
+	local oldProfile
+	etcDir=$(findInstallEtcDir)
+	oldProfile=$(cat $etcDir/couchbase/default_profile)
+	echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
 	## need to hard reset nodes for ns_server to pick up the new profile
-	#hardResetNodes
+	hardResetNodes
 
 	for ((i = 1; i < $maxCollectionCnt; i = (($i + 1)))); do
 		collectionArray[${#collectionArray[@]}]="col$i"
@@ -93,6 +93,9 @@ function runTestCase {
 	# Now while it's up and running, restore profile back in case the script stops running at any point
 	#echo "$oldProfile" >$etcDir/couchbase/default_profile
 
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
 	# Get current instance
 	local -i currentBackfillInstanceCnt
 	local -i currentVBTasksDoneInstanceCnt
@@ -100,8 +103,9 @@ function runTestCase {
 	local currentXdcrLog
 
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-	currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
-	currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
+	local currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
+	local currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
+	local currentSetOpErr=$(echo "$currentXdcrLog" | grep -c "$METAKV_SET_OP_ERR")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -118,15 +122,12 @@ function runTestCase {
 	checkItemCnt "C1" "B1" "$totalItemsCnt"
 
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
-
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
 	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
 
 	grepForPanics
 	validateBrokenMapExists "C1"
-
-  # TODO - file MB
-	read -p "NEIL DEBUG ready to pause with brokenmap"
 
 	echo "Pausing replication"
 	pauseReplication "C1" "B1" "C2" "B2"
@@ -139,13 +140,95 @@ function runTestCase {
 	resumeReplication "C1" "B1" "C2" "B2"
 	echo "Waiting 30 seconds for resume to finish"
 	sleep 30
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+	grepForPanics
 
 	# Kill source goxdcr
 	killGoXdcr "C1"
 	echo "Sleeping 15 seconds for goxdcr to reboot"
 	sleep 15
-	checkUnidirectionalChangesLeft
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
 	grepForPanics
+
+	local currentXdcrLog
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local backfillTimeToWait=4
+
+	local colIdx=1
+	createScope "C2" "B2" "S1"
+	for colIdx in {1..10}; do
+		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+
+		echo "Creating collection ${colIdx} on target bucket and waiting for backfill"
+		createCollection "C2" "B2" "S1" "col${colIdx}"
+
+		# The first backfill will be done as part of backfill manager being "kicked" by collection manifest changes
+		echo "Waiting for backfill to be taken place for collection col${colIdx}"
+		waitForInternalLogInstance "C1" "$BACKFILL_MSG" "$(($currentBackfillInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $BACKFILL_MSG increase"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+		waitForInternalLogInstance "C1" "$VBTASKS_DONE_MSG" "$(($currentVBTasksDoneInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $VBTASKS_DONE_MSG increase"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+		# Secondly, do some I/O to ensure the I/O path will update its collections manifest and ensure that
+		# the router's broken map is properly updated before the checkpoint operation
+		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+		runCbWorkloadGenCollection "C1" "B1" "S1" "col$colIdx"
+		sleep 5
+		waitForInternalLogInstance "C1" "$BACKFILL_MSG" "$(($currentBackfillInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $BACKFILL_MSG increase for router update"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+		waitForInternalLogInstance "C1" "$VBTASKS_DONE_MSG" "$(($currentVBTasksDoneInstanceCnt + 1))" $backfillTimeToWait
+		if (($? == 1)); then
+			echo "Failed to find $VBTASKS_DONE_MSG increase for router update"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+
+		pauseReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 30 seconds for pipeline to really pause"
+		sleep 30
+		grepForPanics
+		validateXDCRCheckpoints "C1"
+		validateXDCRCheckpoints "C2"
+
+		resumeReplication "C1" "B1" "C2" "B2"
+		echo "Waiting 30 seconds for resume to finish"
+		sleep 30
+		checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+		validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+		validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+		validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+		grepForPanics
+
+	done
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -154,6 +237,7 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	resetCustomManifestRefreshInterval "C1"
 
 	# Reset the nodes after test to reload non-10k collections
 	hardResetNodes
