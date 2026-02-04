@@ -117,6 +117,7 @@ function runDifferFindDifference {
 	runXdcrDiffer "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket"
 	if (($retVal != 0)); then
 		echo "Differ returned non-0 exit code"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -138,6 +139,7 @@ function grepForPanics {
 		count=$(grep -c panic ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
 			echo "WARNING Found panics in ${logsDir}/${dir}"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
@@ -151,6 +153,7 @@ function grepForErrs {
 		count=$(grep -c "decoding source mutation" ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
 			echo "WARNING Found err:decoding source mutation in ${logsDir}/${dir}"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
@@ -164,6 +167,7 @@ function grepForPipelineFailures {
 		count=$(grep -c "Failed to start the pipeline" ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
 			echo "WARNING Found err:Failed to start the pipeline in ${logsDir}/${dir}/goxdcr.log"
+			dumpDebugInfoBeforeExit
 			return 1
 		fi
 	done
@@ -177,6 +181,7 @@ function grepForEINVAL {
 		count=$(grep -c "EINVAL" ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
 			echo "WARNING Found EINVAL in ${logsDir}/${dir}"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
@@ -192,6 +197,7 @@ function grepForInvalidCommand {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found invalid format in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -208,6 +214,7 @@ function grepForMultiError {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found SUBDOC_BAD_MULTI in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -224,6 +231,7 @@ function grepForDecodingError {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found 'error decoding' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -240,6 +248,7 @@ function grepForUnknownResponse {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found 'received error response from setMeta client. Repairing connection' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -264,6 +273,7 @@ function grepForCollectionIdAbsentError {
 
 	# If occurrences are found, exit
 	if (($found != 0)); then
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -287,6 +297,7 @@ function grepForTgtColNamespaceNilError {
 
 	# If occurrences are found, exit
 	if (($found != 0)); then
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -302,6 +313,7 @@ function grepForNonMonotonicThroughSeqno {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found 'nonMonoTS' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -318,6 +330,7 @@ function grepForUnusualOSOSessionEnds {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found 'unusualEnd' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
@@ -334,6 +347,7 @@ function grepForFaultyCLogTrackers {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found 'faultyCLog' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		done
