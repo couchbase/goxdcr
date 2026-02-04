@@ -1546,6 +1546,10 @@ func (c *CollectionNamespaceMapping) SnappyDecompress(data []byte) error {
 
 func (c *CollectionNamespaceMapping) MigrateString() string {
 	var buffer bytes.Buffer
+	if len(*c) > base.MaxValueLenForLogging {
+		// Probably not gonna happen
+		return fmt.Sprintf("CollectionNamespaceMapping with %v entries", len(*c))
+	}
 	for src, tgtList := range *c {
 		buffer.WriteString(fmt.Sprintf("SOURCE ||%v|| -> TARGET(s) %v\n", src.CollectionName, CollectionNamespaceList(tgtList).String()))
 	}
@@ -1554,6 +1558,9 @@ func (c *CollectionNamespaceMapping) MigrateString() string {
 
 func (c *CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer
+	if len(*c) > base.MaxValueLenForLogging {
+		return fmt.Sprintf("CollectionNamespaceMapping with %v entries", len(*c))
+	}
 	for src, tgtList := range *c {
 		buffer.WriteString(fmt.Sprintf("SOURCE ||%v|| -> TARGET(s) %v\n", src.String(), CollectionNamespaceList(tgtList).String()))
 	}

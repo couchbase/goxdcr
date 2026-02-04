@@ -48,7 +48,7 @@ function runDataLoad {
 function pauseAndResumeMultiples {
 	local total=$1
 	local i
-	local pauseResumeStatus
+	local pauseResumeStatus=0
 	local oldDataReplicated
 	local oldDocsProcessed
 

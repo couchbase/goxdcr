@@ -161,7 +161,7 @@ function runTestCase {
 	local currentXdcrLog
 	local -i currentBackfillInstanceCnt
 	local -i currentVBTasksDoneInstanceCnt
-	local backfillTimeToWait=4
+	local backfillTimeToWait=6
 
 	local colIdx=1
 	createScope "C2" "B2" "S1"
