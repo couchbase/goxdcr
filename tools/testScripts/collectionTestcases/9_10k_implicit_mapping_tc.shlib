@@ -68,15 +68,6 @@ function runTestCase {
 		exit $?
 	fi
 
-	#local etcDir
-	#local oldProfile
-	#etcDir=$(findInstallEtcDir)
-	#oldProfile=$(cat $etcDir/couchbase/default_profile)
-	#echo "{cluster_scope_collection_limit, unlimited}." >>$etcDir/couchbase/default_profile
-	##echo "{max_collections_per_bucket, unlimited}." >>$etcDir/couchbase/default_profile
-	## need to hard reset nodes for ns_server to pick up the new profile
-	#hardResetNodes
-
 	for ((i = 1; i < $maxCollectionCnt; i = (($i + 1)))); do
 		collectionArray[${#collectionArray[@]}]="col$i"
 	done
@@ -89,9 +80,6 @@ function runTestCase {
 	if (($? != 0)); then
 		exit $?
 	fi
-
-	# Now while it's up and running, restore profile back in case the script stops running at any point
-	#echo "$oldProfile" >$etcDir/couchbase/default_profile
 
 	# Get current instance
 	local -i currentBackfillInstanceCnt

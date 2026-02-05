@@ -1999,17 +1999,16 @@ function findCbWorkloadGen {
 		workloadGenCache=$(cat /tmp/cbworkloadGenLoc.tmp)
 		if [[ ! -z "${workloadGenCache:-}" ]]; then
 			echo "$workloadGenCache"
-			rm -f "$lockfile"
+			if [[ ! -f "$workloadGenCache" ]]; then
+			  # The cache file is out of date
+  			rm -f /tmp/cbworkloadGenLoc.tmp
+  		fi
 			return 0
-		elif [[ ! -z "${workloadGenCache:-}" ]] && [[ ! -f "$workloadGenCache" ]]; then
-			# The cache file is out of date
-			rm -f /tmp/cbworkloadGenLoc.tmp
 		fi
 	fi
 
 	if [[ ! -z "${CBWORKLOADGEN:-}" ]]; then
 		echo "$CBWORKLOADGEN"
-		rm -f "$lockfile"
 		return 0
 	fi
 
@@ -2029,13 +2028,11 @@ function findCbWorkloadGen {
 				CBWORKLOADGEN=$workloadGen
 			fi
 			echo "$workloadGen"
-			rm -f "$lockfile"
 			return 0
 		fi
 		path=$(dirname "$path")
 	done
 	echo ""
-	rm -f "$lockfile"
 	return 1
 }
 

@@ -6,6 +6,54 @@
 # will be governed by the Apache License, Version 2.0, included in the file
 # licenses/APL2.txt.
 
+# ==============================================================================
+# PROCESS POOL - Concurrent Job Execution Library
+# ==============================================================================
+# This library provides a simple process pool for executing bash functions in
+# parallel with configurable concurrency limits. It's designed for speeding up
+# independent operations that would otherwise run sequentially while not overrunning
+# the system resources limits or slow down too much due to too many context switches.
+#
+# TYPICAL USE CASES IN THIS FRAMEWORK:
+# 1. Parallel data loading across multiple collections (e.g., loading 500
+#    collections concurrently with cbworkloadgen instead of sequentially)
+# 2. Parallel manifest processing when dealing with thousands of scopes/collections
+# 3. Concurrent cluster operations across multiple nodes
+# 4. Any batch operation where tasks are independent and can run simultaneously
+#
+# USAGE PATTERN:
+#   # 1. Initialize pool with desired concurrency level (max simultaneous jobs)
+#   initProcessPool 10
+#
+#   # 2. Queue up jobs by adding function calls with their arguments
+#   for ((i=1; i<=500; i++)); do
+#       addJobToPool "runCbWorkloadGenCollection" "C1" "B1" "S1" "col$i"
+#   done
+#
+#   # 3. Execute all queued jobs (blocks until all complete)
+#   runProcessPool
+#
+# HOW IT WORKS:
+# - Jobs are queued in POOL_PENDING_JOBS array and executed in background
+# - Pool maintains at most POOL_MAX_CONCURRENT active jobs simultaneously
+# - As jobs complete, new ones automatically start until queue is empty
+# - Progress is tracked and reported via POOL_COMPLETED counter
+#
+# EXAMPLE FROM REAL TEST CASE (9_10k_implicit_mapping_tc.shlib):
+#   initProcessPool 10
+#   for ((i = 1; i <= 500; i++)); do
+#       addJobToPool "runCbWorkloadGenCollection" "C1" "B1" "S1" "col$i"
+#   done
+#   runProcessPool
+#   # Result: 500 collections loaded in parallel (10 at a time) instead of
+#   #         sequentially, dramatically reducing total test execution time
+#
+# PERFORMANCE IMPACT:
+# With concurrency=10 and 500 jobs, execution time is roughly 500/10 = 50x
+# faster than sequential execution (assuming jobs have similar duration and
+# sufficient system resources).
+# ==============================================================================
+
 # Process pool configuration
 declare -g POOL_MAX_CONCURRENT=5 # Default concurrency
 declare -g POOL_ACTIVE_JOBS=()   # Array to track active job PIDs
