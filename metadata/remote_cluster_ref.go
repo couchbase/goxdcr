@@ -71,20 +71,19 @@ const (
 	RemoteTypeCngStr       = "cng"
 )
 
-func (rt *RemoteType) String() (string, error) {
+func (rt *RemoteType) String() string {
 	if rt == nil {
-		return "", errors.New("received nil RemoteType pointer")
+		return "<nil RemoteType>"
 	}
 	switch *rt {
 	case RemoteTypeAuto:
-		return RemoteTypeAutoStr, nil
+		return RemoteTypeAutoStr
 	case RemoteTypeCbCluster:
-		return RemoteTypeCbClusterStr, nil
+		return RemoteTypeCbClusterStr
 	case RemoteTypeCng:
-		return RemoteTypeCngStr, nil
+		return RemoteTypeCngStr
 	default:
-		// return error incase of invalid remoteType
-		return "", fmt.Errorf("invalid remoteType %v", rt)
+		return fmt.Sprintf("<invalid RemoteType %d>", *rt)
 	}
 }
 
@@ -617,7 +616,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.SecureTypeString()
 	outputMap[base.RemoteClusterHostnameMode] = ref.HostnameMode()
-	outputMap[base.RemoteType], _ = ref.RemoteType.String()
+	outputMap[base.RemoteType] = ref.RemoteType.String()
 	// To be deprecated
 	if ref.IsEncryptionEnabled() {
 		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption_

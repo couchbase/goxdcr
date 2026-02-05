@@ -13,8 +13,8 @@ import (
 
 // remoteOps is a struct that encapsulates the checkpointMgr remote operations
 type remoteOps struct {
-	// bucketStatsProvider is the service that provides the bucket stats
-	bucketStatsProvider service_def.BucketStatsOps
+	// getBucketStatsProvider is a getter for the bucket stats provider
+	getBucketStatsProvider func() (service_def.BucketStatsOps, error)
 	// remoteBucket is the remote bucket information
 	remoteBucket *service_def.RemoteBucketInfo
 	// bucketFailoverLogForPreReplicate is the failover log for pre-replicate
@@ -36,16 +36,16 @@ type remoteOps struct {
 }
 
 // NewRemoteOps is the constructor for the remoteOps struct
-func NewRemoteOps(bucketStatsProvider service_def.BucketStatsOps, srcVbList, tgtVbList []uint16, isVariableVBMode bool, remoteBucket *service_def.RemoteBucketInfo, finCh chan bool, capi_svc service_def.CAPIService, logger *log.CommonLogger) *remoteOps {
+func NewRemoteOps(getBucketStatsProvider func() (service_def.BucketStatsOps, error), srcVbList, tgtVbList []uint16, isVariableVBMode bool, remoteBucket *service_def.RemoteBucketInfo, finCh chan bool, capi_svc service_def.CAPIService, logger *log.CommonLogger) *remoteOps {
 	return &remoteOps{
-		bucketStatsProvider: bucketStatsProvider,
-		srcVbList:           srcVbList,
-		tgtVbList:           tgtVbList,
-		remoteBucket:        remoteBucket,
-		logger:              logger,
-		finCh:               finCh,
-		isVariableVBMode:    isVariableVBMode,
-		capiSvc:             capi_svc,
+		getBucketStatsProvider: getBucketStatsProvider,
+		srcVbList:              srcVbList,
+		tgtVbList:              tgtVbList,
+		remoteBucket:           remoteBucket,
+		logger:                 logger,
+		finCh:                  finCh,
+		isVariableVBMode:       isVariableVBMode,
+		capiSvc:                capi_svc,
 	}
 }
 
@@ -55,7 +55,11 @@ func (r *remoteOps) GetHighSeqNos(ctx *utilities.Context) (*base.BucketVBStats, 
 	if r.isVariableVBMode {
 		vbList = r.tgtVbList
 	}
-	return r.bucketStatsProvider.GetVBucketStats(&base.VBucketStatsRequest{
+	bucketStatsProvider, err := r.getBucketStatsProvider()
+	if err != nil {
+		return nil, nil, fmt.Errorf("GetHighSeqNos: error getting bucket stats provider for remote bucket %v: %w", r.remoteBucket, err)
+	}
+	return bucketStatsProvider.GetVBucketStats(&base.VBucketStatsRequest{
 		VBuckets:   vbList,
 		MaxCasOnly: false,
 		FinCh:      r.finCh,
@@ -72,7 +76,11 @@ func (r *remoteOps) GetFailoverLog(ctx *utilities.Context) (*base.BucketFailover
 		VBuckets: vbList,
 		FinCh:    r.finCh,
 	}
-	return r.bucketStatsProvider.GetFailoverLog(requestOpts, ctx)
+	bucketStatsProvider, err := r.getBucketStatsProvider()
+	if err != nil {
+		return nil, nil, fmt.Errorf("GetFailoverLog: error getting bucket stats provider for remote bucket %v: %w", r.remoteBucket, err)
+	}
+	return bucketStatsProvider.GetFailoverLog(requestOpts, ctx)
 }
 
 // LegacyPreReplicate is the legacy pre-replicate function

@@ -3,7 +3,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/v8/base"
 	log "github.com/couchbase/goxdcr/v8/log"
+
 	metadata_svc "github.com/couchbase/goxdcr/v8/metadata_svc"
 
 	mock "github.com/stretchr/testify/mock"
@@ -26,17 +28,17 @@ func (_m *RemoteCngAgentFactory) EXPECT() *RemoteCngAgentFactory_Expecter {
 	return &RemoteCngAgentFactory_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields: _a0, metakv, uiLog, topologySvc, specsReader, logger
-func (_m *RemoteCngAgentFactory) Execute(_a0 utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
-	ret := _m.Called(_a0, metakv, uiLog, topologySvc, specsReader, logger)
+// Execute provides a mock function with given fields: _a0, metakv, uiLog, topologySvc, specsReader, metadataChangeCallback, logger
+func (_m *RemoteCngAgentFactory) Execute(_a0 utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, metadataChangeCallback base.MetadataChangeHandlerCallback, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
+	ret := _m.Called(_a0, metakv, uiLog, topologySvc, specsReader, metadataChangeCallback, logger)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Execute")
 	}
 
 	var r0 metadata_svc.RemoteAgentIface
-	if rf, ok := ret.Get(0).(func(utils.UtilsIface, service_def.MetadataSvc, service_def.UILogSvc, service_def.XDCRCompTopologySvc, service_def.ReplicationSpecReader, *log.CommonLogger) metadata_svc.RemoteAgentIface); ok {
-		r0 = rf(_a0, metakv, uiLog, topologySvc, specsReader, logger)
+	if rf, ok := ret.Get(0).(func(utils.UtilsIface, service_def.MetadataSvc, service_def.UILogSvc, service_def.XDCRCompTopologySvc, service_def.ReplicationSpecReader, base.MetadataChangeHandlerCallback, *log.CommonLogger) metadata_svc.RemoteAgentIface); ok {
+		r0 = rf(_a0, metakv, uiLog, topologySvc, specsReader, metadataChangeCallback, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(metadata_svc.RemoteAgentIface)
@@ -57,14 +59,15 @@ type RemoteCngAgentFactory_Execute_Call struct {
 //   - uiLog service_def.UILogSvc
 //   - topologySvc service_def.XDCRCompTopologySvc
 //   - specsReader service_def.ReplicationSpecReader
+//   - metadataChangeCallback base.MetadataChangeHandlerCallback
 //   - logger *log.CommonLogger
-func (_e *RemoteCngAgentFactory_Expecter) Execute(_a0 interface{}, metakv interface{}, uiLog interface{}, topologySvc interface{}, specsReader interface{}, logger interface{}) *RemoteCngAgentFactory_Execute_Call {
-	return &RemoteCngAgentFactory_Execute_Call{Call: _e.mock.On("Execute", _a0, metakv, uiLog, topologySvc, specsReader, logger)}
+func (_e *RemoteCngAgentFactory_Expecter) Execute(_a0 interface{}, metakv interface{}, uiLog interface{}, topologySvc interface{}, specsReader interface{}, metadataChangeCallback interface{}, logger interface{}) *RemoteCngAgentFactory_Execute_Call {
+	return &RemoteCngAgentFactory_Execute_Call{Call: _e.mock.On("Execute", _a0, metakv, uiLog, topologySvc, specsReader, metadataChangeCallback, logger)}
 }
 
-func (_c *RemoteCngAgentFactory_Execute_Call) Run(run func(_a0 utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger)) *RemoteCngAgentFactory_Execute_Call {
+func (_c *RemoteCngAgentFactory_Execute_Call) Run(run func(_a0 utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, metadataChangeCallback base.MetadataChangeHandlerCallback, logger *log.CommonLogger)) *RemoteCngAgentFactory_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(utils.UtilsIface), args[1].(service_def.MetadataSvc), args[2].(service_def.UILogSvc), args[3].(service_def.XDCRCompTopologySvc), args[4].(service_def.ReplicationSpecReader), args[5].(*log.CommonLogger))
+		run(args[0].(utils.UtilsIface), args[1].(service_def.MetadataSvc), args[2].(service_def.UILogSvc), args[3].(service_def.XDCRCompTopologySvc), args[4].(service_def.ReplicationSpecReader), args[5].(base.MetadataChangeHandlerCallback), args[6].(*log.CommonLogger))
 	})
 	return _c
 }
@@ -74,7 +77,7 @@ func (_c *RemoteCngAgentFactory_Execute_Call) Return(_a0 metadata_svc.RemoteAgen
 	return _c
 }
 
-func (_c *RemoteCngAgentFactory_Execute_Call) RunAndReturn(run func(utils.UtilsIface, service_def.MetadataSvc, service_def.UILogSvc, service_def.XDCRCompTopologySvc, service_def.ReplicationSpecReader, *log.CommonLogger) metadata_svc.RemoteAgentIface) *RemoteCngAgentFactory_Execute_Call {
+func (_c *RemoteCngAgentFactory_Execute_Call) RunAndReturn(run func(utils.UtilsIface, service_def.MetadataSvc, service_def.UILogSvc, service_def.XDCRCompTopologySvc, service_def.ReplicationSpecReader, base.MetadataChangeHandlerCallback, *log.CommonLogger) metadata_svc.RemoteAgentIface) *RemoteCngAgentFactory_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

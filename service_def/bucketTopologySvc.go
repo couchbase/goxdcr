@@ -48,7 +48,10 @@ type BucketTopologySvc interface {
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
 	// GetRemoteBucketStatsProvider returns the remote bucket stats provider for the given specification
-	GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (BucketStatsOps, error)
+	GetRemoteBucketStatsProvider(key string) (BucketStatsProvider, error)
+
+	// SwitchRemoteType updates the remote type of the target cluster referenced by the replication spec.
+	SwitchRemoteType(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) error
 }
 
 // BucketStatsOps is the interface for the bucket stats operations

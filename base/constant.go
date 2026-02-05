@@ -2092,6 +2092,12 @@ const (
 // UseLegacyPreReplicate is the boolean flag that indicates whether to use legacy pre-replicate
 var UseLegacyPreReplicate = false
 
+// SwitchErrMessage is the error message template when switching remote type fails.
+var SwitchErrMessage = "Error occurred while switching remote type from %v to %v. Manual intervention is required. Error: %v"
+
+// BucketWatcherWarmupTimeout defines the upper bound for bucket watcher initialization.
+var BucketWatcherWarmupTimeout = 5 * time.Second
+
 const MaxValueLenForLogging = 512
 
 var ValueTooLongForLogging = []byte("...<value too long to display>")

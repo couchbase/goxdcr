@@ -59,6 +59,7 @@ func setupBTSSpecs() *metadata.ReplicationSpecification {
 
 func getTestRemRef() *metadata.RemoteClusterReference {
 	ref, _ := metadata.NewRemoteClusterReference("uuid", "name", "hostname", "username", "password", "", false, "", nil, nil, nil, nil)
+	ref.SetRemoteType(metadata.RemoteTypeCbCluster)
 	return ref
 }
 
@@ -188,6 +189,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	replSpecSvc.On("AllReplicationSpecs").Return(replMap, nil)
 
 	remClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(ref, nil)
+	remClusterSvc.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
 	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
 	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
 
@@ -565,7 +567,7 @@ func TestBucketTopologyService_VbUuidMonitoring_CNG(t *testing.T) {
 	vbStats[0] = &base.VBucketStats{Uuid: 111}
 	vbStats[1] = &base.VBucketStats{Uuid: 222}
 	mockProvider.On("GetVBucketStats", mock.Anything, mock.Anything).Return(&base.BucketVBStats{VBStatsMap: vbStats}, nil, nil)
-	watcher.SetStatsProvider(mockProvider)
+	watcher.setStatsProvider(mockProvider)
 
 	// Execute VB stats updater with IncludeVbUuid=true
 	opts := &VBStatsOpts{IncludeVbUuid: true}

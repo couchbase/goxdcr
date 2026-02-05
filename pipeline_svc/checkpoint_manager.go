@@ -749,13 +749,15 @@ func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 }
 
 func (ckmgr *CheckpointManager) setRemoteOps() error {
-	bucketStatsProvider, err := ckmgr.bucketTopologySvc.GetRemoteBucketStatsProvider(ckmgr.pipeline.Specification().GetReplicationSpec())
-	if err != nil {
-		return err
-	}
 	srcVbList := ckmgr.getMyVBs()
 	tgtVbList := ckmgr.getMyTgtVBs()
-	ckmgr.remoteOps = NewRemoteOps(bucketStatsProvider, srcVbList, tgtVbList, ckmgr.isVariableVBMode(), ckmgr.remote_bucket, ckmgr.finish_ch, ckmgr.capi_svc, ckmgr.logger)
+
+	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
+	providerKey := fmt.Sprintf("%v_%v", spec.TargetClusterUUID, spec.TargetBucketName)
+	getBucketStatsProvider := func() (service_def.BucketStatsOps, error) {
+		return ckmgr.bucketTopologySvc.GetRemoteBucketStatsProvider(providerKey)
+	}
+	ckmgr.remoteOps = NewRemoteOps(getBucketStatsProvider, srcVbList, tgtVbList, ckmgr.isVariableVBMode(), ckmgr.remote_bucket, ckmgr.finish_ch, ckmgr.capi_svc, ckmgr.logger)
 	return nil
 }
 

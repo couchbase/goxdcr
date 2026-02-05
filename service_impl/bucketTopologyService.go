@@ -9,6 +9,7 @@
 package service_impl
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +26,9 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
+
+var ErrorStatsProviderNotFound = fmt.Errorf("stats provider not found")
+var ErrorStatsProviderAlreadyExists = fmt.Errorf("stats provider already exists")
 
 type BucketTopologyObjsPool struct {
 	KvVbMapPool       *utils.KvVbMapPool
@@ -131,18 +135,49 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 		}()
 		go func() {
 			defer waitGrp.Done()
-			// Initialize the stats provider for the target cluster
-			var statsProvider service_def.BucketStatsProvider
-			retryStatsOp := func() error {
+
+			var (
+				statsProvider service_def.BucketStatsProvider
+				watcher       *BucketTopologySvcWatcher
+				err           error
+			)
+
+			// function to create stats provider and watcher
+			createOp := func() error {
+				// get or create the stats provider and the watcher
 				if statsProvider == nil {
-					var err error
 					statsProvider, err = b.getOrCreateTargetStatsProvider(specCpy)
 					if err != nil {
-						b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
 						return err
 					}
 				}
-				err := statsProvider.Init()
+				if watcher == nil {
+					watcher, err = b.getOrCreateRemoteWatcher(specCpy)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			setupErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote setup)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, createOp)
+			if setupErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to set up remote watcher and stats provider: %v. XDCR must restart to try again.", specCpy.Id, setupErr))
+			}
+
+			// function to start the watcher
+			retryOp := func() error {
+				err := watcher.Start()
+				if err != nil && err != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, err)
+					return err
+				}
+				return nil
+			}
+
+			// function to init the stats provider
+			retryStatsOp := func() error {
+				err = statsProvider.Init()
 				if err != nil {
 					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
 						// IPv4 or IPv6 family only error means retrying is fruitless
@@ -155,32 +190,18 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				return nil
 			}
 
-			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
-			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish initializing stats provider within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
-			}
-
-			// Start the remote watcher for the target cluster
-			retryOp := func() error {
-				watcher, startErr := b.getOrCreateRemoteWatcher(specCpy)
-				if startErr != nil {
-					b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", startErr)
-					return startErr
-				}
-
-				// Start the watcher
-				startErr = watcher.Start()
-				if startErr != nil && startErr != ErrorWatcherAlreadyStarted {
-					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
-					return startErr
-				}
-				return nil
-			}
-			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
+			// start the watcher
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to start remote watcher: %v. XDCR must restart to try again.", specCpy.Id, retryErr))
+			}
+
+			// init the stats provider
+			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v. XDCR must restart to try again.", specCpy.Id, retryErr))
 			}
 		}()
 	}
@@ -237,7 +258,9 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 			intervalFuncMap[VBSTATS][maxVBCasStatsInterval] = maxVBCasFunc
 		}
 
+		watcher.intervalFuncMapMtx.Lock()
 		watcher.intervalFuncMap = intervalFuncMap
+		watcher.intervalFuncMapMtx.Unlock()
 
 		callback := b.getStreamApiCallback(spec, watcher)
 		watcher.streamApi = b.streamApiGetter(base.ObserveBucketPath+spec.SourceBucketName, b.xdcrCompTopologySvc, b.utils, callback, b.logger)
@@ -466,12 +489,12 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
 
 		// Initialize the stats provider for the watcher
-		statsProvider, err := b.GetRemoteBucketStatsProvider(spec)
+		statsProvider, err := b.GetRemoteBucketStatsProvider(getTargetWatcherKey(spec))
 		if err != nil {
 			return nil, err
 		}
 
-		watcher.SetStatsProvider(statsProvider)
+		watcher.setStatsProvider(statsProvider)
 
 		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 
@@ -486,7 +509,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			return nil, err
 		}
 
-		watcher.isCNG = remoteRef.IsCNG()
+		watcher.setRemoteType(remoteRef.GetRemoteType())
 
 		if vbStatsOpts := b.getRemoteVBStatsOpts(remoteRef.IsCNG()); vbStatsOpts != nil {
 			vbStatsUpdaterFunc := b.getRemoteVBStatsUpdater(spec, watcher, vbStatsOpts)
@@ -494,7 +517,9 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			intervalFuncMap[VBSTATS][b.refreshInterval] = vbStatsUpdaterFunc
 		}
 
+		watcher.intervalFuncMapMtx.Lock()
 		watcher.intervalFuncMap = intervalFuncMap
+		watcher.intervalFuncMapMtx.Unlock()
 	}
 	b.tgtBucketWatchersCnt[getTargetWatcherKey(spec)]++
 	return watcher, nil
@@ -553,11 +578,11 @@ func (b *BucketTopologyService) getOrCreateTargetStatsProvider(spec *metadata.Re
 	// Based on the remote type, create the appropriate provider
 	switch remoteRef.GetRemoteType() {
 	case metadata.RemoteTypeCbCluster:
-		provider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger)
+		provider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger, b.getTgtTopologyInfo)
 	case metadata.RemoteTypeCng:
-		provider = NewCngBucketStatsProvider(spec.TargetBucketName, b.utils, b.logger, func() (*base.GrpcOptions, error) {
+		provider = NewCngBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.utils, b.logger, func() (*base.GrpcOptions, error) {
 			return b.getGrpcOpts(spec)
-		})
+		}, b.getTgtTopologyInfo)
 	default:
 		return nil, fmt.Errorf("unsupported remote type %v for spec %v", remoteRef.GetRemoteType(), spec.Id)
 	}
@@ -909,55 +934,73 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 		go func() {
 			defer waitGrp.Done()
-			// Initialize the stats provider for the target cluster
-			var statsProvider service_def.BucketStatsProvider
-			retryStatsOp := func() error {
+
+			var (
+				statsProvider service_def.BucketStatsProvider
+				watcher       *BucketTopologySvcWatcher
+				err           error
+			)
+
+			// function to create stats provider and watcher
+			createOp := func() error {
+				// get or create the stats provider and the watcher
 				if statsProvider == nil {
-					var err error
 					statsProvider, err = b.getOrCreateTargetStatsProvider(newSpec)
 					if err != nil {
-						b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
 						return err
 					}
 				}
-				err := statsProvider.Init()
+				if watcher == nil {
+					watcher, err = b.getOrCreateRemoteWatcher(newSpec)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			setupErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote setup)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, createOp)
+			if setupErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to set up remote watcher and stats provider: %v. XDCR must restart to try again.", newSpec.Id, setupErr))
+			}
+
+			// function to start the watcher
+			retryOp := func() error {
+				err := watcher.Start()
+				if err != nil && err != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec.Id, err)
+					return err
+				}
+				return nil
+			}
+
+			// function to init the stats provider
+			retryStatsOp := func() error {
+				err = statsProvider.Init()
 				if err != nil {
-					b.logger.Errorf("statsProvider.Init has error: %v", err)
 					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
 						// IPv4 or IPv6 family only error means retrying is fruitless
 						// Let it pass and remote cluster will mark it as RC_ERROR
 						return nil
 					}
+					b.logger.Errorf("statsProvider.Init has error: %v", err)
 					return err
 				}
 				return nil
 			}
-			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemoteStats",
+
+			// start the watcher
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to start remote watcher: %v. XDCR must restart to try again.", newSpec.Id, retryErr))
+			}
+
+			// init the stats provider
+			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish initializing stats provider within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
-			}
-
-			// Start the remote watcher for the target cluster
-			retryRemoteOp := func() error {
-				remoteWatcher, remoteErr := b.getOrCreateRemoteWatcher(newSpec)
-				if remoteErr != nil {
-					b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
-					return remoteErr
-				}
-
-				// Start the watcher
-				remoteStartErr := remoteWatcher.Start()
-				if remoteStartErr != nil && remoteStartErr != ErrorWatcherAlreadyStarted {
-					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
-					return remoteStartErr
-				}
-				return nil
-			}
-			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemote",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryRemoteOp)
-			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service (remote) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v. XDCR must restart to try again.", newSpec.Id, retryErr))
 			}
 		}()
 
@@ -1369,23 +1412,164 @@ func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketN
 // GetRemoteBucketStatsProvider returns the stats provider for the target cluster without
 // incrementing the reference count. This is a read-only lookup that assumes the provider
 // has already been registered via getOrCreateTargetStatsProvider.
-func (b *BucketTopologyService) GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsOps, error) {
+func (b *BucketTopologyService) GetRemoteBucketStatsProvider(key string) (service_def.BucketStatsProvider, error) {
 	b.tgtBucketStatsProvidersMtx.RLock()
 	defer b.tgtBucketStatsProvidersMtx.RUnlock()
 
-	providerKey := getTargetWatcherKey(spec)
-	provider, exists := b.tgtBucketStatsProviders[providerKey]
+	provider, exists := b.tgtBucketStatsProviders[key]
 	if !exists {
-		return nil, fmt.Errorf("remote bucket stats provider not found for spec %v", spec.Id)
+		return nil, ErrorStatsProviderNotFound
 	}
 	return provider, nil
+}
+
+// switchBucketStatsProvider switches the bucket stats provider for the given spec
+// It closes the current provider and creates a new one of the appropriate type.
+func (b *BucketTopologyService) switchBucketStatsProvider(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) (service_def.BucketStatsProvider, error) {
+	currentStatsProvider, err := b.GetRemoteBucketStatsProvider(getTargetWatcherKey(spec))
+	if err != nil {
+		return nil, fmt.Errorf("switchBucketStatsProvider: error getting remote bucket stats provider for spec %v: %w", spec.Id, err)
+	}
+
+	// Based on the remote type, create the appropriate provider
+	var newStatsProvider service_def.BucketStatsProvider
+	switch newRemoteType {
+	case metadata.RemoteTypeCbCluster:
+		newStatsProvider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger, b.getTgtTopologyInfo)
+	case metadata.RemoteTypeCng:
+		newStatsProvider = NewCngBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.utils, b.logger, func() (*base.GrpcOptions, error) {
+			return b.getGrpcOpts(spec)
+		}, b.getTgtTopologyInfo)
+	default:
+		return nil, fmt.Errorf("unsupported remote type %v for spec %v", newRemoteType, spec.Id)
+	}
+
+	// Close the current stats provider
+	if err := currentStatsProvider.Close(); err != nil {
+		b.logger.Warnf("switchBucketStatsProvider: error closing current stats provider for spec %v: %v", spec.Id, err)
+	}
+
+	// Update the provider in the map
+	b.tgtBucketStatsProvidersMtx.Lock()
+	providerKey := getTargetWatcherKey(spec)
+	b.tgtBucketStatsProviders[providerKey] = newStatsProvider
+	b.tgtBucketStatsProvidersMtx.Unlock()
+
+	return newStatsProvider, nil
+}
+
+func (b *BucketTopologyService) SwitchRemoteType(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) error {
+	// get the remote watcher
+	watcher, err := b.getRemoteWatcher(spec)
+	if err != nil {
+		return fmt.Errorf("SwitchRemoteType: error getting remote watcher for spec %v: %w", spec.Id, err)
+	}
+
+	// if the watch is already of the new type, return
+	if watcher.getRemoteType() == newRemoteType {
+		return nil
+	}
+
+	// Switch the bucket stats provider
+	newProvider, err := b.switchBucketStatsProvider(spec, newRemoteType)
+	if err != nil {
+		return fmt.Errorf("SwitchRemoteType: error switching bucket stats provider for spec %v: %w", spec.Id, err)
+	}
+
+	// Restart the watcher to clear any cached target-cluster metadata and to accommodate
+	// changes to intervalFuncMap.
+	// Different remote types maintain different kinds of target-cluster metadata.
+	// For example:
+	// 1. CNG targets track vbucket-to-UUID mappings, while CB clusters
+	//    track vbucket-to-server mappings.
+	// 2. Accordingly, TargetKVVBMap is structured differently: for CNG targets it
+	//    has a single entry representing all vbuckets, whereas for CB clusters it
+	//    maps each server to the set of vbuckets it owns.
+	// Restarting the watcher ensures that:
+	// 1. go-routines that trigger periodic updates are either started or stopped based on
+	//    based on the changes made to intervalFuncMap.
+	// 2. Metadata is re-fetched and re-cached in the appropriate format for the new remote type.
+
+	// Hold the lock during the restart to prevent consumers from accessing the watcher
+	// until the restart completes.
+	b.tgtBucketWatchersMtx.Lock()
+	opts := RemoteTypeUpdate{
+		NewRemoteType:      newRemoteType,
+		NewStatsProvider:   newProvider,
+		UpdateIntervalFunc: func() { b.updateIntervalFuncMap(spec, watcher, newRemoteType) },
+	}
+	if err := watcher.Reconfigure(opts); err != nil {
+		return fmt.Errorf("SwitchRemoteType: error restarting watcher for spec %v: %w", spec.Id, err)
+	}
+	b.tgtBucketWatchersMtx.Unlock()
+
+	// Initialize the new stats provider
+	if err := b.utils.ExponentialBackoffExecutor("SwitchRemoteType:Provider.Init()", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry, base.RemoteMcRetryFactor, newProvider.Init); err != nil {
+		return err
+	}
+	return nil
+}
+
+// updateIntervalFuncMap updates the watcher's intervalFuncMap based on the remote type.
+// This is called when the remote type changes to ensure the correct updaters are registered.
+func (b *BucketTopologyService) updateIntervalFuncMap(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher, newRemoteType metadata.RemoteType) {
+	isCNG := newRemoteType == metadata.RemoteTypeCng
+
+	watcher.intervalFuncMapMtx.Lock()
+	defer watcher.intervalFuncMapMtx.Unlock()
+
+	if vbStatsOpts := b.getRemoteVBStatsOpts(isCNG); vbStatsOpts != nil {
+		// Need VBSTATS updater - add or update it
+		vbStatsUpdaterFunc := b.getRemoteVBStatsUpdater(spec, watcher, vbStatsOpts)
+		watcher.intervalFuncMap[VBSTATS] = make(IntervalInnerFuncMap)
+		watcher.intervalFuncMap[VBSTATS][b.refreshInterval] = vbStatsUpdaterFunc
+	} else {
+		// Don't need VBSTATS updater - remove if present
+		delete(watcher.intervalFuncMap, VBSTATS)
+	}
+}
+
+func (b *BucketTopologyService) getTgtTopologyInfo(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error) {
+	watcher, err := b.getRemoteWatcher(spec)
+	if err != nil {
+		return nil, fmt.Errorf("getTgtTopologyInfo: error getting remote watcher for spec %v: %w", spec.Id, err)
+	}
+	var kvVBMap base.KvVBMapType
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, base.ErrorTargetBucketTopologyNotReady
+		default:
+			watcher.latestCacheMtx.RLock()
+			if watcher.cachePopulated && len(watcher.latestCached.GetTargetServerVBMap()) > 0 {
+				temp := watcher.latestCached.GetTargetServerVBMap()
+				kvVBMap = temp.Clone()
+				watcher.latestCacheMtx.RUnlock()
+				return kvVBMap, nil
+			}
+			watcher.latestCacheMtx.RUnlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// clusterContext is used to store the context for the cluster
+type clusterContext struct {
+	// remoteType is the type of the remote cluster
+	remoteType metadata.RemoteType
+	// statsProvider is used to get bucket specific statistics from the designated cluster
+	statsProvider service_def.BucketStatsOps
+	// mtx is used to protect the 'this' struct
+	mtx sync.RWMutex
 }
 
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
 	source     bool
-	isCNG      bool
 
 	finCh     chan bool
 	startOnce sync.Once
@@ -1423,7 +1607,8 @@ type BucketTopologySvcWatcher struct {
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 
 	// For bootstrapping
-	intervalFuncMap IntervalFuncMap
+	intervalFuncMapMtx sync.RWMutex
+	intervalFuncMap    IntervalFuncMap
 
 	// For runtime
 	watchersTickersMap      WatchersTickerMap
@@ -1474,8 +1659,8 @@ type BucketTopologySvcWatcher struct {
 
 	streamApi streamApiWatcher.StreamApiWatcher
 
-	// statsProvider is used to get bucket specific statistics from the designated cluster
-	statsProvider service_def.BucketStatsOps
+	// clusterContext holds context specific to the cluster hosting the bucket being monitored.
+	*clusterContext
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1531,7 +1716,7 @@ func (bw *BucketTopologySvcWatcher) needToRunInitially(subscriptionType string) 
 	case HIGHSEQNOSLEGACY:
 		return true
 	case VBSTATS:
-		return bw.isCNG
+		return bw.getRemoteType() == metadata.RemoteTypeCng
 	default:
 		return false
 	}
@@ -1576,6 +1761,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		objsPool:                      sharedPool,
 		vbStatsChs:                    map[string]interface{}{},
 		vbStatsErrChs:                 map[string]chan error{},
+		clusterContext:                &clusterContext{},
 		topologyErrChs:                map[string]chan error{},
 		latestErrMap:                  map[string]error{},
 	}
@@ -1618,6 +1804,7 @@ func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 		}()
 	}
 
+	bw.intervalFuncMapMtx.RLock()
 	for updateType, intervalAndFunc := range bw.intervalFuncMap {
 		for interval, updateFunc := range intervalAndFunc {
 			// Make copies because these references can change before the go func() is executed
@@ -1647,6 +1834,8 @@ func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 			}()
 		}
 	}
+	bw.intervalFuncMapMtx.RUnlock()
+
 	initDone.Done()
 
 	for {
@@ -1773,6 +1962,40 @@ func (bw *BucketTopologySvcWatcher) runGC() {
 		}
 	}
 	bw.gcMapMtx.Unlock()
+}
+
+type RemoteTypeUpdate struct {
+	NewRemoteType      metadata.RemoteType
+	NewStatsProvider   service_def.BucketStatsOps
+	UpdateIntervalFunc func()
+}
+
+// Reconfigure transitions the watcher to a new remote type.
+//
+// It performs a lifecycle restart by:
+//  1. Stopping the watcher if it is running.
+//  2. Resetting all cached state and internal bookkeeping.
+//  3. Updating remote-type–dependent configuration, including:
+//     a. interval functions,
+//     b. remote type,
+//     c. bucket stats provider.
+//  4. Starting the watcher again with the updated configuration.
+func (bw *BucketTopologySvcWatcher) Reconfigure(update RemoteTypeUpdate) error {
+	// Stop the watcher if it is running
+	if err := bw.Stop(); err != nil {
+		return err
+	}
+
+	// Reset cached state and internal bookkeeping
+	bw.resetInternalState()
+
+	// Apply remote-type–dependent configuration
+	update.UpdateIntervalFunc()
+	bw.setRemoteType(update.NewRemoteType)
+	bw.setStatsProvider(update.NewStatsProvider)
+
+	// Start the watcher again with the new configuration
+	return bw.Start()
 }
 
 func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFunc func() error) {
@@ -2340,9 +2563,50 @@ func (bw *BucketTopologySvcWatcher) handleSpecDeletion(specId string) {
 	bw.gcMapMtx.Unlock()
 }
 
-// SetStatsProvider sets the stats provider for the bucket topology service watcher
-func (bw *BucketTopologySvcWatcher) SetStatsProvider(statsProvider service_def.BucketStatsOps) {
-	bw.statsProvider = statsProvider
+// clearCache clears the cache of the watcher
+func (bw *BucketTopologySvcWatcher) clearCache() {
+	bw.latestCacheMtx.Lock()
+	defer bw.latestCacheMtx.Unlock()
+	n := NewNotification(bw.source, bw.objsPool)
+	n.SetNumberOfReaders(1)
+	bw.latestCached.Recycle()
+	bw.latestCached = n
+	bw.cachePopulated = false
+}
+
+func (bw *BucketTopologySvcWatcher) resetInternalState() {
+	bw.clearCache()
+	bw.finCh = make(chan bool)
+
+	atomic.StoreUint32(&bw.firstToStart, 0)
+	atomic.StoreUint32(&bw.isStopped, 0)
+	atomic.StoreUint32(&bw.isStarted, 0)
+}
+
+// getStatsProvider returns the stats provider
+func (cc *clusterContext) getStatsProvider() service_def.BucketStatsOps {
+	cc.mtx.RLock()
+	defer cc.mtx.RUnlock()
+	return cc.statsProvider
+}
+
+// setStatsProvider sets the stats provider
+func (cc *clusterContext) setStatsProvider(statsProvider service_def.BucketStatsOps) {
+	cc.mtx.Lock()
+	defer cc.mtx.Unlock()
+	cc.statsProvider = statsProvider
+}
+
+func (cc *clusterContext) getRemoteType() metadata.RemoteType {
+	cc.mtx.RLock()
+	defer cc.mtx.RUnlock()
+	return cc.remoteType
+}
+
+func (cc *clusterContext) setRemoteType(remoteType metadata.RemoteType) {
+	cc.mtx.Lock()
+	defer cc.mtx.Unlock()
+	cc.remoteType = remoteType
 }
 
 type Notification struct {

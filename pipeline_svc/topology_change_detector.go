@@ -10,6 +10,7 @@ licenses/APL2.txt.
 package pipeline_svc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -792,35 +793,57 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 		return
 	}
 
-	// Init with initial info - select on notification or error
-	var firstNotification service_def.TargetNotification
-	select {
-	case firstNotification = <-targetNotifyCh:
-		top_detect_svc.initialiseTargetVbList(firstNotification)
-	case errFromErrCh := <-targetErrCh:
-		*initErr = errFromErrCh
-		// unsubscribe before returning
-		top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
-		initWg.Done()
-		return
-	}
+	// The default BucketTopology refresh interval is 10 seconds.
+	// A 15-second timeout is configured to allow sufficient time for atleast one refresh cycle to complete.
+	ctx, cancel := context.WithTimeout(context.Background(), base.TopologyChangeCheckInterval+5*time.Second)
+	defer cancel()
 
-	// Initialize the appropriate baseline topology based on mode
-	baseline, baselineErr := top_detect_svc.extractTopologyData(firstNotification, top_detect_svc.targetVBList)
-	if baselineErr != nil {
-		*initErr = fmt.Errorf("error extracting baseline topology data: %w", baselineErr)
-		// unsubscribe before returning
-		top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
-		initWg.Done()
-		return
+	//initialize target topology baseline
+	var firstNotification service_def.TargetNotification
+
+	conditionMet := false
+	var baseline base.TargetTopologyData
+	var baselineErr error
+
+	for !conditionMet {
+		select {
+		case firstNotification = <-targetNotifyCh:
+			top_detect_svc.initialiseTargetVbList(firstNotification)
+			baseline, baselineErr = top_detect_svc.extractTopologyData(firstNotification, top_detect_svc.targetVBList)
+			switch baselineErr {
+			case nil:
+				conditionMet = true
+			case base.ErrorVbUUIDMapEmpty:
+				firstNotification.Recycle()
+				top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc monitorTarget: received empty target vb uuid stats, waiting for next notification")
+			default:
+				*initErr = fmt.Errorf("error extracting baseline topology data: %w", baselineErr)
+				// unsubscribe before returning since initialization is not successful
+				firstNotification.Recycle()
+				top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
+				initWg.Done()
+				return
+			}
+		case err := <-targetErrCh:
+			top_detect_svc.logger.Warnf("topology change detector: error fetching target bucket stats while initializing baseline: %v", err)
+		case <-ctx.Done():
+			*initErr = fmt.Errorf("timed out waiting for initial target notification to set baseline topology")
+			// unsubscribe before returning since initialization is not successful
+			top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
+			initWg.Done()
+			return
+		}
 	}
 
 	top_detect_svc.targetTopologyView.SetBaseline(baseline)
 
-	// Now that the baseline is set, we can signal the initWg that the initialization is complete.
+	// Now that the baseline is set,
+	// 1. signal the initWg that the initialization is complete.
+	// 2. recycle the firstNotification
+	// 3. cancel the context timer
 	initWg.Done()
-	// recycle the notification after use
 	firstNotification.Recycle()
+	cancel()
 
 	if spec != nil && spec.Settings != nil {
 		top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()

@@ -20,7 +20,6 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	Component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
-	"google.golang.org/grpc/codes"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -63,10 +62,12 @@ type ClusterBucketStatsProvider struct {
 	cancelCtx context.CancelFunc
 	// mutex is used to protect the operations
 	mutex sync.Mutex
+	// getTargetKvVbMap is the function to get the target kv vb map
+	getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)
 }
 
 // NewClusterBucketStatsProvider is the constructor for ClusterBucketStatsProvider
-func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remoteClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, maxConnectionsPerServer int, logger *log.CommonLogger) *ClusterBucketStatsProvider {
+func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remoteClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, maxConnectionsPerServer int, logger *log.CommonLogger, getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)) *ClusterBucketStatsProvider {
 	context, cancelCtx := context.WithCancel(context.Background())
 	return &ClusterBucketStatsProvider{
 		bucketName:              bucketName,
@@ -79,6 +80,7 @@ func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remote
 		maxConnectionsPerServer: maxConnectionsPerServer,
 		context:                 context,
 		cancelCtx:               cancelCtx,
+		getTargetKvVbMap:        getTargetKvVbMap,
 	}
 }
 
@@ -109,33 +111,7 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 			TargetClusterUUID: provider.clusterUuid,
 			TargetBucketName:  provider.bucketName,
 		}
-		subsId := fmt.Sprintf("bucketInfoGetter_%d", atomic.AddUint64(&provider.subscriptionCounter, 1))
-		targetNotificationCh, errCh, err := provider.bucketTopologySvc.SubscribeToRemoteBucketFeed(remoteOnlySpec, subsId)
-		if err != nil {
-			return nil, err
-		}
-		var latestTargetBucketTopology service_def.TargetNotification
-		defer provider.bucketTopologySvc.UnSubscribeRemoteBucketFeed(remoteOnlySpec, subsId)
-		select {
-		case latestTargetBucketTopology = <-targetNotificationCh:
-			defer latestTargetBucketTopology.Recycle()
-			kvVBMap := latestTargetBucketTopology.GetTargetServerVBMap()
-			// The idea of subscription system is that if there's cached information from before, return that
-			// Only return error if the cached information doesn't exist
-			// Drain the errCh before unsubscription if it has anything
-			select {
-			case <-errCh:
-			default:
-			}
-			return kvVBMap.Clone(), nil
-		default:
-			select {
-			case errFromErrCh := <-errCh:
-				return nil, errFromErrCh
-			default:
-				return nil, base.ErrorTargetBucketTopologyNotReady
-			}
-		}
+		return provider.getTargetKvVbMap(remoteOnlySpec)
 	})
 
 	err := base.ExecWithTimeout(provider.remoteMemcachedComponent.InitConnections, base.ShortHttpTimeout, provider.logger)
@@ -636,6 +612,8 @@ var _ service_def.BucketStatsProvider = &CngBucketStatsProvider{}
 type CngBucketStatsProvider struct {
 	// bucketName is the name of the target bucket
 	bucketName string
+	// clusterUuid is the uuid of the remote cluster
+	clusterUuid string
 	// vbucketIds contains the vbucket IDs for the target bucket.
 	// The list is fetched on demand from CNG and cached, since the
 	// vbucket count is fixed for the lifetime of the bucket.
@@ -664,19 +642,23 @@ type CngBucketStatsProvider struct {
 	context context.Context
 	// cancelCtx is used to cancel all active operations
 	cancelCtx context.CancelFunc
+	// getTargetKvVbMap is the function to get the target kv vb map
+	getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)
 }
 
 // NewCngBucketStatsProvider is the constructor for CngBucketStatsProvider
-func NewCngBucketStatsProvider(bucketName string, utils utils.UtilsIface, logger *log.CommonLogger, getGrpcOpts func() (*base.GrpcOptions, error)) *CngBucketStatsProvider {
+func NewCngBucketStatsProvider(bucketName, clusterUuid string, utils utils.UtilsIface, logger *log.CommonLogger, getGrpcOpts func() (*base.GrpcOptions, error), getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)) *CngBucketStatsProvider {
 	context, cancelCtx := context.WithCancel(context.Background())
 	return &CngBucketStatsProvider{
-		bucketName:  bucketName,
-		utils:       utils,
-		logger:      logger,
-		getGrpcOpts: getGrpcOpts,
-		finCh:       make(chan struct{}),
-		context:     context,
-		cancelCtx:   cancelCtx,
+		bucketName:       bucketName,
+		clusterUuid:      clusterUuid,
+		utils:            utils,
+		logger:           logger,
+		getGrpcOpts:      getGrpcOpts,
+		finCh:            make(chan struct{}),
+		context:          context,
+		cancelCtx:        cancelCtx,
+		getTargetKvVbMap: getTargetKvVbMap,
 	}
 }
 
@@ -868,26 +850,22 @@ func (provider *CngBucketStatsProvider) getVBucketList() ([]uint32, error) {
 		return provider.vbucketIds, nil
 	}
 
-	ctx, cancel := context.WithTimeout(provider.context, base.ShortHttpTimeout)
-	defer cancel()
-	rsp := provider.utils.CngGetBucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetBucketInfoRequest]{
-		Context: ctx,
-		Request: &internal_xdcr_v1.GetBucketInfoRequest{
-			BucketName: provider.bucketName,
-		},
-	})
-	if rsp.Code() != codes.OK {
-		return nil, fmt.Errorf("getVBucketList: failed to get bucket info: %w", rsp.Err())
+	remoteOnlySpec := &metadata.ReplicationSpecification{
+		TargetClusterUUID: provider.clusterUuid,
+		TargetBucketName:  provider.bucketName,
+	}
+	tgtKvVBMap, err := provider.getTargetKvVbMap(remoteOnlySpec)
+	if err != nil {
+		return nil, fmt.Errorf("getVBucketList: failed to get target kv vb map: %w", err)
 	}
 
-	numVBuckets := rsp.Response().GetNumVbuckets()
-	vbucketIds := make([]uint32, numVBuckets)
-	for i := uint32(0); i < numVBuckets; i++ {
-		vbucketIds[i] = i
+	vbucketIds := []uint16{}
+	for _, vblist := range tgtKvVBMap {
+		vbucketIds = append(vbucketIds, vblist...)
 	}
 
 	// Cache the vbucket list for future use
-	provider.vbucketIds = vbucketIds
+	provider.vbucketIds = base.ConvertUint16ToUint32(vbucketIds)
 
-	return vbucketIds, nil
+	return provider.vbucketIds, nil
 }

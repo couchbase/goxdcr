@@ -1416,6 +1416,53 @@ func (_c *RemoteClusterSvc_ShouldUseAlternateAddress_Call) RunAndReturn(run func
 	return _c
 }
 
+// SwitchAgents provides a mock function with given fields: newRef, specs
+func (_m *RemoteClusterSvc) SwitchAgents(newRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification) error {
+	ret := _m.Called(newRef, specs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SwitchAgents")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, map[string]*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(newRef, specs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoteClusterSvc_SwitchAgents_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SwitchAgents'
+type RemoteClusterSvc_SwitchAgents_Call struct {
+	*mock.Call
+}
+
+// SwitchAgents is a helper method to define mock.On call
+//   - newRef *metadata.RemoteClusterReference
+//   - specs map[string]*metadata.ReplicationSpecification
+func (_e *RemoteClusterSvc_Expecter) SwitchAgents(newRef interface{}, specs interface{}) *RemoteClusterSvc_SwitchAgents_Call {
+	return &RemoteClusterSvc_SwitchAgents_Call{Call: _e.mock.On("SwitchAgents", newRef, specs)}
+}
+
+func (_c *RemoteClusterSvc_SwitchAgents_Call) Run(run func(newRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification)) *RemoteClusterSvc_SwitchAgents_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.RemoteClusterReference), args[1].(map[string]*metadata.ReplicationSpecification))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SwitchAgents_Call) Return(_a0 error) *RemoteClusterSvc_SwitchAgents_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SwitchAgents_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, map[string]*metadata.ReplicationSpecification) error) *RemoteClusterSvc_SwitchAgents_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UnRequestRemoteMonitoring provides a mock function with given fields: spec
 func (_m *RemoteClusterSvc) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)

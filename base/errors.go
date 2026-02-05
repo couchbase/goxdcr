@@ -109,6 +109,7 @@ var (
 	ErrorCngUnsupported                          = errors.New("replication to cng target is not supported in mixed-mode clusters. Upgrade all nodes to version >=8.1 to enable replication over cng")
 	ErrorUnmarshallFailed                        = errors.New("unmarshal failed")
 	ErrorUserInitiatedStreamRpcCancellation      = errors.New("user initiated cancellation of the stream RPC")
+	ErrorVbUUIDMapEmpty                          = errors.New("vbUUID map is empty")
 	ErrCERestrictionsBreached                    = errors.New("Cannot create XDCR between two Community Edition clusters")
 )
 

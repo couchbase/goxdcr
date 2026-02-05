@@ -628,10 +628,14 @@ type RemoteClusterChangeListener struct {
 	*MetakvChangeListener
 	repl_spec_svc      service_def.ReplicationSpecSvc
 	remote_cluster_svc service_def.RemoteClusterSvc
+	bucketTopologySvc  service_def.BucketTopologySvc
+	uiLogSvc           service_def.UILogSvc
 }
 
 func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteClusterSvc,
 	repl_spec_svc service_def.ReplicationSpecSvc,
+	bucketTopologySvc service_def.BucketTopologySvc,
+	uilogSvc service_def.UILogSvc,
 	cancel_chan chan struct{},
 	children_waitgrp *sync.WaitGroup,
 	logger_ctx *log.LoggerContext,
@@ -647,8 +651,152 @@ func NewRemoteClusterChangeListener(remote_cluster_svc service_def.RemoteCluster
 			utilsIn),
 		repl_spec_svc,
 		remote_cluster_svc,
+		bucketTopologySvc,
+		uilogSvc,
 	}
 	return rccl
+}
+
+// switchBucketStatsProvider switches the bucket stats provider for all replication specs associated
+// with the given remote cluster reference to the new remote type.
+func (rccl *RemoteClusterChangeListener) switchBucketStatsProvider(newRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification) base.ErrorMap {
+
+	errMap := make(base.ErrorMap)
+	for _, spec := range specs {
+		err := rccl.bucketTopologySvc.SwitchRemoteType(spec, newRef.GetRemoteType())
+		if err != nil {
+			errMap[spec.GetFullId()] = err
+		}
+	}
+	return errMap
+}
+
+// hasRemoteTypeChanged checks if the remote type has been changed between the old and new remote cluster references
+func hasRemoteTypeChanged(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference) bool {
+	return oldRef.RemoteType != newRef.RemoteType
+}
+
+// validateRemoteTypeSwitch performs necessary validation before switching remote type, such as
+// ensuring the identity of the remote cluster reference has not changed
+func (rccl *RemoteClusterChangeListener) validateRemoteTypeSwitch(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference) error {
+	// Priliminary check to ensure that the old and new remote cluster references have the same ID and UUID
+	if oldRef.Id() != newRef.Id() || oldRef.Uuid() != newRef.Uuid() {
+		// should never happen
+		return fmt.Errorf(
+			"remote cluster identity mismatch during remote type switch: oldId=%v oldUuid=%v, newId=%v newUuid=%v",
+			oldRef.Id(), oldRef.Uuid(), newRef.Id(), newRef.Uuid())
+	}
+	return nil
+}
+
+// addUIEvent publishes UI events for replications that encountered errors while switching
+// the remote type, so users are informed of any impacted replications.
+func (rccl *RemoteClusterChangeListener) addUIEvent(specs map[string]*metadata.ReplicationSpecification, errMap base.ErrorMap, old, new metadata.RemoteType) {
+	for key := range specs {
+		if switchErr, exists := errMap[key]; exists {
+			repStatus, err := replication_mgr.pipelineMgr.ReplicationStatus(key)
+			if err != nil {
+				rccl.logger.Errorf("addUIEvent: failed to get replication status for %v: %v", key, err)
+				continue
+			}
+			msg := fmt.Sprintf(base.SwitchErrMessage, old.String(), new.String(), switchErr)
+			repStatus.GetEventsProducer().AddEvent(base.HighPriorityMsg, msg, base.EventsMap{}, nil)
+		}
+	}
+}
+
+// filterSpecsByErrorMap filters out replication specs that encountered errors during the remote type switch,
+// so that only the specs that successfully switched can be restarted.
+func filterSpecsByErrorMap(specs map[string]*metadata.ReplicationSpecification, errMap base.ErrorMap) map[string]*metadata.ReplicationSpecification {
+	filteredSpecs := make(map[string]*metadata.ReplicationSpecification)
+	for key, spec := range specs {
+		if _, exists := errMap[key]; !exists {
+			filteredSpecs[key] = spec
+		}
+	}
+	return filteredSpecs
+}
+
+// switchRemoteType performs the remote type switch for the given remote cluster reference.
+// It involves:
+// 1. switching the remote agent for the remote cluster reference in RemoteClusterService.
+// 2. switching the bucket stats provider for all replication specs associated with the remote cluster reference.
+// 3. Restarting all replication pipelines associated with the remote cluster reference.
+func (rccl *RemoteClusterChangeListener) switchRemoteType(oldRef *metadata.RemoteClusterReference, newRef *metadata.RemoteClusterReference, securitySettingsChanged bool) error {
+	specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(newRef.Uuid())
+
+	// switch the remote agents
+	err := rccl.remote_cluster_svc.SwitchAgents(newRef, specs)
+	if err != nil {
+		return err
+	}
+
+	rccl.logger.Infof(
+		"remote agents switched successfully for cluster %q: %s → %s",
+		oldRef.Name(),
+		oldRef.RemoteType.String(),
+		newRef.RemoteType.String(),
+	)
+	// switch the bucket stats provider
+	errMap := rccl.switchBucketStatsProvider(newRef, specs)
+	if len(errMap) > 0 {
+		err := fmt.Errorf("bucket stats provider switch(%s → %s) partially failed for cluster %q: %v",
+			oldRef.Name(),
+			oldRef.RemoteType.String(),
+			newRef.RemoteType.String(),
+			errMap,
+		)
+		rccl.logger.Error(err.Error())
+
+		// add UI events for replications that encountered errors during the switch, so users are informed of any impacted replications
+		rccl.addUIEvent(specs, errMap, oldRef.RemoteType, newRef.RemoteType)
+
+		// // Restart only pipelines that successfully switched
+		specs = filterSpecsByErrorMap(specs, errMap)
+		rccl.restartPipelines(specs, securitySettingsChanged)
+
+		return err
+	}
+
+	rccl.logger.Infof(
+		"bucket stats provider switched successfully for cluster %q: %s → %s",
+		oldRef.Name(),
+		oldRef.RemoteType.String(),
+		newRef.RemoteType.String(),
+	)
+
+	// restart pipelines
+	rccl.restartPipelines(specs, securitySettingsChanged)
+
+	return nil
+}
+
+// writeUILog writes the given message to the UI log if the UI log service is available
+func (rccl *RemoteClusterChangeListener) writeUILog(msg string) {
+	if rccl.uiLogSvc != nil {
+		rccl.uiLogSvc.Write(msg)
+	}
+}
+
+// asyncSwitchRemoteType performs the remote type switch asynchronously in a separate goroutine.
+func (rccl *RemoteClusterChangeListener) asyncSwitchRemoteType(oldRef, newRef *metadata.RemoteClusterReference, securityChanged bool) {
+	oldName := oldRef.Name()
+	oldType := oldRef.RemoteType.String()
+	newType := newRef.RemoteType.String()
+
+	go func() {
+		rccl.logger.Infof("Initiating remote type switch for remote cluster %q: %s → %s", oldName, oldType, newType)
+		rccl.writeUILog(fmt.Sprintf("Remote cluster %q: Switching from %s to %s. This may take 10-30 seconds.", oldName, oldType, newType))
+
+		if err := rccl.switchRemoteType(oldRef, newRef, securityChanged); err != nil {
+			rccl.logger.Errorf("Failed to switch remote type for remote cluster %q: %v", oldName, err)
+			rccl.writeUILog(fmt.Sprintf("Remote cluster %q: Failed to switch from %s to %s: %v", oldName, oldType, newType, err))
+			return
+		}
+
+		rccl.logger.Infof("Remote type switch completed for remote cluster %q: %s → %s", oldName, oldType, newType)
+		rccl.writeUILog(fmt.Sprintf("Remote cluster %q: Successfully switched from %s to %s.", oldName, oldType, newType))
+	}()
 }
 
 // Handler callback for remote cluster changed event
@@ -688,7 +836,7 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		// between the replication creation and the cluster ref deletion. Delete the now orphaned replications to ensure consistency
 		topics := replication_mgr.pipelineMgr.AllReplicationsForTargetCluster(oldRemoteClusterRef.Uuid())
 		if len(topics) > 0 {
-			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name)
+			rccl.logger.Infof("Deleting replications, %v, since the referenced remote cluster, %v, has been deleted\n", topics, oldRemoteClusterRef.Name())
 			for _, topic := range topics {
 				replication_mgr.pipelineMgr.DeletePipeline(topic)
 			}
@@ -698,13 +846,38 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 		return nil
 	}
 
-	if !oldRemoteClusterRef.AreUserSecurityCredentialsTheSame(newRemoteClusterRef) ||
-		!oldRemoteClusterRef.AreSecuritySettingsTheSame(newRemoteClusterRef) {
-		// TODO there may be less disruptive ways to handle the following updates without restarting the pipelines
-		// restarting the pipelines seems to be acceptable considering the low frequency of such updates.
-		specs := replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(oldRemoteClusterRef.Uuid())
+	securitySettingsChanged := !oldRemoteClusterRef.AreUserSecurityCredentialsTheSame(newRemoteClusterRef) ||
+		!oldRemoteClusterRef.AreSecuritySettingsTheSame(newRemoteClusterRef)
 
-		for _, spec := range specs {
+	if hasRemoteTypeChanged(oldRemoteClusterRef, newRemoteClusterRef) {
+		// priliminary validation prior to switching remote type
+		err := rccl.validateRemoteTypeSwitch(oldRemoteClusterRef, newRemoteClusterRef)
+		if err != nil {
+			return err
+		}
+
+		// At this point, we are ready to switch the remote type.
+		// The switching process involves multiple steps and may take a while to complete(in adverse cases),
+		// so we will perform the switch in a async fashion to avoid blocking the main REST endpoint
+		rccl.asyncSwitchRemoteType(oldRemoteClusterRef, newRemoteClusterRef, securitySettingsChanged)
+		return nil
+	}
+
+	// if only security settings have changed, restart all pipelines associated with the remote cluster
+	if securitySettingsChanged {
+		rccl.restartPipelines(replication_mgr.pipelineMgr.AllReplicationSpecsForTargetCluster(newRemoteClusterRef.Uuid()), true)
+	}
+
+	// other updates to remote clusters do not require any actions
+
+	return nil
+}
+
+// restartPipelines restarts all active replication pipelines associated with the given replication specifications.
+// If setPoolStale is true, it also marks the connection pools associated with the replication specifications as stale.
+func (rccl *RemoteClusterChangeListener) restartPipelines(specs map[string]*metadata.ReplicationSpecification, setPoolStale bool) {
+	for _, spec := range specs {
+		if setPoolStale {
 			// if critical info in remote cluster reference, e.g., log info or certificate, is changed,
 			// the existing connection pools to the corresponding target cluster all need to be reset to
 			// take in the new changes. Mark these connection pools to be stale, so that they will be
@@ -712,17 +885,12 @@ func (rccl *RemoteClusterChangeListener) remoteClusterChangeHandlerCallback(remo
 			// Note that this needs to be done for paused replications as well.
 			base.ConnPoolMgr().SetStaleForPoolsWithNamePrefix(spec.Id)
 			base.ConnPoolMgr().SetStaleForPoolsWithNamePrefix(base.CompileBackfillPipelineSpecId(spec.Id))
-
-			if spec.Settings.Active {
-				rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster %v has been changed\n", spec.Id, oldRemoteClusterRef.Name)
-				replication_mgr.pipelineMgr.UpdatePipeline(spec.Id, nil)
-			}
+		}
+		if spec.Settings.Active {
+			rccl.logger.Infof("Restarting pipelines %v since the referenced remote cluster has been changed", spec.Id)
+			replication_mgr.pipelineMgr.UpdatePipeline(spec.Id, nil)
 		}
 	}
-
-	// other updates to remote clusters do not require any actions
-
-	return nil
 }
 
 func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterRefObj interface{}) (*metadata.RemoteClusterReference, error) {

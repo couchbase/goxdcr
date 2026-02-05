@@ -115,6 +115,9 @@ type RemoteClusterSvc interface {
 
 	// set staged credentials
 	SetStagedCredentials(refName string, stagedCredentials *base.Credentials) (*metadata.RemoteClusterReference, error)
+
+	// switch the remote agents based on the new RemoteType
+	SwitchAgents(newRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification) error
 }
 
 type ClusterHeartbeatAPI interface {

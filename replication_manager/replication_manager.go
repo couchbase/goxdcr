@@ -132,6 +132,8 @@ type replicationManager struct {
 	eventIdAtomicWell int64
 
 	p2pMgr peerToPeer.P2PManager
+
+	uiLogSvc service_def.UILogSvc
 }
 
 // singleton
@@ -416,6 +418,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	remoteClusterChangeListener := NewRemoteClusterChangeListener(
 		rm.remote_cluster_svc,
 		rm.repl_spec_svc,
+		rm.bucketTopologySvc,
+		rm.uiLogSvc,
 		rm.metadata_change_callback_cancel_ch,
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
@@ -533,6 +537,7 @@ func (rm *replicationManager) init(
 	rm.backfillReplSvc = backfillReplSvc
 	rm.bucketTopologySvc = bucketTopologySvc
 	rm.p2pMgr = p2pMgr
+	rm.uiLogSvc = uilog_svc
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc,

@@ -71,6 +71,10 @@ type VBUuidTopology map[uint16]uint64
 // NewVBUuidTopology creates a VBUuidTopology from a vbList and vb->uuid map.
 // Returns an error if any VBs in vbList are not found in allVBUuids
 func NewVBUuidTopology(vbList []uint16, allVBUuids map[uint16]uint64) (VBUuidTopology, error) {
+	if len(allVBUuids) == 0 {
+		return nil, ErrorVbUUIDMapEmpty
+	}
+
 	vbUuidMap := make(VBUuidTopology, len(vbList))
 	var missingVBs []uint16
 	for _, vb := range vbList {

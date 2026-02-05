@@ -70,7 +70,7 @@ func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
 }
 
-type RemoteCngAgentFactory func(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger) RemoteAgentIface
+type RemoteCngAgentFactory func(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, metadataChangeCallback base.MetadataChangeHandlerCallback, logger *log.CommonLogger) RemoteAgentIface
 
 var NewRemoteCngAgent RemoteCngAgentFactory
 
@@ -3712,7 +3712,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 			case metadata.RemoteTypeCbCluster:
 				newAgent = service.NewRemoteClusterAgent()
 			case metadata.RemoteTypeCng:
-				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.xdcr_topology_svc, service.getReplReader(), service.logger)
+				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.xdcr_topology_svc, service.getReplReader(), service.metadata_change_callback, service.logger)
 			default:
 				// should never happen
 				service.agentMutex.Unlock()
@@ -4094,6 +4094,71 @@ func (service *RemoteClusterService) GetCapability(ref *metadata.RemoteClusterRe
 	}
 
 	return agent.GetCapability()
+}
+
+// SwitchAgents is responisble for switching between agents based on the remote type
+// The new agent is started first to ensure continuity. Once the new agent is
+// running successfully, the old agent is stopped and replaced atomically.
+func (service *RemoteClusterService) SwitchAgents(incomingRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification) error {
+	service.agentMutex.Lock()
+	defer service.agentMutex.Unlock()
+
+	// Get the old agent
+	oldAgent, exists := service.agentMap[incomingRef.Id()]
+	if !exists {
+		return errors.New(fmt.Sprintf("Cannot find old agent given the Id: %v", incomingRef.Id()))
+	}
+
+	// Create the new agent based on the new remote type
+	var newAgent RemoteAgentIface
+	switch incomingRef.GetRemoteType() {
+	case metadata.RemoteTypeCbCluster:
+		newAgent = service.NewRemoteClusterAgent()
+	case metadata.RemoteTypeCng:
+		newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.xdcr_topology_svc, service.getReplReader(), service.metadata_change_callback, service.logger)
+	default:
+		// should never happen
+		return fmt.Errorf("unknown remoteType %v for reference %v", incomingRef.GetRemoteType(), incomingRef.Name())
+	}
+
+	// Start the new agent
+	err := newAgent.Start(incomingRef, false)
+	if err != nil {
+		// We do not expect an error here since this operation only starts the agent
+		// and caches the incoming reference. In an adverse case if an error does occur, log it, stop
+		// the agent to ensure proper cleanup, and propagate the error to the caller.
+		service.logger.Errorf("switchAgents: Error starting new agent for reference %v: %v", incomingRef.Name(), err)
+		// handle cleanup here
+		go newAgent.Stop()
+		return err
+	}
+
+	// At this point, the new agent has been successfully started.
+	// Stop the old agent in the background and remove it from the agent map
+	go oldAgent.Stop()
+	delete(service.agentMap, incomingRef.Id())
+	delete(service.agentCacheRefNameMap, incomingRef.Name())
+	delete(service.agentCacheUuidMap, incomingRef.Uuid())
+
+	// Register the new agent in agent maps
+	service.addAgentToAgentMapNoLock(incomingRef, newAgent)
+
+	// Register the specs with the new agent
+	errMap := base.ErrorMap{}
+	for _, spec := range specs {
+		err := newAgent.RegisterBucketRequest(spec.TargetBucketName)
+		if err != nil {
+			// ideally should never occur
+			errMap[spec.Id] = err
+		}
+	}
+
+	if len(errMap) > 0 {
+		// should never occur
+		return fmt.Errorf("failed to register one or more specs with the new agent: %v", base.FlattenErrorMap(errMap))
+	}
+
+	return nil
 }
 
 /**

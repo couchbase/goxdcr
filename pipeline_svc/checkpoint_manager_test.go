@@ -773,7 +773,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	}).Return(nil)
 
 	// Mock GetRemoteBucketStatsProvider - returns a mock BucketStatsOps
-	mockBucketStatsOps := &service_def.BucketStatsOps{}
+	mockBucketStatsProvider := &service_def.BucketStatsProvider{}
 	// Create a failover log with entries for VBs 0-1023 (all possible VBs)
 	failoverLogMap := make(base.FailoverLogMapType)
 	for vb := uint16(0); vb < 1024; vb++ {
@@ -784,7 +784,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 			},
 		}
 	}
-	mockBucketStatsOps.On("GetFailoverLog", mock.Anything, mock.Anything).Return(&base.BucketFailoverLog{
+	mockBucketStatsProvider.On("GetFailoverLog", mock.Anything, mock.Anything).Return(&base.BucketFailoverLog{
 		FailoverLogMap: failoverLogMap,
 	}, nil, nil)
 	// Create VBucketStats with the expected high seqno and UUID for checkpointing
@@ -805,14 +805,14 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 			maxDelay = d
 		}
 	}
-	mockBucketStatsOps.On("GetVBucketStats", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	mockBucketStatsProvider.On("GetVBucketStats", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		if maxDelay > 0 {
 			time.Sleep(time.Duration(maxDelay) * time.Second)
 		}
 	}).Return(&base.BucketVBStats{
 		VBStatsMap: vbStatsMap,
 	}, nil, nil)
-	bucketTopologySvc.On("GetRemoteBucketStatsProvider", mock.Anything).Return(mockBucketStatsOps, nil)
+	bucketTopologySvc.On("GetRemoteBucketStatsProvider", mock.Anything).Return(mockBucketStatsProvider, nil)
 }
 
 var timeStampSetSeqno uint64

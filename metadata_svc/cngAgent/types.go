@@ -213,7 +213,7 @@ func newRefreshSnapShot(ref *metadata.RemoteClusterReference, capability metadat
 }
 
 // NewRemoteCngAgent is a constructor for RemoteCngAgent.
-func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
+func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, uiLog service_def.UILogSvc, topologySvc service_def.XDCRCompTopologySvc, specsReader service_def.ReplicationSpecReader, metadataChangeCallback base.MetadataChangeHandlerCallback, logger *log.CommonLogger) metadata_svc.RemoteAgentIface {
 	services := services{
 		utils:       utils,
 		metakv:      metakv,
@@ -222,9 +222,10 @@ func NewRemoteCngAgent(utils utils.UtilsIface, metakv service_def.MetadataSvc, u
 	}
 
 	cngAgent := &RemoteCngAgent{
-		services: services,
-		finCh:    make(chan struct{}),
-		logger:   logger,
+		services:               services,
+		finCh:                  make(chan struct{}),
+		logger:                 logger,
+		metadataChangeCallback: metadataChangeCallback,
 		heartbeatManager: &heartBeatManager{
 			specsReader: specsReader,
 			services:    services,

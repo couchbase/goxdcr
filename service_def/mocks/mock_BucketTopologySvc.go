@@ -26,29 +26,29 @@ func (_m *BucketTopologySvc) EXPECT() *BucketTopologySvc_Expecter {
 	return &BucketTopologySvc_Expecter{mock: &_m.Mock}
 }
 
-// GetRemoteBucketStatsProvider provides a mock function with given fields: spec
-func (_m *BucketTopologySvc) GetRemoteBucketStatsProvider(spec *metadata.ReplicationSpecification) (service_def.BucketStatsOps, error) {
-	ret := _m.Called(spec)
+// GetRemoteBucketStatsProvider provides a mock function with given fields: key
+func (_m *BucketTopologySvc) GetRemoteBucketStatsProvider(key string) (service_def.BucketStatsProvider, error) {
+	ret := _m.Called(key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRemoteBucketStatsProvider")
 	}
 
-	var r0 service_def.BucketStatsOps
+	var r0 service_def.BucketStatsProvider
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) (service_def.BucketStatsOps, error)); ok {
-		return rf(spec)
+	if rf, ok := ret.Get(0).(func(string) (service_def.BucketStatsProvider, error)); ok {
+		return rf(key)
 	}
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) service_def.BucketStatsOps); ok {
-		r0 = rf(spec)
+	if rf, ok := ret.Get(0).(func(string) service_def.BucketStatsProvider); ok {
+		r0 = rf(key)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.BucketStatsOps)
+			r0 = ret.Get(0).(service_def.BucketStatsProvider)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) error); ok {
-		r1 = rf(spec)
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(key)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -62,24 +62,24 @@ type BucketTopologySvc_GetRemoteBucketStatsProvider_Call struct {
 }
 
 // GetRemoteBucketStatsProvider is a helper method to define mock.On call
-//   - spec *metadata.ReplicationSpecification
-func (_e *BucketTopologySvc_Expecter) GetRemoteBucketStatsProvider(spec interface{}) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
-	return &BucketTopologySvc_GetRemoteBucketStatsProvider_Call{Call: _e.mock.On("GetRemoteBucketStatsProvider", spec)}
+//   - key string
+func (_e *BucketTopologySvc_Expecter) GetRemoteBucketStatsProvider(key interface{}) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+	return &BucketTopologySvc_GetRemoteBucketStatsProvider_Call{Call: _e.mock.On("GetRemoteBucketStatsProvider", key)}
 }
 
-func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Run(run func(spec *metadata.ReplicationSpecification)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Run(run func(key string)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*metadata.ReplicationSpecification))
+		run(args[0].(string))
 	})
 	return _c
 }
 
-func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Return(_a0 service_def.BucketStatsOps, _a1 error) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) Return(_a0 service_def.BucketStatsProvider, _a1 error) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) RunAndReturn(run func(*metadata.ReplicationSpecification) (service_def.BucketStatsOps, error)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
+func (_c *BucketTopologySvc_GetRemoteBucketStatsProvider_Call) RunAndReturn(run func(string) (service_def.BucketStatsProvider, error)) *BucketTopologySvc_GetRemoteBucketStatsProvider_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -581,6 +581,53 @@ func (_c *BucketTopologySvc_SubscribeToRemoteKVStatsFeed_Call) Return(_a0 chan s
 }
 
 func (_c *BucketTopologySvc_SubscribeToRemoteKVStatsFeed_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, chan error, error)) *BucketTopologySvc_SubscribeToRemoteKVStatsFeed_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SwitchRemoteType provides a mock function with given fields: spec, newRemoteType
+func (_m *BucketTopologySvc) SwitchRemoteType(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) error {
+	ret := _m.Called(spec, newRemoteType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SwitchRemoteType")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, metadata.RemoteType) error); ok {
+		r0 = rf(spec, newRemoteType)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// BucketTopologySvc_SwitchRemoteType_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SwitchRemoteType'
+type BucketTopologySvc_SwitchRemoteType_Call struct {
+	*mock.Call
+}
+
+// SwitchRemoteType is a helper method to define mock.On call
+//   - spec *metadata.ReplicationSpecification
+//   - newRemoteType metadata.RemoteType
+func (_e *BucketTopologySvc_Expecter) SwitchRemoteType(spec interface{}, newRemoteType interface{}) *BucketTopologySvc_SwitchRemoteType_Call {
+	return &BucketTopologySvc_SwitchRemoteType_Call{Call: _e.mock.On("SwitchRemoteType", spec, newRemoteType)}
+}
+
+func (_c *BucketTopologySvc_SwitchRemoteType_Call) Run(run func(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType)) *BucketTopologySvc_SwitchRemoteType_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSpecification), args[1].(metadata.RemoteType))
+	})
+	return _c
+}
+
+func (_c *BucketTopologySvc_SwitchRemoteType_Call) Return(_a0 error) *BucketTopologySvc_SwitchRemoteType_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *BucketTopologySvc_SwitchRemoteType_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, metadata.RemoteType) error) *BucketTopologySvc_SwitchRemoteType_Call {
 	_c.Call.Return(run)
 	return _c
 }
