@@ -1,0 +1,577 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002 ["C4"]=9003 ["C5"]=9004 ["C6"]=9005)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002 ["C4"]=13003 ["C5"]=13004 ["C6"]=13005)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3" ["C4"]="B4" ["C5"]="B5" ["C6"]="B6")
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B5" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B6" BucketProperties
+
+# Replication properties with forwardLocalOnly enabled on C1->C2
+declare -A BucketReplPropertiesC1toC2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["forwardLocalOnly"]=true)
+# Replication properties without forwardLocalOnly on C2->C1
+declare -A BucketReplPropertiesC2toC1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true)
+# Replication properties for C3->C1 (C3 will have ECCV disabled, so no HLV in replicated documents)
+declare -A BucketReplPropertiesC3toC1=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true)
+# Replication properties for mesh topology with forwardLocalOnly enabled
+declare -A BucketReplPropertiesMesh=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterBinary"]=true ["forwardLocalOnly"]=true)
+
+function verifyPromStats {
+	# verify no data-corruption
+	validateBinaryFilteredIs0 "C1" "B1" "B2"
+	validateBinaryFilteredIs0 "C2" "B2" "B1"
+	validateBinaryFilteredIs0 "C3" "B3" "B1"
+	validateBinaryFilteredIs0 "C1" "B1" "B4"
+	validateBinaryFilteredIs0 "C4" "B4" "B1"
+	validateBinaryFilteredIs0 "C1" "B1" "B5"
+	validateBinaryFilteredIs0 "C5" "B5" "B1"
+	validateBinaryFilteredIs0 "C1" "B1" "B6"
+	validateBinaryFilteredIs0 "C6" "B6" "B1"
+	validateBinaryFilteredIs0 "C4" "B4" "B5"
+	validateBinaryFilteredIs0 "C5" "B5" "B4"
+	validateBinaryFilteredIs0 "C4" "B4" "B6"
+	validateBinaryFilteredIs0 "C6" "B6" "B4"
+	validateBinaryFilteredIs0 "C5" "B5" "B6"
+	validateBinaryFilteredIs0 "C6" "B6" "B5"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B1" "B2"
+	validateDatapoolFailIs0 "C2" "B2" "B1"
+	validateDatapoolFailIs0 "C3" "B3" "B1"
+	validateDatapoolFailIs0 "C1" "B1" "B4"
+	validateDatapoolFailIs0 "C4" "B4" "B1"
+	validateDatapoolFailIs0 "C1" "B1" "B5"
+	validateDatapoolFailIs0 "C5" "B5" "B1"
+	validateDatapoolFailIs0 "C1" "B1" "B6"
+	validateDatapoolFailIs0 "C6" "B6" "B1"
+	validateDatapoolFailIs0 "C4" "B4" "B5"
+	validateDatapoolFailIs0 "C5" "B5" "B4"
+	validateDatapoolFailIs0 "C4" "B4" "B6"
+	validateDatapoolFailIs0 "C6" "B6" "B4"
+	validateDatapoolFailIs0 "C5" "B5" "B6"
+	validateDatapoolFailIs0 "C6" "B6" "B5"
+}
+
+function testForwardLocalOnly {
+	echo "Setting enableCrossClusterVersioning to true for C1 and C2 (C3 will NOT have ECCV enabled)"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	echo "Creating bi-directional replication with forwardLocalOnly=true only on C1->C2"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesC1toC2
+	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesC2toC1
+
+	echo "Creating replication C3->C1 (C3 does not have ECCV enabled)"
+	createBucketReplication "C3" "B3" "C1" "B1" BucketReplPropertiesC3toC1
+
+	echo "Sleeping 10 seconds for replications to start"
+	sleep 10
+
+	# Get initial stats
+	c1NonLocalSkipped0=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten0=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten0=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+	c3DocsWritten0=$(getPrometheusStat "C3" "B3" "B1" "xdcr_docs_written_total")
+
+	echo ">>> Test 1: For Type-1 - Fresh document written by SDK or clients"
+	echo "Action: Creating a document on C1 (local mutation) - should replicate to C2"
+	writeJSONDocument "C1" "B1" "localDoc1" '{"source":"C1","test":"local"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1NonLocalSkipped1=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten1=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten1=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	# Verify C1->C2 wrote the document and didn't skip it
+	if [ $((c1DocsWritten1 - c1DocsWritten0)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have written 1 document but wrote $((c1DocsWritten1 - c1DocsWritten0))"
+		exit 1
+	fi
+	if [ $((c1NonLocalSkipped1 - c1NonLocalSkipped0)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have skipped local mutation but skipped $((c1NonLocalSkipped1 - c1NonLocalSkipped0))"
+		exit 1
+	fi
+
+	# Verify C2->C1 did not write (short-circuiting because document already has HLV from C1)
+	if [ $((c2DocsWritten1 - c2DocsWritten0)) -ne 0 ]; then
+		echo "FAILED: C2->C1 should have short-circuited and not written, but wrote $((c2DocsWritten1 - c2DocsWritten0))"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 2: For Type-2a - Mutation replicated from another cluster/bucket by XDCR *without* HLV"
+	echo "Action: Creating a document on C3 (which does not have ECCV enabled)"
+	writeJSONDocument "C3" "B3" "c3Doc1" '{"source":"C3","test":"no_hlv"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C3" "B3" "C1" "B1"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	c3DocsWritten1=$(getPrometheusStat "C3" "B3" "B1" "xdcr_docs_written_total")
+	c1NonLocalSkipped2=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten2=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+
+	# Verify C3->C1 wrote the document
+	if [ $((c3DocsWritten1 - c3DocsWritten0)) -ne 1 ]; then
+		echo "FAILED: C3->C1 should have written 1 document but wrote $((c3DocsWritten1 - c3DocsWritten0))"
+		exit 1
+	fi
+
+	# Verify C1->C2 forwarded the document (because it has no HLV, it's treated as local on C1)
+	if [ $((c1DocsWritten2 - c1DocsWritten1)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have forwarded 1 document from C3 (no HLV) but wrote $((c1DocsWritten2 - c1DocsWritten1))"
+		exit 1
+	fi
+	if [ $((c1NonLocalSkipped2 - c1NonLocalSkipped1)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have skipped document from C3 (no HLV) but skipped $((c1NonLocalSkipped2 - c1NonLocalSkipped1))"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 3: For Type-2b(i) - Mutation replicated from another cluster/bucket by XDCR with HLV"
+	echo "Action: Creating a document on C2 - should replicate to C1 but not back to C2"
+	writeJSONDocument "C2" "B2" "c2Doc1" '{"source":"C2","test":"remote"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	c1NonLocalSkipped3=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten3=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten3=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	# Verify C2->C1 wrote the document
+	if [ $((c2DocsWritten3 - c2DocsWritten1)) -ne 1 ]; then
+		echo "FAILED: C2->C1 should have written 1 document but wrote $((c2DocsWritten3 - c2DocsWritten1))"
+		exit 1
+	fi
+
+	# Verify C1->C2 skipped the document (non-local mutation due to forwardLocalOnly)
+	if [ $((c1NonLocalSkipped3 - c1NonLocalSkipped2)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have skipped 1 non-local mutation but skipped $((c1NonLocalSkipped3 - c1NonLocalSkipped2))"
+		exit 1
+	fi
+	if [ $((c1DocsWritten3 - c1DocsWritten2)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have written non-local mutation but wrote $((c1DocsWritten3 - c1DocsWritten2))"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 4: For Type-1 - Mutation updated by SDK or clients"
+	echo "Action: Updating document c2Doc1 on C1 - should replicate to C2 (now local to C1)"
+	writeJSONDocument "C1" "B1" "c2Doc1" '{"source":"C2","test":"updated_on_C1"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1NonLocalSkipped4=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten4=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten4=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	# Verify C1->C2 wrote the document (it's now a local mutation on C1)
+	if [ $((c1DocsWritten4 - c1DocsWritten3)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have written 1 document but wrote $((c1DocsWritten4 - c1DocsWritten3))"
+		exit 1
+	fi
+	if [ $((c1NonLocalSkipped4 - c1NonLocalSkipped3)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have skipped this local update but skipped $((c1NonLocalSkipped4 - c1NonLocalSkipped3))"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 5: For 'HlvBasedShortCircuit' when 'forwardLocalOnly' has been disabled"
+	echo "Disabling forwardLocalOnly on C1->C2"
+	setReplicationSettings "C1" "B1" "C2" "B2" "forwardLocalOnly=false"
+
+	echo "Sleeping 5 seconds for the 'liveUpdatePipeline()' to take effect"
+	sleep 5
+
+	echo "Verifying forwardLocalOnly=false on C1->C2"
+	forwardLocalOnly=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .forwardLocalOnly)
+	if [[ "$forwardLocalOnly" != "false" ]]; then
+		echo "forwardLocalOnly should be false on C1->C2 but got $forwardLocalOnly"
+		exit 1
+	fi
+
+	# Create another document on C2
+	writeJSONDocument "C2" "B2" "c2Doc2" '{"source":"C2","test":"after_disable"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	c2DocsWritten4=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+	c1DocsWritten5=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c1NonLocalSkipped5=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1TargetDocsSkipped5=$(getPrometheusStat "C1" "B1" "B2" "xdcr_target_docs_skipped_skipped_total")
+
+	# Verify C2->C1 wrote the document
+	if [ $((c2DocsWritten4 - c2DocsWritten3)) -ne 1 ]; then
+		echo "FAILED: C2->C1 should have written 1 document but wrote $((c2DocsWritten4 - c2DocsWritten3))"
+		exit 1
+	fi
+
+	# Verify C1->C2 did NOT write the document
+	if [ $((c1DocsWritten5 - c1DocsWritten4)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should have skipped writing the document, but wrote $((c1DocsWritten5 - c1DocsWritten4))"
+		exit 1
+	fi
+
+	# Verify C1->C2 did NOT skip batching the document because of 'forwardLocalOnly'
+	if [ $((c1NonLocalSkipped5 - c1NonLocalSkipped4)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have incremented non-local skips when forwardLocalOnly=false, but skipped $((c1NonLocalSkipped5 - c1NonLocalSkipped4))"
+		exit 1
+	fi
+
+	# Verify C1->C2 skipped batching because of 'HlvBasedShortCircuit' (as document originated from Target)
+	if [ $(c1TargetDocsSkipped5) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have short-circuited (as document originated from Target), but it did not"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 6: Re-enabling forwardLocalOnly"
+	setReplicationSettings "C1" "B1" "C2" "B2" "forwardLocalOnly=true"
+
+	echo "Sleeping 5 seconds for the 'liveUpdatePipeline()' to take effect"
+	sleep 5
+
+	echo "Verifying forwardLocalOnly=true on C1->C2"
+	forwardLocalOnly=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .forwardLocalOnly)
+	if [[ "$forwardLocalOnly" != "true" ]]; then
+		echo "forwardLocalOnly should be true on C1->C2 but got $forwardLocalOnly"
+		exit 1
+	fi
+
+	# Create one more document on C2
+	writeJSONDocument "C2" "B2" "c2Doc3" '{"source":"C2","test":"after_re_enable"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	c1NonLocalSkipped6=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten6=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten6=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	# Verify C2->C1 wrote the document
+	if [ $((c2DocsWritten6 - c2DocsWritten4)) -ne 1 ]; then
+		echo "FAILED: C2->C1 should have written 1 document but wrote $((c2DocsWritten6 - c2DocsWritten4))"
+		exit 1
+	fi
+
+	# Verify C1->C2 skipped the document again (non-local mutation)
+	if [ $((c1NonLocalSkipped6 - c1NonLocalSkipped5)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have skipped 1 non-local mutation after re-enabling but skipped $((c1NonLocalSkipped6 - c1NonLocalSkipped5))"
+		exit 1
+	fi
+	if [ $((c1DocsWritten6 - c1DocsWritten5)) -ne 0 ]; then
+		echo "FAILED: C1->C2 should not have written non-local mutation after re-enabling but wrote $((c1DocsWritten6 - c1DocsWritten5))"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 7: For Type-2b(ii) - Mutation replicated from another cluster/bucket by XDCR but with the local SourceID"
+	echo "Action: Creating a document on C1 with 'disableHlvBasedShortCircuit=true' on C2"
+	echo "Enabling disableHlvBasedShortCircuit on C2->C1"
+	setReplicationSettings "C2" "B2" "C1" "B1" "disableHlvBasedShortCircuit=true"
+
+	echo "Sleeping 5 seconds for the 'liveUpdatePipeline()' to take effect"
+	sleep 5
+
+	echo "Verifying disableHlvBasedShortCircuit=true on C2->C1"
+	disableHlvBasedShortCircuit=$(getReplicationSettings "C2" "B2" "C1" "B1" | jq .disableHlvBasedShortCircuit)
+	if [[ "$disableHlvBasedShortCircuit" != "true" ]]; then
+		echo "disableHlvBasedShortCircuit should be true on C2->C1 but got $disableHlvBasedShortCircuit"
+		exit 1
+	fi
+
+	# Create a new document on C1
+	writeJSONDocument "C1" "B1" "c1Doc2" '{"source":"C1","test":"with_disableHlvBasedShortCircuit"}'
+
+	echo "Waiting for changes_left to go to 0"
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	c1NonLocalSkipped7=$(getPrometheusStat "C1" "B1" "B2" "xdcr_non_local_mutations_skipped_total")
+	c1DocsWritten7=$(getPrometheusStat "C1" "B1" "B2" "xdcr_docs_written_total")
+	c2DocsWritten7=$(getPrometheusStat "C2" "B2" "B1" "xdcr_docs_written_total")
+
+	# Verify C1->C2 wrote the document (it's a local mutation on C1)
+	if [ $((c1DocsWritten7 - c1DocsWritten6)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have written 1 document but wrote $((c1DocsWritten7 - c1DocsWritten6))"
+		exit 1
+	fi
+
+	# Verify C2->C1 wrote the document back (because disableHlvBasedShortCircuit=true prevents short-circuiting)
+	if [ $((c2DocsWritten7 - c2DocsWritten6)) -ne 1 ]; then
+		echo "FAILED: C2->C1 should have written 1 document back (disableHlvBasedShortCircuit=true) but wrote $((c2DocsWritten7 - c2DocsWritten6))"
+		exit 1
+	fi
+
+	# Verify C1->C2 skipped the document from C2 (non-local mutation due to forwardLocalOnly)
+	if [ $((c1NonLocalSkipped7 - c1NonLocalSkipped6)) -ne 1 ]; then
+		echo "FAILED: C1->C2 should have skipped 1 non-local mutation but skipped $((c1NonLocalSkipped7 - c1NonLocalSkipped6))"
+		exit 1
+	fi
+
+	echo "Disabling disableHlvBasedShortCircuit on C2->C1"
+	setReplicationSettings "C2" "B2" "C1" "B1" "disableHlvBasedShortCircuit=false"
+
+	echo "Sleeping 5 seconds for the 'liveUpdatePipeline()' to take effect"
+	sleep 5
+
+	echo "Verifying disableHlvBasedShortCircuit=false on C2->C1"
+	disableHlvBasedShortCircuit=$(getReplicationSettings "C2" "B2" "C1" "B1" | jq .disableHlvBasedShortCircuit)
+	if [[ "$disableHlvBasedShortCircuit" != "false" ]]; then
+		echo "disableHlvBasedShortCircuit should be false on C2->C1 but got $disableHlvBasedShortCircuit"
+		exit 1
+	fi
+	echo ">>> Passed"
+
+	echo ">>> Test 8: Mesh replication with forwardLocalOnly - verify non-local mutations are skipped"
+
+	# Helper function to validate mesh replication stats
+	function validateMeshStats {
+		local srcCluster=$1
+		local srcBucket=$2
+		local dstCluster=$3
+		local dstBucket=$4
+		local docsWritten0=$5
+		local docsWritten1=$6
+		local nonLocalSkipped0=$7
+		local nonLocalSkipped1=$8
+		local expectedDocsWritten=$9
+		local expectedSkips=${10}
+		local skipSources=${11}
+
+		if [ $((docsWritten1 - docsWritten0)) -ne $expectedDocsWritten ]; then
+			echo "FAILED: $srcCluster->$dstCluster should have written $expectedDocsWritten local document(s) but wrote $((docsWritten1 - docsWritten0))"
+			exit 1
+		fi
+
+		if [ $((nonLocalSkipped1 - nonLocalSkipped0)) -ne $expectedSkips ]; then
+			echo "FAILED: $srcCluster->$dstCluster should have skipped $expectedSkips non-local mutations ($skipSources) but skipped $((nonLocalSkipped1 - nonLocalSkipped0))"
+			exit 1
+		fi
+	}
+
+	echo "Setting enableCrossClusterVersioning to true for C1, C4, C5, and C6"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C4" "B4"
+	setCrossClusterVersioningForBucket "C5" "B5"
+	setCrossClusterVersioningForBucket "C6" "B6"
+
+	echo "Creating mesh topology with bidirectional replication (forwardLocalOnly=true) between C1, C4, C5, and C6"
+	# C1 <-> C4
+	createBucketReplication "C1" "B1" "C4" "B4" BucketReplPropertiesMesh
+	createBucketReplication "C4" "B4" "C1" "B1" BucketReplPropertiesMesh
+	# C1 <-> C5
+	createBucketReplication "C1" "B1" "C5" "B5" BucketReplPropertiesMesh
+	createBucketReplication "C5" "B5" "C1" "B1" BucketReplPropertiesMesh
+	# C1 <-> C6
+	createBucketReplication "C1" "B1" "C6" "B6" BucketReplPropertiesMesh
+	createBucketReplication "C6" "B6" "C1" "B1" BucketReplPropertiesMesh
+	# C4 <-> C5
+	createBucketReplication "C4" "B4" "C5" "B5" BucketReplPropertiesMesh
+	createBucketReplication "C5" "B5" "C4" "B4" BucketReplPropertiesMesh
+	# C4 <-> C6
+	createBucketReplication "C4" "B4" "C6" "B6" BucketReplPropertiesMesh
+	createBucketReplication "C6" "B6" "C4" "B4" BucketReplPropertiesMesh
+	# C5 <-> C6
+	createBucketReplication "C5" "B5" "C6" "B6" BucketReplPropertiesMesh
+	createBucketReplication "C6" "B6" "C5" "B5" BucketReplPropertiesMesh
+
+	echo "Sleeping 10 seconds for replications to start"
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C4" "B4"
+	waitForChangesLeft0 "C1" "B1" "C5" "B5"
+	waitForChangesLeft0 "C1" "B1" "C6" "B6"
+	waitForChangesLeft0 "C4" "B4" "C1" "B1"
+	waitForChangesLeft0 "C4" "B4" "C5" "B5"
+	waitForChangesLeft0 "C4" "B4" "C6" "B6"
+	waitForChangesLeft0 "C5" "B5" "C1" "B1"
+	waitForChangesLeft0 "C5" "B5" "C4" "B4"
+	waitForChangesLeft0 "C5" "B5" "C6" "B6"
+	waitForChangesLeft0 "C6" "B6" "C1" "B1"
+	waitForChangesLeft0 "C6" "B6" "C4" "B4"
+	waitForChangesLeft0 "C6" "B6" "C5" "B5"
+
+	# Get initial stats for all mesh clusters
+	c1ToC4NonLocalSkipped0=$(getPrometheusStat "C1" "B1" "B4" "xdcr_non_local_mutations_skipped_total")
+	c1ToC4DocsWritten0=$(getPrometheusStat "C1" "B1" "B4" "xdcr_docs_written_total")
+	c1ToC5NonLocalSkipped0=$(getPrometheusStat "C1" "B1" "B5" "xdcr_non_local_mutations_skipped_total")
+	c1ToC5DocsWritten0=$(getPrometheusStat "C1" "B1" "B5" "xdcr_docs_written_total")
+	c1ToC6NonLocalSkipped0=$(getPrometheusStat "C1" "B1" "B6" "xdcr_non_local_mutations_skipped_total")
+	c1ToC6DocsWritten0=$(getPrometheusStat "C1" "B1" "B6" "xdcr_docs_written_total")
+
+	c4ToC1NonLocalSkipped0=$(getPrometheusStat "C4" "B4" "B1" "xdcr_non_local_mutations_skipped_total")
+	c4ToC1DocsWritten0=$(getPrometheusStat "C4" "B4" "B1" "xdcr_docs_written_total")
+	c4ToC5NonLocalSkipped0=$(getPrometheusStat "C4" "B4" "B5" "xdcr_non_local_mutations_skipped_total")
+	c4ToC5DocsWritten0=$(getPrometheusStat "C4" "B4" "B5" "xdcr_docs_written_total")
+	c4ToC6NonLocalSkipped0=$(getPrometheusStat "C4" "B4" "B6" "xdcr_non_local_mutations_skipped_total")
+	c4ToC6DocsWritten0=$(getPrometheusStat "C4" "B4" "B6" "xdcr_docs_written_total")
+
+	c5ToC1NonLocalSkipped0=$(getPrometheusStat "C5" "B5" "B1" "xdcr_non_local_mutations_skipped_total")
+	c5ToC1DocsWritten0=$(getPrometheusStat "C5" "B5" "B1" "xdcr_docs_written_total")
+	c5ToC4NonLocalSkipped0=$(getPrometheusStat "C5" "B5" "B4" "xdcr_non_local_mutations_skipped_total")
+	c5ToC4DocsWritten0=$(getPrometheusStat "C5" "B5" "B4" "xdcr_docs_written_total")
+	c5ToC6NonLocalSkipped0=$(getPrometheusStat "C5" "B5" "B6" "xdcr_non_local_mutations_skipped_total")
+	c5ToC6DocsWritten0=$(getPrometheusStat "C5" "B5" "B6" "xdcr_docs_written_total")
+
+	c6ToC1NonLocalSkipped0=$(getPrometheusStat "C6" "B6" "B1" "xdcr_non_local_mutations_skipped_total")
+	c6ToC1DocsWritten0=$(getPrometheusStat "C6" "B6" "B1" "xdcr_docs_written_total")
+	c6ToC4NonLocalSkipped0=$(getPrometheusStat "C6" "B6" "B4" "xdcr_non_local_mutations_skipped_total")
+	c6ToC4DocsWritten0=$(getPrometheusStat "C6" "B6" "B4" "xdcr_docs_written_total")
+	c6ToC5NonLocalSkipped0=$(getPrometheusStat "C6" "B6" "B5" "xdcr_non_local_mutations_skipped_total")
+	c6ToC5DocsWritten0=$(getPrometheusStat "C6" "B6" "B5" "xdcr_docs_written_total")
+
+	echo "Action: Creating a unique document on each of C1, C4, C5, and C6"
+	writeJSONDocument "C1" "B1" "meshDoc1" '{"source":"C1","test":"mesh_local"}'
+	writeJSONDocument "C4" "B4" "meshDoc4" '{"source":"C4","test":"mesh_local"}'
+	writeJSONDocument "C5" "B5" "meshDoc5" '{"source":"C5","test":"mesh_local"}'
+	writeJSONDocument "C6" "B6" "meshDoc6" '{"source":"C6","test":"mesh_local"}'
+
+	echo "Waiting for changes_left to go to 0 for all mesh replications"
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C4" "B4"
+	waitForChangesLeft0 "C1" "B1" "C5" "B5"
+	waitForChangesLeft0 "C1" "B1" "C6" "B6"
+	waitForChangesLeft0 "C4" "B4" "C1" "B1"
+	waitForChangesLeft0 "C4" "B4" "C5" "B5"
+	waitForChangesLeft0 "C4" "B4" "C6" "B6"
+	waitForChangesLeft0 "C5" "B5" "C1" "B1"
+	waitForChangesLeft0 "C5" "B5" "C4" "B4"
+	waitForChangesLeft0 "C5" "B5" "C6" "B6"
+	waitForChangesLeft0 "C6" "B6" "C1" "B1"
+	waitForChangesLeft0 "C6" "B6" "C4" "B4"
+	waitForChangesLeft0 "C6" "B6" "C5" "B5"
+
+	# Get final stats
+	c1ToC4NonLocalSkipped1=$(getPrometheusStat "C1" "B1" "B4" "xdcr_non_local_mutations_skipped_total")
+	c1ToC4DocsWritten1=$(getPrometheusStat "C1" "B1" "B4" "xdcr_docs_written_total")
+	c1ToC5NonLocalSkipped1=$(getPrometheusStat "C1" "B1" "B5" "xdcr_non_local_mutations_skipped_total")
+	c1ToC5DocsWritten1=$(getPrometheusStat "C1" "B1" "B5" "xdcr_docs_written_total")
+	c1ToC6NonLocalSkipped1=$(getPrometheusStat "C1" "B1" "B6" "xdcr_non_local_mutations_skipped_total")
+	c1ToC6DocsWritten1=$(getPrometheusStat "C1" "B1" "B6" "xdcr_docs_written_total")
+
+	c4ToC1NonLocalSkipped1=$(getPrometheusStat "C4" "B4" "B1" "xdcr_non_local_mutations_skipped_total")
+	c4ToC1DocsWritten1=$(getPrometheusStat "C4" "B4" "B1" "xdcr_docs_written_total")
+	c4ToC5NonLocalSkipped1=$(getPrometheusStat "C4" "B4" "B5" "xdcr_non_local_mutations_skipped_total")
+	c4ToC5DocsWritten1=$(getPrometheusStat "C4" "B4" "B5" "xdcr_docs_written_total")
+	c4ToC6NonLocalSkipped1=$(getPrometheusStat "C4" "B4" "B6" "xdcr_non_local_mutations_skipped_total")
+	c4ToC6DocsWritten1=$(getPrometheusStat "C4" "B4" "B6" "xdcr_docs_written_total")
+
+	c5ToC1NonLocalSkipped1=$(getPrometheusStat "C5" "B5" "B1" "xdcr_non_local_mutations_skipped_total")
+	c5ToC1DocsWritten1=$(getPrometheusStat "C5" "B5" "B1" "xdcr_docs_written_total")
+	c5ToC4NonLocalSkipped1=$(getPrometheusStat "C5" "B5" "B4" "xdcr_non_local_mutations_skipped_total")
+	c5ToC4DocsWritten1=$(getPrometheusStat "C5" "B5" "B4" "xdcr_docs_written_total")
+	c5ToC6NonLocalSkipped1=$(getPrometheusStat "C5" "B5" "B6" "xdcr_non_local_mutations_skipped_total")
+	c5ToC6DocsWritten1=$(getPrometheusStat "C5" "B5" "B6" "xdcr_docs_written_total")
+
+	c6ToC1NonLocalSkipped1=$(getPrometheusStat "C6" "B6" "B1" "xdcr_non_local_mutations_skipped_total")
+	c6ToC1DocsWritten1=$(getPrometheusStat "C6" "B6" "B1" "xdcr_docs_written_total")
+	c6ToC4NonLocalSkipped1=$(getPrometheusStat "C6" "B6" "B4" "xdcr_non_local_mutations_skipped_total")
+	c6ToC4DocsWritten1=$(getPrometheusStat "C6" "B6" "B4" "xdcr_docs_written_total")
+	c6ToC5NonLocalSkipped1=$(getPrometheusStat "C6" "B6" "B5" "xdcr_non_local_mutations_skipped_total")
+	c6ToC5DocsWritten1=$(getPrometheusStat "C6" "B6" "B5" "xdcr_docs_written_total")
+
+	# Verify C1 wrote its local mutation to C4, C5, C6 and skipped non-local mutations from them
+	# Note: C1 also has 3 non-local documents from C2 (c2Doc1, c2Doc2, c2Doc3), but those were already skipped during the initial
+	# replication catch-up and are accounted for in c1ToC4NonLocalSkipped0, c1ToC5NonLocalSkipped0, c1ToC6NonLocalSkipped0
+	# So we expect 3 new skips per C1 replication path in this test (one from each of C4, C5, C6)
+	validateMeshStats "C1" "B1" "C4" "B4" $c1ToC4DocsWritten0 $c1ToC4DocsWritten1 $c1ToC4NonLocalSkipped0 $c1ToC4NonLocalSkipped1 1 3 "from C4, C5, C6"
+	validateMeshStats "C1" "B1" "C5" "B5" $c1ToC5DocsWritten0 $c1ToC5DocsWritten1 $c1ToC5NonLocalSkipped0 $c1ToC5NonLocalSkipped1 1 3 "from C4, C5, C6"
+	validateMeshStats "C1" "B1" "C6" "B6" $c1ToC6DocsWritten0 $c1ToC6DocsWritten1 $c1ToC6NonLocalSkipped0 $c1ToC6NonLocalSkipped1 1 3 "from C4, C5, C6"
+
+	# Verify C4 wrote its local mutation to C1, C5, C6 and skipped non-local mutations from them
+	validateMeshStats "C4" "B4" "C1" "B1" $c4ToC1DocsWritten0 $c4ToC1DocsWritten1 $c4ToC1NonLocalSkipped0 $c4ToC1NonLocalSkipped1 1 3 "from C1, C5, C6"
+	validateMeshStats "C4" "B4" "C5" "B5" $c4ToC5DocsWritten0 $c4ToC5DocsWritten1 $c4ToC5NonLocalSkipped0 $c4ToC5NonLocalSkipped1 1 3 "from C1, C5, C6"
+	validateMeshStats "C4" "B4" "C6" "B6" $c4ToC6DocsWritten0 $c4ToC6DocsWritten1 $c4ToC6NonLocalSkipped0 $c4ToC6NonLocalSkipped1 1 3 "from C1, C5, C6"
+
+	# Verify C5 wrote its local mutation to C1, C4, C6 and skipped non-local mutations from them
+	validateMeshStats "C5" "B5" "C1" "B1" $c5ToC1DocsWritten0 $c5ToC1DocsWritten1 $c5ToC1NonLocalSkipped0 $c5ToC1NonLocalSkipped1 1 3 "from C1, C4, C6"
+	validateMeshStats "C5" "B5" "C4" "B4" $c5ToC4DocsWritten0 $c5ToC4DocsWritten1 $c5ToC4NonLocalSkipped0 $c5ToC4NonLocalSkipped1 1 3 "from C1, C4, C6"
+	validateMeshStats "C5" "B5" "C6" "B6" $c5ToC6DocsWritten0 $c5ToC6DocsWritten1 $c5ToC6NonLocalSkipped0 $c5ToC6NonLocalSkipped1 1 3 "from C1, C4, C6"
+
+	# Verify C6 wrote its local mutation to C1, C4, C5 and skipped non-local mutations from them
+	validateMeshStats "C6" "B6" "C1" "B1" $c6ToC1DocsWritten0 $c6ToC1DocsWritten1 $c6ToC1NonLocalSkipped0 $c6ToC1NonLocalSkipped1 1 3 "from C1, C4, C5"
+	validateMeshStats "C6" "B6" "C4" "B4" $c6ToC4DocsWritten0 $c6ToC4DocsWritten1 $c6ToC4NonLocalSkipped0 $c6ToC4NonLocalSkipped1 1 3 "from C1, C4, C5"
+	validateMeshStats "C6" "B6" "C5" "B5" $c6ToC5DocsWritten0 $c6ToC5DocsWritten1 $c6ToC5NonLocalSkipped0 $c6ToC5NonLocalSkipped1 1 3 "from C1, C4, C5"
+
+	echo "Success: Each of C1, C4, C5, and C6 only replicated their 'local' document"
+	echo ">>> Passed"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running 'forwardLocalOnly' Test Cases"
+	echo "============================================================================"
+
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	createRemoteClusterReference "C3" "C1"
+	createRemoteClusterReference "C1" "C4"
+	createRemoteClusterReference "C4" "C1"
+	createRemoteClusterReference "C1" "C5"
+	createRemoteClusterReference "C5" "C1"
+	createRemoteClusterReference "C1" "C6"
+	createRemoteClusterReference "C6" "C1"
+	createRemoteClusterReference "C4" "C5"
+	createRemoteClusterReference "C5" "C4"
+	createRemoteClusterReference "C4" "C6"
+	createRemoteClusterReference "C6" "C4"
+	createRemoteClusterReference "C5" "C6"
+	createRemoteClusterReference "C6" "C5"
+	sleep 1
+	testForwardLocalOnly
+
+	grepForAbnormalities
+
+	verifyPromStats
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}

@@ -121,6 +121,14 @@ func (m *CRMetadata) IsImportMutation() bool {
 	return m.isImport
 }
 
+// Checks if the mutation qualifies for a 'forwardLocalOnly' replication.
+// Should only be called on a CRMetadata object with up-to-date HLV.
+func (m *CRMetadata) IsLocalMutation(localSourceID hlv.DocumentSourceId) bool {
+	return (!m.hadHlv || /* mutations without an HLV */
+		m.hlv.Updated || /* CAS > cvCAS */
+		(len(m.hlv.GetMV()) > 0 && m.hlv.GetCvSrc() == localSourceID) /* local 'merge mutation' */)
+}
+
 func (m *CRMetadata) UpdateHLVIfNeeded(source hlv.DocumentSourceId, cas uint64, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap hlv.VersionsMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64) (err error) {
 	if cvCas > 0 {
 		// The document already has an HLV. In this case we need to keep it updated even if enableCrossClusterVersioning is off

@@ -111,6 +111,8 @@ var (
 	ErrorUserInitiatedStreamRpcCancellation      = errors.New("user initiated cancellation of the stream RPC")
 	ErrorVbUUIDMapEmpty                          = errors.New("vbUUID map is empty")
 	ErrCERestrictionsBreached                    = errors.New("Cannot create XDCR between two Community Edition clusters")
+	ErrorForwardLocalOnlyUnsupported             = errors.New("all cluster nodes do not support the replication setting 'forwardLocalOnly', so it cannot be enabled")
+	ErrorForwardLocalOnlyCNGUnsupported          = errors.New("'forwardLocalOnly' currently does not support being enabled when remote-cluster is of CNG type")
 )
 
 // Various non-error internal msgs

@@ -87,6 +87,7 @@ function setupCNG {
 
 	if ((rebuild == 1)); then
 		echo "INFO: Building gateway binary at $gatewayBin" >&2
+		go generate ./...
 		go build -o "$gatewayBin" ./cmd/gateway 2>>"$logFile"
 		if (($? != 0)) || [[ ! -x "$gatewayBin" ]]; then
 			echo "ERRO: Failed to build gateway binary" >&2

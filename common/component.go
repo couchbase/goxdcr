@@ -121,6 +121,9 @@ const (
 	// a subdoc command, but could not be because it reached
 	// the maximum operations limit.
 	SubdocCmdSkippedDueToLimits ComponentEventType = iota
+
+	// when 'forwardLocalOnly' is enabled, mutation which is skipped because it's a non-local mutation
+	NonLocalMutationSkipped ComponentEventType = iota
 )
 
 // Struct definitions for holding data specific to the processing of certain event types
@@ -179,15 +182,8 @@ type DataNotReplicatedEventData struct {
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	switch c {
-	case DataFailedCRSource:
-		return true
-	case TargetDataSkipped:
-		return true
-	case DataSent:
-		return true
-	case DataNotReplicated:
-		return true
-	case SubdocCmdSkippedDueToLimits:
+	case DataFailedCRSource, TargetDataSkipped, DataSent, DataNotReplicated,
+		SubdocCmdSkippedDueToLimits, NonLocalMutationSkipped:
 		return true
 	default:
 		return false

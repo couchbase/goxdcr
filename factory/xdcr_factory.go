@@ -630,6 +630,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.ConflictsDetected, trueConflictsEventListener)
 			out_nozzle.RegisterComponentEventListener(common.SubdocCmdSkippedDueToLimits, outnozzle_data_skipped_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.NonLocalMutationSkipped, outnozzle_data_skipped_event_listener)
 		}
 	}
 
@@ -1136,6 +1137,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 		xmemSettings[base.MinPVLenForMobileKey] = minPVLenForMobile
 	}
 
+	forwardLocalOnlyFlag, ok := settings[base.ForwardLocalOnlyKey]
+	if ok {
+		xmemSettings[base.ForwardLocalOnlyKey] = forwardLocalOnlyFlag
+	}
+
 	return xmemSettings
 }
 
@@ -1397,6 +1403,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	}
 	if val, ok := settings[base.MinPVLenForMobileKey]; ok {
 		xmemSettings[base.MinPVLenForMobileKey] = val
+	}
+	if val, ok := settings[base.ForwardLocalOnlyKey]; ok {
+		xmemSettings[base.ForwardLocalOnlyKey] = val
 	}
 
 	return xmemSettings, nil

@@ -280,8 +280,8 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	// re-populate replication settings that may have been skipped by a legacy node (during mixed-mode operation)
 	if oldSpec != nil {
 		for _, key := range metadata.UpgradeReplicationSettings {
-			if _, exists := oldSpec.Settings.Values[key]; exists {
-				if _, ok := newSpec.Settings.Values[key]; !ok {
+			if _, newExists := newSpec.Settings.Values[key]; !newExists {
+				if _, oldExists := oldSpec.Settings.Values[key]; oldExists {
 					newSpec.Settings.Values[key] = oldSpec.Settings.Values[key]
 				}
 			}
@@ -539,7 +539,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
 		oldSettings.GetXmemNozzleNetworkIOFaultPercent(oldSettings) != newSettings.GetXmemNozzleNetworkIOFaultPercent(newSettings) ||
 		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() ||
-		cLogBasedLiveSettingsUpdate(oldSettings, newSettings) {
+		cLogBasedLiveSettingsUpdate(oldSettings, newSettings) ||
+		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
@@ -559,6 +560,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 
 		return nil
 	}
+
+	rscl.logger.Warnf("found no settings change which qualified for a live-update of the pipeline %v\n", topic)
 
 	return nil
 }

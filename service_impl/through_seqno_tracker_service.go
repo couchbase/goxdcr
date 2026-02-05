@@ -1354,6 +1354,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 				tsTracker.HandleDoneSession(vbno, session)
 			}
 		}
+	case common.NonLocalMutationSkipped:
+		fallthrough
 	case common.SubdocCmdSkippedDueToLimits:
 		fallthrough
 	case common.TargetDataSkipped:
@@ -2453,6 +2455,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	var vbno uint16
 
 	switch event.EventType {
+	case common.NonLocalMutationSkipped:
+		fallthrough
 	case common.SubdocCmdSkippedDueToLimits:
 		fallthrough
 	case common.TargetDataSkipped:

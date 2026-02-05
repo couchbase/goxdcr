@@ -237,6 +237,9 @@ const (
 
 	// Remote Cluster related stats
 	REMOTE_CLUSTER_MONITORING_METADATA_TX = "remote_cluster_monitoring_metadata_transferred"
+
+	// 'forwardLocalOnly' metric, tracking number of skipped non-local mutations
+	NON_LOCAL_MUTATIONS_SKIPPED_METRIC = base.NonLocalMutationsSkippedCount
 )
 
 var GRPC_METRICS_LIST = []string{
@@ -1860,6 +1863,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Internal,
 		Labels:       RemoteClusterSpecificLabels,
 	},
+
 	// CNG Specific Metrics
 	CNG_COLLECTION_NOT_FOUND_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -2005,6 +2009,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCngSupportPhase1,
 		Description:  "Number of GRPC requests that failed due to authentication failure",
 		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+
+	NON_LOCAL_MUTATIONS_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForForwardLocalOnly,
+		Description:  "Number of document mutations that were not batched for replication to Target because they did not qualify as 'local' for the 'forwardLocalOnly' replication",
+		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
 }

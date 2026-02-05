@@ -507,8 +507,6 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		logger_ap.Infof("Request params: stagedCredentials %v", stagedCredentials.Clone().Redact())
 
 		remoteClusterRef, setErr = remoteClusterService.SetStagedCredentials(remoteClusterName, stagedCredentials)
-	default:
-		// no op
 	}
 
 	switch {

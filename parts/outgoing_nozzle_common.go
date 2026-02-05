@@ -113,11 +113,13 @@ type baseConfig struct {
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
 
-	DisableHlvBasedShortCircuit atomic.Bool
+	DisableHlvBasedShortCircuit atomic.Bool // disables optimisation to skip Target mutations for XMEM batching (origin verified using HLV)
 
 	// minPVLen represents the lower bound of the number of entries in PV that must be retained
 	// and not be pruned. It will be always 0 when mobile is Off.
 	minPVLen atomic.Uint32
+
+	forwardLocalOnly atomic.Bool // flag to specify if only "local mutations" are to be batched for replication
 }
 
 type VbucketCommon struct {
@@ -176,6 +178,7 @@ const (
 	UnknownReason OutNozzleDataSkippedReason = iota
 	DataIsFromTarget
 	SubdocMaxPathLimitReached
+	IsNotLocalMutation
 )
 
 type DataSentEventAdditional struct {

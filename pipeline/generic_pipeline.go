@@ -342,13 +342,14 @@ func (genericPipeline *GenericPipeline) setHlvInfoWithTimeout(settings metadata.
 	getHlvInfo := func() error {
 		var wg sync.WaitGroup
 
-		// hlv info from the source bucket.
+		// hlv info from the source bucket
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			sourceHlvEnabled, pruningWindow, sourceHlvVbMaxCasMap, localErr = genericPipeline.getLocalHlvInfo(spec, genPipelineId, finCh)
 		}()
 
+		// hlv info from the target bucket
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

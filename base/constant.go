@@ -527,6 +527,7 @@ const (
 	CLogDocsWrittenEventListener         = "CLogDocsWrittenEventListener"
 	CLogWriteStatusEventListener         = "CLogWriteStatusEventListener"
 	TrueConflictsEventListener           = "TrueConflictsEventListener"
+	LocalImportMutationEventListener     = "LocalImportMutationEventListener"
 )
 
 const (
@@ -668,6 +669,7 @@ var VersionForCngSupportPhase1 = ServerVersion{8, 1, 0}
 var VersionForMetadataStatsSupport = ServerVersion{8, 1, 0}
 var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 1, 0}
 var VersionForConflictRateBasedAutopause = ServerVersion{8, 1, 0}
+var VersionForForwardLocalOnly = ServerVersion{8, 1, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1881,6 +1883,7 @@ const (
 	CLogHibernatedCount                = "clog_hibernated_count"
 	GetDocsCasChangedCount             = "get_docs_cas_changed"
 	SubdocCmdsSkippedCount             = "subdoc_cmd_docs_skipped"
+	NonLocalMutationsSkippedCount      = "non_local_mutations_skipped"
 )
 
 var ValidJsonEnds []byte = []byte{
@@ -2121,3 +2124,6 @@ var (
 	// for cleaning conflict monitor stats. It is an internal setting.
 	CLogMonitorCleanupFreq uint64 = 300
 )
+
+// When enabled, only "local mutations" will be batched for replication
+const ForwardLocalOnlyKey = "forwardLocalOnly"

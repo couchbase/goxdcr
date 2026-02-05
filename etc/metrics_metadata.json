@@ -1268,6 +1268,18 @@
         ],
         "stability": "committed"
     },
+    "xdcr_non_local_mutations_skipped_total": {
+        "type": "counter",
+        "help": "Number of document mutations that were not batched for replication to Target because they did not qualify as 'local' for the 'forwardLocalOnly' replication",
+        "added": "8.1.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_num_checkpoints_total": {
         "type": "counter",
         "help": "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication",

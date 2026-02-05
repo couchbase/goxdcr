@@ -162,6 +162,9 @@ const (
 	CNGQueueSizeKey   = base.CNGQueueSizeKey   // size of the channel buffer between nozzle and workers
 	CNGConnCountKey   = base.CNGConnCountKey   // number of gRPC connections to CNG per nozzle
 	CNGRPCDeadlineKey = base.CNGRPCDeadline    // gRPC deadline in milliseconds for each RPC call to CNG
+
+	// Boolean flag to specify if only "local mutations" are to be batched for replication
+	ForwardLocalOnlyKey = base.ForwardLocalOnlyKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -180,7 +183,7 @@ const (
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
 	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey, MobileCompatibleKey, CLogKey}
+	CollectionsDelVbBackfillKey, DismissEventKey, MobileCompatibleKey, CLogKey, ForwardLocalOnlyKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{FilterSystemScopeKey, PipelineReinitHashKey}
@@ -211,7 +214,7 @@ var MultiValueMap map[string]string = map[string]string{
 }
 
 // settings that require validation
-var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey}
+var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey, ForwardLocalOnlyKey}
 
 var MaxBatchCount = 10000
 
@@ -327,6 +330,8 @@ var CNGQueueSizeConfig = &SettingsConfig{base.DefaultCNGQueueSize, &Range{1, 100
 var CNGConnCountConfig = &SettingsConfig{base.DefaultCNGConnCount, &Range{1, 100}}
 var CNGRPCDeadlineConfig = &SettingsConfig{base.DefaultCNGRPCDeadline, &Range{500, 60000}} // (in ms) range = 500 ms to 1 minute
 
+var forwardLocalOnlyConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -395,6 +400,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CNGQueueSizeKey:   CNGQueueSizeConfig,
 	CNGConnCountKey:   CNGConnCountConfig,
 	CNGRPCDeadlineKey: CNGRPCDeadlineConfig,
+
+	ForwardLocalOnlyKey: forwardLocalOnlyConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1656,6 +1663,7 @@ func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *Repli
 // which is a string encoded json map. If the validation is successful, returns the corresponding map.
 var ValidateAndConvertStrToCLogMapping func(settingStr string) (base.ConflictLoggingMappingInput, error)
 
+// List of new replication settings that may have been skipped by a legacy node (during mixed-mode operation)
 var UpgradeReplicationSettings = [...]string{DCPFlowControlThrottleKey, ComponentEventsChanLengthKey}
 
 // GetMinPVLenForMobile returns the value of MinPVLenForMobileKey setting.
@@ -1675,4 +1683,10 @@ func (s *ReplicationSettings) GetCLogPauseReplThreshold() int {
 func (s *ReplicationSettings) GetCLogMonitorDuration() int {
 	val, _ := s.GetSettingValueOrDefaultValue(CLogMonitorDurationKey)
 	return val.(int)
+}
+
+func (s *ReplicationSettings) GetForwardLocalOnlyFlag() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(ForwardLocalOnlyKey)
+	flag := val.(bool)
+	return flag
 }

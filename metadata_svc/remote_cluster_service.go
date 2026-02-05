@@ -2924,16 +2924,30 @@ func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName s
 
 	oldRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
-		return agent, err
+		return nil, err
 	}
 
 	err = service.validateRemote(ref, true)
 	if err != nil {
-		return agent, err
+		return nil, err
+	}
+
+	// As part of CNG-P1 guardrails, forwardLocalOnly cannot be enabled for a remote-cluster of CNG RemoteType
+	// Guardrail will be removed after MB-70671
+	if ref.GetRemoteType() == metadata.RemoteTypeCng {
+		specs, err := service.getReplReader().AllReplicationSpecsWithRemote(ref)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify presence of 'forwardLocalOnly' replications for CNG reference: %v", err)
+		}
+		for _, spec := range specs {
+			if spec.Settings.GetForwardLocalOnlyFlag() {
+				return nil, base.ErrorForwardLocalOnlyCNGUnsupported
+			}
+		}
 	}
 
 	if oldRef.Uuid() != ref.Uuid() {
-		return agent, wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("The new hostname points to a different remote cluster %v, which is not allowed with old cluster being %v.", ref.Uuid(), oldRef.Uuid()))
+		return nil, wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("The new hostname points to a different remote cluster %v, which is not allowed with old cluster being %v.", ref.Uuid(), oldRef.Uuid()))
 	}
 
 	return agent, nil
