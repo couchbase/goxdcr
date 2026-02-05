@@ -47,7 +47,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, service_def.NON_LOCAL_MUTATIONS_SKIPPED_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -179,6 +179,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FILTERED_CLOG_METRIC:           service_def.MetricTypeCounter,
 	service_def.GET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
 	service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC:      service_def.MetricTypeCounter,
+	service_def.NON_LOCAL_MUTATIONS_SKIPPED_METRIC:  service_def.MetricTypeCounter,
 }
 
 func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, srcvb uint16) base.VBCountMetric {
@@ -1707,6 +1708,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.GET_DOCS_CAS_CHANGED_METRIC, getCasChanged)
 		subdocCmdDocsSkipped := metrics.NewCounter()
 		registry.Register(service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC, subdocCmdDocsSkipped)
+		nonLocalMutationsSkipped := metrics.NewCounter()
+		registry.Register(service_def.NON_LOCAL_MUTATIONS_SKIPPED_METRIC, nonLocalMutationsSkipped)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1761,6 +1764,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.TRUE_CONFLICTS_DETECTED] = trueConflictsCnt
 		metric_map[service_def.GET_DOCS_CAS_CHANGED_METRIC] = getCasChanged
 		metric_map[service_def.SUBDOC_CMD_DOCS_SKIPPED_METRIC] = subdocCmdDocsSkipped
+		metric_map[service_def.NON_LOCAL_MUTATIONS_SKIPPED_METRIC] = nonLocalMutationsSkipped
 
 		listOfTargetVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(listOfTargetVBs, part.Id())
@@ -2065,6 +2069,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		if err != nil {
 			return err
 		}
+
+	case common.NonLocalMutationSkipped:
+		metricMap[service_def.NON_LOCAL_MUTATIONS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+
 	}
 	return nil
 }

@@ -648,6 +648,7 @@ var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
 var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 0, 1}
+var VersionForForwardLocalOnly = ServerVersion{8, 0, 2}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1848,6 +1849,7 @@ const (
 	CLogHibernatedCount                = "clog_hibernated_count"
 	GetDocsCasChangedCount             = "get_docs_cas_changed"
 	SubdocCmdsSkippedCount             = "subdoc_cmd_docs_skipped"
+	NonLocalMutationsSkippedCount      = "non_local_mutations_skipped"
 )
 
 var ValidJsonEnds []byte = []byte{
@@ -2014,3 +2016,6 @@ const (
 )
 
 var MaxKeepAliveTokensForCkptMgr = 100
+
+// When enabled, only "local mutations" will be batched for replication
+const ForwardLocalOnlyKey = "forwardLocalOnly"

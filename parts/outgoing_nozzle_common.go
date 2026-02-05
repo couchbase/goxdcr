@@ -112,6 +112,8 @@ type baseConfig struct {
 	devBackfillSendDelay uint32
 
 	DisableHlvBasedShortCircuit atomic.Bool
+
+	forwardLocalOnly atomic.Bool // flag to specify if only "local mutations" are to be batched for replication
 }
 
 type VbucketCommon struct {
@@ -168,6 +170,7 @@ const (
 	UnknownReason OutNozzleDataSkippedReason = iota
 	DataIsFromTarget
 	SubdocMaxPathLimitReached
+	IsNotLocalMutation
 )
 
 type DataSentEventAdditional struct {

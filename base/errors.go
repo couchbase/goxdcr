@@ -105,6 +105,7 @@ var (
 	ErrorCLoggingTargetUnsupported               = errors.New("Target cluster does not support conflict-logging feature")
 	ErrorSubdocMaxPathLimitBreached              = fmt.Errorf("subdoc max path limit breached")
 	ErrUnsupportedAlternateAddressing            = errors.New("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
+	ErrorForwardLocalOnlyUnsupported             = errors.New("all cluster nodes do not support the replication setting 'forwardLocalOnly', so it cannot be enabled")
 )
 
 // Various non-error internal msgs

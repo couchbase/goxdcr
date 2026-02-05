@@ -2977,16 +2977,16 @@ func (service *RemoteClusterService) ValidateSetRemoteCluster(refName string, re
 func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName string, ref *metadata.RemoteClusterReference) (*RemoteClusterAgent, error) {
 	oldRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
-		return agent, err
+		return nil, err
 	}
 
 	err = service.validateRemoteCluster(ref, true)
 	if err != nil {
-		return agent, err
+		return nil, err
 	}
 
 	if oldRef.Uuid() != ref.Uuid() {
-		return agent, wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("The new hostname points to a different remote cluster %v, which is not allowed with old cluster being %v.", ref.Uuid(), oldRef.Uuid()))
+		return nil, wrapAsInvalidRemoteClusterOperationError(fmt.Sprintf("The new hostname points to a different remote cluster %v, which is not allowed with old cluster being %v.", ref.Uuid(), oldRef.Uuid()))
 	}
 
 	return agent, nil

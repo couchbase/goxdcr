@@ -727,12 +727,12 @@ func CheckIfRemoteValidationRequired(justValidate bool, oldSettings, newSettings
 		return false
 	}
 
-	compressionType, compressionOk := newSettings[metadata.CompressionTypeKey]
-	if compressionOk {
-		oldCompressionType := oldSettings[metadata.CompressionTypeKey].(int)
-		if (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
-			base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
-			return true
+	if compressionType, ok := newSettings[metadata.CompressionTypeKey].(int); ok {
+		if oldCompressionType, ok := oldSettings[metadata.CompressionTypeKey].(int); ok {
+			if (base.GetCompressionType(compressionType) != base.CompressionTypeNone) &&
+				base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType) {
+				return true
+			}
 		}
 	}
 
@@ -752,6 +752,14 @@ func CheckIfRemoteValidationRequired(justValidate bool, oldSettings, newSettings
 		}
 		if !conflictLoggingMap.Disabled() && !conflictLoggingMap.SameAs(oldConflictLoggingMap) {
 			return true
+		}
+	}
+
+	if forwardLocalOnly, ok := newSettings[metadata.ForwardLocalOnlyKey].(bool); ok {
+		if oldForwardLocalOnly, ok := oldSettings[metadata.ForwardLocalOnlyKey].(bool); ok {
+			if forwardLocalOnly && !oldForwardLocalOnly {
+				return true
+			}
 		}
 	}
 

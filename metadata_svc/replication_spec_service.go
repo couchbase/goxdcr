@@ -641,7 +641,7 @@ func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket,
 	return errorMap, err, warnings
 }
 func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, newSettings bool, warnings service_def.UIWarnings) error {
-
+	var clusterCompatVer *int
 	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
 		// Validate filter if it's a new setting OR it's an existing adv filter
 		if version, ok := settings[metadata.FilterVersionKey]; newSettings || (ok && (version.(base.FilterVersionType) == base.FilterVersionAdvanced)) {
@@ -651,7 +651,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
 				return err
 			}
-			if !base.IsClusterCompatible(clusterCompat, base.VersionForAdvFilteringSupport) {
+			clusterCompatVer = &clusterCompat
+			if !base.IsClusterCompatible(*clusterCompatVer, base.VersionForAdvFilteringSupport) {
 				return base.ErrorAdvFilterMixedModeUnsupported
 			}
 
@@ -678,40 +679,29 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 	}
 
+	var sourceECCV *bool
 	if mobile, ok := settings[metadata.MobileCompatibleKey].(int); ok {
 		if mobile != base.MobileCompatibilityOff {
 			// Mobile is on. Make sure source bucket enableCrossClusterVersioning is true.
-			connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
+			crossClusterVer, err := service.getSourceBucketECCV(sourceBucket)
 			if err != nil {
 				return err
 			}
-			username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
-			if err != nil {
-				service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
-				return err
-			}
-			bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
-			if err != nil {
-				return err
-			}
-			crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
-			if err != nil {
-				return err
-			}
-			if !crossClusterVer {
+			sourceECCV = &crossClusterVer
+			if *sourceECCV == false {
 				errorMap[base.MobileCompatibleKey] = fmt.Errorf("mobile must be off when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
 				return nil
 			}
 		}
 	}
-	targetClusterRef, err1 := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
-	if err1 != nil {
+	targetClusterRef, errTargetClusterRef := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if errTargetClusterRef != nil {
 		// In this case an error is reported only when the agent is not yet initialized.
-		// It is ok to skip the appendGoMaxProcsWarnings and unblock the function. Hence set the error to nil and move ahead
+		// It is ok to skip the appendGoMaxProcsWarnings and unblock the function. Hence move ahead.
 		service.logger.Errorf("Failed to fetch remote cluster ref for %v - skip checking GoMaxProcs and nozzles warnings", targetCluster)
-		return nil
+	} else {
+		service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
 	}
-	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
 
 	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.CLogKey])
 	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
@@ -727,31 +717,74 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 
 		// Conflict logging is on. Make sure source bucket enableCrossClusterVersioning is true.
-		connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
-		if err != nil {
-			return err
+		if sourceECCV == nil {
+			crossClusterVer, err := service.getSourceBucketECCV(sourceBucket)
+			if err != nil {
+				return err
+			}
+			sourceECCV = &crossClusterVer
 		}
-		username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
-		if err != nil {
-			service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
-			return err
-		}
-		bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
-		if err != nil {
-			return err
-		}
-		crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
-		if err != nil {
-			return err
-		}
-		if !crossClusterVer {
+		if *sourceECCV == false {
 			errorMap[metadata.CLogKey] = fmt.Errorf("conflictLogging must be disabled when %v is false for the source bucket", base.EnableCrossClusterVersioningKey)
+			return nil
+		}
+	}
+
+	if forwardLocalOnly, ok := settings[metadata.ForwardLocalOnlyKey].(bool); ok && forwardLocalOnly {
+		// Ensure that all nodes in the Source cluster support the 'forwardLocalOnly' setting
+		if clusterCompatVer == nil {
+			clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+			if err != nil {
+				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
+				return err
+			}
+			clusterCompatVer = &clusterCompat
+		}
+		if !base.IsClusterCompatible(*clusterCompatVer, base.VersionForForwardLocalOnly) {
+			errorMap[base.ForwardLocalOnlyKey] = base.ErrorForwardLocalOnlyUnsupported
+			return nil
+		}
+
+		// Source bucket enableCrossClusterVersioning needs to be enabled as a prerequisite
+		if sourceECCV == nil {
+			crossClusterVer, err := service.getSourceBucketECCV(sourceBucket)
+			if err != nil {
+				return err
+			}
+			sourceECCV = &crossClusterVer
+		}
+		if *sourceECCV == false {
+			errorMap[base.ForwardLocalOnlyKey] = fmt.Errorf("'forwardLocalOnly' cannot be enabled when '%v' is false for the Source bucket", base.EnableCrossClusterVersioningKey)
 			return nil
 		}
 	}
 
 	return nil
 }
+
+func (service *ReplicationSpecService) getSourceBucketECCV(bucketName string) (bool, error) {
+	connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
+	if err != nil {
+		return false, err
+	}
+	username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
+	if err != nil {
+		service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
+		return false, err
+	}
+
+	bucketInfo, err := service.utils.GetBucketInfo(connstr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+	if err != nil {
+		return false, err
+	}
+
+	crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+	if err != nil {
+		return false, err
+	}
+	return crossClusterVer, nil
+}
+
 func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {
 	var populateErr error
 	var err error
@@ -824,6 +857,18 @@ func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMa
 		}
 		if !crossClusterVer {
 			errorMap[metadata.CLogKey] = fmt.Errorf("conflictLogging must be disabled when %v is false for the target bucket", base.EnableCrossClusterVersioningKey)
+			return nil
+		}
+	}
+
+	if forwardLocalOnly, ok := settings[metadata.ForwardLocalOnlyKey].(bool); ok && forwardLocalOnly {
+		// Target bucket enableCrossClusterVersioning needs to be enabled as a prerequisite
+		crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+		if err != nil {
+			return err
+		}
+		if !crossClusterVer {
+			errorMap[base.ForwardLocalOnlyKey] = fmt.Errorf("'forwardLocalOnly' cannot be enabled when '%v' is false for the Target bucket", base.EnableCrossClusterVersioningKey)
 			return nil
 		}
 	}
@@ -1771,6 +1816,12 @@ func (service *ReplicationSpecService) ValidateSpecSettings(settings *metadata.R
 	// validated together. Therefore it's validated here instead of ValidateReplicationSettings.
 	validateDeletionFilterExprForTombstones(settings, false, service.xdcr_comp_topology_svc, errorMap)
 	if len(errorMap) > 0 {
+		return errorMap, nil
+	}
+
+	// 'forwardLocalOnly' cannot be enabled when 'mobile' is enabled
+	if settings.GetForwardLocalOnlyFlag() && settings.GetMobileCompatible() != base.MobileCompatibilityOff {
+		errorMap[metadata.ForwardLocalOnlyKey] = fmt.Errorf("'%v' does not support '%v' being enabled", metadata.ForwardLocalOnlyKey, metadata.MobileCompatibleKey)
 		return errorMap, nil
 	}
 

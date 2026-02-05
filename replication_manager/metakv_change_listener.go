@@ -506,7 +506,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
 		!oldSettings.GetConflictLoggingMapping().Same(newSettings.GetConflictLoggingMapping()) ||
-		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() {
+		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
+		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
@@ -526,6 +527,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 
 		return nil
 	}
+
+	rscl.logger.Warnf("found no settings change which qualified for a live-update of the pipeline %v\n", topic)
 
 	return nil
 }

@@ -153,6 +153,9 @@ const (
 
 	// FilterExpirationsWithFEKey represents filtering of expirations based on filter expression.
 	FilterExpirationsWithFEKey = base.FilterExpirationsWithFEKey
+
+	// Boolean flag to specify if only "local mutations" are to be batched for replication
+	ForwardLocalOnlyKey = base.ForwardLocalOnlyKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -171,7 +174,7 @@ const (
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
 	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey, MobileCompatibleKey, CLogKey}
+	CollectionsDelVbBackfillKey, DismissEventKey, MobileCompatibleKey, CLogKey, ForwardLocalOnlyKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{FilterSystemScopeKey, PipelineReinitHashKey}
@@ -206,7 +209,7 @@ var MultiValueMap map[string]string = map[string]string{
 }
 
 // settings that require validation
-var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey}
+var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey, CLogKey, ForwardLocalOnlyKey}
 
 var MaxBatchCount = 10000
 
@@ -317,6 +320,8 @@ var PipelineReinitHashConfig = &SettingsConfig{"", nil}
 // of the replication by default (i.e. it is not disabled by default). Disable it if needed, at the cost of performance.
 var disableHlvBasedShortCircuitConfig = &SettingsConfig{false, nil}
 
+var forwardLocalOnlyConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -389,6 +394,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcConfig,
 	PipelineReinitHashKey:                PipelineReinitHashConfig,
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
+	ForwardLocalOnlyKey:                  forwardLocalOnlyConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -662,11 +668,11 @@ func (r *ReplicationMultiValueHelper) handleCollectionsMgtKeyImport(s *Replicati
 // When exporting, we just export the replicationMultiValueHelper, which ReplicationSetting will
 // check for and make sure to do the right interaction combinations
 func (r *ReplicationMultiValueHelper) ExportToSettingsMap(settings ReplicationSettingsMap) {
-	for k, _ := range r.activeConfig {
+	for k := range r.activeConfig {
 		settings[k] = *r
 	}
 
-	for k, _ := range MultiValueMap {
+	for k := range MultiValueMap {
 		delete(settings, k)
 	}
 }
@@ -675,13 +681,13 @@ func (r *ReplicationMultiValueHelper) ImportToReplicationSettings(s *Replication
 	r.handleImport(s, sm)
 	// Everything else, not implemented
 	// Cleanup the older keys
-	for k, _ := range MultiValueMap {
+	for k := range MultiValueMap {
 		delete(s.Values, k)
 	}
 }
 
 func (r *ReplicationMultiValueHelper) handleImport(s *ReplicationSettings, sm ReplicationSettingsMap) {
-	for k, _ := range r.activeConfig {
+	for k := range r.activeConfig {
 		if k == FilterExpDelKey {
 			r.handleFilterExpDelKeyImport(s, sm)
 		} else if k == CollectionsMgtMultiKey {
@@ -1607,3 +1613,9 @@ func (old *ReplicationSettings) NeedToReconstructDueToConflictLogging(new *Repli
 // validates the input conflict logging in the replication setting,
 // which is a string encoded json map. If the validation is successful, returns the corresponding map.
 var ValidateAndConvertStrToCLogMapping func(settingStr string) (base.ConflictLoggingMappingInput, error)
+
+func (s *ReplicationSettings) GetForwardLocalOnlyFlag() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(ForwardLocalOnlyKey)
+	flag := val.(bool)
+	return flag
+}

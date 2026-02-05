@@ -604,6 +604,9 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 		if val, ok := settings[base.DisableHlvBasedShortCircuitKey]; ok {
 			config.DisableHlvBasedShortCircuit.Store(val.(bool))
 		}
+		if val, ok := settings[base.ForwardLocalOnlyKey]; ok {
+			config.forwardLocalOnly.Store(val.(bool))
+		}
 	}
 	return err
 }
@@ -741,6 +744,7 @@ type XmemNozzle struct {
 	counterNumGetEx                   uint64
 	counterNumGetCompressed           uint64
 	counterUpstreamErrReporterMissing uint64
+	counterNonLocalMutation           uint64
 
 	receive_token_ch chan int
 
@@ -1073,14 +1077,12 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 
 	xmem.checkAndUpdateReceivedStats(request)
 
-	// For custom CR, we don't need to send document if target is the source of change.
-	fromTarget, err := xmem.isChangesFromTarget(request)
+	addToBatch, reasonIfSkipping, err := xmem.sendOrNotBasedOnHLV(request)
 	if err != nil {
-		// We shouldn't hit error here. If we do, log an error. We will just treat the document as not from target
-		xmem.Logger().Warnf("%v accumuBatch received error%v parsing the XATTR to determine if the change is from target for custom CR, req.UniqueKey=%v%s%v",
+		// We shouldn't hit error here. If we do, log an error. We will just treat the document as eligible for batching
+		xmem.Logger().Warnf("%v accumuBatch received error (%v) parsing the XATTR to determine if the change is eligible for batching, req.UniqueKey=%v%s%v",
 			xmem.Id(), err, base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
-	} else if fromTarget {
-		// Change is from target. Don't replicate back
+	} else if !addToBatch {
 		additionalInfo := OutNozzleDataSkippedEventAdditional{
 			DataSkippedCommon: DataSkippedCommon{
 				Seqno:         request.Seqno,
@@ -1091,15 +1093,28 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 				Cloned:        request.Cloned,
 				CloneSyncCh:   request.ClonedSyncCh,
 			},
-			Reason: DataIsFromTarget,
+			Reason: reasonIfSkipping,
 		}
 
 		if request.OrigSrcVB != nil {
 			additionalInfo.SetOrigSrcVB(*request.OrigSrcVB)
 		}
-		xmem.RaiseEvent(common.NewEvent(common.TargetDataSkipped, nil, xmem, nil, additionalInfo))
+
+		switch reasonIfSkipping {
+		case DataIsFromTarget:
+			xmem.RaiseEvent(common.NewEvent(common.TargetDataSkipped, nil, xmem, nil, additionalInfo))
+			atomic.AddUint64(&xmem.counter_from_target, 1)
+
+		case IsNotLocalMutation:
+			xmem.RaiseEvent(common.NewEvent(common.NonLocalMutationSkipped, nil, xmem, nil, additionalInfo))
+			atomic.AddUint64(&xmem.counterNonLocalMutation, 1)
+
+		default:
+			xmem.Logger().Warnf("%v accumuBatch skipping data for unknown reason. req.UniqueKey=%v%s%v, reason=%v\n",
+				xmem.Id(), base.UdTagBegin, request.UniqueKey, base.UdTagEnd, reasonIfSkipping)
+		}
+
 		xmem.recycleDataObj(request)
-		atomic.AddUint64(&xmem.counter_from_target, 1)
 		return nil
 	}
 	xmem.batch_lock <- true
@@ -3068,31 +3083,57 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	return nil
 }
 
-// If the change is from targetCluster, we don't need to send it back.
-// In fact, it will eventually lose CR. So we can short-circuit it's lifetime to
-// avoid unnecessary processing down the line.
-func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, error) {
+// Returns a boolean indicating whether the mutation can be batched for replication.
+// If not, the returned OutNozzleDataSkippedReason indicates why.
+// Scenarios in which we can skip batching a mutation are:
+// (1) If 'forwardLocalOnly' is enabled and 'req' is a non-local mutation
+// (2) If the change is from targetCluster (it will eventually lose CR and so can be skipped).
+// Note that 'forwardLocalOnly' takes precedence over 'DisableHlvBasedShortCircuit'.
+func (xmem *XmemNozzle) sendOrNotBasedOnHLV(req *base.WrappedMCRequest) (bool, OutNozzleDataSkippedReason, error) {
+	reasonIfSkipping := UnknownReason // default reason
 	if !xmem.usesHlv(req) {
-		return false, nil
+		return true, reasonIfSkipping, nil
 	}
 
 	if req.RetryCRCount > 0 {
-		return false, nil
+		return true, reasonIfSkipping, nil
 	}
 
+	forwardLocalOnly := xmem.config.forwardLocalOnly.Load()
+	if !forwardLocalOnly { // as 'forwardLocalOnly' takes precedence over 'DisableHlvBasedShortCircuit'
+		return xmem.isChangeNotFromTargetCluster(req)
+	}
+
+	return xmem.isChangeFromLocalCluster(req)
+}
+
+func (xmem *XmemNozzle) isChangeNotFromTargetCluster(req *base.WrappedMCRequest) (bool, OutNozzleDataSkippedReason, error) {
 	if xmem.config.DisableHlvBasedShortCircuit.Load() {
-		// The short-circuiting behaviour is explicitly turned off
-		// for this replication.
-		return false, nil
+		// no need to process HLV, bailing
+		return true, UnknownReason, nil
 	}
 
 	doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
 	meta, err := doc.GetMetadata(xmem.uncompressBody)
 	if err != nil {
-		return false, err
+		// in case of an error, don't skip replicating the document
+		return true, UnknownReason, err
 	}
 
-	return meta.GetHLV().GetCvSrc() == xmem.targetActorId, nil
+	// will replicate mutation only if it is NOT from the Target cluster
+	return meta.GetHLV().GetCvSrc() != xmem.targetActorId, DataIsFromTarget, nil
+}
+
+func (xmem *XmemNozzle) isChangeFromLocalCluster(req *base.WrappedMCRequest) (bool, OutNozzleDataSkippedReason, error) {
+	doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
+	meta, err := doc.GetMetadata(xmem.uncompressBody)
+	if err != nil {
+		// in case of an error, don't skip replicating the document
+		return true, UnknownReason, err
+	}
+
+	// will replicate mutation only if it is from the local Source cluster
+	return meta.IsLocalMutation(xmem.sourceActorId), IsNotLocalMutation, nil
 }
 
 func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) error {
@@ -4396,7 +4437,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v, numGetEx=%v, numGetComp=%v, numUpstreamErrReporterMissing=%v",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, numSubdocGet=%v, temp_err=%v, eaccess_err=%v, guardrailHit=%v, unknownStatusRec=%v, logConflicts=%v, numGetEx=%v, numGetComp=%v, numUpstreamErrReporterMissing=%v, nonLocalMutationsSkipped=%v,",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -4410,6 +4451,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
 			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus),
 			xmem.conflictLoggingEnabled(), atomic.LoadUint64(&xmem.counterNumGetEx), atomic.LoadUint64(&xmem.counterNumGetCompressed), atomic.LoadUint64(&xmem.counterUpstreamErrReporterMissing),
+			atomic.LoadUint64(&xmem.counterNonLocalMutation),
 		)
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
@@ -4884,6 +4926,12 @@ func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 		if xmem.config.DisableHlvBasedShortCircuit.Load() != disableHlvBasedShortCircuitBool {
 			xmem.config.DisableHlvBasedShortCircuit.Store(disableHlvBasedShortCircuitBool)
 			xmem.Logger().Infof("%v updated %v to %v", xmem.Id(), DISABLE_HLV_SHORT_CIRCUIT, disableHlvBasedShortCircuitBool)
+		}
+	}
+	if forwardLocalOnlyNew, ok := settings[base.ForwardLocalOnlyKey].(bool); ok {
+		if xmem.config.forwardLocalOnly.Load() != forwardLocalOnlyNew {
+			xmem.config.forwardLocalOnly.Store(forwardLocalOnlyNew)
+			xmem.Logger().Infof("%v updated %v to %v", xmem.Id(), base.ForwardLocalOnlyKey, forwardLocalOnlyNew)
 		}
 	}
 

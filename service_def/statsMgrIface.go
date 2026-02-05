@@ -209,6 +209,9 @@ const (
 
 	// Consts for accumulative number of replications
 	TOTAL_REPLICATIONS_COUNT = "number_of_replications"
+
+	// 'forwardLocalOnly' metric, tracking number of skipped non-local mutations
+	NON_LOCAL_MUTATIONS_SKIPPED_METRIC = base.NonLocalMutationsSkippedCount
 )
 
 const (
@@ -1773,6 +1776,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The total number of replications that exists to replicate to a particular target cluster",
 		Stability:    Committed,
 		Labels:       RemoteClusterSpecificLabels,
+	},
+
+	NON_LOCAL_MUTATIONS_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForForwardLocalOnly,
+		Description:  "Number of document mutations that were not batched for replication to Target because they did not qualify as 'local' for the 'forwardLocalOnly' replication",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 }
 
