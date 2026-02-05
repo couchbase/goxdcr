@@ -2000,9 +2000,9 @@ function findCbWorkloadGen {
 		if [[ ! -z "${workloadGenCache:-}" ]]; then
 			echo "$workloadGenCache"
 			if [[ ! -f "$workloadGenCache" ]]; then
-			  # The cache file is out of date
-  			rm -f /tmp/cbworkloadGenLoc.tmp
-  		fi
+				# The cache file is out of date
+				rm -f /tmp/cbworkloadGenLoc.tmp
+			fi
 			return 0
 		fi
 	fi
