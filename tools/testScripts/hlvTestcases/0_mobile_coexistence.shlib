@@ -104,6 +104,7 @@ function testReplicationSettings {
 	setCrossClusterVersioningForBucket "C2" "B2"
 	sleep 5
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 
 	echo "Checking replication setting mobileCompatible=Active"
 	mobile=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .mobile)
@@ -198,6 +199,8 @@ function testMobileHlv {
 
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B2" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 
 	# Insert
 	writeJSONDocument "C1" "B1" "mobile1" '{"foo":"bar"}'

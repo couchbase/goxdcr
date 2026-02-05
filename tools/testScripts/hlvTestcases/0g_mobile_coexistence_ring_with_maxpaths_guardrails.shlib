@@ -75,6 +75,12 @@ function testMobileHlvWithRingTopology {
 	createBucketReplication "C3" "B3" "C1" "B1" BucketReplPropertiesWithMobile
 	echo "Replication C3.B3 -> C2.B2"
 	createBucketReplication "C3" "B3" "C2" "B2" BucketReplPropertiesWithMobile
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C1" "B1" "C3" "B3" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B2" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B2" "C3" "B3" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C3" "B3" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C3" "B3" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
 
 	# insert 100 docs which have 20 user xattrs each
 	numAbnormalDocs=100

@@ -131,6 +131,8 @@ function runOneReplicationCycleAndPause {
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" BucketReplProperties
 	createBucketReplication "C2" "B1" "C1" "B0" BucketReplProperties
+	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B1" "C1" "B0" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
 	enableMobileImportSimIfPresent "C1" "B0"

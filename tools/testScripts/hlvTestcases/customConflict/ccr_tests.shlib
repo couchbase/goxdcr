@@ -64,6 +64,7 @@ function setUpCcrReplication {
 					echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
 					exit 1
 				fi
+				seedInjectMainPipelineDelay $cluster1 $bucket1 $cluster2 $bucket2 $SEED_INJ_MAX_MAIN_DELAY_MS
 			fi
 		done
 	done

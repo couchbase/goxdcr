@@ -143,6 +143,13 @@ function testReplicationWithConflictLogging {
 
 	# replication to verify that conflict records are not replicated.
 	createBucketReplication "C1" "B4" "C1" "B0" BucketReplProperties
+	seedInjectMainPipelineDelay "C1" "B1" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C1" "B1" "C3" "B3" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B2" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C2" "B2" "C3" "B3" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C3" "B3" "C1" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C3" "B3" "C2" "B2" $SEED_INJ_MAX_MAIN_DELAY_MS
+	seedInjectMainPipelineDelay "C1" "B4" "C1" "B0" $SEED_INJ_MAX_MAIN_DELAY_MS
 
 	echo "Sleep $HLV_TESTS_CLOG_OSO_INIT_SLEEP_SECS seconds to wait for replication to finish"
 	sleep $HLV_TESTS_CLOG_OSO_INIT_SLEEP_SECS
