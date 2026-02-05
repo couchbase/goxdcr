@@ -552,6 +552,9 @@ function testPositiveWithFECreate {
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} with create replication API PASSED"
 	echo "============================================================================"
 
+	# Run differ to verify data consistency
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
+
 	# Cleanup setup for next tests
 	cleanupBucketReplications
 	cleanupBuckets
@@ -733,6 +736,9 @@ function testPositiveWithFEUpdate {
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings API PASSED"
 	echo "============================================================================"
 
+	# Run differ to verify data consistency
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
+
 	# Cleanup setup for next tests
 	cleanupBucketReplications
 	cleanupBuckets
@@ -884,6 +890,9 @@ function testPositiveWithFEUpgradeAfterPassthrough {
 	echo "============================================================================"
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade PASSED"
 	echo "============================================================================"
+
+	# Run differ to verify data consistency
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	# Cleanup setup for next tests
 	cleanupBucketReplications
@@ -1068,6 +1077,9 @@ function testPositiveWithFEUpgradeAfterFiltered {
 	echo "============================================================================"
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade (after filtered) PASSED"
 	echo "============================================================================"
+
+	# Run differ to verify data consistency
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	# Cleanup setup for next tests
 	cleanupBucketReplications
