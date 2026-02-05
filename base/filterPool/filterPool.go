@@ -17,12 +17,14 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
-// Implements filter/filter
+// Implements filter/Filter for xdcrDiffer.
 
 type filterWithState struct {
 	filter filter.Filter
 	myIdx  int
 }
+
+var _ filter.Filter = (*FilterPool)(nil)
 
 type FilterPool struct {
 	dataPool    base.DataPool
@@ -58,6 +60,18 @@ func (f *FilterPool) SetShouldSkipUncommittedTxn(val bool) {
 	// maybe revisit this? For now it's not used for differ and this seems to be fine
 	for i := 0; i < len(f.filtersList); i++ {
 		f.filtersList[i].filter.SetShouldSkipUncommittedTxn(val)
+	}
+}
+
+func (f *FilterPool) SetShouldFilterDeletionsWithFE(val bool) {
+	for i := 0; i < len(f.filtersList); i++ {
+		f.filtersList[i].filter.SetShouldFilterDeletionsWithFE(val)
+	}
+}
+
+func (f *FilterPool) SetShouldFilterExpirationsWithFE(val bool) {
+	for i := 0; i < len(f.filtersList); i++ {
+		f.filtersList[i].filter.SetShouldFilterExpirationsWithFE(val)
 	}
 }
 
