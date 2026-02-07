@@ -29,6 +29,7 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -445,15 +446,19 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	} else {
 		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
-		if err != nil {
+		switch {
+		case err == nil:
+			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+			go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
+			return NewCreateRemoteClusterResponse(remoteClusterRef)
+		case metadata_svc.RemoteClusterRefNotFoundErr(err):
+			// Return 404 Not Found if the remote cluster doesn't exist
+			return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+		default:
 			if isAccessDeniedErr(err) {
 				go writeRemoteAccessDeniedEvent(service_def.UpdateRemoteAccessDeniedEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), err.Error())
 			}
 			return EncodeRemoteClusterErrorIntoResponse(err)
-		} else {
-			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
-			go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
-			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
 }
@@ -476,7 +481,12 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 
 	remoteClusterService := RemoteClusterService()
 	ref, err := remoteClusterService.RemoteClusterByRefName(remoteClusterName, false)
-	if err != nil {
+	switch {
+	case err == nil:
+	case metadata_svc.RemoteClusterRefNotFoundErr(err):
+		// Return 404 Not Found if the remote cluster doesn't exist
+		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+	default:
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 
@@ -604,11 +614,14 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 	}
 
 	err = DeleteReplication(replicationId, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
-
-	if err != nil {
-		return EncodeReplicationSpecErrorIntoResponse(err)
-	} else {
+	switch {
+	case err == nil:
 		return NewEmptyArrayResponse()
+	case metadata_svc.ReplicationNotFoundErr(err):
+		// Return 404 Not Found if the replication doesn't exist
+		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+	default:
+		return EncodeReplicationSpecErrorIntoResponse(err)
 	}
 }
 
@@ -695,12 +708,16 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
+	switch {
+	case err == nil:
+		// marshal replication settings in replication spec and return it
+		return NewReplicationSettingsResponse(replSpec.Settings, nil, false)
+	case metadata_svc.ReplicationNotFoundErr(err):
+		// Return 404 Not Found if the replication doesn't exist
+		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+	default:
 		return EncodeReplicationSpecErrorIntoResponse(err)
 	}
-
-	// marshal replication settings in replication spec and return it
-	return NewReplicationSettingsResponse(replSpec.Settings, nil, false)
 }
 
 func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
@@ -748,12 +765,19 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	cleanupTempReplicationSettingKeys(settingsMap)
 
 	errorsMap, err, warnings := UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), justValidate)
-	if err != nil {
+	switch {
+	case err == nil:
+		if len(errorsMap) > 0 {
+			logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+			return EncodeErrorsMapIntoResponse(errorsMap, false)
+		}
+	case metadata_svc.ReplicationNotFoundErr(err):
+		// Return 404 Not Found if the replication doesn't exist
+		logger_ap.Errorf("UpdateReplicationSettings: Replication was not found, err=%v", err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+	default:
 		logger_ap.Errorf("UpdateReplicationSettings error=%v", err)
 		return nil, err
-	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
-		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
 	if justValidate {
@@ -764,12 +788,16 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 
 	// return replication settings after changes
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
-	if err != nil {
+	switch {
+	case err == nil:
+		logger_ap.Info("Done with doChangeReplicationSettingsRequest")
+		return NewReplicationSettingsResponse(replSpec.Settings, warnings, includeWarnings)
+	case metadata_svc.ReplicationNotFoundErr(err):
+		// Return 404 Not Found if the replication doesn't exist
+		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
+	default:
 		return EncodeReplicationSpecErrorIntoResponse(err)
 	}
-
-	logger_ap.Info("Done with doChangeReplicationSettingsRequest")
-	return NewReplicationSettingsResponse(replSpec.Settings, warnings, includeWarnings)
 }
 
 func ForceManualBackfillRequest(replId string, incomingReq string) error {

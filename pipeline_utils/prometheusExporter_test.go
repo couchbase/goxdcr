@@ -14,10 +14,11 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/goxdcr/service_def"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"testing"
+
+	"github.com/couchbase/goxdcr/service_def"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPrometheusExpVarParseMap(t *testing.T) {
@@ -86,7 +87,7 @@ func TestPrometheusParseMapToMetricMap(t *testing.T) {
 		convertedMap[k] = ExpVarParseMapType(v.(map[string]interface{}))
 	}
 
-	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, StatsTableLabels)
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, NewPrometheusLabelsTable)
 	exporter.expVarParseMap = convertedMap
 
 	exporter.LoadMetricsMap(true)

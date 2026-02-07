@@ -1150,7 +1150,7 @@ func (rm *ResourceManager) applySettingsToPipeline(spec metadata.GenericSpecific
 	}
 
 	if pipeline == nil {
-		return fmt.Errorf("Skipping updating settings for %v because of nil pipeline. err=%v\n", replId)
+		return fmt.Errorf("Skipping updating settings for %v because of nil pipeline", replId)
 	}
 	// apply the setting to the live pipeline
 	return pipeline.UpdateSettings(settings)
