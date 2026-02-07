@@ -38,6 +38,87 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
+# Validates that REST API endpoints return proper HTTP 404 (Not Found) responses
+# for non-existent resources before any remote cluster references or replications are created.
+function validate404Responses {
+	local sourceCluster="C1"
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	local FAKE_REPL_ID="fake-cluster-uuid%2FB1%2FB2"
+	local RESP_CODE
+	local RESULT
+	local URL="http://$sourceHost:$sourcePort"
+	local remoteClusterURI="$URL/pools/default/remoteClusters/nonexistent-cluster"
+	local replicationURI="$URL/settings/replications/${FAKE_REPL_ID}"
+
+	echo "============================================================================"
+	echo "Validating 404 responses for non-existent resources before creating replications"
+	echo "============================================================================"
+
+	# Test 1: GET specific non-existent remote cluster should return 404
+	echo "Test 1: GET specific non-existent remote cluster (nonexistent-cluster) on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW $remoteClusterURI)
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for getting non-existent remote cluster, got $RESP_CODE"
+		exit 1
+	fi
+	sleep 2
+
+	# Test 2: DELETE non-existent remote cluster should return 404
+	echo "Test 2: DELETE non-existent remote cluster (nonexistent-cluster) on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW $remoteClusterURI)
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for deleting non-existent remote cluster, got $RESP_CODE"
+		exit 1
+	fi
+	echo "PASSED: DELETE non-existent remote cluster returned 404"
+	sleep 2
+
+	# Test 3: POST (update) non-existent remote cluster reference should return 404
+	echo "Test 3: POST (update) non-existent remote cluster reference (nonexistent-cluster) on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW $remoteClusterURI -d name=nonexistent-cluster -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW)
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for updating non-existent remote cluster, got $RESP_CODE"
+		exit 1
+	fi
+	echo "PASSED: POST non-existent remote cluster reference returned 404"
+	sleep 2
+
+	# Test 4: DELETE non-existent replication should return 404
+	echo "Test 4: DELETE non-existent replication on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${FAKE_REPL_ID})
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for deleting non-existent replication, got $RESP_CODE"
+		exit 1
+	fi
+	echo "PASSED: DELETE non-existent replication returned 404"
+	sleep 2
+
+	# Test 5: GET non-existent replication settings should return 404
+	echo "Test 5: GET non-existent replication settings on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW $replicationURI)
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for getting non-existent replication settings, got $RESP_CODE"
+		exit 1
+	fi
+	echo "PASSED: GET non-existent replication settings returned 404"
+	sleep 2
+
+	# Test 6: POST (update) non-existent replication settings should return 404
+	echo "Test 6: POST (update) non-existent replication settings on $sourceCluster"
+	RESP_CODE=$($CURL -s -o /dev/null -w "%{http_code}" -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW $replicationURI -d checkpointInterval=600)
+	if [[ "$RESP_CODE" != "404" ]]; then
+		echo "FAILED: Expected HTTP 404 for updating non-existent replication settings, got $RESP_CODE"
+		exit 1
+	fi
+	echo "PASSED: POST non-existent replication settings returned 404"
+	sleep 2
+
+	echo "============================================================================"
+	echo "All 404 validation tests PASSED"
+	echo "============================================================================"
+}
+
 function runDataLoad {
 	echo "RUNNING dataload..."
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
@@ -77,6 +158,9 @@ function runTestCase {
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
+
+	validate404Responses
+
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
