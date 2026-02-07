@@ -105,4 +105,16 @@ packages:
       dir: "base/helpers/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
+  github.com/couchbase/cbauth:
+    interfaces:
+      Authenticator:
+        config:
+          dir: "replication_manager/mocks"
+          outpkg: "mocks"
+          mockname: "{{.InterfaceName}}"
+      Creds:
+        config:
+          dir: "replication_manager/mocks"
+          outpkg: "mocks"
+          mockname: "{{.InterfaceName}}"
 

@@ -1566,9 +1566,18 @@ func (service *ReplicationSpecService) writeUiLogWithAdditionalInfo(spec *metada
 	}
 }
 
+// ReplicationNotFoundErr returns true if err is for when a replication doesn't exist.
+func ReplicationNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return strings.HasPrefix(err.Error(), base.ReplicationSpecNotFoundErrorMessage)
+}
+
 func (service *ReplicationSpecService) IsReplicationValidationError(err error) bool {
 	if err != nil {
-		return strings.HasPrefix(err.Error(), ReplicationSpecAlreadyExistErrorMessage) || strings.HasPrefix(err.Error(), base.ReplicationSpecNotFoundErrorMessage)
+		return strings.HasPrefix(err.Error(), ReplicationSpecAlreadyExistErrorMessage) || ReplicationNotFoundErr(err)
 	} else {
 		return false
 	}

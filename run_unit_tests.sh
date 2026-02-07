@@ -8,6 +8,10 @@
 # will be governed by the Apache License, Version 2.0, included in the file
 # licenses/APL2.txt.
 
+export CGO_CFLAGS="-I$PWD/../../../../../sigar/include"
+export CGO_LDFLAGS="-L$PWD/../../../../../install/lib -lsigar"
+export DYLD_LIBRARY_PATH="$PWD/../../../../../install/lib:$DYLD_LIBRARY_PATH"
+
 function man() {
 	echo "Usage: $0 [--dir=<path>] [--long]" 1>&2
 	echo "-h OR --help						: Help" 1>&2
@@ -86,6 +90,8 @@ DIRS_WITH_UT=(
 	pipeline_svc
 	pipeline_manager
 	pipeline_utils
+	replication_manager
+	resource_manager
 	service_impl
 	streamApiWatcher
 	utils
