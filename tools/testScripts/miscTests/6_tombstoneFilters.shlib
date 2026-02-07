@@ -483,6 +483,9 @@ function testPositiveWithFECreate {
 	# (2000 preloaded docs + nomatch_doc UPR_MUTATION + nomatch_doc tombstone)
 	verifyTombstoneFilterStats "$testType" 1 2002
 
+	# Run differ to verify data consistency
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
+
 	# Step 2: Turn off filterWithExpression and verify ALL tombstones are filtered
 	echo "============================================================================"
 	echo "Step 2: Turning off $filterTombstoneSettingWithExpr"
@@ -551,9 +554,6 @@ function testPositiveWithFECreate {
 	echo "============================================================================"
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} with create replication API PASSED"
 	echo "============================================================================"
-
-	# Run differ to verify data consistency
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	# Cleanup setup for next tests
 	cleanupBucketReplications
@@ -736,9 +736,6 @@ function testPositiveWithFEUpdate {
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} with update settings API PASSED"
 	echo "============================================================================"
 
-	# Run differ to verify data consistency
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
-
 	# Cleanup setup for next tests
 	cleanupBucketReplications
 	cleanupBuckets
@@ -890,9 +887,6 @@ function testPositiveWithFEUpgradeAfterPassthrough {
 	echo "============================================================================"
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade PASSED"
 	echo "============================================================================"
-
-	# Run differ to verify data consistency
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	# Cleanup setup for next tests
 	cleanupBucketReplications
@@ -1077,9 +1071,6 @@ function testPositiveWithFEUpgradeAfterFiltered {
 	echo "============================================================================"
 	echo "Positive Test: ${filterTombstoneSettingWithExpr} upgrade (after filtered) PASSED"
 	echo "============================================================================"
-
-	# Run differ to verify data consistency
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
 
 	# Cleanup setup for next tests
 	cleanupBucketReplications
