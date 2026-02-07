@@ -135,7 +135,18 @@ function runActivePassiveSgwReplication {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	runActivePassiveSgwReplication "trinity" &&
 		runActivePassiveSgwReplication "morpheus" &&
 		runActivePassiveSgwReplication "totoro"
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
+	done
 }

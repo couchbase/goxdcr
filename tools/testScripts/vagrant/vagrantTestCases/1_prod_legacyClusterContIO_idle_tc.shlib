@@ -52,6 +52,12 @@ function runDataLoad {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	local maxRuns=30
 	echo "============================================================================"
 	echo "Running legacy replication with injection delays"
@@ -107,4 +113,9 @@ function runTestCase {
 	vagrantKillAllIO "C1"
 	cleanupBucketReplications
 	cleanupBuckets
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
+	done
 }

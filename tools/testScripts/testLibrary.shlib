@@ -411,7 +411,7 @@ function waitForChangesLeft0 {
 	local changesLeftMaxCheck=$CHECK_CHANGES_LEFT_MAX
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
-	if [[ ! -z "$seedArg" ]]; then
+	if [[ -n "${seedArg:-}" ]]; then
 		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 5))
 	fi
 
@@ -447,7 +447,11 @@ function waitForChangesLeft0 {
 			echo "$prefix: Changes left is not going down. It is still $changesLeft"
 		else
 			lastChangesLeft=$changesLeft
-			i=$(($i - 1))
+			if [[ -n "${seedArg:-}" ]]; then
+				i=0
+			else
+				i=$(($i - 1))
+			fi
 			echo "$prefix: Changes left is not 0. It is $changesLeft... it is decreasing"
 		fi
 		sleep $CHANGES_LEFT_0_WAIT_SECS
@@ -491,6 +495,7 @@ function checkChangesLeftInternalWithSpecifiedCount {
 	local i
 
 	local lastChangesLeft=0
+	local seedArg="${RANDOM_SEED_ARG:-}"
 
 	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
@@ -506,8 +511,12 @@ function checkChangesLeftInternalWithSpecifiedCount {
 				echo "Node $srcCluster Changes left is not $specifiedCount. It is $changesLeft"
 			else
 				lastChangesLeft=$changesLeft
-				i=$(($i - 1))
 				echo "Node $srcCluster Changes left is not $specifiedCount. It is $changesLeft... it is decreasing"
+				if [[ -n "${seedArg:-}" ]]; then
+					i=0
+				else
+					i=$(($i - 1))
+				fi
 			fi
 			sleep 10
 		fi
@@ -570,7 +579,7 @@ function checkDocsProcessed {
 	local changesLeftMaxCheck=$CHECK_CHANGES_LEFT_MAX
 	local seedArg="${RANDOM_SEED_ARG:-}"
 
-	if [[ ! -z "$seedArg" ]]; then
+	if [[ -n "${seedArg:-}" ]]; then
 		changesLeftMaxCheck=$(($CHECK_CHANGES_LEFT_MAX * 2))
 	fi
 

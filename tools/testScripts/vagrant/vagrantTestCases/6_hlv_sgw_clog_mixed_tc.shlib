@@ -151,6 +151,12 @@ function runMixedModeSGWClogTest {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	# Technically trinity has HLV but it doesn't have Clog, so for the context of this test treat it
 	# as it doesn't have HLV
 	local -a versionsWithoutHLV=("trinity" "neo")
@@ -162,5 +168,10 @@ function runTestCase {
 		for versionWithoutHLV in "${versionsWithoutHLV[@]}"; do
 			runMixedModeSGWClogTest "$versionWithHLV" "$versionWithoutHLV" || exit 1
 		done
+	done
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
 	done
 }

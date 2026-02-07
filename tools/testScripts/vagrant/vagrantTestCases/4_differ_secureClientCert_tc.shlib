@@ -183,6 +183,12 @@ function runDifferTestRebalanceIn {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	echo "============================================================================"
 	echo "Running multiple versions compatibility matrix differ test with secure or nonsecure replication"
 	echo "============================================================================"
@@ -256,4 +262,9 @@ function runTestCase {
 
 	unset srcVersionLoaded
 	unset tgtVersionLoaded
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
+	done
 }

@@ -43,6 +43,8 @@ VSSH_NOHUP[2]="vagrant ssh node3 -- "
 VSSH_NOHUP[3]="vagrant ssh node4 -- "
 VSSH_NOHUP[4]="vagrant ssh node5 -- "
 
+MAX_NETWORK_FAULT_PERCENTAGE=8
+
 # vscp from local to a node
 function vscp {
 	local index="$1"
@@ -69,7 +71,40 @@ declare -A SGWLink=(
 )
 
 function vagrantUp {
-	vagrant up
+	local vagrantfile="./Vagrantfile"
+	local -a nodeNames=()
+
+	if [[ ! -f "$vagrantfile" ]]; then
+		echo "Error: Vagrantfile not found at $vagrantfile"
+		return 1
+	fi
+
+	# Extract node names from Vagrantfile
+	# Look for lines like: config.vm.define "node1"
+	while IFS= read -r line; do
+		nodeNames+=("$line")
+	done < <(grep -oP 'config\.vm\.define\s+"\K[^"]+' "$vagrantfile" 2>/dev/null || grep -Eo 'config\.vm\.define\s+"[^"]+"' "$vagrantfile" | sed 's/config\.vm\.define "\(.*\)"/\1/')
+
+	if [[ ${#nodeNames[@]} -eq 0 ]]; then
+		echo "Warning: No nodes found in Vagrantfile, running 'vagrant up' without specific nodes"
+		vagrant up
+		return
+	fi
+
+	echo "==== Found ${#nodeNames[@]} node(s) in Vagrantfile: ${nodeNames[*]} ===="
+
+	# Bring up each node sequentially
+	for nodeName in "${nodeNames[@]}"; do
+		echo "==== Bringing up $nodeName ===="
+		vagrant up "$nodeName"
+		if (($? != 0)); then
+			echo "Error: Failed to bring up $nodeName"
+			exit 1
+		fi
+		echo "==== Successfully brought up $nodeName ===="
+	done
+
+	echo "==== All nodes are up ===="
 }
 
 function vagrantHalt {
@@ -917,4 +952,201 @@ function vagrantValidatePrometheusPipelineStatusIs1 {
 	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
 	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
 	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
+}
+
+function vagrantGetNodeIPsFromVagrantfile {
+	local nodeName=$1
+	local vagrantfile="${2:-./Vagrantfile}"
+	local -a ips=()
+
+	if [[ ! -f "$vagrantfile" ]]; then
+		echo "Warning: Vagrantfile not found at $vagrantfile" >&2
+		return 1
+	fi
+
+	# Extract IP addresses for the specified node from Vagrantfile
+	# Look for lines like: node1.vm.network "private_network", ip: "192.168.56.2"
+	while IFS= read -r line; do
+		# Extract the IP address from the line
+		local ip=$(echo "$line" | grep -oE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+		if [[ -n "$ip" ]]; then
+			ips+=("$ip")
+		fi
+	done < <(awk "/config\.vm\.define \"$nodeName\"/,/^  end$/" "$vagrantfile" | grep "private_network" | grep "ip:")
+
+	# Return the IPs as space-separated string
+	echo "${ips[@]}"
+}
+
+function vagrantInjectNetworkFault {
+	local clusterName=$1
+	local cmd
+	local nodeIdx
+	local nodeName
+
+	# Get node index from cluster name using getClusterIdx
+	nodeIdx=$(getClusterIdx "$clusterName")
+	if [[ -z "$nodeIdx" ]]; then
+		echo "Error: Could not determine node index for cluster name: $clusterName"
+		return 1
+	fi
+
+	# Derive node name from index (e.g., 0 -> node1, 1 -> node2, etc.)
+	nodeName="node$((nodeIdx + 1))"
+
+	# Get network fault percentage from seed
+	local networkFaultPercent=$(getIntFromSeed $MAX_NETWORK_FAULT_PERCENTAGE)
+
+	echo "==== Injecting ${networkFaultPercent}% network fault on $clusterName ($nodeName, idx=$nodeIdx) ===="
+
+	# Install net-tools if not already installed
+	cmd="${VSSH[$nodeIdx]} \"sudo apt-get update && sudo apt-get install -y net-tools iproute2\""
+	echo "==== Ensuring net-tools and iproute2 are installed on $nodeName ===="
+	eval $cmd
+
+	# Get the primary IP from VAGRANT_VM_IP_MAP
+	local primaryIP="${VAGRANT_VM_IP_MAP[$clusterName]:-}"
+	if [[ -z "$primaryIP" ]]; then
+		echo "Error: Could not find IP address for cluster name: $clusterName"
+		return 1
+	fi
+
+	# Get IP addresses for this node from Vagrantfile
+	local nodeIPsStr=$(vagrantGetNodeIPsFromVagrantfile "$nodeName")
+	if [[ -z "$nodeIPsStr" ]]; then
+		echo "Warning: Could not parse IP addresses from Vagrantfile for $nodeName, will try to discover via ifconfig"
+		# Fallback: try to discover IPs from the VM itself
+		nodeIPsStr=$(${VSSH[$nodeIdx]} "hostname -I" 2>/dev/null | tr ' ' '\n' | grep '^192\.168\.56\.')
+	fi
+
+	# Convert space-separated string to array
+	local -a nodeIPs
+	read -ra nodeIPs <<<"$nodeIPsStr"
+
+	if [[ ${#nodeIPs[@]} -eq 0 ]]; then
+		echo "Error: Could not determine IP addresses for $nodeName"
+		return 1
+	fi
+
+	echo "==== Found ${#nodeIPs[@]} IP address(es) for $nodeName: ${nodeIPs[*]} ===="
+
+	# For each IP, find its interface and inject network fault
+	for ip in "${nodeIPs[@]}"; do
+		echo "==== Finding interface for IP $ip on $nodeName ===="
+
+		# Get ifconfig output and find the interface for this IP
+		local ifconfigOutput
+		ifconfigOutput=$(${VSSH[$nodeIdx]} "ifconfig -a" 2>/dev/null)
+
+		# Parse interface name from ifconfig output
+		# This finds the interface name that comes before the IP address
+		local interface
+		interface=$(echo "$ifconfigOutput" | grep -B 1 "$ip" | grep -E '^[a-z]' | awk '{print $1}' | sed 's/://g' | head -n 1)
+
+		if [[ -z "$interface" ]]; then
+			echo "Warning: Could not find interface for IP $ip on $nodeName, skipping..."
+			continue
+		fi
+
+		echo "==== Found interface $interface for IP $ip ===="
+
+		# Clear any existing tc rules on this interface first
+		cmd="${VSSH[$nodeIdx]} \"sudo tc qdisc del dev $interface root 2>/dev/null || true\""
+		echo "==== Clearing existing tc rules on $interface ===="
+		eval $cmd
+
+		# Inject network fault using tc
+		if ((networkFaultPercent > 0)); then
+			cmd="${VSSH[$nodeIdx]} \"sudo tc qdisc add dev $interface root netem loss ${networkFaultPercent}%\""
+			echo "==== Running: sudo tc qdisc add dev $interface root netem loss ${networkFaultPercent}% ===="
+			eval $cmd
+
+			# Verify the rule was added
+			cmd="${VSSH[$nodeIdx]} \"sudo tc qdisc show dev $interface\""
+			echo "==== Verifying tc rule on $interface ===="
+			eval $cmd
+		else
+			echo "==== Network fault percentage is 0%, skipping injection on $interface ===="
+		fi
+	done
+
+	echo "==== Network fault injection completed on $clusterName ($nodeName) ===="
+}
+
+function vagrantUninjectNetworkFault {
+	local clusterName=$1
+	local cmd
+	local nodeIdx
+	local nodeName
+
+	# Get node index from cluster name using getClusterIdx
+	nodeIdx=$(getClusterIdx "$clusterName")
+	if [[ -z "$nodeIdx" ]]; then
+		echo "Error: Could not determine node index for cluster name: $clusterName"
+		return 1
+	fi
+
+	# Derive node name from index (e.g., 0 -> node1, 1 -> node2, etc.)
+	nodeName="node$((nodeIdx + 1))"
+
+	echo "==== Removing network fault on $clusterName ($nodeName, idx=$nodeIdx) ===="
+
+	# Get the primary IP from VAGRANT_VM_IP_MAP
+	local primaryIP="${VAGRANT_VM_IP_MAP[$clusterName]:-}"
+	if [[ -z "$primaryIP" ]]; then
+		echo "Error: Could not find IP address for cluster name: $clusterName"
+		return 1
+	fi
+
+	# Get IP addresses for this node from Vagrantfile
+	local nodeIPsStr=$(vagrantGetNodeIPsFromVagrantfile "$nodeName")
+	if [[ -z "$nodeIPsStr" ]]; then
+		echo "Warning: Could not parse IP addresses from Vagrantfile for $nodeName, will try to discover via ifconfig"
+		# Fallback: try to discover IPs from the VM itself
+		nodeIPsStr=$(${VSSH[$nodeIdx]} "hostname -I" 2>/dev/null | tr ' ' '\n' | grep '^192\.168\.56\.')
+	fi
+
+	# Convert space-separated string to array
+	local -a nodeIPs
+	read -ra nodeIPs <<<"$nodeIPsStr"
+
+	if [[ ${#nodeIPs[@]} -eq 0 ]]; then
+		echo "Error: Could not determine IP addresses for $nodeName"
+		return 1
+	fi
+
+	echo "==== Found ${#nodeIPs[@]} IP address(es) for $nodeName: ${nodeIPs[*]} ===="
+
+	# For each IP, find its interface and remove network fault
+	for ip in "${nodeIPs[@]}"; do
+		echo "==== Finding interface for IP $ip on $nodeName ===="
+
+		# Get ifconfig output and find the interface for this IP
+		local ifconfigOutput
+		ifconfigOutput=$(${VSSH[$nodeIdx]} "ifconfig -a" 2>/dev/null)
+
+		# Parse interface name from ifconfig output
+		# This finds the interface name that comes before the IP address
+		local interface
+		interface=$(echo "$ifconfigOutput" | grep -B 1 "$ip" | grep -E '^[a-z]' | awk '{print $1}' | sed 's/://g' | head -n 1)
+
+		if [[ -z "$interface" ]]; then
+			echo "Warning: Could not find interface for IP $ip on $nodeName, skipping..."
+			continue
+		fi
+
+		echo "==== Found interface $interface for IP $ip ===="
+
+		# Remove tc rules on this interface
+		cmd="${VSSH[$nodeIdx]} \"sudo tc qdisc del dev $interface root 2>/dev/null || true\""
+		echo "==== Removing tc rules on $interface ===="
+		eval $cmd
+
+		# Verify the rule was removed
+		cmd="${VSSH[$nodeIdx]} \"sudo tc qdisc show dev $interface\""
+		echo "==== Verifying tc rules removed on $interface ===="
+		eval $cmd
+	done
+
+	echo "==== Network fault removal completed on $clusterName ($nodeName) ===="
 }

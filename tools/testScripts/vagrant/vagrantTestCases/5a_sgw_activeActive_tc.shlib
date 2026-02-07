@@ -153,6 +153,17 @@ function runActiveActiveSGWTest {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	runActiveActiveSGWTest "morpheus" &&
 		runActiveActiveSGWTest "totoro"
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
+	done
 }

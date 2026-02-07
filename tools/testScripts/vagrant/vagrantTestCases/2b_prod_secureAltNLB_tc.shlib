@@ -124,8 +124,19 @@ function runFullSecureAlternateClientCertAndNLB {
 }
 
 function runTestCase {
+	local vm
+	# Inject for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantInjectNetworkFault "$vm"
+	done
+
 	runFullSecureAlternateClientCertAndNLB "neo" 1 0 &&
 		runFullSecureAlternateClientCertAndNLB "trinity" 0 0 &&
 		runFullSecureAlternateClientCertAndNLB "morpheus" 0 0 &&
 		runFullSecureAlternateClientCertAndNLB "totoro" 0 1
+
+	# Clear for each node in VAGRANT_VM_IP_MAP
+	for vm in "${!VAGRANT_VM_IP_MAP[@]}"; do
+		vagrantUninjectNetworkFault "$vm"
+	done
 }

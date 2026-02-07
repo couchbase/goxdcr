@@ -14,6 +14,15 @@ set -u
 # then load 10k documents on each bucket, resulting in 20k total docs per bucket after
 # bi-directional replication
 
+# Check for help flag
+helpMode=false
+for arg in "$@"; do
+	if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+		helpMode=true
+		break
+	fi
+done
+
 if [[ ! -f "./Vagrantfile" ]]; then
 	echo "Cannot find vagrant file"
 	exit 1
@@ -27,7 +36,9 @@ if (($? != 0)); then
 	exit $?
 fi
 
-vagrantUp
+if [[ "$helpMode" == false ]]; then
+	vagrantUp
+fi
 
 # main logic all exist elsewhere
 . ./commonTestRunner.shlib
@@ -35,4 +46,6 @@ if (($? != 0)); then
 	exit $?
 fi
 
-vagrantHalt
+if [[ "$helpMode" == false ]]; then
+	vagrantHalt
+fi
