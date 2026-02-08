@@ -444,6 +444,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	modesChanged := oldSettings.NeedToRestartPipelineDueToCollectionModeChanges(newSettings)
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
+	excludeEventRegexChanged := oldSettings.GetExcludeEventRegex() != newSettings.GetExcludeEventRegex()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -453,7 +454,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
-		modesChanged || rulesChanged || mobileModeChanged
+		modesChanged || rulesChanged || mobileModeChanged || excludeEventRegexChanged
 }
 
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {

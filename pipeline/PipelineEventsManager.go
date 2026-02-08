@@ -13,6 +13,7 @@ package pipeline
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -120,7 +121,10 @@ type PipelineEventsManager interface {
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
 	ClearFatalEventsExceptBrokenMap()
+	SetExcludeRegex(regex string) error
 }
+
+var _ PipelineEventsManager = (*PipelineEventsMgr)(nil)
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
 // on dismissing events
@@ -136,6 +140,11 @@ type PipelineEventsMgr struct {
 	updateBrokenMapEventCh chan bool
 
 	isMigrationMode bool
+
+	// excludeEventRegex is a compiled regex pattern used to filter out events
+	// from displaying on UI, based on the excludeEventRegex replication setting
+	excludeEventRegex *regexp.Regexp
+	lock              sync.RWMutex
 }
 
 func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter ReplicationSpecGetter, logger *log.CommonLogger, utils utilities.UtilsIface) *PipelineEventsMgr {
@@ -155,6 +164,7 @@ func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter Replicat
 		updateBrokenMapEventCh: make(chan bool, 1),
 		utils:                  utils,
 	}
+
 	mgr.updateBrokenMapEventCh <- true
 	return mgr
 }
@@ -165,8 +175,26 @@ func (p *PipelineEventsMgr) GetCurrentEvents() *PipelineEventList {
 	return &p.events
 }
 
-// Used internally - does not update brokenmap but rather after an eventID already confirmed to exist
+// shouldExcludeEvent checks if an event description matches the exclusion regex pattern.
+// Returns true if the event should be excluded from being added.
+func (p *PipelineEventsMgr) shouldExcludeEvent(eventDesc string) bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	if p.excludeEventRegex == nil {
+		return false
+	}
+
+	return p.excludeEventRegex.MatchString(eventDesc)
+}
+
+// Used internally - does not update brokenmap but rather after an eventID already confirmed to exist.
+// Returns ErrorNotFound if eventId < 0.
 func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
+	if eventId < 0 {
+		return nil, base.ErrorNotFound
+	}
+
 	p.events.Mutex.RLock()
 	defer p.events.Mutex.RUnlock()
 
@@ -182,7 +210,15 @@ func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
 	return nil, base.ErrorNotFound
 }
 
+// AddEvent creates a new event and returns its eventId.
+// Returns -1 if the event matches the exclusion regex filter and was not added.
+// Callers can treat eventId < 0 as a no-op indicator.
 func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) int64 {
+	// Check if the event should be excluded based on the regex filter
+	if p.shouldExcludeEvent(eventDesc) {
+		return -1
+	}
+
 	if eventExtras.IsNil() {
 		eventExtras.Init()
 	}
@@ -214,7 +250,13 @@ func (p *PipelineEventsMgr) reKeyEventExtras(eventExtras base.EventsMap) base.Ev
 	return reKeyedExtras
 }
 
+// UpdateEvent updates an existing event with new description and extras.
+// Returns nil (no-op) if eventId < 0.
 func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
+	if eventId < 0 {
+		return nil
+	}
+
 	var err = base.ErrorNotFound
 
 	p.events.Mutex.Lock()
@@ -343,7 +385,13 @@ func (p *PipelineEventsMgr) updateBrokenMapEvent() error {
 	return nil
 }
 
+// ContainsEvent checks if an event with the given eventId exists.
+// Returns false if eventId < 0.
 func (p *PipelineEventsMgr) ContainsEvent(eventId int) bool {
+	if eventId < 0 {
+		return false
+	}
+
 	p.events.Mutex.RLock()
 	defer p.events.Mutex.RUnlock()
 	for _, eventInfo := range p.events.EventInfos {
@@ -354,7 +402,13 @@ func (p *PipelineEventsMgr) ContainsEvent(eventId int) bool {
 	return false
 }
 
+// DismissEvent dismisses an event by eventId.
+// Returns nil (no-op) if eventId < 0.
 func (p *PipelineEventsMgr) DismissEvent(eventId int) error {
+	if eventId < 0 {
+		return nil
+	}
+
 	event, err := p.getEvent(eventId)
 	if err != nil {
 		return err
@@ -507,4 +561,25 @@ func (p *PipelineEventsMgr) updateMigrationMode() {
 	}
 	collectionMode := spec.Settings.GetCollectionModes()
 	p.isMigrationMode = collectionMode.IsMigrationOn()
+}
+
+// SetExcludeRegex sets the regex which will be used as an exclusion filter of events raised by p.
+func (p *PipelineEventsMgr) SetExcludeRegex(regex string) error {
+	if len(regex) == 0 {
+		return nil
+	}
+
+	compiledRegex, err := regexp.Compile(regex)
+	if err != nil {
+		// Should not happen because of the replication settings validation.
+		const msg = "failed to compile regex for events exclusion, it will be disabled"
+		err = fmt.Errorf("%s: %s: %w", msg, regex, err)
+		p.logger.Errorf("%v", err)
+		return err
+	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.excludeEventRegex = compiledRegex
+	return nil
 }

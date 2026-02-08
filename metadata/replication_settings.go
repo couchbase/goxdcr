@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -147,6 +148,9 @@ const (
 
 	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
 	MinPVLenForMobileKey = base.MinPVLenForMobileKey
+
+	// ExcludeEventRegexKey is a regex pattern to exclude errors from UI logging
+	ExcludeEventRegexKey = base.ExcludeEventRegexKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -173,7 +177,8 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
 	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey,
 	DevPreCheckMaxCasErrorInjection, DevBackfillMgrVbsTasksDoneNotifierDelay, DevPipelineReinitCleanupDelayProofNode,
-	DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang, DevBackfillUnrecoverableErrorInj}
+	DevBackfillReqHandlerStartOnceDelay, DevBackfillReqHandlerHandleVBTaskDoneHang, DevBackfillUnrecoverableErrorInj,
+	ExcludeEventRegexKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -297,6 +302,10 @@ var DevReplOptsConfig = &SettingsConfig{"", nil}
 
 var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
 
+// excludeEventRegexConfig is a regex pattern to filter out errors from being displayed on the UI.
+// An empty string "" means no exclude logic is applied, and all errors will be shown.
+var excludeEventRegexConfig = &SettingsConfig{"", nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -361,6 +370,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DisableHlvBasedShortCircuitKey:       disableHlvBasedShortCircuitConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
 	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
+	ExcludeEventRegexKey:                 excludeEventRegexConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1402,6 +1412,14 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 		convertedValue = value
+	case ExcludeEventRegexKey:
+		if value != "" {
+			if _, err = regexp.Compile(value); err != nil {
+				err = fmt.Errorf("invalid regex pattern for %s: %v", ExcludeEventRegexKey, err)
+				return
+			}
+		}
+		convertedValue = value
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
@@ -1497,4 +1515,11 @@ func (s *ReplicationSettings) GetMinPVLenForMobile() int {
 	val, _ := s.GetSettingValueOrDefaultValue(MinPVLenForMobileKey)
 	len := val.(int)
 	return len
+}
+
+// GetExcludeEventRegex returns the value of the ExcludeEventRegex setting in s.
+func (s *ReplicationSettings) GetExcludeEventRegex() string {
+	val, _ := s.GetSettingValueOrDefaultValue(ExcludeEventRegexKey)
+	regex := val.(string)
+	return regex
 }
