@@ -43,6 +43,7 @@ CKPT_GET_ERR="Error getting ckpt docs for"
 BACKFILL_DEL_OP="metakv operation on backfill spec op=2"
 BACKFILL_CLEANED="BackfillPipelineClean"
 CHANGES_LEFT_0_WAIT_SECS=10
+IMPORT_MUTATIONS_WARNING="Import mutations detected when 'mobile' setting is Off. This is not supported in active-active XDCR and Sync Gateway deployment. Ignore this warning if the deployment is active-passive."
 
 # These should be imported after clusterRunProvision script
 

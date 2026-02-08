@@ -1909,7 +1909,8 @@ function waitForBgJobs {
 	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
 	while (($jobsCnt > 0)); do
-		sleep 1
+		echo "$jobsCnt background jobs still running..."
+		sleep 2
 		jobsCnt=$(jobs -l | grep -c "Running")
 	done
 }

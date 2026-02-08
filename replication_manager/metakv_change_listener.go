@@ -446,6 +446,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
 	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
+	excludeEventRegexChanged := oldSettings.GetExcludeEventRegex() != newSettings.GetExcludeEventRegex()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -455,7 +456,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
-		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged
+		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged || excludeEventRegexChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()

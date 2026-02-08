@@ -309,7 +309,8 @@ var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
 
 var CapellaHostnameSuffix = ".cloud.couchbase.com"
 
-const ImportDetectedStr = "Import mutations detected when mobile is Off. This is not supported."
+const ImportDetectedStr = "Import mutations detected when 'mobile' setting is Off. This is not supported in active-active XDCR and Sync Gateway deployment. " +
+	"Ignore this warning if the deployment is active-passive."
 
 const FinClosureStr = "because of finch closure"
 
@@ -2028,3 +2029,6 @@ var MaxKeepAliveTokensForCkptMgr = 100
 
 // When enabled, only "local mutations" will be batched for replication
 const ForwardLocalOnlyKey = "forwardLocalOnly"
+
+// ExcludeEventRegexKey is a regex pattern to exclude errors from UI error events section
+const ExcludeEventRegexKey string = "excludeUIErrRegex"
