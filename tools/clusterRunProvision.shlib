@@ -2499,7 +2499,6 @@ function waitForBgJobs {
 
 	while (($jobsCnt > 0)); do
 		echo "$jobsCnt background jobs still running..."
-		jobs -l
 		sleep 2
 		jobsCnt=$(jobs -l | grep -c "Running")
 		local currentTime=$(date +%s)

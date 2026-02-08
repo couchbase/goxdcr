@@ -51,6 +51,7 @@ METAKV_SET_OP_ERR="metakv_svc_setOp encountered error"
 CE_ERROR="Cannot create XDCR between two Community Edition clusters"
 REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED="Current cluster encryption level requires the remote-cluster-reference to be of 'Full' encryption-type."
 UNABLE_TO_FIND_SHAS="Unable to find shas"
+IMPORT_MUTATIONS_WARNING="Import mutations detected when 'mobile' setting is Off. This is not supported in active-active XDCR and Sync Gateway deployment. Ignore this warning if the deployment is active-passive."
 
 # HLV Test sleep configs
 HLV_TESTS_INIT_SLEEP_SECS=30

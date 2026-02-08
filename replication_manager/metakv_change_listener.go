@@ -459,6 +459,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	conflictLoggingChanged := oldSettings.NeedToReconstructDueToConflictLogging(newSettings)
 	dcpFlowControlThrottleChanged := oldSettings.GetDCPFlowControlThrottle() != newSettings.GetDCPFlowControlThrottle()
 	componentEventsChanLengthChanged := oldSettings.GetComponentEventsChanLength() != newSettings.GetComponentEventsChanLength()
+	excludeEventRegexChanged := oldSettings.GetExcludeEventRegex() != newSettings.GetExcludeEventRegex()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -473,7 +474,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
 		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
 		dcpFlowControlThrottleChanged || componentEventsChanLengthChanged ||
-		cngWorkerCountChanged
+		cngWorkerCountChanged || excludeEventRegexChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()

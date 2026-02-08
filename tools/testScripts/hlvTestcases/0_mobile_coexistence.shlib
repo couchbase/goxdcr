@@ -20,6 +20,28 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
+declare -A BucketReplPropertiesWithMobileOff=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Off" ["filterBinary"]=true)
+
+function checkUIErrorMessage {
+	local srcCluster=$1
+	local srcBucket=$2
+	local tgtCluster=$3
+	local tgtBucket=$4
+	local errorMessage=$5
+
+	local errorList=$(getErrorListForMainPipeline $srcCluster)
+	if [[ -z "$errorList" ]] || [[ "$errorList" == "null" ]]; then
+		echo "false"
+		return 0
+	fi
+
+	local errorCount=$(echo "$errorList" | jq -r '.[].ErrorMsg' | grep -c "$IMPORT_MUTATIONS_WARNING")
+	if [[ $errorCount -gt 0 ]]; then
+		echo "true"
+	else
+		echo "false"
+	fi
+}
 
 function testHlvShortCircuiting {
 	# kill mobile import sim first, so that docs_written stat is accurate
@@ -85,6 +107,8 @@ function testHlvShortCircuiting {
 		echo "FAILED: docs_written difference expected is one for C1 and 0 for C2 due to short-circuiting"
 		exit 1
 	fi
+
+	cleanupBucketReplications
 }
 
 function verifyPromStats {
@@ -241,6 +265,68 @@ function testMobileHlv {
 	grepForAbnormalities
 
 	verifyPromStats
+
+	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
+	runXdcrDifferValidateNoDiff "C2" "B2" "C1" "B1"
+}
+
+function testExcludeUIErrRegex {
+	echo "=========== testExcludeUIErrRegex =========="
+
+	# kill mobile import sim first
+	killMobileImportSim "C1" "B1"
+	killMobileImportSim "C2" "B2"
+	sleep 5
+
+	# Create 2 buckets with ECCV on
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
+
+	# Enable mobile import sim only on source bucket
+	enableMobileImportSimIfPresent "C1" "B1"
+
+	# Create unidirectional replication with mobile=Off
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobileOff
+
+	# Load 100 docs and wait for changes_left to go to 0
+	echo "Loading 100 docs on source bucket"
+	for i in {1..100}; do
+		writeJSONDocument "C1" "B1" "excludeUIErr_doc_$i" '{"test":"data"}'
+	done
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify UI error message appears
+	echo "Checking for UI error message presence"
+	local errorPresent=$(checkUIErrorMessage "C1" "B1" "C2" "B2" "$IMPORT_MUTATIONS_WARNING")
+	if [[ "$errorPresent" != "true" ]]; then
+		echo "FAILED: Expected UI error message not found"
+		exit 1
+	fi
+	echo "UI error message found as expected"
+
+	# Change replication setting to excludeUIErrRegex
+	echo "Setting excludeUIErrRegex to exclude the error message"
+	setReplicationSettings "C1" "B1" "C2" "B2" "excludeUIErrRegex=$IMPORT_MUTATIONS_WARNING"
+
+	# Load 100 more docs and wait for changes_left to go to 0
+	echo "Loading 100 more docs on source bucket"
+	for i in {101..200}; do
+		writeJSONDocument "C1" "B1" "excludeUIErr_doc_$i" '{"test":"data"}'
+	done
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	# Verify UI error message is NOT there
+	echo "Checking that UI error message is now excluded"
+	local errorPresent=$(checkUIErrorMessage "C1" "B1" "C2" "B2" "$IMPORT_MUTATIONS_WARNING")
+	if [[ "$errorPresent" != "false" ]]; then
+		echo "FAILED: UI error message should be excluded but is still present"
+		exit 1
+	fi
+	echo "UI error message successfully excluded"
+
+	echo "testExcludeUIErrRegex completed successfully"
 }
 
 function runTestCase {
@@ -268,18 +354,12 @@ function runTestCase {
 	testReplicationSettings
 	testMobileHlv
 	testHlvShortCircuiting
-
-	grepForAbnormalities
-
-	verifyPromStats
-
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
-	runXdcrDifferValidateNoDiff "C2" "B2" "C1" "B1"
+	testExcludeUIErrRegex
 
 	echo "============================================================================"
 	echo "Mobile coexistence test case passed"
 	echo "============================================================================"
-	cleanupBuckets
 	cleanupBucketReplications
+	cleanupBuckets
 	cleanupRemoteClusterRefs
 }

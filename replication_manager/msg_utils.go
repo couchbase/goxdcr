@@ -138,7 +138,8 @@ const (
 	CNGConnCountKey   = base.CNGConnCountKey
 	CNGRPCDeadline    = base.CNGRPCDeadline
 
-	ForwardLocalOnlyKey = base.ForwardLocalOnlyKey
+	ForwardLocalOnlyKey  = base.ForwardLocalOnlyKey
+	ExcludeEventRegexKey = base.ExcludeEventRegexKey
 )
 
 // constants for parsing create/change/view replication response
@@ -291,7 +292,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CNGConnCountKey:   metadata.CNGConnCountKey,
 	CNGRPCDeadline:    metadata.CNGRPCDeadlineKey,
 
-	ForwardLocalOnlyKey: metadata.ForwardLocalOnlyKey,
+	ForwardLocalOnlyKey:  metadata.ForwardLocalOnlyKey,
+	ExcludeEventRegexKey: metadata.ExcludeEventRegexKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -375,7 +377,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CNGConnCountKey:   CNGConnCountKey,
 	metadata.CNGRPCDeadlineKey: CNGRPCDeadline,
 
-	metadata.ForwardLocalOnlyKey: ForwardLocalOnlyKey,
+	metadata.ForwardLocalOnlyKey:  ForwardLocalOnlyKey,
+	metadata.ExcludeEventRegexKey: ExcludeEventRegexKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

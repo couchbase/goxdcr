@@ -499,6 +499,12 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		return errMap
 	}
 
+	err = pipelineMgr.setEventsMgrSettings(topic, rep_status.GetEventsManager())
+	if err != nil {
+		errMap[fmt.Sprintf("pipelineMgr.setEventsMgrSettings(%v)", topic)] = err
+		return errMap
+	}
+
 	pipelineMgr.setP2PWaitTime(rep_status)
 
 	rep_status.RecordProgress(common.ProgressStartConstruction)
@@ -533,6 +539,19 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	}
 
 	return errMap
+}
+
+// setEventsMgrSettings sets replication specific events manager settings.
+func (pipelineMgr *PipelineManager) setEventsMgrSettings(topic string, eventsMgr pipeline.PipelineEventsManager) error {
+	spec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
+	if err != nil {
+		pipelineMgr.logger.Errorf("%s: failed to get replication specification for eventsMgr settings, err=%v", topic, err)
+		return err
+	}
+
+	// Don't treat the error returned as a fatal error and continue with pipeline start.
+	eventsMgr.SetExcludeRegex(spec.Settings.GetExcludeEventRegex())
+	return nil
 }
 
 func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status pipeline.ReplicationStatusIface) {

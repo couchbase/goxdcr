@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -165,6 +166,9 @@ const (
 
 	// Boolean flag to specify if only "local mutations" are to be batched for replication
 	ForwardLocalOnlyKey = base.ForwardLocalOnlyKey
+
+	// ExcludeEventRegexKey is a regex pattern to exclude errors from UI logging
+	ExcludeEventRegexKey = base.ExcludeEventRegexKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -192,7 +196,7 @@ var ImmutableSettings = []string{FilterSystemScopeKey, PipelineReinitHashKey}
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, FilterSystemScopeKey,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, PipelineReinitHashKey}
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, PipelineReinitHashKey, ExcludeEventRegexKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -332,6 +336,10 @@ var CNGRPCDeadlineConfig = &SettingsConfig{base.DefaultCNGRPCDeadline, &Range{50
 
 var forwardLocalOnlyConfig = &SettingsConfig{false, nil}
 
+// excludeEventRegexConfig is a regex pattern to filter out errors from being displayed on the UI.
+// An empty string "" means no exclude logic is applied, and all errors will be shown.
+var excludeEventRegexConfig = &SettingsConfig{"", nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -401,7 +409,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CNGConnCountKey:   CNGConnCountConfig,
 	CNGRPCDeadlineKey: CNGRPCDeadlineConfig,
 
-	ForwardLocalOnlyKey: forwardLocalOnlyConfig,
+	ForwardLocalOnlyKey:  forwardLocalOnlyConfig,
+	ExcludeEventRegexKey: excludeEventRegexConfig,
 }
 
 type replicationSettingsInjections interface {
@@ -1487,6 +1496,14 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 		convertedValue = value
+	case ExcludeEventRegexKey:
+		if value != "" {
+			if _, err = regexp.Compile(value); err != nil {
+				err = fmt.Errorf("invalid regex pattern for %s: %v", ExcludeEventRegexKey, err)
+				return
+			}
+		}
+		convertedValue = value
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
@@ -1689,4 +1706,11 @@ func (s *ReplicationSettings) GetForwardLocalOnlyFlag() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(ForwardLocalOnlyKey)
 	flag := val.(bool)
 	return flag
+}
+
+// GetExcludeEventRegex returns the value of the ExcludeEventRegex setting in s.
+func (s *ReplicationSettings) GetExcludeEventRegex() string {
+	val, _ := s.GetSettingValueOrDefaultValue(ExcludeEventRegexKey)
+	regex := val.(string)
+	return regex
 }
