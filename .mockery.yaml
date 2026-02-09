@@ -106,6 +106,8 @@ packages:
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
   github.com/couchbase/cbauth:
+    config:
+      all: False
     interfaces:
       Authenticator:
         config:

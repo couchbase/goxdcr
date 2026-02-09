@@ -3,11 +3,9 @@
 package mocks
 
 import (
-	context "context"
+	http "net/http"
 
 	cbauth "github.com/couchbase/cbauth"
-
-	http "net/http"
 
 	httpreq "github.com/couchbase/cbauth/httpreq"
 
@@ -310,123 +308,6 @@ func (_c *Authenticator_GetClusterEncryptionConfig_Call) Return(_a0 cbauth.Clust
 }
 
 func (_c *Authenticator_GetClusterEncryptionConfig_Call) RunAndReturn(run func() (cbauth.ClusterEncryptionConfig, error)) *Authenticator_GetClusterEncryptionConfig_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetEncryptionKeys provides a mock function with given fields: _a0
-func (_m *Authenticator) GetEncryptionKeys(_a0 cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error) {
-	ret := _m.Called(_a0)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetEncryptionKeys")
-	}
-
-	var r0 *cbauth.EncrKeysInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func(cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error)); ok {
-		return rf(_a0)
-	}
-	if rf, ok := ret.Get(0).(func(cbauth.KeyDataType) *cbauth.EncrKeysInfo); ok {
-		r0 = rf(_a0)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*cbauth.EncrKeysInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(cbauth.KeyDataType) error); ok {
-		r1 = rf(_a0)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// Authenticator_GetEncryptionKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEncryptionKeys'
-type Authenticator_GetEncryptionKeys_Call struct {
-	*mock.Call
-}
-
-// GetEncryptionKeys is a helper method to define mock.On call
-//   - _a0 cbauth.KeyDataType
-func (_e *Authenticator_Expecter) GetEncryptionKeys(_a0 interface{}) *Authenticator_GetEncryptionKeys_Call {
-	return &Authenticator_GetEncryptionKeys_Call{Call: _e.mock.On("GetEncryptionKeys", _a0)}
-}
-
-func (_c *Authenticator_GetEncryptionKeys_Call) Run(run func(_a0 cbauth.KeyDataType)) *Authenticator_GetEncryptionKeys_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(cbauth.KeyDataType))
-	})
-	return _c
-}
-
-func (_c *Authenticator_GetEncryptionKeys_Call) Return(_a0 *cbauth.EncrKeysInfo, _a1 error) *Authenticator_GetEncryptionKeys_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *Authenticator_GetEncryptionKeys_Call) RunAndReturn(run func(cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error)) *Authenticator_GetEncryptionKeys_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetEncryptionKeysBlocking provides a mock function with given fields: _a0, _a1
-func (_m *Authenticator) GetEncryptionKeysBlocking(_a0 context.Context, _a1 cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetEncryptionKeysBlocking")
-	}
-
-	var r0 *cbauth.EncrKeysInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, cbauth.KeyDataType) *cbauth.EncrKeysInfo); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*cbauth.EncrKeysInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, cbauth.KeyDataType) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// Authenticator_GetEncryptionKeysBlocking_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEncryptionKeysBlocking'
-type Authenticator_GetEncryptionKeysBlocking_Call struct {
-	*mock.Call
-}
-
-// GetEncryptionKeysBlocking is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 cbauth.KeyDataType
-func (_e *Authenticator_Expecter) GetEncryptionKeysBlocking(_a0 interface{}, _a1 interface{}) *Authenticator_GetEncryptionKeysBlocking_Call {
-	return &Authenticator_GetEncryptionKeysBlocking_Call{Call: _e.mock.On("GetEncryptionKeysBlocking", _a0, _a1)}
-}
-
-func (_c *Authenticator_GetEncryptionKeysBlocking_Call) Run(run func(_a0 context.Context, _a1 cbauth.KeyDataType)) *Authenticator_GetEncryptionKeysBlocking_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(cbauth.KeyDataType))
-	})
-	return _c
-}
-
-func (_c *Authenticator_GetEncryptionKeysBlocking_Call) Return(_a0 *cbauth.EncrKeysInfo, _a1 error) *Authenticator_GetEncryptionKeysBlocking_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *Authenticator_GetEncryptionKeysBlocking_Call) RunAndReturn(run func(context.Context, cbauth.KeyDataType) (*cbauth.EncrKeysInfo, error)) *Authenticator_GetEncryptionKeysBlocking_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -785,101 +666,6 @@ func (_c *Authenticator_GetUserUuid_Call) RunAndReturn(run func(string, string) 
 	return _c
 }
 
-// ImportEncryptionKeys provides a mock function with given fields: _a0, _a1, _a2
-func (_m *Authenticator) ImportEncryptionKeys(_a0 []string, _a1 cbauth.KeyDataType, _a2 int) error {
-	ret := _m.Called(_a0, _a1, _a2)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ImportEncryptionKeys")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func([]string, cbauth.KeyDataType, int) error); ok {
-		r0 = rf(_a0, _a1, _a2)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// Authenticator_ImportEncryptionKeys_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportEncryptionKeys'
-type Authenticator_ImportEncryptionKeys_Call struct {
-	*mock.Call
-}
-
-// ImportEncryptionKeys is a helper method to define mock.On call
-//   - _a0 []string
-//   - _a1 cbauth.KeyDataType
-//   - _a2 int
-func (_e *Authenticator_Expecter) ImportEncryptionKeys(_a0 interface{}, _a1 interface{}, _a2 interface{}) *Authenticator_ImportEncryptionKeys_Call {
-	return &Authenticator_ImportEncryptionKeys_Call{Call: _e.mock.On("ImportEncryptionKeys", _a0, _a1, _a2)}
-}
-
-func (_c *Authenticator_ImportEncryptionKeys_Call) Run(run func(_a0 []string, _a1 cbauth.KeyDataType, _a2 int)) *Authenticator_ImportEncryptionKeys_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string), args[1].(cbauth.KeyDataType), args[2].(int))
-	})
-	return _c
-}
-
-func (_c *Authenticator_ImportEncryptionKeys_Call) Return(_a0 error) *Authenticator_ImportEncryptionKeys_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Authenticator_ImportEncryptionKeys_Call) RunAndReturn(run func([]string, cbauth.KeyDataType, int) error) *Authenticator_ImportEncryptionKeys_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// KeysDropComplete provides a mock function with given fields: _a0, _a1
-func (_m *Authenticator) KeysDropComplete(_a0 cbauth.KeyDataType, _a1 error) error {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for KeysDropComplete")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(cbauth.KeyDataType, error) error); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// Authenticator_KeysDropComplete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'KeysDropComplete'
-type Authenticator_KeysDropComplete_Call struct {
-	*mock.Call
-}
-
-// KeysDropComplete is a helper method to define mock.On call
-//   - _a0 cbauth.KeyDataType
-//   - _a1 error
-func (_e *Authenticator_Expecter) KeysDropComplete(_a0 interface{}, _a1 interface{}) *Authenticator_KeysDropComplete_Call {
-	return &Authenticator_KeysDropComplete_Call{Call: _e.mock.On("KeysDropComplete", _a0, _a1)}
-}
-
-func (_c *Authenticator_KeysDropComplete_Call) Run(run func(_a0 cbauth.KeyDataType, _a1 error)) *Authenticator_KeysDropComplete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(cbauth.KeyDataType), args[1].(error))
-	})
-	return _c
-}
-
-func (_c *Authenticator_KeysDropComplete_Call) Return(_a0 error) *Authenticator_KeysDropComplete_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Authenticator_KeysDropComplete_Call) RunAndReturn(run func(cbauth.KeyDataType, error) error) *Authenticator_KeysDropComplete_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // RegisterConfigRefreshCallback provides a mock function with given fields: callback
 func (_m *Authenticator) RegisterConfigRefreshCallback(callback cbauth.ConfigRefreshCallback) error {
 	ret := _m.Called(callback)
@@ -922,55 +708,6 @@ func (_c *Authenticator_RegisterConfigRefreshCallback_Call) Return(_a0 error) *A
 }
 
 func (_c *Authenticator_RegisterConfigRefreshCallback_Call) RunAndReturn(run func(cbauth.ConfigRefreshCallback) error) *Authenticator_RegisterConfigRefreshCallback_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RegisterEncryptionKeysCallbacks provides a mock function with given fields: _a0, _a1, _a2, _a3
-func (_m *Authenticator) RegisterEncryptionKeysCallbacks(_a0 cbauth.RefreshKeysCallback, _a1 cbauth.GetInUseKeysCallback, _a2 cbauth.DropKeysCallback, _a3 cbauth.SynchronizeKeyFilesCallback) error {
-	ret := _m.Called(_a0, _a1, _a2, _a3)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RegisterEncryptionKeysCallbacks")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(cbauth.RefreshKeysCallback, cbauth.GetInUseKeysCallback, cbauth.DropKeysCallback, cbauth.SynchronizeKeyFilesCallback) error); ok {
-		r0 = rf(_a0, _a1, _a2, _a3)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// Authenticator_RegisterEncryptionKeysCallbacks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterEncryptionKeysCallbacks'
-type Authenticator_RegisterEncryptionKeysCallbacks_Call struct {
-	*mock.Call
-}
-
-// RegisterEncryptionKeysCallbacks is a helper method to define mock.On call
-//   - _a0 cbauth.RefreshKeysCallback
-//   - _a1 cbauth.GetInUseKeysCallback
-//   - _a2 cbauth.DropKeysCallback
-//   - _a3 cbauth.SynchronizeKeyFilesCallback
-func (_e *Authenticator_Expecter) RegisterEncryptionKeysCallbacks(_a0 interface{}, _a1 interface{}, _a2 interface{}, _a3 interface{}) *Authenticator_RegisterEncryptionKeysCallbacks_Call {
-	return &Authenticator_RegisterEncryptionKeysCallbacks_Call{Call: _e.mock.On("RegisterEncryptionKeysCallbacks", _a0, _a1, _a2, _a3)}
-}
-
-func (_c *Authenticator_RegisterEncryptionKeysCallbacks_Call) Run(run func(_a0 cbauth.RefreshKeysCallback, _a1 cbauth.GetInUseKeysCallback, _a2 cbauth.DropKeysCallback, _a3 cbauth.SynchronizeKeyFilesCallback)) *Authenticator_RegisterEncryptionKeysCallbacks_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(cbauth.RefreshKeysCallback), args[1].(cbauth.GetInUseKeysCallback), args[2].(cbauth.DropKeysCallback), args[3].(cbauth.SynchronizeKeyFilesCallback))
-	})
-	return _c
-}
-
-func (_c *Authenticator_RegisterEncryptionKeysCallbacks_Call) Return(_a0 error) *Authenticator_RegisterEncryptionKeysCallbacks_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Authenticator_RegisterEncryptionKeysCallbacks_Call) RunAndReturn(run func(cbauth.RefreshKeysCallback, cbauth.GetInUseKeysCallback, cbauth.DropKeysCallback, cbauth.SynchronizeKeyFilesCallback) error) *Authenticator_RegisterEncryptionKeysCallbacks_Call {
 	_c.Call.Return(run)
 	return _c
 }
