@@ -2055,6 +2055,46 @@ func (b *BackfillMgr) SetBackfillSpecUpdateStatus(specId string, status base.Bac
 	}
 }
 
+// runRetryMonitorOnce represents one iteration of runRetryMonitor.
+func (b *BackfillMgr) runRetryMonitorOnce() {
+	b.errorRetryQMtx.RLock()
+	if len(b.errorRetryQueue) == 0 {
+		// No jobs to retry
+		b.errorRetryQMtx.RUnlock()
+	} else {
+		b.errorRetryQMtx.RUnlock()
+		b.errorRetryQMtx.Lock()
+		// find the smallest manifestId to process
+		var unableToBeProcessedQueue []BackfillRetryRequest
+		var smallestJob uint64
+		var lastRetryWasSuccessful = true
+
+		for len(b.errorRetryQueue) > 0 {
+			// Find the earliest job first to process, according to the srcManifestsID it is supposed to set
+			minIdx, job := b.retryQueueFindSmallestManifestRequest()
+			if lastRetryWasSuccessful {
+				smallestJob = job.correspondingSrcManifestId
+			} else {
+				// Do not retry a job that has a higher source manifest ID than the last failed job
+				if job.correspondingSrcManifestId > smallestJob {
+					break
+				}
+			}
+			// Unlock before doing metakv ops - in the meantime, queue may be appended but minIdx location should not be affected
+			b.errorRetryQMtx.Unlock()
+			lastRetryWasSuccessful = b.retryJob(job, &unableToBeProcessedQueue)
+			b.errorRetryQMtx.Lock()
+			// Regardless of success or failure, remove the job from errorRetryQueue
+			b.errorRetryQueue = append(b.errorRetryQueue[:minIdx], b.errorRetryQueue[minIdx+1:]...)
+		}
+		// After cycling through the errorRetryQueue, re-add those jobs that weren't able to successfully run
+		for _, unableToBeProcessedJob := range unableToBeProcessedQueue {
+			b.errorRetryQueue = append(b.errorRetryQueue, unableToBeProcessedJob)
+		}
+		b.errorRetryQMtx.Unlock()
+	}
+}
+
 func (b *BackfillMgr) runRetryMonitor() {
 	periodicRetryTimer := time.NewTicker(b.retryTimerPeriod)
 	for {
@@ -2065,42 +2105,7 @@ func (b *BackfillMgr) runRetryMonitor() {
 		case removedSpecId := <-b.retrySpecRemovalCh:
 			b.cleanupBackfillRetryQueue(removedSpecId)
 		case <-periodicRetryTimer.C:
-			b.errorRetryQMtx.RLock()
-			if len(b.errorRetryQueue) == 0 {
-				// No jobs to retry
-				b.errorRetryQMtx.RUnlock()
-			} else {
-				b.errorRetryQMtx.RUnlock()
-				b.errorRetryQMtx.Lock()
-				// find the smallest manifestId to process
-				var unableToBeProcessedQueue []BackfillRetryRequest
-				var smallestJob uint64
-				var lastRetryWasSuccessful = true
-
-				for len(b.errorRetryQueue) > 0 {
-					// Find the earliest job first to process, according to the srcManifestsID it is supposed to set
-					minIdx, job := b.retryQueueFindSmallestManifestRequest()
-					if lastRetryWasSuccessful {
-						smallestJob = job.correspondingSrcManifestId
-					} else {
-						// Do not retry a job that has a higher source manifest ID than the last failed job
-						if job.correspondingSrcManifestId > smallestJob {
-							break
-						}
-					}
-					// Unlock before doing metakv ops - in the meantime, queue may be appended but minIdx location should not be affected
-					b.errorRetryQMtx.Unlock()
-					lastRetryWasSuccessful = b.retryJob(job, &unableToBeProcessedQueue)
-					b.errorRetryQMtx.Lock()
-					// Regardless of success or failure, remove the job from errorRetryQueue
-					b.errorRetryQueue = append(b.errorRetryQueue[:minIdx], b.errorRetryQueue[minIdx+1:]...)
-				}
-				// After cycling through the errorRetryQueue, re-add those jobs that weren't able to successfully run
-				for _, unableToBeProcessedJob := range unableToBeProcessedQueue {
-					b.errorRetryQueue = append(b.errorRetryQueue, unableToBeProcessedJob)
-				}
-				b.errorRetryQMtx.Unlock()
-			}
+			b.runRetryMonitorOnce()
 		}
 	}
 }

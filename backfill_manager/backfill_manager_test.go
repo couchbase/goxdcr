@@ -449,7 +449,9 @@ func TestBackfillMgrRetry(t *testing.T) {
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
-	backfillMgr.retryTimerPeriod = 500 * time.Millisecond
+	// Don't run runRetryMonitorOnce from runRetryMonitor, because the test explicitly calls
+	// runRetryMonitorOnce when needed to avoid timing race conditions.
+	backfillMgr.retryTimerPeriod = 500 * time.Minute
 
 	assert.Nil(backfillMgr.Start())
 
@@ -496,7 +498,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	assert.Len(backfillMgr.errorRetryQueue, 3)
 	backfillMgr.errorRetryQMtx.RUnlock()
 
-	time.Sleep(1 * time.Second)
+	backfillMgr.runRetryMonitorOnce()
 
 	backfillMgr.errorRetryQMtx.RLock()
 	assert.Len(backfillMgr.errorRetryQueue, 0)
@@ -506,14 +508,15 @@ func TestBackfillMgrRetry(t *testing.T) {
 
 	// Test for failure condition - new instance of backfillMgr
 	_, _, backfillReplSvcBad, _, _, _, bucketTopologySvc, utils := setupBoilerPlate()
-	//setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvcBad, specs)
 	setupBackfillReplSvcNegMock(backfillReplSvcBad)
 	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil, utils, nil)
 
 	backfillMgr = NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvcBad, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
 	assert.NotNil(backfillMgr)
-	backfillMgr.retryTimerPeriod = 500 * time.Millisecond
+	// Don't run runRetryMonitorOnce from runRetryMonitor, because the test explicitly calls
+	// runRetryMonitorOnce when needed to avoid timing race conditions.
+	backfillMgr.retryTimerPeriod = 500 * time.Minute
 
 	assert.Nil(backfillMgr.Start())
 	handler := backfillMgr.internalGetHandler(specId)
@@ -527,12 +530,14 @@ func TestBackfillMgrRetry(t *testing.T) {
 	assert.Len(backfillMgr.errorRetryQueue, 3)
 	backfillMgr.errorRetryQMtx.RUnlock()
 
-	time.Sleep(1 * time.Second)
+	backfillMgr.runRetryMonitorOnce()
 
 	// Not tested here - but look at the logs - there should be 2 instances of retries
 	backfillMgr.errorRetryQMtx.RLock()
 	assert.Len(backfillMgr.errorRetryQueue, 3)
 	backfillMgr.errorRetryQMtx.RUnlock()
+
+	backfillMgr.Stop()
 }
 
 func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
