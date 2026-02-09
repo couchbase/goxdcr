@@ -242,14 +242,14 @@ func TestUnknownClusterError_Detection(t *testing.T) {
 
 	// Test that UnknownClusterError correctly identifies unknown cluster errors
 	unknownErr := fmt.Errorf("%v : refName - someCluster", metadata_svc.UnknownRemoteClusterErrorMessage)
-	assert.True(metadata_svc.UnknownClusterError(unknownErr), "Should detect unknown cluster error")
+	assert.True(metadata_svc.RemoteClusterRefNotFoundErr(unknownErr), "Should detect unknown cluster error")
 
 	// Test that it doesn't false-positive on other errors
 	otherErr := errors.New("some other error message")
-	assert.False(metadata_svc.UnknownClusterError(otherErr), "Should not detect other errors as unknown cluster")
+	assert.False(metadata_svc.RemoteClusterRefNotFoundErr(otherErr), "Should not detect other errors as unknown cluster")
 
 	// Test nil error
-	assert.False(metadata_svc.UnknownClusterError(nil), "Should handle nil error")
+	assert.False(metadata_svc.RemoteClusterRefNotFoundErr(nil), "Should handle nil error")
 }
 
 func TestDoDeleteReplicationRequest(t *testing.T) {
