@@ -297,6 +297,10 @@ const (
 	MaxCheckpointRecordsToKeepVariableVBKey = "MaxCheckpointRecordsToKeepVariableVB"
 	// the maximum number of checkpoint records to read from the checkpoint doc - for variableVB replications
 	MaxCheckpointRecordsToReadVariableVBKey = "MaxCheckpointRecordsToReadVariableVB"
+
+	// threshold for compiling lookup index during CollectionNamespaceMapping marshalling
+	// if the mapping size exceeds this threshold, an index will be compiled to speed up lookups
+	ColMarshalIdxThresholdKey = "ColMappingLargeThreshold"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -439,6 +443,7 @@ var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMax
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
 var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
+var ColMarshalIdxThresholdConfig = &SettingsConfig{base.ColMappingLargeThreshold, &Range{1, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -581,6 +586,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
 	MaxCheckpointRecordsToKeepVariableVBKey:       MaxCheckpointRecordsToKeepVariableVBConfig,
 	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
+	ColMarshalIdxThresholdKey:                     ColMarshalIdxThresholdConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

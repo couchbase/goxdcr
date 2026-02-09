@@ -1443,6 +1443,12 @@ func (c *CollectionNamespaceMapping) AppendToTarget(srcPtr, target *base.Collect
 func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 	metaObj := newCollectionNsMetaObj()
 
+	var compiledIndex CollectionNamespaceMappingIdx
+	if len(*c) > base.ColMappingLargeThreshold {
+		// If the mapping is too big, compile the index to speed up lookup during unmarshalling at the cost of extra memory and cpu during marshalling and unmarshalling
+		compiledIndex = c.CreateLookupIndex()
+	}
+
 	var unsortedKeys []*base.CollectionNamespace
 	for k, _ := range *c {
 		unsortedKeys = append(unsortedKeys, k.GetCollectionNamespace())
@@ -1451,7 +1457,7 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 
 	for i, k := range sortedKeys {
 		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
-		srcNamespacePtr, _, value, exists := c.Get(k, nil)
+		srcNamespacePtr, _, value, exists := c.Get(k, compiledIndex)
 		if exists {
 			metaObj.IndirectTargetMap[uint64(i)] = value
 			metaObj.SourceNamespaceTypeMap[uint64(i)] = srcNamespacePtr.GetType()

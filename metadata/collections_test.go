@@ -1944,3 +1944,100 @@ func TestCollectionNamespaceList_Contains(t *testing.T) {
 		})
 	}
 }
+
+// Helper function to create a CollectionNamespaceMapping with a specific number of entries
+func createTestMapping(size int) CollectionNamespaceMapping {
+	mapping := make(CollectionNamespaceMapping)
+
+	for i := 0; i < size; i++ {
+		scopeName := fmt.Sprintf("scope_%d", i)
+		collectionName := fmt.Sprintf("collection_%d", i)
+
+		srcNamespace := base.CollectionNamespace{
+			ScopeName:      scopeName,
+			CollectionName: collectionName,
+		}
+
+		targetNamespace := base.CollectionNamespace{
+			ScopeName:      scopeName,
+			CollectionName: collectionName,
+		}
+
+		var targetList CollectionNamespaceList
+		targetList = append(targetList, &targetNamespace)
+
+		mapping[NewSourceCollectionNamespace(&srcNamespace)] = targetList
+	}
+
+	return mapping
+}
+
+// Benchmark MarshalJSON with 1000 entries with index enabled (default threshold is 1000)
+func BenchmarkMarshalJSON_1000_WithIndex(b *testing.B) {
+	mapping := createTestMapping(1000)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := mapping.MarshalJSON()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark MarshalJSON with 10000 entries with index enabled (default threshold is 1000)
+func BenchmarkMarshalJSON_10000_WithIndex(b *testing.B) {
+	mapping := createTestMapping(10000)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := mapping.MarshalJSON()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark MarshalJSON with 1000 entries without index (threshold set to 20000)
+func BenchmarkMarshalJSON_1000_WithoutIndex(b *testing.B) {
+	// Save original threshold
+	originalThreshold := base.ColMappingLargeThreshold
+	// Set threshold to 20000 to disable index compilation
+	base.ColMappingLargeThreshold = 20000
+	defer func() {
+		// Restore original threshold
+		base.ColMappingLargeThreshold = originalThreshold
+	}()
+
+	mapping := createTestMapping(1000)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := mapping.MarshalJSON()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark MarshalJSON with 10000 entries without index (threshold set to 20000)
+func BenchmarkMarshalJSON_10000_WithoutIndex(b *testing.B) {
+	// Save original threshold
+	originalThreshold := base.ColMappingLargeThreshold
+	// Set threshold to 20000 to disable index compilation
+	base.ColMappingLargeThreshold = 20000
+	defer func() {
+		// Restore original threshold
+		base.ColMappingLargeThreshold = originalThreshold
+	}()
+
+	mapping := createTestMapping(10000)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := mapping.MarshalJSON()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

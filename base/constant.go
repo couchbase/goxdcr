@@ -1268,6 +1268,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
+	colMarshalIdxThreshold int,
 	buildVersion string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
@@ -1457,6 +1458,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
+	ColMappingLargeThreshold = colMarshalIdxThreshold
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -2016,3 +2018,5 @@ const (
 const MaxValueLenForLogging = 512
 
 var ValueTooLongForLogging = []byte("...<value too long to display>")
+
+var ColMappingLargeThreshold = 1000
