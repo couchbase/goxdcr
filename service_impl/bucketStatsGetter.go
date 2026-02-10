@@ -518,6 +518,24 @@ func (provider *ClusterBucketStatsProvider) IsRetryableError(err error) bool {
 		case gomemcached.EINTERNAL:
 			// internal error (may be transient)
 			return true
+		case gomemcached.NOT_SUPPORTED:
+			// When XDCR issues a SelectBucket command and the target bucket is not yet
+			// running in memcached, memcached creates a config-only bucket. This is a
+			// lightweight placeholder that exists until ns_server creates the actual
+			// bucket. While in this state, only the following operations are supported:
+			//   1. GetClusterConfig
+			//   2. GetErrorMap
+			//   3. Hello
+			//   4. SelectBucket
+			//
+			// See - https://review.couchbase.org/c/kv_engine/+/177982/21/daemon/cookie.cc#546
+			//
+			// Any other operation will return NOT_SUPPORTED when XERROR is disabled,
+			// or EConfigOnly when XERROR is enabled.
+			//
+			// Therefore, XDCR should retry until the real bucket is created and replaces
+			// the config-only bucket, after which the operations will succeed.
+			return true
 
 		// Non-retryable errors
 		case gomemcached.NOT_MY_VBUCKET:
