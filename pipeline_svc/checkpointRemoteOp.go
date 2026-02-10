@@ -111,14 +111,17 @@ func (r *remoteOps) PreReplicate(tgtTs *service_def.RemoteVBReplicationStatus, c
 		// If the failover log is not yet fetched, fetch it and prepare for local pre-replicate
 		bucketFailoverLog, errMap, err := r.GetFailoverLog(ctx)
 		if err != nil {
+			r.mutex.Unlock()
 			return false, nil, fmt.Errorf("failed to fetch failover log: %w", err)
 		}
 		if len(errMap) > 0 {
 			// For pre-replicate we need to have failover log for all the requested vbuckets.
 			// If not, we should return an error.
+			r.mutex.Unlock()
 			return false, nil, fmt.Errorf("failed to get failover log for all vbuckets: %v", errMap)
 		}
 		if err := r.PrepareForLocalPreReplicate(bucketFailoverLog); err != nil {
+			r.mutex.Unlock()
 			return false, nil, fmt.Errorf("failed to prepare for local pre-replicate: %w", err)
 		}
 		r.bucketFailoverLogForPreReplicate = bucketFailoverLog
