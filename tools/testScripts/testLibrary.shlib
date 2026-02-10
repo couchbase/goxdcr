@@ -425,7 +425,7 @@ function waitForChangesLeft0 {
 		fi
 		if (($? != 0)); then
 			echo "$prefix: Failed to get changes_left"
-			dumpDebugInfoBeforeExit
+			dumpDebugInfoBeforeExit "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"
 			exit 1
 		fi
 		if [[ -z "${changesLeft:-}" ]]; then
@@ -458,7 +458,7 @@ function waitForChangesLeft0 {
 	done
 
 	echo "changes_left never went to zero for $1.$2 -> $3.$4"
-	dumpDebugInfoBeforeExit
+	dumpDebugInfoBeforeExit "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"
 	exit 1
 }
 
@@ -1817,9 +1817,22 @@ function runCbCollectInfo {
 }
 
 function dumpDebugInfoBeforeExit {
+	local debugClusterName=${1:-}
+	local debugSourceBucket=${2:-}
+	local debugTargetCluster=${3:-}
+	local debugTargetBucket=${4:-}
 	local clusterName
 	local testOutputDir
 	local shouldRunCbCollect="${RUN_CBCOLLECT:-}"
+
+	# Turn on debug logging if all cluster/bucket parameters are provided
+	if [[ -n "$debugClusterName" ]] && [[ -n "$debugSourceBucket" ]] && [[ -n "$debugTargetCluster" ]] && [[ -n "$debugTargetBucket" ]]; then
+		echo "Enabling debug logging for replication ${debugClusterName}/${debugSourceBucket} -> ${debugTargetCluster}/${debugTargetBucket} for 60 seconds"
+		setReplicationSettings "$debugClusterName" "$debugSourceBucket" "$debugTargetCluster" "$debugTargetBucket" "logLevel=Debug"
+		sleep 60
+		echo "Disabling debug logging for replication ${debugClusterName}/${debugSourceBucket} -> ${debugTargetCluster}/${debugTargetBucket}"
+		setReplicationSettings "$debugClusterName" "$debugSourceBucket" "$debugTargetCluster" "$debugTargetBucket" "logLevel=Info"
+	fi
 
 	xdcrMemRss
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
