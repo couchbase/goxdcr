@@ -4640,9 +4640,18 @@ func (service *RemoteClusterService) GetBucketTopologySvc() service_def.BucketTo
 }
 
 func (service *RemoteClusterService) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
-	ref.PopulateDnsSrvIfNeeded(logger)
-	// Before a reference is created, the data usage is not technically associated with it yet
-	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
+	switch ref.GetRemoteType() {
+	case metadata.RemoteTypeCbCluster:
+		ref.PopulateDnsSrvIfNeeded(logger)
+		// Before a reference is created, the data usage is not technically associated with it yet
+		return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
+	case metadata.RemoteTypeCng:
+		setHostNamesAndSecuritySettingsForCngTargets(logger, ref)
+		return nil
+	default:
+		// should never happen
+		return fmt.Errorf("unknown remoteType %v for reference %v", ref.GetRemoteType(), ref.Name())
+	}
 }
 
 func (rctx *refreshContext) IsCertificateExpired(statusCode int, err error) bool {

@@ -60,6 +60,7 @@ type InitRemoteClusterRefFunc func(*log.CommonLogger, *metadata.RemoteClusterRef
 
 type ConnectionPreCheck interface {
 	SendConnectionPreCheckRequest(*metadata.RemoteClusterReference, InitRemoteClusterRefFunc, string)
+	SendCngConnectionPreCheckRequest(*metadata.RemoteClusterReference, InitRemoteClusterRefFunc, string)
 	RetrieveConnectionPreCheckResult(string) (base.ConnectionErrMapType, bool, error)
 }
 
@@ -875,6 +876,74 @@ func sendConnectionPreCheckRequestErrHelper(errMsg string, taskId string, myHost
 	err := store.InitConnectionPreCheckResults(taskId, myHostAddr, []string{}, connErr)
 	if err != nil {
 		logger.Errorf("Error in InitConnectionPreCheckResults(myHosrAddr=%v), err=%v", myHostAddr, err)
+	}
+}
+
+// SendCngConnectionPreCheckRequest is the entry point for sending connection pre-check request for CNG targets.
+func (p *P2PManagerImpl) SendCngConnectionPreCheckRequest(remoteRef *metadata.RemoteClusterReference, initRemoteClusterRef InitRemoteClusterRefFunc, taskId string) {
+	loggerCtx := log.CopyCtx(p.logger.LoggerContext())
+	additionalInfo := map[string]string{base.ConnectionPreCheckTaskId: taskId}
+	loggerCtx.AddMoreContext(additionalInfo)
+	logger := log.NewLogger("ConnectionPreCheck", loggerCtx)
+
+	myHostAddr, err := p.xdcrCompSvc.MyHostAddr()
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting myHostAddr, err=%v", err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
+		return
+	}
+
+	// initialise the remote cluster reference with authMech, active hostnames etc.
+	err = initRemoteClusterRef(logger, remoteRef)
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error initialising remote cluster reference, err=%v", err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, remoteRef, logger)
+		return
+	}
+	logger.Infof("Remote cluster reference for Connection Pre-Check initialised as ref=%v", remoteRef.SmallString())
+
+	// get the list of peer nodes to send the connection pre-check request to.
+	peers, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
+	if err != nil && strings.Contains(err.Error(), service_def.UnknownPoolStr) {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because, %v is not sending connection pre-check requests since no other nodes have been detected", p.GetLifecycleId())
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, true, nil, logger)
+		return
+	}
+
+	targetNodes := []string{remoteRef.HostName()}
+
+	// getReqFunc is the function to generate the connection pre-check request for CNG target
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, nil, nil, taskId, false)
+		return connectionPreCheckReq
+	}
+
+	// execute the connection pre-check logic on 'this' node
+	connectionErrs := executeConnectionPreCheckForCngTarget(remoteRef, p.utils)
+	// format the result from connection pre-check execution on 'this' node and init the store
+	connectionErrs = FormatConnectionPreCheckResults(connectionErrs, targetNodes, false)
+
+	store := peerToPeerResults.GetConnectionPreCheckStore(logger)
+
+	// initialze the store with the result from 'this' node and the list of peer nodes to expect response back from.
+	err = store.InitConnectionPreCheckResults(taskId, myHostAddr, peers, connectionErrs)
+	if err != nil {
+		logger.Errorf("Connection Pre-Check exited because of the error in InitConnectionPreCheckResults(myHostAddr=%v)=%v", myHostAddr, err)
+		return
+	}
+
+	// perform pre-check on all the other source nodes except self
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime, 1))
+	if err != nil {
+		logger.Errorf("Connection Pre-Check exited because P2PSend failed for all peers, err=%v", err)
+	}
+	for _, peer := range peers {
+		if failed, ok := peersFailedToSend[peer]; ok && failed {
+			p.handlePreCheckP2PSendErr(taskId, myHostAddr, peer, ErrorPreCheckP2PSendFailure)
+		} else {
+			p.handlePreCheckP2PSendSuccess(taskId, myHostAddr, peer)
+		}
 	}
 }
 

@@ -1525,14 +1525,23 @@ func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Reques
 
 	logger_ap.Infof("Request params: remoteClusterRef=%v; Task ID generated: %v", remoteClusterRef.CloneAndRedact(), taskId)
 
+	switch remoteClusterRef.GetRemoteType() {
+	case metadata.RemoteTypeCbCluster:
+		go adminport.p2pMgr.SendConnectionPreCheckRequest(remoteClusterRef, RemoteClusterService().InitRemoteClusterReference, taskId)
+	case metadata.RemoteTypeCng:
+		go adminport.p2pMgr.SendCngConnectionPreCheckRequest(remoteClusterRef, RemoteClusterService().InitRemoteClusterReference, taskId)
+	default:
+		err = fmt.Errorf("Unsupported remote cluster type %v for remote cluster ref %v", remoteClusterRef.GetRemoteType(), remoteClusterRef.CloneAndRedact())
+		logger_ap.Errorf(err.Error())
+		return nil, err
+	}
+
 	response, err = NewConnectionPreCheckPostResponse(remoteClusterRef.HostName(), remoteClusterRef.UserName(), taskId)
 	if err != nil {
 		return nil, err
 	}
 
-	go adminport.p2pMgr.SendConnectionPreCheckRequest(remoteClusterRef, RemoteClusterService().InitRemoteClusterReference, taskId)
-
-	return response, err
+	return response, nil
 }
 
 func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.Request) (*ap.Response, error) {

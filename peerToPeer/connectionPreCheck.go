@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -16,12 +17,14 @@ import (
 	"time"
 
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/peerToPeer/peerToPeerResults"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
+	"google.golang.org/grpc/codes"
 )
 
 const maxWaitBeforeRPCInMs = 10000 // 10 seconds
@@ -29,6 +32,50 @@ const maxWaitBeforeRPCInMs = 10000 // 10 seconds
 type mccClientIfcWithErr struct {
 	clientIfc mcc.ClientIface
 	err       error
+}
+
+// executeConnectionPreCheckForCngTarget performs connection pre-check for a CNG target by attempting to establish a gRPC connection and making a simple RPC call.
+func executeConnectionPreCheckForCngTarget(ref *metadata.RemoteClusterReference, utils utils.UtilsIface) base.HostToErrorsMapType {
+	result := make(base.HostToErrorsMapType)
+
+	hostAddr, err := ref.MyConnectionStr()
+	if err != nil {
+		result[base.PlaceHolderFieldKey] = []string{fmt.Sprintf("failed to get connection string: %v", err)}
+		return result
+	}
+
+	grpcOpts, err := base.NewGrpcOptionsSecure(hostAddr, func() *base.Credentials { return ref.Credentials.Clone() }, base.DeepCopyByteArray(ref.Certificates()))
+	if err != nil {
+		result[base.PlaceHolderFieldKey] = []string{fmt.Sprintf("failed to create gRPC options: %v", err)}
+		return result
+	}
+
+	// Darshan TODO: use the global connection pool instead of creating a new connection here
+	// This TODO is a placeholder until we have the conn pool checked in
+	conn, err := base.NewCngConn(grpcOpts)
+	if err != nil {
+		result[base.PlaceHolderFieldKey] = []string{fmt.Sprintf("failed to establish gRPC connection: %v", err)}
+		return result
+	}
+	defer conn.Close()
+
+	// perform a simple gRPC call to verify the connection is healthy
+	ctx, cancel := context.WithTimeout(context.Background(), base.ConnectionPreCheckRPCTimeout)
+	defer cancel()
+
+	// register the hostAddr in the result map
+	result[hostAddr] = nil
+
+	resp := utils.CngGetClusterInfo(conn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
+		Context: ctx,
+		Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+	})
+
+	if resp.Code() != codes.OK {
+		result[hostAddr] = append(result[hostAddr], resp.Message())
+	}
+
+	return result
 }
 
 // helper function to establish connections to all the target nodes. Returns a hostname -> list of connection errors mapping
@@ -308,7 +355,18 @@ func (h *ConnectionPreCheckHandler) handler() {
 }
 
 func (h *ConnectionPreCheckHandler) handleRequest(req *ConnectionPreCheckReq) {
-	results := executeConnectionPreCheck(req.TargetRef, req.TargetClusterNodes, req.SrvLookupResults, req.PortsMap, h.utils, h.logger)
+	var results base.HostToErrorsMapType
+	switch req.TargetRef.GetRemoteType() {
+	case metadata.RemoteTypeCbCluster:
+		results = executeConnectionPreCheck(req.TargetRef, req.TargetClusterNodes, req.SrvLookupResults, req.PortsMap, h.utils, h.logger)
+	case metadata.RemoteTypeCng:
+		results = executeConnectionPreCheckForCngTarget(req.TargetRef, h.utils)
+	default:
+		// should never happen
+		results = base.HostToErrorsMapType{base.PlaceHolderFieldKey: []string{fmt.Sprintf("unknown remote cluster type %v", req.TargetRef.GetRemoteType())}}
+		h.logger.Errorf("Unknown remote cluster type %v for req %v", req.TargetRef.GetRemoteType(), req)
+	}
+
 	req.ConnectionErrs = results
 
 	resp := req.GenerateResponse().(*ConnectionPreCheckRes)
@@ -363,7 +421,7 @@ func FormatConnectionPreCheckResults(results base.HostToErrorsMapType, targetNod
 		}
 
 		_, ok := results[node]
-		if !ok || len(results[node]) == 0 {
+		if ok && len(results[node]) == 0 {
 			results[node] = []string{successMsg}
 		}
 	}
