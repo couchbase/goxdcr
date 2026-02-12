@@ -1080,15 +1080,23 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "privateEndPoints.json")
 	bucketInfo, _, err := readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err := testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	exists, err := testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, true)
 	assert.Nil(err)
 	assert.Equal(true, exists)
+	// Case 1a: replication doesn't need alternate addressing
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, false)
+	assert.Nil(err)
+	assert.Equal(false, exists)
 
 	// Case 2 : no alternate addresses setup
 	fileName = fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_b2.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, true)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+	// Case 2a: replication doesn't need alternate addressing
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 
@@ -1096,7 +1104,11 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, true)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+	// Case 3a: replication doesn't need alternate addressing
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 
@@ -1104,7 +1116,11 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, true)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+	// Case 4a: replication doesn't need alternate addressing
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 
@@ -1112,7 +1128,11 @@ func TestTargetHasSharedExternalHostname(t *testing.T) {
 	fileName = fmt.Sprintf("%v%v", testExternalDataDir, "nlb_pools_default_bucket_b2.json")
 	bucketInfo, _, err = readJsonHelper(fileName)
 	assert.Nil(err)
-	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo)
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, true)
+	assert.Nil(err)
+	assert.Equal(false, exists)
+	// Case 5a: replication doesn't need alternate addressing
+	exists, err = testUtils.TargetHasSharedExternalHostnameAndMgmtPort(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(false, exists)
 }
