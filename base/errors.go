@@ -103,6 +103,7 @@ var (
 	ErrorReplicationSpecNotActive                = errors.New("replication specification not found or no longer active")
 	ErrorCLoggingMixedModeUnsupported            = errors.New("not all nodes support conflict logging feature")
 	ErrorSubdocMaxPathLimitBreached              = fmt.Errorf("subdoc max path limit breached")
+	ErrUnsupportedAlternateAddressing            = errors.New("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
 )
 
 // Various non-error internal msgs

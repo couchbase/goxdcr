@@ -510,15 +510,14 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				targetBucketInfo, targetBucketUUID, targetBucketNumberOfVbs, targetConflictResolutionType, targetKVVBMap = service.validateTargetBucket(validateTargetBucketErrMap, remoteConnstr, targetBucket, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, sourceBucket, targetCluster, useExternal)
 
 				// Validate the alternate/external address setup, particularly to check if private link is configured.
-				hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo)
+				hasSharedExternalHostname, err := service.utils.TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo, useExternal)
 				if err != nil {
 					errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
 					service.logger.Error(errMsg)
 					validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
 				} else if hasSharedExternalHostname {
-					errMsg := fmt.Sprintf("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
-					service.logger.Error(errMsg)
-					validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+					service.logger.Errorf("%v, useExternal=%v", base.ErrUnsupportedAlternateAddressing, useExternal)
+					validateTargetBucketErrMap[base.ExternalAddressSetup] = base.ErrUnsupportedAlternateAddressing
 				}
 			}
 			if len(validateTargetBucketErrMap) > 0 {

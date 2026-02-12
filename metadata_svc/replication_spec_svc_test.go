@@ -154,7 +154,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 
 	// Real utilities object to check the existance of private endpoints
 	realUtilsMockObj := utilities.NewUtilities()
-	privateEndpointsExists, err1 := realUtilsMockObj.TargetHasSharedExternalHostnameAndMgmtPort(tgtBucketInfo)
+	privateEndpointsExists, err1 := realUtilsMockObj.TargetHasSharedExternalHostnameAndMgmtPort(tgtBucketInfo, true)
 
 	// Utilities mock
 	var port uint16 = 9000
@@ -174,7 +174,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
 	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
 	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
-	utilitiesMock.On("TargetHasSharedExternalHostnameAndMgmtPort", tgtBucketInfo).Return(privateEndpointsExists, err1)
+	utilitiesMock.On("TargetHasSharedExternalHostnameAndMgmtPort", tgtBucketInfo, mock.Anything).Return(privateEndpointsExists, err1)
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType
@@ -667,8 +667,7 @@ func TestValidPrivateEndpointsSetup(t *testing.T) {
 	// Should have only one error
 	assert.Equal(len(errMap), 1)
 	// Check if the error is related to the existance of private endpoints
-	errStr := "XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup."
-	assert.Equal(errStr, errMap[base.ExternalAddressSetup].Error())
+	assert.Equal(base.ErrUnsupportedAlternateAddressing.Error(), errMap[base.ExternalAddressSetup].Error())
 	fmt.Println("============== Test case end: TestPrivateEndpointsSetup =================")
 }
 

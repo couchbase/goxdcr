@@ -2349,7 +2349,13 @@ func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeIn
 // management port number.
 // Example 2:
 // If there are 3 nodes, each of the 3 nodes do not have unique mgmt port, each of it must has its own unique FQDN
-func (u *Utilities) TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo map[string]interface{}) (bool, error) {
+func (u *Utilities) TargetHasSharedExternalHostnameAndMgmtPort(targetBucketInfo map[string]interface{}, useExternal bool) (bool, error) {
+	if !useExternal {
+		// If the user intent is internal addressing, no need to check for shared
+		// external hostname and mgmt port.
+		return false, nil
+	}
+
 	uniqueAddresses := make(map[string]bool)
 
 	nodesList, err := u.GetNodeListFromInfoMap(targetBucketInfo, u.logger_utils)
