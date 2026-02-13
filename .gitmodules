@@ -1,0 +1,3 @@
+[submodule ".agent-context"]
+	path = .agent-context
+	url = git@github.com:couchbaselabs/goxdcr-agent-context.git

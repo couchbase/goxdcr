@@ -51,3 +51,7 @@ testOutput/
 
 #vscode
 .vscode
+
+# agent contexts
+AGENTS.md
+.agent-context/*
