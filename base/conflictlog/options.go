@@ -18,18 +18,19 @@ import (
 
 // LoggerOptions defines optional args for a logger implementation
 type LoggerOptions struct {
-	Rules                    *Rules
-	Mapper                   Mapper
-	LogQueueCap              int
-	WorkerCount              int
-	NetworkRetryCount        int
-	NetworkRetryInterval     time.Duration
-	PoolGetTimeout           time.Duration
-	SetMetaTimeout           time.Duration
-	MaxErrorCount            int
-	ErrorTimeWindow          time.Duration
-	ReattemptDuration        time.Duration
-	ConflictRateForPauseRepl int
+	Rules                *Rules
+	Mapper               Mapper
+	LogQueueCap          int
+	WorkerCount          int
+	NetworkRetryCount    int
+	NetworkRetryInterval time.Duration
+	PoolGetTimeout       time.Duration
+	SetMetaTimeout       time.Duration
+	MaxErrorCount        int
+	ErrorTimeWindow      time.Duration
+	ReattemptDuration    time.Duration
+	ReplPauseThreshold   int
+	MonitorDuration      int
 
 	// this is off by default and only present for
 	// local testing changeable through internal setting.
@@ -47,9 +48,10 @@ func (l *LoggerOptions) String() string {
 	b.WriteString(fmt.Sprintf("setMetaTimeout:%s,", l.SetMetaTimeout))
 	b.WriteString(fmt.Sprintf("maxErrorCount:%v,", l.MaxErrorCount))
 	b.WriteString(fmt.Sprintf("errorTimeWindow:%v,", l.ErrorTimeWindow))
-	b.WriteString(fmt.Sprintf("reattemptDuration:%v", l.ReattemptDuration))
-	b.WriteString(fmt.Sprintf("skipTlsVerify:%v", l.SkipTlsVerify))
-	b.WriteString(fmt.Sprintf("conflictRateForPauseRepl:%v", l.ConflictRateForPauseRepl))
+	b.WriteString(fmt.Sprintf("reattemptDuration:%v,", l.ReattemptDuration))
+	b.WriteString(fmt.Sprintf("skipTlsVerify:%v,", l.SkipTlsVerify))
+	b.WriteString(fmt.Sprintf("pauseThreshold:%v,", l.ReplPauseThreshold))
+	b.WriteString(fmt.Sprintf("monitorDuration:%v", l.MonitorDuration))
 
 	return b.String()
 }
@@ -126,9 +128,15 @@ func WithReattemptDuration(val time.Duration) LoggerOpt {
 	}
 }
 
-func WithAutopauseConflictRate(val int) LoggerOpt {
+func WithAutopauseReplThreshold(val int) LoggerOpt {
 	return func(o *LoggerOptions) {
-		o.ConflictRateForPauseRepl = val
+		o.ReplPauseThreshold = val
+	}
+}
+
+func WithAutopauseReplMonitorDuration(val int) LoggerOpt {
+	return func(o *LoggerOptions) {
+		o.MonitorDuration = val
 	}
 }
 

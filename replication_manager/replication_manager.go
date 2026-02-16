@@ -380,6 +380,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.MaxCheckpointRecordsToKeepVariableVBKey].(int),
 		internal_settings.Values[metadata.MaxCheckpointRecordsToReadVariableVBKey].(int),
 		buildVersion, internal_settings.Values[metadata.MaxKeepAliveTokensForCkptMgrKey].(int),
+		time.Duration(internal_settings.Values[metadata.CLogMonitorCycleIntervalKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.CLogMonitorCleanupFreqKey].(int),
 	)
 }
 

@@ -301,6 +301,8 @@ const (
 	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
 	CLogResourceManagerBoostKey = "CLogResourceManagerBoost"
 	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
+	CLogMonitorCycleIntervalKey = "CLogMonitorCycleInterval"
+	CLogMonitorCleanupFreqKey   = "CLogMonitorCleanupFreq"
 
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
 
@@ -453,6 +455,8 @@ var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDispla
 var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var MaxKeepAliveTokensForCkptMgrConfig = &SettingsConfig{base.MaxKeepAliveTokensForCkptMgr, &Range{50, 1000}}
+var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
+var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -596,6 +600,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxCheckpointRecordsToKeepVariableVBKey:       MaxCheckpointRecordsToKeepVariableVBConfig,
 	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
 	MaxKeepAliveTokensForCkptMgrKey:               MaxKeepAliveTokensForCkptMgrConfig,
+	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
+	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

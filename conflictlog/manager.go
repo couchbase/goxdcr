@@ -172,6 +172,11 @@ func (m *managerImpl) connPoolBucketDelFn(bucketUUID string) {
 // StartMonitor will set the input monitor for the CLog manager and start the monitoring
 // goroutine.
 func (m *managerImpl) StartMonitor(monitor baseclog.Monitor) {
+	if isKVNode, err := m.topSvc.IsKVNode(); err == nil && !isKVNode {
+		m.logger.Infof("non-KV node doesn't need conflict monitoring")
+		return
+	}
+
 	m.monitor.once.Do(func() {
 		mtr := &monitorImpl{
 			Monitor:        monitor,

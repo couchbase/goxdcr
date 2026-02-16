@@ -30,8 +30,8 @@ const (
 		"One or more buckets or scopes or collections doesn't exist. " +
 		"The conflict logger will not accept any logging requests for the next %d minutes. " +
 		"Manually disable the feature, make sure the mappings and rules are fixed, then re-enable the feature to continue logging."
-	AutoPauseErrUIStr string = "%s: Replication was autopaused because the detected conflict rate: %d conflicts per second was above the " +
-		"configured threshold: %d conflicts per second."
+	AutoPauseErrUIStr string = "%s: Replication was autopaused because the detected conflict count: %d conflicts exceeded the " +
+		"configured threshold: %d conflicts within a monitoring duration of %d seconds."
 
 	// ConflictRecord consts
 	SourcePrefix    string = "src"
@@ -43,9 +43,6 @@ const (
 		4 /* _xdcr_conflict xattr size */ +
 		len(base.ConflictLoggingXattrKey) +
 		len(base.ConflictLoggingXattrVal) + 2 /* null terminators one each after key and value */
-
-	// Monitor constants
-	MonitorCleanupFreq = 300
 )
 
 // qosType represents the fault tolerance technique in which the conflict logger

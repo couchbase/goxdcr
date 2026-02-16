@@ -1284,7 +1284,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
-	buildVersion string, maxKeepAliveTokensForCkptMgr int) {
+	buildVersion string, maxKeepAliveTokensForCkptMgr int, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1468,6 +1468,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CLogSkipTlsVerify = cLogSkipTlsVerify
 	CLogResourceManagerBoost = cLogRMBoost
 	CLogStatsLoggingMaxFreqInterval = cLogStatsMaxFreq
+	CLogMonitorCycleInterval = cLogMonitorCycleInterval
+	CLogMonitorCleanupFreq = uint64(cLogMonitorCleanupFreq)
 
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 
@@ -1573,23 +1575,25 @@ var (
 //		"disabled": [true|false]
 //	}
 const (
-	CLogKey                  string = "conflictLogging"
-	CLogBucketKey            string = "bucket"
-	CLogCollectionKey        string = "collection"
-	CLogLoggingRulesKey      string = "loggingRules"
-	CLogDisabledKey          string = "disabled"
-	CLogSetMetaTimeout       string = "cLogSetTimeoutMs"
-	CLogPoolGetTimeout       string = "cLogPoolGetTimeoutMs"
-	CLogNetworkRetryCount    string = "cLogNetworkRetryCount"
-	CLogNetworkRetryInterval string = "cLogNetworkRetryIntervalMs"
-	CLogWorkerCount          string = "cLogWorkerCount"
-	CLogQueueCapacity        string = "cLogQueueCapacity"
-	CLogMaxErrorCount        string = "cLogMaxErrorCount"
-	CLogErrorTimeWindow      string = "cLogErrorTimeWindowMs"
-	CLogReattemptDuration    string = "cLogReattemptDurationMs"
-	CLogConnPoolLimit        string = "cLogConnPoolLimit"
-	CLogConnPoolGCInterval   string = "cLogConnPoolGCIntervalMs"
-	CLogConnPoolReapInterval string = "cLogConnPoolReapIntervalMs"
+	CLogKey                   string = "conflictLogging"
+	CLogBucketKey             string = "bucket"
+	CLogCollectionKey         string = "collection"
+	CLogLoggingRulesKey       string = "loggingRules"
+	CLogDisabledKey           string = "disabled"
+	CLogSetMetaTimeout        string = "cLogSetTimeoutMs"
+	CLogPoolGetTimeout        string = "cLogPoolGetTimeoutMs"
+	CLogNetworkRetryCount     string = "cLogNetworkRetryCount"
+	CLogNetworkRetryInterval  string = "cLogNetworkRetryIntervalMs"
+	CLogWorkerCount           string = "cLogWorkerCount"
+	CLogQueueCapacity         string = "cLogQueueCapacity"
+	CLogMaxErrorCount         string = "cLogMaxErrorCount"
+	CLogErrorTimeWindow       string = "cLogErrorTimeWindowMs"
+	CLogReattemptDuration     string = "cLogReattemptDurationMs"
+	CLogPauseReplThresholdKey string = "cLogPauseReplThreshold" // unit is conflicts per source cluster node.
+	CLogMonitorDurationKey    string = "cLogMonitorDuration"    // unit is seconds.
+	CLogConnPoolLimit         string = "cLogConnPoolLimit"
+	CLogConnPoolGCInterval    string = "cLogConnPoolGCIntervalMs"
+	CLogConnPoolReapInterval  string = "cLogConnPoolReapIntervalMs"
 )
 
 // simple keys inside conflict logging mapping. It excludes loggingRules key.
@@ -1622,6 +1626,10 @@ const (
 	DefaultCLogErrorTimeWindowMs   int = 2 * 60 * 1000  // in milliseconds (2 minutes)
 	DefaultCLogReattemptDurationMs int = 10 * 60 * 1000 // in milliseconds (10 minutes)
 
+	// Default values for autopause threshold and monitoring duration (both 0 means hibernation mode)
+	DefaultCLogPauseReplThreshold int = 0 // conflicts per second per source cluster node
+	DefaultCLogMonitorDuration    int = 0 // in seconds
+
 	// conflict logger's Connection Pool consts
 	// maximum number of connection objects for a given bucket in the pool.
 	// It is assumed that an average of 3 replications with conflict logging to the same bucket could exist.
@@ -1630,10 +1638,6 @@ const (
 	DefaultCLogConnPoolGCIntervalMs = 60000 // in milliseconds
 	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
 	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
-
-	// DefaultConflictRateToAutopauseRepl of 0 represents that the default QoS strategy
-	// for conflict logger is hibernation.
-	DefaultConflictRateToAutopauseRepl = 0
 )
 
 // Used for internal testing with self-signed certs.
@@ -2041,6 +2045,12 @@ const ForwardLocalOnlyKey = "forwardLocalOnly"
 // ExcludeEventRegexKey is a regex pattern to exclude errors from UI error events section
 const ExcludeEventRegexKey string = "excludeUIErrRegex"
 
-// ConflictRateToPauseReplKey denotes the setting to autopause the replication based on the input conflict
-// rate while conflict logging.
-const ConflictRateToPauseReplKey string = "conflictRateToPauseRepl"
+var (
+	// CLogMonitorCycleInterval is the interval for conflict logging monitor cycle. It is an internal
+	// setting.
+	CLogMonitorCycleInterval = 1000 * time.Millisecond
+
+	// CLogMonitorCleanupFreq is the frequency (in number of cycles based on CLogMonitorCycleInterval)
+	// for cleaning conflict monitor stats. It is an internal setting.
+	CLogMonitorCleanupFreq uint64 = 300
+)
