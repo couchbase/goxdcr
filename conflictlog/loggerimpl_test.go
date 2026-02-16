@@ -354,99 +354,99 @@ func TestLoggerImpl_HibernateIfNeeded(t *testing.T) {
 	mcache := NewManifestCache()
 
 	tests := []struct {
-		name                 string
-		errorType            error
-		maxErrorCount        int
-		errorTimeWindow      time.Duration
-		reattemptDuration    time.Duration
-		numErrors            int
-		waitBetweenErrors    time.Duration
-		shouldHibernate      bool
-		testUnhibernate      bool
+		name                  string
+		errorType             error
+		maxErrorCount         int
+		errorTimeWindow       time.Duration
+		reattemptDuration     time.Duration
+		numErrors             int
+		waitBetweenErrors     time.Duration
+		shouldHibernate       bool
+		testUnhibernate       bool
 		conflictRateThreshold int // 0 = hibernation QoS, >0 = autopause QoS
 	}{
 		{
-			name:                 "HibernateOnRulesError",
-			errorType:            baseclog.ErrRules,
-			maxErrorCount:        3,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3,
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      true,
-			testUnhibernate:      true,
+			name:                  "HibernateOnRulesError",
+			errorType:             baseclog.ErrRules,
+			maxErrorCount:         3,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3,
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       true,
+			testUnhibernate:       true,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "HibernateOnThrottleError",
-			errorType:            baseclog.ErrThrottle,
-			maxErrorCount:        3,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3,
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      true,
-			testUnhibernate:      true,
+			name:                  "HibernateOnThrottleError",
+			errorType:             baseclog.ErrThrottle,
+			maxErrorCount:         3,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3,
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       true,
+			testUnhibernate:       true,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "HibernateOnTimeoutError",
-			errorType:            baseclog.ErrTimeout,
-			maxErrorCount:        3,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3,
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      true,
-			testUnhibernate:      true,
+			name:                  "HibernateOnTimeoutError",
+			errorType:             baseclog.ErrTimeout,
+			maxErrorCount:         3,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3,
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       true,
+			testUnhibernate:       true,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "NoHibernateOnOtherError",
-			errorType:            baseclog.ErrTMPFAIL,
-			maxErrorCount:        3,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            5,
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      false,
-			testUnhibernate:      false,
+			name:                  "NoHibernateOnOtherError",
+			errorType:             baseclog.ErrTMPFAIL,
+			maxErrorCount:         3,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             5,
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       false,
+			testUnhibernate:       false,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "NoHibernateWhenErrorsOutsideTimeWindow",
-			errorType:            baseclog.ErrRules,
-			maxErrorCount:        3,
-			errorTimeWindow:      50 * time.Millisecond,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3,
-			waitBetweenErrors:    100 * time.Millisecond, // Wait longer than time window
-			shouldHibernate:      false,
-			testUnhibernate:      false,
+			name:                  "NoHibernateWhenErrorsOutsideTimeWindow",
+			errorType:             baseclog.ErrRules,
+			maxErrorCount:         3,
+			errorTimeWindow:       50 * time.Millisecond,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3,
+			waitBetweenErrors:     100 * time.Millisecond, // Wait longer than time window
+			shouldHibernate:       false,
+			testUnhibernate:       false,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "NoHibernateWhenBelowThreshold",
-			errorType:            baseclog.ErrRules,
-			maxErrorCount:        5,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3, // Below threshold
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      false,
-			testUnhibernate:      false,
+			name:                  "NoHibernateWhenBelowThreshold",
+			errorType:             baseclog.ErrRules,
+			maxErrorCount:         5,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3, // Below threshold
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       false,
+			testUnhibernate:       false,
 			conflictRateThreshold: 0,
 		},
 		{
-			name:                 "NoHibernateWithAutopauseQoS",
-			errorType:            baseclog.ErrRules,
-			maxErrorCount:        3,
-			errorTimeWindow:      1 * time.Second,
-			reattemptDuration:    100 * time.Millisecond,
-			numErrors:            3,
-			waitBetweenErrors:    10 * time.Millisecond,
-			shouldHibernate:      false,
-			testUnhibernate:      false,
+			name:                  "NoHibernateWithAutopauseQoS",
+			errorType:             baseclog.ErrRules,
+			maxErrorCount:         3,
+			errorTimeWindow:       1 * time.Second,
+			reattemptDuration:     100 * time.Millisecond,
+			numErrors:             3,
+			waitBetweenErrors:     10 * time.Millisecond,
+			shouldHibernate:       false,
+			testUnhibernate:       false,
 			conflictRateThreshold: 100, // Autopause QoS - should not hibernate
 		},
 	}
@@ -469,7 +469,8 @@ func TestLoggerImpl_HibernateIfNeeded(t *testing.T) {
 				baseclog.WithMaxErrorCount(tt.maxErrorCount),
 				baseclog.WithErrorTimeWindow(tt.errorTimeWindow),
 				baseclog.WithReattemptDuration(tt.reattemptDuration),
-				baseclog.WithAutopauseConflictRate(tt.conflictRateThreshold),
+				baseclog.WithAutopauseReplThreshold(tt.conflictRateThreshold),
+				baseclog.WithAutopauseReplMonitorDuration(60),
 			)
 			require.Nil(t, err)
 			assert.Nil(t, l.Start(nil))
@@ -547,7 +548,8 @@ func TestLoggerImpl_HibernateUnhibernateRace(t *testing.T) {
 		baseclog.WithMaxErrorCount(2),
 		baseclog.WithErrorTimeWindow(100*time.Millisecond),
 		baseclog.WithReattemptDuration(50*time.Millisecond),
-		baseclog.WithAutopauseConflictRate(0), // hibernation QoS
+		baseclog.WithAutopauseReplThreshold(0),       // hibernation QoS
+		baseclog.WithAutopauseReplMonitorDuration(0), // hibernation QoS
 	)
 	require.Nil(t, err)
 	assert.Nil(t, l.Start(nil))

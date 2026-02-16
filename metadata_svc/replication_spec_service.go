@@ -844,21 +844,51 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 	}
 
-	if conflictRateThreshold, ok := settings[metadata.ConflictRateToPauseReplKey].(int); ok && conflictRateThreshold > 0 {
-		clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
-		if err != nil {
-			const msg = "Unable to get local cluster compatibility as part of replSpec validation for autopause threshold"
-			service.logger.Errorf("%s: %v", msg, err)
-			return fmt.Errorf("%s: %w", msg, err)
-		}
-
-		if !base.IsClusterCompatible(clusterCompat, base.VersionForConflictRateBasedAutopause) {
-			return fmt.Errorf("all source cluster nodes should be upgraded to atleast %s, for using the %s setting", base.VersionForConflictRateBasedAutopause, metadata.ConflictRateToPauseReplKey)
-		}
-	}
-
 	return nil
 }
+
+// validateCLogAutopauseSettings validates cLogPauseThreshold and cLogMonitorDuration settings.
+// 1. Both settings need to be turned on atomically in a single request
+// 2. Cluster compatibility check
+// Note that conflict logging is a pre-requisite, but it's not validated explicitly. This is because the user
+// should be disable conflict logging (and maybe turn it on later), without the need to change cLogPauseThreshold
+// and cLogMonitorDuration.
+func validateCLogAutopauseSettings(settings *metadata.ReplicationSettings, _ bool, xdcrCompTopology service_def.XDCRCompTopologySvc, errorMap base.ErrorMap) {
+	cLogPauseThreshold := settings.GetCLogPauseReplThreshold()
+	cLogMonitorDuration := settings.GetCLogMonitorDuration()
+
+	if cLogPauseThreshold <= 0 && cLogMonitorDuration <= 0 {
+		// both are turned off, no validations to be done.
+		return
+	}
+
+	// Both of the settings need be turned on in an atomic way.
+	var errKey string
+	if cLogPauseThreshold > 0 && cLogMonitorDuration <= 0 {
+		errKey = metadata.CLogMonitorDurationKey
+	} else if cLogPauseThreshold <= 0 && cLogMonitorDuration > 0 {
+		errKey = metadata.CLogPauseReplThresholdKey
+	}
+
+	if len(errKey) > 0 {
+		errorMap[errKey] = fmt.Errorf("%s and %s settings should be enabled together by configuring a positive integer", metadata.CLogPauseReplThresholdKey, metadata.CLogMonitorDurationKey)
+		return
+	}
+
+	clusterCompat, err := xdcrCompTopology.MyClusterCompatibility()
+	if err != nil {
+		const msg = "Unable to get local cluster compatibility as part of replSpec validation for autopause threshold"
+		errorMap[metadata.CLogPauseReplThresholdKey] = fmt.Errorf("%s: %w", msg, err)
+		return
+	}
+
+	if !base.IsClusterCompatible(clusterCompat, base.VersionForConflictRateBasedAutopause) {
+		errorMap[metadata.CLogPauseReplThresholdKey] = fmt.Errorf("all source cluster nodes should be upgraded to at least %s, for using the %s and %s settings",
+			base.VersionForConflictRateBasedAutopause, metadata.CLogPauseReplThresholdKey, metadata.CLogMonitorDurationKey)
+		return
+	}
+}
+
 func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {
 	var populateErr error
 	var err error
@@ -1872,6 +1902,11 @@ func (service *ReplicationSpecService) ValidateSpecSettings(settings *metadata.R
 		return errorMap, nil
 	}
 
+	validateCLogAutopauseSettings(settings, true, service.xdcr_comp_topology_svc, errorMap)
+	if len(errorMap) > 0 {
+		return errorMap, nil
+	}
+
 	return nil, nil
 }
 
@@ -1964,7 +1999,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 		// See ImmutableDefaultSettings for more details.
 		// However check cluster compatibility to avoid settings change in mixed mode.
 		if !base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr) {
-			errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to atleast %s when either %s or %s is true",
+			errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to at least %s when either %s or %s is true",
 				base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
 			return
 		}
@@ -1992,7 +2027,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 			return
 		}
 	default:
-		errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to atleast %s when either %s or %s is true",
+		errorMap[errKey] = fmt.Errorf("the whole cluster must be upgraded to at least %s when either %s or %s is true",
 			base.VersionForKeyOnlyDeletionFilterExpr.String(), metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
 		return
 	}

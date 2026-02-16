@@ -17,9 +17,9 @@ declare -A CNG_NODE_CERT_LOCATION_MAP
 declare -A CNG_NODE_KEY_LOCATION_MAP
 declare -A CNG_NODE_PORT_MAP
 
-CNG_CB_PORT="9001" # by default attached to server running on 9001
-CNG_CB_PASS="wewewe"         # default password
-CNG_PATH="/tmp/cng"          # default path for all CNG-related files
+CNG_CB_PORT="9001"   # by default attached to server running on 9001
+CNG_CB_PASS="wewewe" # default password
+CNG_PATH="/tmp/cng"  # default path for all CNG-related files
 
 # setupCNG <cngRepoPath> <cngNodeName> [cbPort] [cbPass] [userName]
 # Launches the CNG gateway using the certificate/key

@@ -25,8 +25,13 @@ insertPropertyIntoBucketNamePropertyMap "B5" BucketProperty # conflict bucket fo
 
 conflictLoggingMap="{\"bucket\":\"B4\", \"collection\": \"_default._default\"}"
 
-# Settings for autopause with conflict rate threshold of 10 conflicts/s.
-declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap ["conflictRateToPauseRepl"]=10)
+# Default replication properties for negative tests
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["statsInterval"]=500)
+
+# Settings for autopause with threshold of 10 conflicts within 30 seconds monitoring duration.
+declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap ["cLogPauseReplThreshold"]=10 ["cLogMonitorDuration"]=30 ["xdcrDevMainSendDelayMs"]=3000)
+declare -A UpdateSettingsOff=(["cLogPauseReplThreshold"]=0 ["cLogMonitorDuration"]=0)
+declare -A UpdateSettingsOn=(["cLogPauseReplThreshold"]=10 ["cLogMonitorDuration"]=30)
 
 # Bucket -> Scopes
 # -----------------
@@ -38,9 +43,31 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]} ["B4"]=${sc
 declare -a collection1Arr=("col1")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
 
-function verifyPromStats {
-	numItems=$1
+# Helper function to retry prometheus validation checks
+function retryValidation {
+	local maxRetries=10
+	local sleepTime=15
+	local retryCount=0
+	local validationCmd="$@"
 
+	while [ $retryCount -lt $maxRetries ]; do
+		# Run in subshell to prevent exit 1 from terminating the script
+		date +"%T.%N"
+		(eval "$validationCmd")
+		if [ $? -eq 0 ]; then
+			return 0
+		fi
+		retryCount=$((retryCount + 1))
+		if [ $retryCount -lt $maxRetries ]; then
+			echo "Validation failed, retry $retryCount/$maxRetries after $sleepTime seconds..."
+			sleep $sleepTime
+		fi
+	done
+	echo "Validation failed after $maxRetries retries"
+	exit 1
+}
+
+function verifyPromStats {
 	# verify no data-corruption
 	validateBinaryFilteredIs0 "C1" "B1" "B2"
 
@@ -49,17 +76,19 @@ function verifyPromStats {
 
 	# verify no unknown clog others
 	validatePrometheusStatsCLogOtherErrors0 "C1" "B1" "B2"
+}
 
-	checkItemCnt "C1" "B1" $numItems
-	if (($? == 1)); then
-		runDifferFindDifference "C2" "B2" "C1" "B1"
-		exit 1
-	fi
-	checkItemCnt "C2" "B2" $numItems
-	if (($? == 1)); then
-		runDifferFindDifference "C1" "B1" "C2" "B2"
-		exit 1
-	fi
+function runDataLoad {
+	prefix=$1
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=5000
+
+	# the way this test creates conflicts is by having docs of the same keys on both buckets.
+	# this is hackish and doesn't represent a true conflict.
+	echo runCbWorkloadGenBucket _default._default "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS "conflict"
+	runCbWorkloadGenBucket "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS $prefix
+
+	echo runCbWorkloadGenBucket _default._default "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS "conflict"
+	runCbWorkloadGenBucket "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS $prefix
 }
 
 # The conflict rate in this test will be greater than configured threshold and therefore the replication
@@ -79,16 +108,7 @@ function testReplicationWhichAutoPauses {
 	setCrossClusterVersioningForBucket "C1" "B1"
 	setCrossClusterVersioningForBucket "C2" "B2"
 
-	numItems=5000
-	CBWORKLOAD_COLLECTION_NUM_ITEMS=$numItems
-
-	# the way this test creates conflicts is by having docs of the same keys on both buckets.
-	# this is hackish and doesn't represent a true conflict.
-	echo runCbWorkloadGenBucket _default._default "C1" "B1" $numItems "conflict"
-	runCbWorkloadGenBucket "C1" "B1" $numItems "conflict"
-
-	echo runCbWorkloadGenBucket _default._default "C2" "B2" $numItems "conflict"
-	runCbWorkloadGenBucket "C2" "B2" $numItems "conflict"
+	runDataLoad "conflict"
 
 	echo "Replication C1.B1 -> C2.B2"
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplProperties
@@ -96,13 +116,42 @@ function testReplicationWhichAutoPauses {
 	echo "Sleep 60 seconds to wait for replication to autopause"
 	sleep 60
 
-	#TODO: MB-70285
-	#validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
-	validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
+	retryValidation validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
 	echo "Replication has been successfully autopaused"
 
 	grepForAbnormalities
-	verifyPromStats $numItems
+	verifyPromStats
+
+	echo "Updating replication settings to disable autopause (threshold=0, duration=0)"
+	setReplicationSettings "C1" "B1" "C2" "B2" UpdateSettingsOff
+	sleep 2
+
+	echo "Resuming the replication"
+	resumeReplication "C1" "B1" "C2" "B2"
+
+	echo "Sleep 60 seconds to verify replication continues without autopause"
+	sleep 60
+
+	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	echo "Replication is running and not autopaused with hibernated settings"
+
+	grepForAbnormalities
+	verifyPromStats
+
+	echo "Updating replication settings to enable autopause (threshold=10, duration=30)"
+	setReplicationSettings "C1" "B1" "C2" "B2" UpdateSettingsOn
+	sleep 2
+
+	echo "Sleep 60 seconds to wait for replication to autopause"
+	sleep 60
+
+	retryValidation validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
+	echo "Replication has been successfully autopaused"
+
+	grepForAbnormalities
+	verifyPromStats
 
 	cleanupBucketReplications
 	cleanupBuckets
@@ -139,20 +188,192 @@ function testReplicationWhichDoesnotAutoPauses {
 	echo "Sleep 60 seconds for replication to complete"
 	sleep 60
 
-	#TODO: MB-70285
-	#validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
-	validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	retryValidation validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	echo "Replication is still running"
+
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevMainSendDelayMs=0"
+	sleep 10
+
+	retryValidation validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
+	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
 	echo "Replication is still running"
 
 	# changes_left should be 0
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 
 	grepForAbnormalities
-	verifyPromStats $numItems
+	verifyPromStats
 
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+}
+
+# Helper function to test replication creation failure
+# Usage: testCreateReplicationShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testCreateReplicationShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to create replication with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication \
+		-d fromBucket=B1 \
+		-d toCluster=C2 \
+		-d toBucket=B2 \
+		-d replicationType=continuous \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Helper function to test default settings change failure
+# Usage: testDefaultSettingsChangeShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testDefaultSettingsChangeShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to change default settings with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/settings/replications \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Global variable to store the replication ID for update tests
+REPLICATION_ID=""
+
+# Helper function to test replication settings update failure
+# Usage: testUpdateReplicationSettingsShouldFail "testName" "paramsArrayName" "expectedError"
+# paramsArrayName is the name of an array containing curl -d arguments
+function testUpdateReplicationSettingsShouldFail {
+	local testName=$1
+	local -n extraParams=$2
+	local expectedError=$3
+
+	echo "============================================================================"
+	echo "$testName"
+	echo "============================================================================"
+
+	echo "Attempting to update replication settings with params: ${extraParams[*]}"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW "http://127.0.0.1:9000/settings/replications/${REPLICATION_ID}" \
+		"${extraParams[@]}")
+
+	if [[ $output != *"$expectedError"* ]]; then
+		echo "Expected error: $expectedError"
+		echo "But got: $output"
+		exit 1
+	fi
+	echo "Received expected error: $expectedError"
+	echo "$testName PASSED"
+}
+
+# Default Settings Test: autopause threshold or duration set without the other should fail
+function testDefaultSettingsAutopauseWithoutBothOn {
+	local threshold=$1
+	local duration=$2
+	local expectedError=$3
+
+	local -a params=(
+		-d "cLogPauseReplThreshold=$threshold"
+		-d "cLogMonitorDuration=$duration"
+	)
+
+	testDefaultSettingsChangeShouldFail "Default Settings Test: threshold=$threshold, duration=$duration should fail" params "$expectedError"
+}
+
+# Update Settings Test: autopause threshold or duration set without the other should fail
+function testUpdateSettingsAutopauseWithoutBothOn {
+	local threshold=$1
+	local duration=$2
+	local expectedError=$3
+
+	local -a params=(
+		-d "cLogPauseReplThreshold=$threshold"
+		-d "cLogMonitorDuration=$duration"
+	)
+
+	testUpdateReplicationSettingsShouldFail "Update Settings Test: threshold=$threshold, duration=$duration should fail" params "$expectedError"
+}
+
+# Create Replication Test: autopause threshold or duration set without the other should fail
+function testCreateAutopauseWithoutBothOn {
+	local threshold=$1
+	local duration=$2
+	local expectedError=$3
+
+	local -a params=(
+		-d "cLogPauseReplThreshold=$threshold"
+		-d "cLogMonitorDuration=$duration"
+	)
+
+	testCreateReplicationShouldFail "Create Test: threshold=$threshold, duration=$duration should fail" params "$expectedError"
+}
+
+# Helper function to get replication ID for update tests
+function getReplicationIdForUpdate {
+	local replId=$(curl -s -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/remoteClusters/C2/B1%2FB2 | grep -o '"id":[^,]*' | cut -d'"' -f4)
+	echo "$replId"
+}
+
+function testNegativeCases {
+	# Set up basic topologies for negative tests
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createRemoteClusterReference "C1" "C2"
+	err="cLogPauseReplThreshold and cLogMonitorDuration settings should be enabled together by configuring a positive integer"
+
+	# Default settings negative tests (no replication needed)
+	echo "Running default settings autopause tests..."
+	testDefaultSettingsAutopauseWithoutBothOn 10 0 $err
+	testDefaultSettingsAutopauseWithoutBothOn 0 30 $err
+
+	# Create replication negative tests (no replication needed, these try to create and fail)
+	echo "Running replication creation autopause negative tests..."
+	testCreateAutopauseWithoutBothOn 10 0 $err
+	testCreateAutopauseWithoutBothOn 0 30 $err
+
+	# Update settings negative tests (need a replication)
+	echo "Creating test replication for update settings tests..."
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 5
+	REPLICATION_ID=$(getReplicationIdForUpdate)
+
+	echo "Running update settings autopause negative tests..."
+	testUpdateSettingsAutopauseWithoutBothOn 10 0 $err
+	testUpdateSettingsAutopauseWithoutBothOn 0 30 $err
+
+	# Clean up after negative tests
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	sleep 5
 }
 
 function runTestCase {
@@ -169,8 +390,15 @@ function runTestCase {
 	fi
 
 	sleep 2
+	OLD_CBWORKLOAD_COLLECTION_NUM_ITEMS=$CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	testNegativeCases
+
+	echo "Setting up for positive tests with conflict logging..."
 	testReplicationWhichAutoPauses
 	testReplicationWhichDoesnotAutoPauses
+
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$OLD_CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	echo "============================================================================"
 	echo "Running conflict logging autopause test case passed"

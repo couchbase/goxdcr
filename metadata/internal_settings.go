@@ -290,6 +290,8 @@ const (
 	CLogSkipTlsVerifyKey        = "CLogSkipTlsVerify"
 	CLogResourceManagerBoostKey = "CLogResourceManagerBoost"
 	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
+	CLogMonitorCycleIntervalKey = "CLogMonitorCycleInterval"
+	CLogMonitorCleanupFreqKey   = "CLogMonitorCleanupFreq"
 
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
 
@@ -448,6 +450,8 @@ var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 1
 var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var UseLegacyPreReplicateConfig = &SettingsConfig{false, nil}
 var ColMarshalIdxThresholdConfig = &SettingsConfig{base.ColMappingLargeThreshold, &Range{1, 10000}}
+var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
+var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -592,6 +596,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
 	UseLegacyPreReplicateKey:                      UseLegacyPreReplicateConfig,
 	ColMarshalIdxThresholdKey:                     ColMarshalIdxThresholdConfig,
+	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
+	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

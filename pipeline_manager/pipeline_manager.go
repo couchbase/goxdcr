@@ -2851,15 +2851,20 @@ func (pm *PipelineManager) gcTargetBucket(spec *metadata.ReplicationSpecificatio
 }
 
 // GetConflictsCount returns the true_conflicts_detected stat for both main and backfill pipeline.
+// Returns ErrorReplicationSpecNotActive if pipeline is not running or if it doesn't exist.
 func (pm *PipelineManager) GetConflictsCount(topic string) (int64, error) {
 	rs, err := pm.ReplicationStatus(topic)
-	if err != nil {
+	switch {
+	case err == nil:
+	case err.Error() == pm.utils.ReplicationStatusNotFoundError(topic).Error():
+		return 0, base.ErrorReplicationSpecNotActive
+	default:
 		return 0, err
 	}
 
 	curProgress := rs.GetProgress()
 	if curProgress != common.ProgressPipelineRunning {
-		return 0, nil
+		return 0, base.ErrorReplicationSpecNotActive
 	}
 
 	var totalConflicts int64
@@ -2881,6 +2886,8 @@ func (pm *PipelineManager) GetConflictsCount(topic string) (int64, error) {
 	return totalConflicts, nil
 }
 
+// RaiseUIError raise a UI error log message and also adds a persistent error to the input
+// replication topic to it's UI tab.
 func (pm *PipelineManager) RaiseUIError(topic string, errMsg string) (int64, error) {
 	pm.uilog_svc.Write(errMsg)
 

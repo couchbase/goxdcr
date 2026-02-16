@@ -150,11 +150,12 @@ const (
 	// MinPVLenForMobileKey represents the minimum length of PV to retain when mobile setting is on.
 	MinPVLenForMobileKey = base.MinPVLenForMobileKey
 
-	// ConflictRateToPauseReplKey represents the conflict rate (conflicts per second per source cluster node),
-	// if configured, the replication needs to be autopaused during conflict logging. The conflict rate will
-	// be monitored on each node and if any node experiences conflict burst with conflict rate greater than
-	// the threshold, the replication pipeline will be autopaused on every node (i.e. across the cluster).
-	ConflictRateToPauseReplKey = base.ConflictRateToPauseReplKey
+	// CLogPauseReplThresholdKey represents the conflict count threshold (conflicts per second per source node)
+	// at which the replication will be autopaused during conflict logging.
+	CLogPauseReplThresholdKey = base.CLogPauseReplThresholdKey
+
+	// CLogMonitorDurationKey represents the duration (in seconds) over which conflict counts are monitored.
+	CLogMonitorDurationKey = base.CLogMonitorDurationKey
 
 	// CNG Nozzle settings
 	CNGWorkerCountKey = base.CNGWorkerCountKey // number of workers per nozzle to process incoming data
@@ -313,8 +314,12 @@ var DevReplOptsConfig = &SettingsConfig{"", nil}
 
 var minPVLenForMobileConfig = &SettingsConfig{5, &Range{0, 1000}}
 
-// Conflict rate of 0 indicates that, the pipeline will be not autopaused with any rate of conflict.
-var conflictRateToPauseReplConfig = &SettingsConfig{0, &Range{0, math.MaxInt}}
+// CLog pause threshold of 0 indicates that the pipeline will not be autopaused based on conflict count.
+var cLogPauseReplThresholdConfig = &SettingsConfig{0, &Range{0, math.MaxInt}}
+
+// CLog monitor duration of 0 indicates that the pipeline will not be autopaused based on conflict count.
+// Max value is 2592000 seconds (30 days).
+var cLogMonitorDurationConfig = &SettingsConfig{0, &Range{0, 2592000}}
 
 // CNG Nozzle settings
 var CNGWorkerCountConfig = &SettingsConfig{base.DefaultCNGWorkerCount, &Range{1, 10000}}
@@ -382,7 +387,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ComponentEventsChanLengthKey:         ComponentEventsChanLengthConfig,
 	DevReplOptsKey:                       DevReplOptsConfig,
 	MinPVLenForMobileKey:                 minPVLenForMobileConfig,
-	ConflictRateToPauseReplKey:           conflictRateToPauseReplConfig,
+	CLogPauseReplThresholdKey:            cLogPauseReplThresholdConfig,
+	CLogMonitorDurationKey:               cLogMonitorDurationConfig,
 
 	// CNG Nozzle settings
 	CNGWorkerCountKey: CNGWorkerCountConfig,
@@ -1659,9 +1665,14 @@ func (s *ReplicationSettings) GetMinPVLenForMobile() int {
 	return len
 }
 
-// GetConflictRateToPauseRepl returns the value of ConflictRateToPauseReplKey setting.
-func (s *ReplicationSettings) GetConflictRateToPauseRepl() int {
-	val, _ := s.GetSettingValueOrDefaultValue(ConflictRateToPauseReplKey)
-	rate := val.(int)
-	return rate
+// GetCLogPauseReplThreshold returns the value of CLogPauseReplThresholdKey setting.
+func (s *ReplicationSettings) GetCLogPauseReplThreshold() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogPauseReplThresholdKey)
+	return val.(int)
+}
+
+// GetCLogMonitorDuration returns the value of CLogMonitorDurationKey setting.
+func (s *ReplicationSettings) GetCLogMonitorDuration() int {
+	val, _ := s.GetSettingValueOrDefaultValue(CLogMonitorDurationKey)
+	return val.(int)
 }

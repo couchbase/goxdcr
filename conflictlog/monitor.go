@@ -24,6 +24,29 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
+// monitorState represents the current state of conflict monitoring for a replication.
+type monitorState int
+
+const (
+	// monitorStateNormal indicates normal operation with no conflict rate breach
+	monitorStateNormal monitorState = iota
+
+	// monitorStateConflictRateBreached indicates the conflict rate threshold has been exceeded
+	monitorStateConflictRateBreached
+)
+
+// String returns the string representation of the monitor state.
+func (s monitorState) String() string {
+	switch s {
+	case monitorStateNormal:
+		return "normal"
+	case monitorStateConflictRateBreached:
+		return "conflictRateBreached"
+	default:
+		return "unknown"
+	}
+}
+
 var _ baseclog.Monitor = (*monitorImpl)(nil)
 
 // monitorImpl is the concrete implementation of the Monitor interface.
@@ -54,33 +77,46 @@ type monitorImpl struct {
 
 // stats represents the statistics of a given replication to be monitored
 // by the conflict manager.
+//
+// Note:
+// A "window" is defined as an interval [windowStartTimestamp, windowStartTimestamp + windowMonitorDuration]. The number of
+// conflicts observed at any instant in the current window is stored in windowConflicts.
+// A "cycle" is defined as one execution of monitorConflictRateOnce. It has a frequency of 1 seconds (CLogMonitorCycleInterval).
+// The idea is that a replication is eligible to be autopaused after every 1 second, eventhough the threshold number of conflicts
+// is configured for a possible larger window duration. This is because we don't want to wait until the end of a window to autopause
+// the replication if the threshold was breached at any instant of the window to ensure immediate QoS and reduce the chances of conflicts or
+// data loss.
 type stats struct {
-	// timestamp is the last updated timestamp.
+	// timestamp is when the last cycle was executed.
 	timestamp int64
 
-	// conflicts is the total number of conflicts detected.
+	// conflicts is the total number of conflicts detected in the last cycle.
 	conflicts int64
 
-	// lastErr is the last seen error while monitoring for a
-	// given replication.
-	lastErr error
+	// windowConflicts tracks the accumulated conflicts in the current monitoring window.
+	windowConflicts int64
 
-	// errCnt is the total number of errors seen while monitoring
-	// for a given replication.
-	errCnt uint64
+	// windowStartTimestamp marks the start time of the current monitoring window (in nanoseconds).
+	windowStartTimestamp int64
 
-	// conflictRateBreached represents if the conflict rate for the given
-	// replication has exceeded threshold, across the lifecycle of an active
-	// replication pipeline.
-	// When conflictRateBreached is true, autopaused should be true. If it's not
-	// true, it means that we have breached the threshold, but there's some trouble
-	// autopausing the replication.
-	conflictRateBreached bool
+	// windowThreshold is the threshold captured at the start of the current monitoring window. This
+	// is so that if the corresponsing replication setting is updated in middle of an ongoing window,
+	// the update will only come into effect from the next window.
+	windowThreshold int
 
-	// autopaused represents that the replication is already autopaused
-	// successfully. conflictRateBreached will always be true if autopaused
-	// is true.
-	autopaused bool
+	// windowMonitorDuration is the monitor duration captured at the start of the current monitoring window.
+	// This is so that if the corresponsing replication setting is updated in middle of an ongoing window,
+	// the update will only come into effect from the next window.
+	windowMonitorDuration int
+
+	// state represents the current monitoring state for the replication.
+	// State transitions: normal -> conflictRateBreached -> autoPaused
+	// - normal: No conflict rate breach detected
+	// - conflictRateBreached: Conflict rate has exceeded threshold, autopause pending/in-progress
+	// - autoPaused: Replication has been successfully autopaused
+	// The state spans accross the lifetime of a replication and is not restricted to a specific
+	// window.
+	state monitorState
 
 	// descTime represents the number of monitoring cycles in which the timestamp
 	// read was non-monotonic.
@@ -89,6 +125,14 @@ type stats struct {
 	// descConflicts represents the number of monitoring cycles in which the number of
 	// conflicts stat was non-monotonic.
 	descConflicts uint64
+
+	// lastErr is the last seen error while monitoring for a
+	// given replication.
+	lastErr error
+
+	// errCnt is the total number of errors seen while monitoring
+	// for a given replication.
+	errCnt uint64
 }
 
 // String returns the stringer representation of s.
@@ -97,8 +141,8 @@ func (s *stats) String() string {
 		return "<nil>"
 	}
 
-	return fmt.Sprintf("{conflicts=%v,errCnt=%v,lastErr=%v,breach=%v,paused=%v,desc=(%v,%v)} ",
-		s.conflicts, s.errCnt, s.lastErr, s.conflictRateBreached, s.autopaused, s.descTime, s.descConflicts)
+	return fmt.Sprintf("{conflicts=%v,windowStart=%v,currentWindow=%v,errCnt=%v,lastErr=%v,state=%v,desc=(%v,%v),threshold=%v,duration=%v} ",
+		s.conflicts, s.windowStartTimestamp, s.windowConflicts, s.errCnt, s.lastErr, s.state, s.descTime, s.descConflicts, s.windowThreshold, s.windowMonitorDuration)
 }
 
 // resetError resets s.lastErr to be set to nil.
@@ -108,6 +152,18 @@ func (s *stats) resetError() {
 	}
 
 	s.lastErr = nil
+}
+
+// startNewWindow initializes or resets the monitoring window of size monitorDuration.
+func (s *stats) startNewWindow(startTimestamp int64, initialConflicts int64, threshold int, monitorDuration int) {
+	if s == nil {
+		return
+	}
+
+	s.windowStartTimestamp = startTimestamp
+	s.windowConflicts = initialConflicts
+	s.windowThreshold = threshold
+	s.windowMonitorDuration = monitorDuration
 }
 
 // Start initiates the monitoring process.
@@ -126,8 +182,8 @@ func (m *monitorImpl) monitorStatsLogStr() string {
 	}
 
 	sb := strings.Builder{}
-	for fullTopic, stat := range m.statsToMonitor {
-		sb.WriteString(fullTopic)
+	for uniqueTopic, stat := range m.statsToMonitor {
+		sb.WriteString(uniqueTopic)
 		sb.WriteByte(':')
 		sb.WriteString(stat.String())
 	}
@@ -154,12 +210,12 @@ func (m *monitorImpl) monitorConflictRate() {
 		errCnt    uint64
 	)
 
-	ticker := time.NewTicker(base.ResourceManagementInterval)
+	ticker := time.NewTicker(base.CLogMonitorCycleInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		monitored++
-		if monitored%MonitorCleanupFreq == 0 {
+		if monitored%base.CLogMonitorCleanupFreq == 0 {
 			// Take this opportunity to log some information for debugging before cleanup.
 			m.logger.Infof("monitored: %v, errCnt: %v, lastErr: %v, details: %s",
 				monitored, errCnt, lastErr, m.monitorStatsLogStr())
@@ -183,23 +239,39 @@ func (m *monitorImpl) monitorConflictRate() {
 	}
 }
 
-// updateStat updates the monitoring stats map for the given fullTopic, with the input stats.
-func (m *monitorImpl) updateStat(fullTopic string, timestamp int64, conflicts int64, conflictRateBreached bool, autopaused bool, err error) {
-	stat, ok := m.statsToMonitor[fullTopic]
+// newStat is to be called when a replication with uniqueTopic doesn't have a stat
+// initialised yet. It initializes both the basic stats and the monitoring window.
+// If uniqueTopic already has an entry, this function is a no-op.
+func (m *monitorImpl) newStat(uniqueTopic string, timestamp int64, conflicts int64, threshold int, monitorDuration int) {
+	stat, ok := m.statsToMonitor[uniqueTopic]
 	if !ok || stat == nil {
 		stat = &stats{
 			timestamp: timestamp,
 			conflicts: conflicts,
+			state:     monitorStateNormal,
 		}
-		m.statsToMonitor[fullTopic] = stat
+
+		// Initialise a window of size monitorDuration.
+		stat.startNewWindow(timestamp, 0, threshold, monitorDuration)
+		m.statsToMonitor[uniqueTopic] = stat
+	}
+}
+
+// handleErr sets the stats when a non-nil err is passed.
+// uniqueTopic should already have an entry in m.statsToMonitor and err should be non nil.
+func (m *monitorImpl) handleErr(uniqueTopic string, timestamp int64, conflicts int64, err error) {
+	if err == nil {
+		// Breaks the pre-requisite. Don't continue.
+		return
+	}
+
+	stat, ok := m.statsToMonitor[uniqueTopic]
+	if !ok || stat == nil {
+		// Breaks the pre-requisite. Don't continue.
+		return
 	}
 
 	switch {
-	case err == nil:
-		stat.timestamp = timestamp
-		stat.conflicts = conflicts
-		stat.conflictRateBreached = conflictRateBreached
-		stat.autopaused = autopaused
 	case errors.Is(err, baseclog.ErrDescConflictCounter):
 		// record timestamp and conflicts as a baseline for next monitoring cycle.
 		stat.timestamp = timestamp
@@ -240,86 +312,122 @@ func (m *monitorImpl) monitorOneReplicationOnce(spec *metadata.ReplicationSpecif
 		return
 	}
 
+	var (
+		timestamp   = time.Now().UnixNano()
+		uniqueTopic = spec.UniqueId()
+		topic       = spec.Id
+	)
+
 	conflictLoggingOff := spec.Settings.GetConflictLoggingMapping().Disabled()
-	autoPauseOff := spec.Settings.GetConflictRateToPauseRepl() == 0
+	threshold := spec.Settings.GetCLogPauseReplThreshold()
+	monitorDuration := spec.Settings.GetCLogMonitorDuration()
+	autoPauseOff := threshold == 0 || monitorDuration == 0
 	if conflictLoggingOff || autoPauseOff {
+		// Ensure that old monitoring stat if any is deleted.
+		// If it's not present delete is a no-op anyways.
+		delete(m.statsToMonitor, uniqueTopic)
 		return
 	}
 
-	var (
-		newTimestamp = time.Now().UnixNano()
-		threshold    = float64(spec.Settings.GetConflictRateToPauseRepl())
-		fullTopic    = spec.UniqueId()
-		topic        = spec.Id
-
-		deltaSeconds   float64
-		deltaConflicts float64
-	)
-
-	newConflictCnt, err := m.Monitor.GetConflictsCount(topic)
-	if err != nil {
+	conflicts, err := m.Monitor.GetConflictsCount(topic)
+	switch {
+	case err == nil:
+	case errors.Is(err, base.ErrorReplicationSpecNotActive):
+		// Ensure the previous monitoring states are deleted for new
+		// monitoring sessions in the future.
+		delete(m.statsToMonitor, uniqueTopic)
+		return
+	default:
 		err = fmt.Errorf("error getting conflict count: %w", err)
-		m.updateStat(fullTopic, newTimestamp, 0, false, false, err)
+		m.handleErr(uniqueTopic, timestamp, 0, err)
 		return
 	}
 
-	oldStats, ok := m.statsToMonitor[fullTopic]
-	if !ok || oldStats == nil {
-		// This is probably the first cycle for this replication.
-		m.updateStat(fullTopic, newTimestamp, newConflictCnt, false, false, nil)
+	stat, ok := m.statsToMonitor[uniqueTopic]
+	if !ok || stat == nil {
+		// This is the first cycle of monitoring for this replication.
+		m.newStat(uniqueTopic, timestamp, conflicts, threshold, monitorDuration)
 		return
 	}
 
-	delta := time.Duration(newTimestamp - oldStats.timestamp).Seconds()
-	if delta > 0 {
-		// delta of 0 is not an acceptable value for the denominator.
-		deltaSeconds = delta
-	} else {
-		// Time went backwards or is the same as the last cycle. Do not consider this
-		// sample for the current cycle.
-		m.updateStat(fullTopic, newTimestamp, newConflictCnt, oldStats.conflictRateBreached, oldStats.autopaused, baseclog.ErrDescTime)
-		return
-	}
-
-	delta = float64(newConflictCnt - oldStats.conflicts)
-	if delta >= 0 {
-		// delta of 0 is an acceptable value for the numerator.
-		deltaConflicts = delta
-	} else {
-		// Monotonic counter went backwards. Do not consider this sample for the current cycle.
-		m.updateStat(fullTopic, newTimestamp, newConflictCnt, oldStats.conflictRateBreached, oldStats.autopaused, baseclog.ErrDescConflictCounter)
-		return
-	}
-
-	var (
-		conflictRate         = deltaConflicts / deltaSeconds
-		autopaused           = oldStats.autopaused
-		conflictRateBreached = oldStats.conflictRateBreached || (conflictRate >= threshold)
-	)
-
-	m.logger.Tracef("%s: conflictRate=%v, autopaused=%v, breached=%v", topic, conflictRate, autopaused, conflictRateBreached)
-	if conflictRateBreached && !autopaused {
-		m.logger.Infof("%s: The replication will be autopaused due to high conflict rate, which is greater than the set threshold, conflictRate=%v, threshold=%v",
-			fullTopic, conflictRate, threshold)
-		err = m.Monitor.AutoPauseReplication(topic)
-		if err != nil {
-			// could not pause in this cycle, will retry in next cycle
-			err = fmt.Errorf("error autopausing the replication %v: %w", fullTopic, err)
-			m.updateStat(fullTopic, newTimestamp, newConflictCnt, true, false, err)
+	if stat.state == monitorStateNormal {
+		// Validate time monotonicity and conflict counter monotonicity as we have
+		// monitored for this replication in the past.
+		if timestamp <= stat.timestamp {
+			// Time went backwards or is the same as the last cycle. Do not consider this
+			// sample for the current cycle.
+			m.handleErr(uniqueTopic, timestamp, conflicts, baseclog.ErrDescTime)
 			return
 		}
 
-		autopaused = true
-		uiMsg := fmt.Sprintf(AutoPauseErrUIStr, topic, int(conflictRate), int(threshold))
-		_, err = m.Monitor.RaiseUIError(topic, uiMsg)
-		if err != nil {
-			err = fmt.Errorf("error displaying ui message after autopausing %v: %w", fullTopic, err)
-			m.updateStat(fullTopic, newTimestamp, newConflictCnt, true, true, err)
+		// Add this cycle's conflicts to the current window
+		delta := conflicts - stat.conflicts
+		if delta < 0 {
+			// Monotonic counter went backwards. Do not consider this sample for the current cycle.
+			// delta of 0 is an acceptable value though.
+			m.handleErr(uniqueTopic, timestamp, conflicts, baseclog.ErrDescConflictCounter)
 			return
+		}
+
+		stat.windowConflicts += delta
+
+		// Use the threshold that was captured at window start. If the state is
+		// already monitorStateConflictRateBreached, we don't need to transition
+		// to a new state based on conflicts count.
+		if stat.windowConflicts >= int64(stat.windowThreshold) {
+			stat.state = monitorStateConflictRateBreached
+			m.logger.Infof("%s: The replication will be autopaused due to high conflict count, which is greater than the set threshold, windowConflicts=%v, windowThreshold=%v, windowMonitorDuration=%v",
+				uniqueTopic, stat.windowConflicts, stat.windowThreshold, stat.windowMonitorDuration)
 		}
 	}
 
-	m.updateStat(fullTopic, newTimestamp, newConflictCnt, conflictRateBreached, autopaused, nil)
+	m.logger.Tracef("%s: windowConflicts=%v, windowThreshold=%v, state=%v", topic, stat.windowConflicts, stat.windowThreshold, stat.state)
+	if stat.state == monitorStateConflictRateBreached {
+		uiMsg := fmt.Sprintf(AutoPauseErrUIStr, topic, stat.windowConflicts, stat.windowThreshold, stat.windowMonitorDuration)
+		err = m.autopauseReplication(topic, uniqueTopic, uiMsg)
+		if err != nil {
+			m.handleErr(uniqueTopic, timestamp, conflicts, err)
+			return
+		}
+	} else {
+		// Check if monitoring window has expired.
+		windowElapsed := time.Duration(timestamp - stat.windowStartTimestamp).Seconds()
+		if windowElapsed >= float64(stat.windowMonitorDuration) {
+			// Window expired. Start a new window from the last successful monitoring point
+			// to ensure no time gaps between windows.
+			// Next cycle will be a fresh window for this replication.
+			stat.startNewWindow(stat.timestamp, 0, threshold, monitorDuration)
+		}
+
+		// This cycle was successful and conflict count is below threshold.
+		// Store the stats for baseline of next cycle.
+		stat.timestamp = timestamp
+		stat.conflicts = conflicts
+	}
+}
+
+// autopauseReplication pauses the replication with input topic and notifies the frontend
+// with the reason for autopause.
+func (m *monitorImpl) autopauseReplication(topic, uniqueTopic string, reason string) error {
+	err := m.Monitor.AutoPauseReplication(topic)
+	if err != nil {
+		// could not pause in this cycle, will retry in next cycle
+		return fmt.Errorf("error autopausing the replication %v: %w", uniqueTopic, err)
+	}
+
+	// Delete the monitoring metadata for this replication to indicate that
+	// the replication has been paused. This way if the replication is then resumed
+	// a new monitoring session will start.
+	delete(m.statsToMonitor, uniqueTopic)
+
+	// Raise an error to alert the frontend. We will try this only once and if it fails
+	// we will ignore it.
+	_, err = m.Monitor.RaiseUIError(topic, reason)
+	if err != nil {
+		return fmt.Errorf("error displaying ui message after autopausing %v: %w", uniqueTopic, err)
+	}
+
+	return nil
 }
 
 // cleanupMonitoredStats removes all the replication entries from the monitoring stats map, which

@@ -984,3 +984,73 @@ func TestCERestrictions(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestCERestrictions =================")
 }
+
+func TestValidateCLogAutopauseSettings(t *testing.T) {
+	tests := []struct {
+		name         string
+		pauseThresh  int
+		monitorDur   int
+		compat       base.ServerVersion
+		compatErr    error
+		expectErrKey string
+	}{
+		{
+			name:        "Both off",
+			pauseThresh: 0, monitorDur: 0, compat: base.VersionForConflictRateBasedAutopause,
+			expectErrKey: "",
+		},
+		{
+			name:        "Only pause threshold on",
+			pauseThresh: 1, monitorDur: 0, compat: base.VersionForConflictRateBasedAutopause,
+			expectErrKey: metadata.CLogMonitorDurationKey,
+		},
+		{
+			name:        "Only monitor duration on",
+			pauseThresh: 0, monitorDur: 1, compat: base.VersionForConflictRateBasedAutopause,
+			expectErrKey: metadata.CLogPauseReplThresholdKey,
+		},
+		{
+			name:        "Both on, compat error",
+			pauseThresh: 1, monitorDur: 1, compatErr: errors.New("compat error"),
+			expectErrKey: metadata.CLogPauseReplThresholdKey,
+		},
+		{
+			name:        "Both on, compat fail",
+			pauseThresh: 1, monitorDur: 1, compat: base.Version7_2_1,
+			expectErrKey: metadata.CLogPauseReplThresholdKey,
+		},
+		{
+			name:        "Both on, compat pass",
+			pauseThresh: 1, monitorDur: 1, compat: base.VersionForConflictRateBasedAutopause,
+			expectErrKey: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := metadata.DefaultReplicationSettings()
+			settings.Values[metadata.CLogMonitorDurationKey] = tc.monitorDur
+			settings.Values[metadata.CLogPauseReplThresholdKey] = tc.pauseThresh
+			errorMap := make(base.ErrorMap)
+
+			mockSvc := &service_def.XDCRCompTopologySvc{}
+			if tc.compatErr != nil {
+				mockSvc.On("MyClusterCompatibility").Return(0, tc.compatErr)
+			} else {
+				mockSvc.On("MyClusterCompatibility").Return(base.EncodeVersionToEffectiveVersion(tc.compat), nil)
+			}
+
+			validateCLogAutopauseSettings(settings, false, mockSvc, errorMap)
+
+			if tc.expectErrKey == "" {
+				if len(errorMap) != 0 {
+					t.Errorf("Expected no errors, got: %v", errorMap)
+				}
+			} else {
+				if _, ok := errorMap[tc.expectErrKey]; !ok {
+					t.Errorf("Expected error for key %s, got: %v", tc.expectErrKey, errorMap)
+				}
+			}
+		})
+	}
+}

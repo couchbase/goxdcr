@@ -57,6 +57,11 @@ func (repl_settings_svc *ReplicationSettingsSvc) validateDefaultSettings(setting
 		return errorMap, nil
 	}
 
+	validateCLogAutopauseSettings(settings, true, repl_settings_svc.xdcr_topology_svc, errorMap)
+	if len(errorMap) > 0 {
+		return errorMap, nil
+	}
+
 	return nil, nil
 }
 

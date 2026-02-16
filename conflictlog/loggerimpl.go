@@ -167,18 +167,19 @@ func calcThrottlerAttempts(setMetaTimeout time.Duration) int {
 func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIface, security baseclog.SecurityInfo, throttlerSvc throttlerSvc.ThroughputThrottlerSvc, topSvc service_def.XDCRCompTopologySvc, connPool iopool.ConnPool, eventsProducer common.PipelineEventsProducer, mcache *ManifestCache, opts ...baseclog.LoggerOpt) (l *LoggerImpl, err error) {
 	// set the defaults
 	options := baseclog.LoggerOptions{
-		Rules:                    nil,
-		Mapper:                   NewConflictMapper(logger),
-		LogQueueCap:              base.DefaultCLogQueueCapacity,
-		WorkerCount:              base.DefaultCLogWorkerCount,
-		NetworkRetryCount:        base.DefaultCLogNetworkRetryCount,
-		NetworkRetryInterval:     time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
-		PoolGetTimeout:           time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
-		SetMetaTimeout:           time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
-		MaxErrorCount:            base.DefaultCLogMaxErrorCount,
-		ErrorTimeWindow:          time.Duration(base.DefaultCLogErrorTimeWindowMs) * time.Millisecond,
-		ReattemptDuration:        time.Duration(base.DefaultCLogReattemptDurationMs) * time.Millisecond,
-		ConflictRateForPauseRepl: base.DefaultConflictRateToAutopauseRepl,
+		Rules:                nil,
+		Mapper:               NewConflictMapper(logger),
+		LogQueueCap:          base.DefaultCLogQueueCapacity,
+		WorkerCount:          base.DefaultCLogWorkerCount,
+		NetworkRetryCount:    base.DefaultCLogNetworkRetryCount,
+		NetworkRetryInterval: time.Duration(base.DefaultCLogNetworkRetryIntervalMs) * time.Millisecond,
+		PoolGetTimeout:       time.Duration(base.DefaultCLogPoolGetTimeoutMs) * time.Millisecond,
+		SetMetaTimeout:       time.Duration(base.DefaultCLogSetMetaTimeoutMs) * time.Millisecond,
+		MaxErrorCount:        base.DefaultCLogMaxErrorCount,
+		ErrorTimeWindow:      time.Duration(base.DefaultCLogErrorTimeWindowMs) * time.Millisecond,
+		ReattemptDuration:    time.Duration(base.DefaultCLogReattemptDurationMs) * time.Millisecond,
+		ReplPauseThreshold:   base.DefaultCLogPauseReplThreshold,
+		MonitorDuration:      base.DefaultCLogMonitorDuration,
 	}
 
 	// override the defaults
@@ -217,7 +218,7 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		manifestCache:      mcache,
 	}
 
-	if options.ConflictRateForPauseRepl == 0 {
+	if options.ReplPauseThreshold == 0 || options.MonitorDuration == 0 {
 		l.setQOS(hibernation)
 	} else {
 		l.setQOS(autopauseReplication)
@@ -1008,6 +1009,49 @@ func (l *LoggerImpl) UpdateReattemptDuration(t time.Duration) {
 	l.opts.ReattemptDuration = t
 }
 
+func (l *LoggerImpl) changeQOSNoLock() {
+	newQOS := autopauseReplication
+	if l.opts.MonitorDuration == 0 || l.opts.ReplPauseThreshold == 0 {
+		newQOS = hibernation
+	}
+
+	if l.getQOS() == newQOS {
+		return
+	}
+
+	l.logger.Infof("changing conflict logger QOS: threshold=%v monitorDur=%v old=%s new=%s id=%s",
+		l.opts.ReattemptDuration, l.opts.ReplPauseThreshold, l.getQOS(), newQOS, l.id)
+	l.setQOS(newQOS)
+}
+
+func (l *LoggerImpl) UpdateReplPauseThreshold(t int) {
+	if l.isClosed() {
+		return
+	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.logger.Infof("changing conflict logger ReplPauseThreshold old=%v new=%v id=%s", l.opts.ReplPauseThreshold, t, l.id)
+
+	l.opts.ReplPauseThreshold = t
+	l.changeQOSNoLock()
+}
+
+func (l *LoggerImpl) UpdateMonitorDuration(d int) {
+	if l.isClosed() {
+		return
+	}
+
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	l.logger.Infof("changing conflict logger MonitorDuration old=%v new=%v id=%s", l.opts.ReattemptDuration, d, l.id)
+
+	l.opts.MonitorDuration = d
+	l.changeQOSNoLock()
+}
+
 func (l *LoggerImpl) Attach(_ common.Pipeline) error {
 	// noop - conflict logger doesn't need to have access to the pipeline itself.
 	return nil
@@ -1190,20 +1234,21 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 		}
 	}
 
-	conflictRateForAutopauseRepl, ok := settings[base.ConflictRateToPauseReplKey]
+	// update cLogPauseThreshold if needed
+	cLogPauseThreshold, ok := settings[base.CLogPauseReplThresholdKey]
 	if ok {
-		threshold, ok := conflictRateForAutopauseRepl.(int)
+		t, ok := cLogPauseThreshold.(int)
 		if ok {
-			oldQOS := l.getQOS()
-			newQOS := hibernation
-			if threshold > 0 {
-				newQOS = autopauseReplication
-			}
+			l.UpdateReplPauseThreshold(t)
+		}
+	}
 
-			if newQOS != oldQOS {
-				l.logger.Infof("%s: changed qos config from %s to %s", l.id, oldQOS, newQOS)
-				l.setQOS(newQOS)
-			}
+	// update cLogMonitorDuration if needed
+	cLogMonitorDuration, ok := settings[base.CLogMonitorDurationKey]
+	if ok {
+		d, ok := cLogMonitorDuration.(int)
+		if ok {
+			l.UpdateMonitorDuration(d)
 		}
 	}
 

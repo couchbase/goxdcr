@@ -129,7 +129,8 @@ const (
 	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
 	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
 	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
-	ConflictRateToPauseReplKey        = base.ConflictRateToPauseReplKey
+	CLogPauseReplThresholdKey         = base.CLogPauseReplThresholdKey
+	CLogMonitorDurationKey            = base.CLogMonitorDurationKey
 
 	// CNG related settings
 	CNGWorkerCountKey = base.CNGWorkerCountKey
@@ -279,7 +280,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
 	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
 	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
-	ConflictRateToPauseReplKey:        metadata.ConflictRateToPauseReplKey,
+	CLogPauseReplThresholdKey:         metadata.CLogPauseReplThresholdKey,
+	CLogMonitorDurationKey:            metadata.CLogMonitorDurationKey,
 
 	// CNG nozzle settings
 	CNGWorkerCountKey: metadata.CNGWorkerCountKey,
@@ -360,7 +362,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterDeletionsWithFEKey:             FilterDeletionsWithFEKey,
 	metadata.FilterExpirationsWithFEKey:           FilterExpirationsWithFEKey,
 	metadata.MinPVLenForMobileKey:                 MinPVLenForMobileKey,
-	metadata.ConflictRateToPauseReplKey:           ConflictRateToPauseReplKey,
+	metadata.CLogPauseReplThresholdKey:            CLogPauseReplThresholdKey,
+	metadata.CLogMonitorDurationKey:               CLogMonitorDurationKey,
 
 	// CNG nozzle settings
 	metadata.CNGWorkerCountKey: CNGWorkerCountKey,

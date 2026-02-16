@@ -382,6 +382,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.UseLegacyPreReplicateKey].(bool),
 		internal_settings.Values[metadata.ColMarshalIdxThresholdKey].(int),
 		buildVersion,
+		time.Duration(internal_settings.Values[metadata.CLogMonitorCycleIntervalKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.CLogMonitorCleanupFreqKey].(int),
 	)
 }
 
