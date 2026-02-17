@@ -1467,7 +1467,13 @@ func (b *BackfillRequestHandler) recordLastMergedReqForGC(req internalPeerBackfi
 
 	mtx := vbTaskMapClone.GetLock()
 	mtx.RLock()
-	for vbno, _ := range vbTaskMapClone.VBTasksMap {
+	vbNums := make([]uint16, 0, len(vbTaskMapClone.VBTasksMap))
+	for vbno := range vbTaskMapClone.VBTasksMap {
+		vbNums = append(vbNums, vbno)
+	}
+	mtx.RUnlock()
+
+	for _, vbno := range vbNums {
 		gcFunc := func() error {
 			return b.gcLastMergedMap(vbno, nodeNameCpy, requestId, req.pushMode)
 		}
@@ -1478,7 +1484,6 @@ func (b *BackfillRequestHandler) recordLastMergedReqForGC(req internalPeerBackfi
 			b.logger.Warnf("Unable to register GC for %v %v %v - %v", b.spec.Id, nodeNameCpy, vbno, registerErr)
 		}
 	}
-	mtx.RUnlock()
 }
 
 func (b *BackfillRequestHandler) registerNonOwnedVBsForGC(req internalPeerBackfillTaskMergeReq) {
