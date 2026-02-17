@@ -44,6 +44,7 @@ RR_REST="settings/resourceManagement/bucket/residentRatio"
 # Scopes -> Collections
 declare -A CLUSTER_NAME_HOST_MAP
 declare -A CLUSTER_NAME_PORT_MAP
+declare -A CLUSTER_CNG_PORT_MAP
 declare -A CLUSTER_NAME_SSLPORT_MAP
 declare -A CLUSTER_NAME_NO_REPLACE_MAP
 declare -A CLUSTER_SETUP_DONE_MAP
@@ -559,6 +560,9 @@ function hardResetNodesSynchronously {
 
 function setupCluster {
 	local initPort
+
+	echo "setting up clusters cngMode=$cngMode cngPath=$cngPath"
+
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		if [[ ! -z "${CLUSTER_SETUP_DONE_MAP[$clusterName]:-}" ]]; then
 			echo "$clusterName has already been set up - skipping setup"
@@ -1679,6 +1683,68 @@ function setupCollections {
 	done
 }
 
+function startCNG {
+	clusterName=$1
+	clusterHost=$2
+	username=$3
+	password=$4
+	dataport=$5
+
+	local certFile=$CNG_TMP_PATH/$clusterName/node.pem
+	local keyFile=$CNG_TMP_PATH/$clusterName/node.key
+
+	if [[ ! -f "$certFile" ]]; then
+		echo "ERRO: CNG node certificate not found at $certFile" >&2
+		return 1
+	fi
+	if [[ ! -f "$keyFile" ]]; then
+		echo "ERRO: CNG node key not found at $keyFile" >&2
+		return 1
+	fi
+	
+	echo "Starting CNG for cluster $clusterName on host $clusterHost with user $username at dataport $dataport"
+
+	nohup $CNG_EXE_PATH \
+		--cb-host="${clusterHost}" \
+		--grpc-cert "$certFile" \
+		--grpc-key "$keyFile" \
+		--cb-user "${username}" \
+		--cb-pass "${password}" \
+		--data-port $dataport \
+		--debug \
+		--log-level=debug >>"$CNG_PATH/$clusterName/cng.log" 2>&1 &
+
+	local pid=$!
+	disown $pid
+
+	echo $pid > "$CNG_PATH/$clusterName/cng.pid"
+
+	return $?
+}
+
+function _startCNGInstances {
+	echo "Stopping any existing CNG instances for clusters"
+	pkill -9 $CNG_EXE 
+	echo "Starting CNG instances for clusters"
+
+	cngPortBase=18098
+	cngPort=$cngPortBase
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		local host=${CLUSTER_NAME_HOST_MAP[$clusterName]:-"127.0.0.1"}
+		clusterAddr="$host:${CLUSTER_NAME_PORT_MAP[$clusterName]}"
+
+		startCNG "$clusterName" $clusterAddr $DEFAULT_ADMIN $DEFAULT_PW $cngPort
+		if [[ $? != 0 ]]; then
+			echo "Failed to start CNG for cluster $clusterName"
+			return 1
+		fi
+
+		echo $cngPort > "$CNG_TMP_PATH/$clusterName/cng.port"
+
+		cngPort=$((cngPort + 1))
+	done
+}
+
 # Allow specific flags to be passed in:
 # -d : <developer mode>
 # -c : runs cluster_run on behalf of user
@@ -1739,6 +1805,40 @@ function setupTopologies {
 			echo "Found cbworkloadgen at $CBWORKLOADGEN"
 		fi
 	fi
+
+	if [[ "$cngMode" = "1" ]]; then
+		_startCNGInstances
+		if [[ $? != 0 ]]; then
+			return $?
+		fi
+	fi
+}
+
+function createCNGRemoteClusterRef {
+	local sourceCluster=$1
+	local targetCluster=$2
+
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
+
+	local targetHost=${CLUSTER_NAME_HOST_MAP[$targetCluster]:-"127.0.0.1"}
+	local targetCNGPort=$(cat $CNG_TMP_PATH/$targetCluster/cng.port)
+
+	local remoteRefName="$targetCluster"
+	local hostName="couchbase2://$targetHost:$targetCNGPort"
+
+	local caCert=$(cat $CNG_TMP_PATH/$targetCluster/ca.pem)
+
+
+	echo "Creating CNG remote cluster reference from $sourceCluster to $targetCluster"
+	echo $CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}" > $CNG_TMP_PATH/$sourceCluster/createCNGRemoteRef.cmd
+	echo ""
+
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}"
+
+	return $?
 }
 
 # Takes 2 arguments:
@@ -1750,7 +1850,14 @@ function setupTopologies {
 function createRemoteClusterReference {
 	local source=$1
 	local target=$2
-	local targetHost=${3:-}
+
+	if [[ "$cngMode" = "1" ]]; then
+		echo "CNG mode enabled, creating CNG remote cluster reference"
+		createCNGRemoteClusterRef $source $target
+		return $?
+	fi
+
+	local targetHost=${3:-"127.0.0.1"}
 	local remoteUser=${4:-$DEFAULT_ADMIN}
 	local remotePassword=${5:-$DEFAULT_PW}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
@@ -2333,14 +2440,16 @@ function waitForBgJobs {
 
 	echo "Waiting for background jobs to finish..."
 
-	local jobsCnt=$(jobs -l | grep -c "Running")
+	local jobsCnt=$(jobs -l | grep -c "Running" )
 	echo "$jobsCnt background jobs were running initially"
 
 	local startedTime=$(date +%s)
 	local maxSecsToWait=600
 
 	while (($jobsCnt > 0)); do
-		sleep 1
+		echo "$jobsCnt background jobs still running..."
+		jobs -l
+		sleep 2
 		jobsCnt=$(jobs -l | grep -c "Running")
 		local currentTime=$(date +%s)
 		local elapsed=$((currentTime - startedTime))

@@ -64,8 +64,6 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 		// CNG TODO: check use of datapool
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(bodyWithoutXattr)))
 		c.Body = snappy.Encode(cbuf, bodyWithoutXattr)
-		req.NeedToRecompress = false
-		req.Req.DataType |= base.SnappyDataType
 		return c, nil
 	}
 
@@ -73,8 +71,6 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(req.Req.Body)))
 		// CNG TODO: check use of datapool
 		c.Body = snappy.Encode(cbuf, req.Req.Body)
-		req.NeedToRecompress = false
-		req.Req.DataType |= base.SnappyDataType
 	} else {
 		c.Body = req.Req.Body
 	}

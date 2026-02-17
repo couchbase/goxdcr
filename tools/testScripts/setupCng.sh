@@ -10,76 +10,50 @@
 
 # A dev script to get CNG up
 
-. ./cngProvision.shlib
-. ./testLibrary.shlib
-
-# Usage: setupCng.sh <repoPath> <cngNodeName> [cbHost] [cbPass]
-# 1. Generates CA and node certs via setupCNGCerts
-# 2. Starts gateway via setupCNG
-# 3. Echoes only the PID to stdout (first line) then tails /tmp/cng.log
-# 4. On Ctrl-C (SIGINT) or SIGTERM, kills the CNG process and exits
-repoPath="$1"
-cngNodeName="$2"
-cbPort="${3:-$CNG_CB_PORT}"
-cbPass="${4:-$CNG_CB_PASS}"
-
-if [[ -z "$repoPath" || -z "$cngNodeName" ]]; then
-	echo "ERRO: Missing required args. Usage: setupCng.sh <repoPath> <cngNodeName> [userName] [cbHost] [cbPass]" >&2
+if [[ $# -lt 6 ]]; then
+	echo "Usage: setupCng.sh <cngNodeName> <repoPath> <clusterAddr> <cbUser> <cbPass> <cngPort>" >&2
 	exit 1
 fi
 
-# Ensure certs exist
-setupCNGCerts "$cngNodeName" || {
-	echo "ERRO: setupCNGCerts failed" >&2
+. ./clusterRunProvision.shlib
+. ./cngProvision.shlib
+
+
+cngNodeName="$1"
+repoPath="$2"
+clusterAddr="$3"
+cbUser="$4"
+cbPass="$5"
+cngPort=$6
+
+export cngMode=1
+
+if [[ "${repoPath}" = "default" ]]; then
+	export cngPath="https://github.com/couchbase/stellar-gateway"
+fi
+
+echo "Initializing CNG setup... $cngPath"
+cngSetupInit
+
+cloneStellarGatewayRepo
+if [[ $? -ne 0 ]]; then
+	echo "ERRO: Failed to clone Stellar Gateway repo" >&2
 	exit 1
-}
-
-logFile="$CNG_PATH/$cngNodeName/cng.log"
-touch "$logFile" 2>/dev/null || { echo "WARN: Unable to touch $logFile; tail may wait for file creation" >&2; }
-
-echo "" >$logFile
-
-# Start gateway and capture PID
-pid=$(setupCNG "$repoPath" "$cngNodeName" "$cbPort" "$CNG_CB_PASS") || {
-	echo "ERRO: setupCNG failed" >&2
+fi
+buildStellarGateway
+if [[ $? -ne 0 ]]; then
+	echo "ERRO: Failed to build Stellar Gateway" >&2
 	exit 1
-}
+fi
 
-echo "Gateway PID: $pid"
+generateCNGCerts $cngNodeName
+if [[ $? -ne 0 ]]; then
+	echo "ERRO: Failed to generate CNG certs" >&2
+	exit 1
+fi
 
-cleanup() {
-	local ec=$?
-	echo "INFO: Caught signal - stopping CNG (pid $pid)" >&2
-	if kill -0 "$pid" 2>/dev/null; then
-		kill "$pid" 2>/dev/null || true
-		# Give it a moment to exit gracefully
-		sleep 3
-
-		if kill -0 "$pid" 2>/dev/null; then
-			# if the process still exists force kill it
-			echo "INFO: Force killing CNG (pid $pid)" >&2
-			kill -9 "$pid" 2>/dev/null || true
-		fi
-	fi
-
-	# stop the tail incase its still running - should not happen
-	if [[ -n "$tailPid" ]] && kill -0 "$tailPid" 2>/dev/null; then
-		kill "$tailPid" 2>/dev/null || true
-	fi
-
-	exit $ec
-}
-
-trap cleanup INT TERM
-
-echo "INFO: Tailing $logFile (Ctrl-C to stop)" >&2
-
-# Use tail -F the log file
-tail -F "$logFile" &
-tailPid=$!
-
-# Wait on tail; if it exits, perform cleanup
-wait "$tailPid"
-
-# If tail exited naturally, perform cleanup
-cleanup
+startCNG "$cngNodeName" $clusterAddr $cbUser $cbPass $cngPort
+if [[ $? -ne 0 ]]; then
+	echo "ERRO: Failed to start CNG" >&2
+	exit 1
+fi

@@ -248,15 +248,30 @@ while getopts "$optspec" optchar; do
 done
 
 if ((cngMode == 1)); then
-	if [[ -z "$cngPath" ]]; then
-		echo "ERRO: cngPath must be provided when enabling CNG mode"
+	echo "INFO: CNG mode enabled"
+
+	if [[ "$cngPath" = "default" ]]; then
+		export cngPath="https://github.com/couchbase/stellar-gateway"
+	fi
+
+	echo "cngPath=$cngPath"
+
+	cngSetupInit
+
+	cloneStellarGatewayRepo
+	if [[ $? -ne 0 ]]; then
+		echo "ERRO: Failed to clone Stellar Gateway repo" >&2
 		exit 1
 	fi
-	if [[ ! -d "$cngPath" ]]; then
-		echo "ERRO: Provided cngPath '$cngPath' is not a directory or does not exist"
+	buildStellarGateway
+	if [[ $? -ne 0 ]]; then
+		echo "ERRO: Failed to build Stellar Gateway" >&2
 		exit 1
 	fi
-	echo "INFO: CNG mode enabled. cngPath=$cngPath"
+
+	generateCNGCerts "C1"
+	generateCNGCerts "C2"
+	generateCNGCerts "C1P0"
 fi
 
 if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestcases" ] && [ "${testCasesDirectory:-}" != "vagrantTestCases" ]; then

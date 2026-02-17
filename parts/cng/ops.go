@@ -150,8 +150,9 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 		VbUuid:     &vbuuid,
 	}
 
+	var content content
 	if req.Req.Opcode == mc.UPR_MUTATION {
-		content, err := getContent(n.Logger(), req)
+		content, err = getContent(n.Logger(), req)
 		if err != nil {
 			return rsp, err
 		}

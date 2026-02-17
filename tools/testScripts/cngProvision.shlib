@@ -17,6 +17,12 @@ declare -A CNG_NODE_CERT_LOCATION_MAP
 declare -A CNG_NODE_KEY_LOCATION_MAP
 declare -A CNG_NODE_PORT_MAP
 
+# CNG_TMP_PATH is where cng repo is cloned, built and launched from.
+export CNG_TMP_PATH="/tmp/cng"
+export CNG_REPO_PATH="$CNG_TMP_PATH/stellar-gateway"
+export CNG_EXE="stellar-gateway"
+export CNG_EXE_PATH="$CNG_REPO_PATH/$CNG_EXE"
+
 CNG_CB_PORT="9001"   # by default attached to server running on 9001
 CNG_CB_PASS="wewewe" # default password
 CNG_PATH="/tmp/cng"  # default path for all CNG-related files
@@ -87,7 +93,6 @@ function setupCNG {
 
 	if ((rebuild == 1)); then
 		echo "INFO: Building gateway binary at $gatewayBin" >&2
-		go generate ./...
 		go build -o "$gatewayBin" ./cmd/gateway 2>>"$logFile"
 		if (($? != 0)) || [[ ! -x "$gatewayBin" ]]; then
 			echo "ERRO: Failed to build gateway binary" >&2
@@ -145,34 +150,119 @@ function clearCngLogs() {
 	done
 }
 
-function createSecureCNGReference {
-	local source=$1
-	local target=$2
-	local userName=${3:-}
-	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
-		echo "Invalid input"
+
+function cngSetupInit {
+	rm -fR $CNG_TMP_PATH
+	mkdir -p $CNG_TMP_PATH
+}
+
+function buildStellarGateway {
+	if [[ ! -d "$CNG_REPO_PATH" ]]; then
+		echo "ERRO: Stellar Gateway repo not found at $CNG_REPO_PATH" >&2
 		return 1
 	fi
-	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
-	local targetPort=${CNG_NODE_PORT_MAP[$target]:-}
-	local targetHost="127.0.0.1"
-	local remoteRefName="CNG_$target"
-	local hostName="couchbase2://$targetHost:18098"
 
-	local caCertMapKey="$target"
-	if [[ -n "$userName" ]]; then
-		caCertMapKey="${target}_${userName}"
+	echo "Building Stellar Gateway binary"
+
+	pushd $CNG_REPO_PATH/dataapiv1
+	go generate
+	if [[ $? -ne 0 ]]; then
+		echo "ERRO: Failed to generate data API code" >&2
+		popd >/dev/null
+		return 1
 	fi
 
-	caCert="${CNG_ROOT_CERTIFICATE_MAP[$caCertMapKey]}"
+	popd >/dev/null
+	pushd $CNG_REPO_PATH
 
-	echo "Creating SECURE remote cluster reference from $source to $target"
-	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}""
+	go build -o "$CNG_EXE_PATH" ./cmd/gateway
+	if (($? != 0)); then
+		echo "ERRO: Failed to build Stellar Gateway binary" >&2
+		popd >/dev/null
+		return 1
+	fi
 
-	echo ""
+	echo "Stellar Gateway binary built successfully at $CNG_EXE_PATH"
+	popd >/dev/null
+}
 
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}"
+function cloneStellarGatewayRepo {
+	if [[ "$cngMode" != "1" ]]; then
+		echo "CNG mode is not set. Skipping CNG setup."
+		return
+	fi
 
+	rm -fR $CNG_TMP_PATH
+	mkdir -p $CNG_TMP_PATH
+	if [[ $cngPath == https* ]]; then
+		pushd $CNG_TMP_PATH
+		git clone --depth=1 "$cngPath" $CNG_REPO_PATH
+		if [[ $? -ne 0 ]]; then
+			echo "ERRO: Failed to clone CNG repo from $cngPath" >&2
+			popd >/dev/null
+			exit 1
+		fi
+
+		echo "Cloned CNG repo from $cngPath to /tmp/cng/stellar-gateway"
+		popd >/dev/null
+	fi
+
+
+	echo "Setting up CNG with mode: $cngMode, path=$cngPath"
+}
+
+function generateCNGCerts {
+	local clusterName="$1"
+
+	mkdir -p "$CNG_TMP_PATH/$clusterName"
+
+	local caFileName="$CNG_TMP_PATH/$clusterName/ca"
+	local CN="Couchbase CNG Root CA"
+
+	# Create a private key for the cluster (CNG)
+	echo "Generating private key for CNG cluster $caFileName"
+	openssl genrsa -out "${caFileName}.key" 2048
+	if [[ $? -ne 0 ]]; then
+		echo "ERRO: Failed to generate private key for CNG cluster" >&2
+		return 1
+	fi
+
+	# Create the self-signed certificate with CNG specific CN
+	openssl req -new -x509 -days 3650 -sha256 -key "${caFileName}.key" -out "${caFileName}.pem" \
+		-subj "/CN=${CN}" -addext "basicConstraints=CA:TRUE"
+	if [[ $? -ne 0 ]]; then
+		echo "ERRO: Failed to generate self-signed certificate for CNG cluster" >&2
+		return 1
+	fi
+
+	local privateKeyPath="$CNG_TMP_PATH/$clusterName/node.key"
+	openssl genrsa -out "$privateKeyPath" 2048 >/dev/null 2>&1 || {
+		echo "ERRO: Failed generating node key"
+		return 1
+	}
+	local certPath="$CNG_TMP_PATH/$clusterName/node.pem"
+	openssl req -new -key "$privateKeyPath" -out "$CNG_TMP_PATH/$clusterName/node.csr" -subj "/CN=CNG Node Cert" >/dev/null 2>&1 || {
+		echo "ERRO: Failed generating node CSR"
+		return 1
+	}
+
+cat >$CNG_TMP_PATH/$clusterName/cng_node.ext <<EOF
+basicConstraints=CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage=serverAuth
+keyUsage = digitalSignature,keyEncipherment
+subjectAltName = IP:127.0.0.1
+EOF
+
+	openssl x509 \
+		-CA "$caFileName.pem" \
+		-CAkey "${caFileName}.key" \
+		-CAcreateserial -days 365 -req \
+		-in "$CNG_TMP_PATH/$clusterName/node.csr" \
+		-out "$CNG_TMP_PATH/$clusterName/node.pem" \
+		-extfile "$CNG_TMP_PATH/$clusterName/cng_node.ext" 2>&1 || {
+		echo "ERRO: Failed signing CNG node certificate"
+		return 1
+	}
 }
