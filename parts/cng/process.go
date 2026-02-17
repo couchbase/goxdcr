@@ -18,10 +18,11 @@ import (
 func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (err error) {
 	trace, err := getTrace(ctx)
 	if err != nil {
+		err = mapToCNGError(err)
 		return
 	}
 
-	callStat, err := n.connPool.WithConn(func(client XDCRClient) (err error) {
+	callStat, err := n.connPool.WithConn(func(client base.CngClient) (err error) {
 		return n.transfer(ctx, client, req)
 	})
 
@@ -43,7 +44,7 @@ func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (er
 // The entire transfer is retried in case of network errors.
 // In CNG Phase 1 the flow of transfer is documented at:
 // https://docs.google.com/document/d/1aWKUgNo3icXfEX6uZBGWSaQNTJpzRXzePqGzsQA5ZfM/edit?tab=t.0#heading=h.wm68yvvhrnh1
-func (n *Nozzle) transfer(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (err error) {
+func (n *Nozzle) transfer(ctx context.Context, client base.CngClient, req *base.WrappedMCRequest) (err error) {
 	trace, err := getTrace(ctx)
 	if err != nil {
 		return
@@ -119,7 +120,7 @@ func (c *conflictCheckRsp) String() string {
 // conflictCheck checks for conflicts and returns true if the source document should be transferred
 // An error returned indicates that the conflict check failed.
 // The caller must check sourceWon only if err is nil
-func (n *Nozzle) conflictCheck(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp conflictCheckRsp, err error) {
+func (n *Nozzle) conflictCheck(ctx context.Context, client base.CngClient, req *base.WrappedMCRequest) (rsp conflictCheckRsp, err error) {
 	_, err = n.CheckDocument(ctx, client, req)
 	err = handleConflictCheckErr(err, &rsp)
 	return

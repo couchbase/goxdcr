@@ -12,12 +12,20 @@ import (
 	"github.com/couchbase/goxdcr/v8/utils"
 )
 
+// cngConn is an interface for a CNG gRPC connection and client.
+// This abstraction allows for easier testing without requiring actual gRPC connections.
+type cngConn interface {
+	Close() error
+	Client() base.CngClient
+}
+
 type wrapperConn struct {
-	conn       *base.CngConn
+	conn       cngConn
 	rw         sync.RWMutex
 	generation atomic.Int64
 }
 
+// Close closes the wrapped connection.
 func (w *wrapperConn) Close() error {
 	if w.conn != nil {
 		return w.conn.Close()
@@ -47,7 +55,7 @@ type ConnPool struct {
 
 type PoolConfig struct {
 	ConnCount     int
-	ConnFn        func() (*base.CngConn, error)
+	ConnFn        func() (cngConn, error)
 	RetryInterval int // in milliseconds
 
 	UtilsSvc utils.UtilsIface
@@ -157,7 +165,7 @@ func (p *ConnPool) connect(index int, nwErr error) error {
 	return nil
 }
 
-func (p *ConnPool) callFn(w *wrapperConn, fn func(client XDCRClient) error) error {
+func (p *ConnPool) callFn(w *wrapperConn, fn func(client base.CngClient) error) error {
 	if p == nil {
 		err := fmt.Errorf("connection pool is nil")
 		return err
@@ -258,7 +266,7 @@ func (p *ConnPool) ChangeConnCount(newCount int) (err error) {
 // in case of network errors.
 // The method returns PoolCallStat which contains statistics about the call, e.g., number of retries
 // The stats should be used even if an error is returned
-func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, err error) {
+func (p *ConnPool) WithConn(fn func(client base.CngClient) error) (st PoolCallStat, err error) {
 	if p == nil {
 		err = fmt.Errorf("connection pool is nil")
 		return

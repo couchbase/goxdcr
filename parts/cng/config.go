@@ -2,6 +2,7 @@ package cng
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
@@ -87,6 +88,9 @@ type Tunables struct {
 	// OptimisticThresholdSize is the document size (in bytes)
 	// CNG TODO: make it dynamic i.e. settable at runtime
 	OptimisticThresholdSize int
+
+	// Live-updateable fields
+	rpcDeadlineMs atomic.Int64
 }
 
 func (t *Tunables) String() string {

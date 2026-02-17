@@ -38,7 +38,7 @@ func (x *XDCRFactory) constructCNGNozzle(topic string, // Replication topic
 
 	// For CNG, there is only one nozzle per target cluster
 	id := x.partId(CNG_NOZZLE_NAME_PREFIX, topic, targetClusterRef.HostName(), 0)
-	cfg := cng.Config{
+	cfg := &cng.Config{
 		Replication: cng.ReplicationConfig{
 			CRMode:            sourceCRMode,
 			SourceBucketName:  spec.SourceBucketName,

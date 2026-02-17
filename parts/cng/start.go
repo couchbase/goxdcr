@@ -53,7 +53,13 @@ func (n *Nozzle) startInner(ctx context.Context, settings metadata.ReplicationSe
 
 	n.dataCh = make(chan *base.WrappedMCRequest, n.cfg.Tunables.DataChanSize)
 
-	n.initWorkers(ctx)
+	// Initialize RPC deadline from config
+	n.cfg.Tunables.rpcDeadlineMs.Store(int64(n.cfg.Tunables.Deadline.Milliseconds()))
+
+	// Start initial workers
+	for i := 0; i < n.cfg.Tunables.WorkerCount; i++ {
+		go n.worker(ctx)
+	}
 
 	return
 }
@@ -88,13 +94,6 @@ func (n *Nozzle) initConfig(settings metadata.ReplicationSettingsMap) (err error
 	}
 
 	return
-}
-
-func (n *Nozzle) initWorkers(ctx context.Context) {
-	n.Logger().Infof("starting workers, count=%d", n.cfg.Tunables.WorkerCount)
-	for i := 0; i < n.cfg.Tunables.WorkerCount; i++ {
-		go n.worker(ctx)
-	}
 }
 
 func (n *Nozzle) initConnPool() (err error) {

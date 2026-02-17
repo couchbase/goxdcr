@@ -74,5 +74,6 @@ func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) {
 		return
 	}
 
+	n.Logger().Errorf("setting error to upstream, err=%v", err)
 	reportFn(req)
 }

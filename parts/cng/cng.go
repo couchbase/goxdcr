@@ -4,19 +4,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
-	_ "github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/parts"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
-	_ "google.golang.org/grpc"
-	_ "google.golang.org/grpc/credentials"
 )
-
-type XDCRClient internal_xdcr_v1.XdcrServiceClient
 
 type CNGContextKey string
 
@@ -26,7 +20,7 @@ const (
 
 type Nozzle struct {
 	parts.AbstractPart
-	cfg   Config
+	cfg   *Config
 	stats *Stats
 
 	upstreamObjRecycler    func(any)
@@ -40,7 +34,7 @@ type Nozzle struct {
 }
 
 // New creates a new nozzle for CNG protocol
-func New(id string, loggerContext *log.LoggerContext, cfg Config) (n *Nozzle, err error) {
+func New(id string, loggerContext *log.LoggerContext, cfg *Config) (n *Nozzle, err error) {
 	if id == "" {
 		return nil, fmt.Errorf("id is empty")
 	}

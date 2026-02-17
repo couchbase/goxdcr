@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 
-	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"google.golang.org/grpc"
 )
@@ -31,7 +30,7 @@ func (n *Nozzle) getDialOpts() (dialOpts []grpc.DialOption, err error) {
 // newCNGClient creates a new gRPC client connection to CNG
 // Note: grpc.NewClient does not actually create the TCP connection.
 // It gets lazily created when the first RPC is made.
-func (n *Nozzle) newCNGClient() (conn *base.CngConn, err error) {
+func (n *Nozzle) newCNGClient() (conn cngConn, err error) {
 	ref, err := n.getRemoteRef()
 	if err != nil {
 		n.Logger().Errorf("error getting remote cluster reference: %v", err)
@@ -44,8 +43,11 @@ func (n *Nozzle) newCNGClient() (conn *base.CngConn, err error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, err = ref.NewCNGConn(dialOpts...)
-	return
+	cngConn, err := ref.NewCNGConn(dialOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return cngConn, nil
 }
 
 func (n *Nozzle) getRemoteRef() (ref *metadata.RemoteClusterReference, err error) {

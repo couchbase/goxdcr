@@ -69,6 +69,10 @@ func (c *CNGError) Error() string {
 const (
 	// Note: did not want to use iota here to make sure the values are stable
 
+	// NO_ERROR is not supposed to used in CNGError.
+	// Is exists mainly for testing purpose to indicate the absence of error
+	NO_ERROR CNGErrorCode = 0
+
 	ERR_UNKNOWN CNGErrorCode = 1
 
 	ERR_COLLECTION_NOT_FOUND CNGErrorCode = 2

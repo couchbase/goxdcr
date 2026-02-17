@@ -466,10 +466,14 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	batchCountChanged := (oldSettings.BatchCount != newSettings.BatchCount)
 	batchSizeChanged := (oldSettings.BatchSize != newSettings.BatchSize)
 
+	// CNG worker count changes require pipeline restart
+	cngWorkerCountChanged := oldSettings.GetCNGWorkerCount() != newSettings.GetCNGWorkerCount()
+
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
 		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
-		dcpFlowControlThrottleChanged || componentEventsChanLengthChanged
+		dcpFlowControlThrottleChanged || componentEventsChanLengthChanged ||
+		cngWorkerCountChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()
@@ -540,7 +544,9 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetXmemNozzleNetworkIOFaultPercent(oldSettings) != newSettings.GetXmemNozzleNetworkIOFaultPercent(newSettings) ||
 		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() ||
 		cLogBasedLiveSettingsUpdate(oldSettings, newSettings) ||
-		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() {
+		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() ||
+		oldSettings.GetCNGConnCount() != newSettings.GetCNGConnCount() ||
+		oldSettings.GetCNGRPCDeadline() != newSettings.GetCNGRPCDeadline() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

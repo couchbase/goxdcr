@@ -18,7 +18,7 @@ import (
 
 // CheckDocument is a wrapper on the actual CheckDocument RPC call + timeout.
 // It mainly maps req to the input params needed by the RPC, which a lot of boilerplate code.
-func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp *internal_xdcr_v1.CheckDocumentResponse, err error) {
+func (n *Nozzle) CheckDocument(ctx context.Context, client base.CngClient, req *base.WrappedMCRequest) (rsp *internal_xdcr_v1.CheckDocumentResponse, err error) {
 	revSeqNo, err := req.RevSeqNo()
 	if err != nil {
 		return
@@ -65,7 +65,7 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client XDCRClient, req *base
 	//  - Document exists
 	//       - Source wins, err == nil
 	//       - Target wins, err == GRPC Error with Code=Aborted, and ErrorInfo with reason=doc_newer
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.getRPCDeadline())
 	defer cancel()
 	rsp, err = client.CheckDocument(ctxWithTimeout, checkDocReq)
 	if err != nil {
@@ -107,7 +107,7 @@ func (r *PushDocRsp) String() string {
 // PushDocument is a thin wrapper on the actual PushDocument RPC call + timeout.
 // It mainly maps req to the input params needed by the RPC. There is a lot
 // of boilerplate code, hence the need for this wrapper.
-func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.WrappedMCRequest) (rsp PushDocRsp, err error) {
+func (n *Nozzle) PushDocument(ctx context.Context, client base.CngClient, req *base.WrappedMCRequest) (rsp PushDocRsp, err error) {
 	revSeqNo, err := req.RevSeqNo()
 	if err != nil {
 		return
@@ -180,7 +180,7 @@ func (n *Nozzle) PushDocument(ctx context.Context, client XDCRClient, req *base.
 	}
 
 	now := time.Now()
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.cfg.Tunables.Deadline)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.getRPCDeadline())
 	defer cancel()
 	// See: https://docs.google.com/document/d/1aWKUgNo3icXfEX6uZBGWSaQNTJpzRXzePqGzsQA5ZfM/edit?tab=t.0#heading=h.dnhuz9b2hhsp
 	rpcRsp, err := client.PushDocument(ctxWithTimeout, pushDocReq)
