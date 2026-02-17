@@ -8,6 +8,10 @@ const (
 	// This is different from the backoff time for retryable errors
 	ProcessRetryInterval = 5000 * time.Millisecond
 
+	WithConnRetryBackoffInitial = 2 * time.Second
+	WithConnRetryBackoffMax     = 60 * time.Second
+	WithConnRetryBackoffFactor  = 1.5
+
 	ConflictReasonSuccess    = "SUCCESS"
 	ConflictReasonDocMissing = "DOC_MISSING"
 	ConflictReasonDocNewer   = "DOC_NEWER"

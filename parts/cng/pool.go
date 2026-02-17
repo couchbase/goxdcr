@@ -2,6 +2,7 @@ package cng
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -289,8 +290,19 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 				return
 			}
 
-			time.Sleep(time.Duration(p.cfg.RetryInterval) * time.Millisecond) // brief pause before reconnecting
 			st.RetryCount++
+			backoff := withConnRetryBackoff(st.RetryCount)
+			timer := time.NewTimer(backoff)
+			p.logger.Errorf("retrying due to network error, backoff=%s, err=%v", backoff, err)
+			select {
+			case <-p.shutdown:
+				if !timer.Stop() {
+					<-timer.C
+				}
+				err = fmt.Errorf("connection pool is shutting down or already closed")
+				return
+			case <-timer.C:
+			}
 
 			if cngErr.Code == ERR_GRPC_DEADLINE_EXCEEDED {
 				// For deadline exceeded errors, we do not attempt to recreate the connection
@@ -306,6 +318,19 @@ func (p *ConnPool) WithConn(fn func(client XDCRClient) error) (st PoolCallStat, 
 			}
 		}
 	}
+}
+
+func withConnRetryBackoff(retryCount uint64) time.Duration {
+	if retryCount <= 1 {
+		return WithConnRetryBackoffInitial
+	}
+
+	backoff := time.Duration(float64(WithConnRetryBackoffInitial) * math.Pow(WithConnRetryBackoffFactor, float64(retryCount-1)))
+	if backoff > WithConnRetryBackoffMax {
+		return WithConnRetryBackoffMax
+	}
+
+	return backoff
 }
 
 // isRetryableError determines if the error is a network error that warrants connection recreation and retry
