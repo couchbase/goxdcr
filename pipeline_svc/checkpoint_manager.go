@@ -405,7 +405,7 @@ func (ckptMgr *CheckpointManager) trackDataTransfer(ctx *utilities.Context) {
 	}
 	totalDataTransferred := ctx.DataReceived + ctx.DataSent
 	if totalDataTransferred > 0 {
-		ckptMgr.RaiseEvent(common.NewEvent(common.SystemMetadataTransferred, totalDataTransferred, ckptMgr, nil, nil))
+		ckptMgr.RaiseEvent(common.NewEvent(common.SystemMetadataTransferred, int(totalDataTransferred), ckptMgr, nil, nil))
 	}
 }
 
