@@ -401,6 +401,54 @@ func TestCapellaNoTLS(t *testing.T) {
 	assert.Equal(ErrorCapellaNeedsTLS, nonSecureRef.ValidateCertificates())
 }
 
+func TestConvertRemoteTypeIfAuto(t *testing.T) {
+	tests := []struct {
+		name         string
+		hostName     string
+		expectedType RemoteType
+		expectError  bool
+	}{
+		{
+			name:         "plain hostname deduces CbCluster",
+			hostName:     "myhost",
+			expectedType: RemoteTypeCbCluster,
+		},
+		{
+			name:         "couchbase:// deduces CbCluster",
+			hostName:     "couchbase://myhost",
+			expectedType: RemoteTypeCbCluster,
+		},
+		{
+			name:         "couchbases:// deduces CbCluster",
+			hostName:     "couchbases://myhost",
+			expectedType: RemoteTypeCbCluster,
+		},
+		{
+			name:         "couchbase2:// deduces Cng",
+			hostName:     "couchbase2://myhost",
+			expectedType: RemoteTypeCng,
+		},
+		{
+			name:        "http:// is rejected",
+			hostName:    "http://myhost",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := RemoteTypeAuto
+			err := rt.ConvertRemoteTypeIfAuto(tt.hostName)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedType, rt)
+			}
+		})
+	}
+}
+
 func TestCapellaTLS(t *testing.T) {
 	fmt.Println("============== Test case start: TestCapellaTLS =================")
 	defer fmt.Println("============== Test case done: TestCapellaTLS =================")

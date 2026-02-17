@@ -100,17 +100,22 @@ func (rt *RemoteType) ConvertRemoteTypeIfAuto(hostName string) error {
 		return nil
 	}
 
-	if !base.IsURL(hostName) {
+	// At this point the remote type is Auto, we need to deduce the actual type based on the hostname
+	// The entered hostname can be in the format of plain hostname (FQDN or IP), or a URL with scheme prefix (e.g., couchbases://mycluster.com)
+	// If the hostname is a URL:
+	// - If it has a scheme 'couchbase://' or 'couchbases://', we treat it as CbCluster type
+	// - If it has a scheme 'couchbase2://', we treat it as Cng type
+	// If the hostname is not a URL, we treat it as a cb cluster to ensure backward compatibility.
+	if !base.IsURL(hostName) || base.IsCbURL(hostName) {
 		*rt = RemoteTypeCbCluster
 		return nil
 	}
-
 	if base.IsCngURL(hostName) {
 		*rt = RemoteTypeCng
 		return nil
 	}
 
-	return fmt.Errorf("failed to deduce remote type; provide a plain hostname (FQDN or IP address) for Couchbase Cluster or prefix with %q for CNG", base.CouchbaseCngUri)
+	return fmt.Errorf("failed to deduce remote type; provide a plain hostname (FQDN or IP address), or prefix with %q / %q for Couchbase Cluster, or %q for CNG", base.CouchbaseUri, base.CouchbaseSecureUri, base.CouchbaseCngUri)
 }
 
 func ParseRemoteType(rtStr string) (RemoteType, error) {

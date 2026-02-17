@@ -853,3 +853,75 @@ func TestUint32Ops(t *testing.T) {
 	assert.True(t, Uint32List(l3).Equal(l2))
 	assert.True(t, Uint32List(l1).Equal(l3))
 }
+
+func TestValidateHostAddrForCbCluster(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		expected    string
+		expectError bool
+	}{
+		{
+			name:     "plain hostname gets default admin port",
+			input:    "myhost",
+			expected: "myhost:8091",
+		},
+		{
+			name:     "hostname with port is preserved",
+			input:    "myhost:9000",
+			expected: "myhost:9000",
+		},
+		{
+			name:     "couchbase:// prefix is stripped and default admin port used",
+			input:    "couchbase://myhost",
+			expected: "myhost:8091",
+		},
+		{
+			name:     "couchbase:// with port is preserved",
+			input:    "couchbase://myhost:9000",
+			expected: "myhost:9000",
+		},
+		{
+			name:     "couchbases:// prefix is stripped and default SSL port used",
+			input:    "couchbases://myhost",
+			expected: "myhost:18091",
+		},
+		{
+			name:     "couchbases:// with port is preserved",
+			input:    "couchbases://myhost:19000",
+			expected: "myhost:19000",
+		},
+		{
+			name:     "ipv6 address with couchbase://",
+			input:    "couchbase://[::1]",
+			expected: "[::1]:8091",
+		},
+		{
+			name:     "ipv6 address with couchbases://",
+			input:    "couchbases://[::1]:19000",
+			expected: "[::1]:19000",
+		},
+		{
+			name:        "http:// scheme is rejected",
+			input:       "http://myhost",
+			expectError: true,
+		},
+		{
+			name:        "couchbase2:// scheme is rejected",
+			input:       "couchbase2://myhost",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ValidateHostAddrForCbCluster(tt.input)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
