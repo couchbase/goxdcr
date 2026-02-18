@@ -115,7 +115,7 @@ func (remoteBucket *RemoteBucketInfo) refreshCngInternal() error {
 	remoteBucket.UUID = targetBucketInfo.GetBucketUuid()
 
 	// CNG only supports clusters with version >= 7.5.2 which supports xdcrCheckpointing
-	remoteBucket.Capabilities = []string{"xdcrCheckpointing"}
+	remoteBucket.Capabilities = []string{base.XDCRCheckpointing}
 
 	return nil
 }

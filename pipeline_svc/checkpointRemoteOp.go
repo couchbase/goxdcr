@@ -84,14 +84,14 @@ func (r *remoteOps) GetFailoverLog(ctx *utilities.Context) (*base.BucketFailover
 }
 
 // LegacyPreReplicate is the legacy pre-replicate function
-func (r *remoteOps) LegacyPreReplicate(tgtTs *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
+func (r *remoteOps) legacyPreReplicate(tgtTs *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
 	return r.capiSvc.PreReplicate(r.remoteBucket, tgtTs, true, ctx)
 }
 
-// PrepareForLocalPreReplicate prepares the failover log for local pre-replicate
+// prepareForLocalPreReplicate prepares the failover log for local pre-replicate
 // It ensures that the failover log is in a state where it can be used for local pre-replicate
 // It modifies the failover log in place
-func (r *remoteOps) PrepareForLocalPreReplicate(bucketFailoverLog *base.BucketFailoverLog) error {
+func (r *remoteOps) prepareForLocalPreReplicate(bucketFailoverLog *base.BucketFailoverLog) error {
 	bucketFailoverLog.Mutex.Lock()
 	defer bucketFailoverLog.Mutex.Unlock()
 
@@ -104,14 +104,14 @@ func (r *remoteOps) PrepareForLocalPreReplicate(bucketFailoverLog *base.BucketFa
 	return nil
 }
 
-// PreReplicate verifies if the tgtTs is a valid with respect to the failover log
+// preReplicate verifies if the tgtTs is a valid with respect to the failover log
 // If returns:
 // 1. match: true if the tgtTs is valid with respect to the failover log
 // 2. targetVBOpaque: denotes the latest/current vbucketUUID of  the vbucket
 // 3. error: any error that occurred during the operation
-func (r *remoteOps) PreReplicate(tgtTs *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
+func (r *remoteOps) preReplicate(tgtTs *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
 	if base.UseLegacyPreReplicate {
-		return r.LegacyPreReplicate(tgtTs, ctx)
+		return r.legacyPreReplicate(tgtTs, ctx)
 	}
 
 	r.mutex.Lock()
@@ -128,7 +128,7 @@ func (r *remoteOps) PreReplicate(tgtTs *service_def.RemoteVBReplicationStatus, c
 			r.mutex.Unlock()
 			return false, nil, fmt.Errorf("failed to get failover log for all vbuckets: %v", errMap)
 		}
-		if err := r.PrepareForLocalPreReplicate(bucketFailoverLog); err != nil {
+		if err := r.prepareForLocalPreReplicate(bucketFailoverLog); err != nil {
 			r.mutex.Unlock()
 			return false, nil, fmt.Errorf("failed to prepare for local pre-replicate: %w", err)
 		}

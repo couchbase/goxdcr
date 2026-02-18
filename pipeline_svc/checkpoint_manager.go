@@ -420,7 +420,7 @@ func (ckptMgr *CheckpointManager) newGlobalCkptPrereplicateCacheCtx(expireThresh
 		expireThreshold:   expireThreshold,
 		errorThreshold:    errThreshold,
 		_preReplicate: func(status *service_def.RemoteVBReplicationStatus, ctx *utilities.Context) (bool, metadata.TargetVBOpaque, error) {
-			return ckptMgr.remoteOps.PreReplicate(status, ctx)
+			return ckptMgr.remoteOps.preReplicate(status, ctx)
 		},
 	}
 }
@@ -1606,7 +1606,7 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimest
 	if ctx != nil {
 		trackingCtx = ctx.dataTrackingCtx
 	}
-	bMatch, current_remoteVBOpaque, err := ckmgr.remoteOps.PreReplicate(targetTimestamp, trackingCtx)
+	bMatch, current_remoteVBOpaque, err := ckmgr.remoteOps.preReplicate(targetTimestamp, trackingCtx)
 	if err != nil {
 		ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 		return
@@ -4492,7 +4492,7 @@ func (ckmgr *CheckpointManager) IsCkptRecordValidBasedOnPreReplicate(ckptRecord 
 			VBSeqno:  ckptRecord.Target_Seqno,
 			VBNo:     vbno,
 		}
-		bmatch, _, err := ckmgr.remoteOps.PreReplicate(targetTimestamp, ctx.dataTrackingCtx)
+		bmatch, _, err := ckmgr.remoteOps.preReplicate(targetTimestamp, ctx.dataTrackingCtx)
 		if err != nil {
 			ckmgr.logger.Errorf("IsCkptRecordValidBasedOnPreReplicate targetTimeStamp (%v,%v,%v) error: %v",
 				vbno, ckptRecord.Target_vb_opaque, ckptRecord.Target_Seqno, err)
