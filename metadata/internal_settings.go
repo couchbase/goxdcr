@@ -303,6 +303,13 @@ const (
 	// use legacy pre-replicate
 	UseLegacyPreReplicateKey = "UseLegacyPreReplicate"
 
+	// Collections watcher related settings
+	CollectionsWatcherWaitTimeKey      = "CollectionsWatcherWaitTimeSec"
+	CollectionsWatcherBackoffFactorKey = "CollectionsWatcherBackoffFactor"
+	CollectionsWatcherMaxWaitTimeKey   = "CollectionsWatcherMaxWaitTimeSec"
+
+	MaxAllowedRCDegradedCyclesForCngKey = "MaxAllowedRCDegradedCyclesForCng"
+
 	// threshold for compiling lookup index during CollectionNamespaceMapping marshalling
 	// if the mapping size exceeds this threshold, an index will be compiled to speed up lookups
 	ColMarshalIdxThresholdKey = "ColMappingLargeThreshold"
@@ -449,6 +456,10 @@ var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDispla
 var MaxCheckpointRecordsToKeepVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 100}}
 var UseLegacyPreReplicateConfig = &SettingsConfig{false, nil}
+var CollectionsWatcherWaitTimeConfig = &SettingsConfig{int(base.CollectionsWatcherWaitTime / time.Second), &Range{1, 300}}
+var CollectionsWatcherBackoffFactorConfig = &SettingsConfig{base.CollectionsWatcherBackoffFactor, &Range{1, 10}}
+var CollectionsWatcherMaxWaitTimeConfig = &SettingsConfig{int(base.CollectionsWatcherMaxWaitTime / time.Second), &Range{1, 600}}
+var MaxAllowedRCDegradedCyclesForCngConfig = &SettingsConfig{base.MaxAllowedRCDegradedCyclesForCng, &Range{1, 18}}
 var ColMarshalIdxThresholdConfig = &SettingsConfig{base.ColMappingLargeThreshold, &Range{1, 10000}}
 var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
 var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
@@ -595,6 +606,10 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxCheckpointRecordsToKeepVariableVBKey:       MaxCheckpointRecordsToKeepVariableVBConfig,
 	MaxCheckpointRecordsToReadVariableVBKey:       MaxCheckpointRecordsToReadVariableVBConfig,
 	UseLegacyPreReplicateKey:                      UseLegacyPreReplicateConfig,
+	CollectionsWatcherWaitTimeKey:                 CollectionsWatcherWaitTimeConfig,
+	CollectionsWatcherBackoffFactorKey:            CollectionsWatcherBackoffFactorConfig,
+	CollectionsWatcherMaxWaitTimeKey:              CollectionsWatcherMaxWaitTimeConfig,
+	MaxAllowedRCDegradedCyclesForCngKey:           MaxAllowedRCDegradedCyclesForCngConfig,
 	ColMarshalIdxThresholdKey:                     ColMarshalIdxThresholdConfig,
 	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
 	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,

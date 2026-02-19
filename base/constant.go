@@ -1287,6 +1287,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
 	useLegacyPreReplicate bool,
+	collectionsWatcherWaitTime time.Duration, collectionsWatcherBackoffFactor int, collectionsWatcherMaxWaitTime time.Duration,
+	maxAllowedRCDegradedCyclesForCng int,
 	colMarshalIdxThreshold int,
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
@@ -1481,6 +1483,12 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
 
 	UseLegacyPreReplicate = useLegacyPreReplicate
+
+	CollectionsWatcherWaitTime = collectionsWatcherWaitTime
+	CollectionsWatcherBackoffFactor = collectionsWatcherBackoffFactor
+	CollectionsWatcherMaxWaitTime = collectionsWatcherMaxWaitTime
+
+	MaxAllowedRCDegradedCyclesForCng = maxAllowedRCDegradedCyclesForCng
 	ColMappingLargeThreshold = colMarshalIdxThreshold
 }
 
@@ -2027,12 +2035,12 @@ const Backfill = "backfill"
 const DisableHlvBasedShortCircuitKey string = "disableHlvBasedShortCircuit"
 
 // MaxAllowedRCDegradedCyclesForCng denotes the threshold number of consecutive refresh cycles RC can remain degraded before reporting RC_ERROR.
-const MaxAllowedRCDegradedCyclesForCng = 6
+var MaxAllowedRCDegradedCyclesForCng = 6
 
 // Collections watcher related constants
-const CollectionsWatcherWaitTime = 5 * time.Second
-const CollectionsWatcherBackoffFactor = 2
-const CollectionsWatcherMaxWaitTime = 60 * time.Second
+var CollectionsWatcherWaitTime = 5 * time.Second
+var CollectionsWatcherBackoffFactor = 2
+var CollectionsWatcherMaxWaitTime = 60 * time.Second
 
 /**
 * In order for DCP flow control to work correctly, the number of mutations in DCP buffer
