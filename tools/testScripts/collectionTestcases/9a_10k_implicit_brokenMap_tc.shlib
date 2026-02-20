@@ -163,6 +163,8 @@ function runTestCase {
 		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
 		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+		local -i currentFixedRoutingInstanceCnt
+		currentFixedRoutingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$FIXED_ROUTING_UPDATE_MSG")
 
 		echo "Creating collection ${colIdx} on target bucket and waiting for backfill"
 		createCollection "C2" "B2" "S1" "col${colIdx}"
@@ -185,25 +187,19 @@ function runTestCase {
 		checkChangesLeftInternal "C1" "B1" "C2" "B2"
 
 		# Secondly, do some I/O to ensure the I/O path will update its collections manifest and ensure that
-		# the router's broken map is properly updated before the checkpoint operation
-		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
-		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+		# the router's broken map is properly updated before the checkpoint operation.
+		# We validate that at least one FixedRoutingUpdateEvent was raised during this iteration.
+		# This is more robust than waiting for a second BACKFILL_MSG, because the backfill request handler
+		# may deduplicate the request if the backfill spec already exists with the same mapping.
 		runCbWorkloadGenCollection "C1" "B1" "S1" "col$colIdx"
 		sleep 5
-		waitForInternalLogInstance "C1" "$BACKFILL_MSG" "$(($currentBackfillInstanceCnt + 1))" $backfillTimeToWait
+		waitForInternalLogInstance "C1" "$FIXED_ROUTING_UPDATE_MSG" "$(($currentFixedRoutingInstanceCnt + 1))" $backfillTimeToWait
 		if (($? == 1)); then
-			echo "Failed to find $BACKFILL_MSG increase for router update"
+			echo "Failed to find $FIXED_ROUTING_UPDATE_MSG increase for router update"
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 		checkChangesLeftInternal "C1" "B1" "C2" "B2"
-		waitForInternalLogInstance "C1" "$VBTASKS_DONE_MSG" "$(($currentVBTasksDoneInstanceCnt + 1))" $backfillTimeToWait
-		if (($? == 1)); then
-			echo "Failed to find $VBTASKS_DONE_MSG increase for router update"
-			dumpDebugInfoBeforeExit
-			exit 1
-		fi
 
 		pauseReplication "C1" "B1" "C2" "B2"
 		echo "Waiting 30 seconds for pipeline to really pause"
