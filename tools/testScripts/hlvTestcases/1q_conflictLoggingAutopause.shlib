@@ -30,8 +30,6 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["stats
 
 # Settings for autopause with threshold of 10 conflicts within 30 seconds monitoring duration.
 declare -A BucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=900 ["statsInterval"]=500 ["filterBinary"]=true ["conflictLogging"]=$conflictLoggingMap ["cLogPauseReplThreshold"]=10 ["cLogMonitorDuration"]=30 ["xdcrDevMainSendDelayMs"]=3000)
-declare -A UpdateSettingsOff=(["cLogPauseReplThreshold"]=0 ["cLogMonitorDuration"]=0)
-declare -A UpdateSettingsOn=(["cLogPauseReplThreshold"]=10 ["cLogMonitorDuration"]=30)
 
 # Bucket -> Scopes
 # -----------------
@@ -124,7 +122,7 @@ function testReplicationWhichAutoPauses {
 	verifyPromStats
 
 	echo "Updating replication settings to disable autopause (threshold=0, duration=0)"
-	setReplicationSettings "C1" "B1" "C2" "B2" UpdateSettingsOff
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogPauseReplThreshold=0" "cLogMonitorDuration=0"
 	sleep 2
 
 	echo "Resuming the replication"
@@ -140,7 +138,7 @@ function testReplicationWhichAutoPauses {
 	verifyPromStats
 
 	echo "Updating replication settings to enable autopause (threshold=10, duration=30)"
-	setReplicationSettings "C1" "B1" "C2" "B2" UpdateSettingsOn
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogPauseReplThreshold=10" "cLogMonitorDuration=30"
 	sleep 2
 
 	echo "Sleep 60 seconds to wait for replication to autopause"
@@ -198,6 +196,38 @@ function testReplicationWhichDoesnotAutoPauses {
 	retryValidation validatePrometheusCLogStatusIs1 "C1" "B1" "B2" "Main" "Running"
 	retryValidation validatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Running"
 	echo "Replication is still running"
+
+	currentClusterLog=$(getInternalNodeXdcrLog "C1")
+	cLogRulesUpdateCnt=$(echo "$currentClusterLog" | grep -c "Conflict logger updated for pipeline")
+	cLogThresholdUpdateCnt=$(echo "$currentClusterLog" | grep -c "changing conflict logger ReplPauseThreshold")
+	cLogMonDurUpdateCnt=$(echo "$currentClusterLog" | grep -c "changing conflict logger MonitorDuration")
+	cLogQueueCapDoneCnt=$(echo "$currentClusterLog" | grep -c "done changing conflict logger queue capacity")
+	cLogSetMetaTimeoutUpdateCnt=$(echo "$currentClusterLog" | grep -c "changing conflict logger set meta timeout")
+	cLogPipelineRestartCnt=$(echo "$currentClusterLog" | grep -c "since the changes to replication spec are critical")
+
+	# Test clog live settings update
+	setReplicationSettings "C1" "B1" "C2" "B2" 'conflictLogging={"bucket":"B4","collection":"_default._default","loggingRules":{"S1.col1":{"bucket":"B4","collection":"S1.col1"}}}'
+	sleep 2
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogPauseReplThreshold=11"
+	sleep 2
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogMonitorDuration=31"
+	sleep 2
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogQueueCapacity=10000"
+	sleep 2
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogSetTimeoutMs=6000"
+	sleep 2
+	# Test clog settings update which cause pipeline update
+	setReplicationSettings "C1" "B1" "C2" "B2" "cLogQueueCapacity=500"
+	sleep 10
+	setReplicationSettings "C1" "B1" "C2" "B2" "conflictLogging={}"
+	sleep 10
+
+	validateInternalLogWithInstance "C1" "Conflict logger updated for pipeline" $(($cLogRulesUpdateCnt + 1))
+	validateInternalLogWithInstance "C1" "changing conflict logger ReplPauseThreshold" $(($cLogThresholdUpdateCnt + 1))
+	validateInternalLogWithInstance "C1" "changing conflict logger MonitorDuration" $(($cLogMonDurUpdateCnt + 1))
+	validateInternalLogWithInstance "C1" "done changing conflict logger queue capacity" $(($cLogQueueCapDoneCnt + 1))
+	validateInternalLogWithInstance "C1" "changing conflict logger set meta timeout" $(($cLogSetMetaTimeoutUpdateCnt + 1))
+	validateInternalLogWithInstance "C1" "since the changes to replication spec are critical" $(($cLogPipelineRestartCnt + 2))
 
 	# changes_left should be 0
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"

@@ -218,11 +218,11 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		manifestCache:      mcache,
 	}
 
+	qos := autopauseReplication
 	if options.ReplPauseThreshold == 0 || options.MonitorDuration == 0 {
-		l.setQOS(hibernation)
-	} else {
-		l.setQOS(autopauseReplication)
+		qos = hibernation
 	}
+	l.setQOS(qos)
 
 	now := time.Now()
 	err = l.updateBucketUUIDFromRules(l.opts.Rules, true)
@@ -230,8 +230,8 @@ func newLoggerImpl(logger *log.CommonLogger, replId string, utils utils.UtilsIfa
 		return nil, err
 	}
 
-	logger.Infof("updated bucket UUID from rules for replId=%s. Time elapsed=%v",
-		replId, time.Since(now))
+	logger.Infof("updated bucket UUID from rules for replId=%s. Time elapsed=%v. QOS=%s",
+		replId, time.Since(now), qos)
 
 	return
 }
@@ -926,6 +926,10 @@ func (l *LoggerImpl) UpdateNWRetryCount(cnt int) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.opts.NetworkRetryCount == cnt {
+		return
+	}
+
 	l.logger.Infof("changing conflict logger network retry count old=%d new=%d id=%s", l.opts.NetworkRetryCount, cnt, l.id)
 
 	l.opts.NetworkRetryCount = cnt
@@ -938,6 +942,10 @@ func (l *LoggerImpl) UpdateNWRetryInterval(t time.Duration) {
 
 	l.lock.Lock()
 	defer l.lock.Unlock()
+
+	if l.opts.NetworkRetryInterval == t {
+		return
+	}
 
 	l.logger.Infof("changing conflict logger network retry interval old=%v new=%v id=%s", l.opts.NetworkRetryInterval, t, l.id)
 
@@ -952,6 +960,10 @@ func (l *LoggerImpl) UpdateSetMetaTimeout(t time.Duration) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.opts.SetMetaTimeout == t {
+		return
+	}
+
 	l.logger.Infof("changing conflict logger set meta timeout old=%v new=%v id=%s", l.opts.SetMetaTimeout, t, l.id)
 
 	l.opts.SetMetaTimeout = t
@@ -964,6 +976,10 @@ func (l *LoggerImpl) UpdateGetFromPoolTimeout(t time.Duration) {
 
 	l.lock.Lock()
 	defer l.lock.Unlock()
+
+	if l.opts.PoolGetTimeout == t {
+		return
+	}
 
 	l.logger.Infof("changing conflict logger pool get timeout old=%v new=%v id=%s", l.opts.PoolGetTimeout, t, l.id)
 
@@ -978,6 +994,10 @@ func (l *LoggerImpl) UpdateMaxErrorCount(cnt int) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.opts.MaxErrorCount == cnt {
+		return
+	}
+
 	l.logger.Infof("changing conflict logger max error count old=%v new=%v id=%s", l.opts.MaxErrorCount, cnt, l.id)
 
 	l.opts.MaxErrorCount = cnt
@@ -991,6 +1011,10 @@ func (l *LoggerImpl) UpdateErrorTimeWindow(t time.Duration) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.opts.ErrorTimeWindow == t {
+		return
+	}
+
 	l.logger.Infof("changing conflict logger error time window old=%v new=%v id=%s", l.opts.ErrorTimeWindow, t, l.id)
 
 	l.opts.ErrorTimeWindow = t
@@ -1003,6 +1027,10 @@ func (l *LoggerImpl) UpdateReattemptDuration(t time.Duration) {
 
 	l.lock.Lock()
 	defer l.lock.Unlock()
+
+	if l.opts.ReattemptDuration == t {
+		return
+	}
 
 	l.logger.Infof("changing conflict logger reattempt duration old=%v new=%v id=%s", l.opts.ReattemptDuration, t, l.id)
 
@@ -1032,6 +1060,10 @@ func (l *LoggerImpl) UpdateReplPauseThreshold(t int) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.opts.ReplPauseThreshold == t {
+		return
+	}
+
 	l.logger.Infof("changing conflict logger ReplPauseThreshold old=%v new=%v id=%s", l.opts.ReplPauseThreshold, t, l.id)
 
 	l.opts.ReplPauseThreshold = t
@@ -1046,7 +1078,11 @@ func (l *LoggerImpl) UpdateMonitorDuration(d int) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
-	l.logger.Infof("changing conflict logger MonitorDuration old=%v new=%v id=%s", l.opts.ReattemptDuration, d, l.id)
+	if l.opts.MonitorDuration == d {
+		return
+	}
+
+	l.logger.Infof("changing conflict logger MonitorDuration old=%v new=%v id=%s", l.opts.MonitorDuration, d, l.id)
 
 	l.opts.MonitorDuration = d
 	l.changeQOSNoLock()
@@ -1087,62 +1123,64 @@ func (l *LoggerImpl) Stop() error {
 	return nil
 }
 
+// updateRules is a helper function to update rules to conflictLoggingMap.
+func (l *LoggerImpl) updateRules(conflictLoggingMap base.ConflictLoggingMappingInput) error {
+	if conflictLoggingMap == nil {
+		// nil is not an accepted value, should not reach here.
+		err := fmt.Errorf("conflict map is nil")
+		l.logger.Errorf("conflict map value cannot be nil")
+		return err
+	}
+
+	// validate if we can perform live pipeline update or not.
+	if conflictLoggingMap.Disabled() {
+		// conflict logging is on in the pipeline right now
+		// and the setting update was to turn it off. The pipeline should have restarted.
+		err := fmt.Errorf("conflict map respresents Off")
+		l.logger.Errorf("Ignoring the update because pipeline should have restarted, err=%v", err)
+		return err
+	}
+
+	// conflict logging is on and its settings needs to be updated in-place.
+	err := UpdateLoggerWithRules(conflictLoggingMap, l, l.replId, l.logger)
+	if err != nil {
+		err := fmt.Errorf("error updating existing conflict logging rules: %w", err)
+		l.logger.Errorf("ignoring %v and continuing with old rules. err=%v", conflictLoggingMap, err)
+		return err
+	}
+
+	return nil
+}
+
 // The following conflict logging settings update should result in a restart of pipeline,
 // and which cannot be handled on a live basis by this function:
 // 1. conflict logging mapping change (i.e. On/Enabled -> Off/Disabled change)
 // 2. conflict logging mapping change (i.e Off/Disabled -> On/Enabled change)
 // 3. conflict logging queue capacity decrease (i.e. newCap < oldCap).
+//
+// Note: settings will only contain those replication settings that changed during this call and
+// not the entire replication spec settings.
 func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	conflictLoggingIsOn := l != nil
+	if l.isClosed() {
+		return nil
+	}
 
 	// change of conflict logging rules if needed
-	var conflictLoggingMap base.ConflictLoggingMappingInput
-	conflictLoggingIn, conflictLoggingMapExists := settings[base.CLogKey]
-	if !conflictLoggingMapExists {
-		// no conflict logging update exists, which is fine.
-		return nil
-	}
-
-	conflictLoggingMap, conflictLoggingMapExists = base.ParseConflictLoggingInputType(conflictLoggingIn)
-	if !conflictLoggingMapExists {
-		// wrong type
-		err := fmt.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
-			conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
-		l.logger.Errorf(err.Error())
-		return err
-	}
-
-	if conflictLoggingMap == nil {
-		// nil is not an accepted value, should not reach here.
-		err := fmt.Errorf("conflict map is nil as input, but is cannot be nil. Ignoring %v for the update",
-			conflictLoggingIn)
-		l.logger.Errorf(err.Error())
-		return err
-	}
-
-	// validate if we can perform live pipeline update or not.
-	if conflictLoggingIsOn {
-		if conflictLoggingMap.Disabled() {
-			// conflict logging is on in the pipeline right now
-			// and the setting update was to turn it off. The pipeline should have restarted.
-			err := fmt.Errorf("conflict map respresents Off as input. Ignoring %v for the update because pipeline should have restarted",
-				conflictLoggingIn)
-			l.logger.Errorf(err.Error())
-			return err
-		}
-	} else {
-		if !conflictLoggingMap.Disabled() {
-			// conflict logging is off in the pipeline right now
-			// and the setting update was to turn it on. The pipeline should have restarted.
-			err := fmt.Errorf("conflict map respresents On as input. Ignoring %v for the update because pipeline should have restarted",
-				conflictLoggingIn)
-			log.NewLogger(ConflictLoggerName, log.DefaultLoggerContext).Errorf(err.Error())
+	conflictLoggingIn, ok := settings[base.CLogKey]
+	if ok {
+		conflictLoggingMap, ok := base.ParseConflictLoggingInputType(conflictLoggingIn)
+		if !ok {
+			// wrong type
+			err := fmt.Errorf("conflict mapping is of invalid type")
+			l.logger.Errorf("conflict map %v as input, is of invalid type %v. Ignoring the update",
+				conflictLoggingIn, reflect.TypeOf(conflictLoggingIn))
 			return err
 		}
 
-		// No need of settings update.
-		// Conflict logging is Off and will remain off.
-		return nil
+		err := l.updateRules(conflictLoggingMap)
+		if err != nil {
+			return fmt.Errorf("%w, in=%v", err, conflictLoggingIn)
+		}
 	}
 
 	// update logger queue capacity if needed
@@ -1249,18 +1287,6 @@ func (l *LoggerImpl) UpdateSettings(settings metadata.ReplicationSettingsMap) er
 		d, ok := cLogMonitorDuration.(int)
 		if ok {
 			l.UpdateMonitorDuration(d)
-		}
-	}
-
-	// change of conflict logging rules if needed
-	if conflictLoggingMapExists {
-		// conflict logging is on and its settings needs to be updated.
-		err := UpdateLoggerWithRules(conflictLoggingMap, l, l.replId, l.logger)
-		if err != nil {
-			err := fmt.Errorf("error updating existing conflict logging rules, ignoring %v and continuing with old rules. err=%v",
-				conflictLoggingMap, err)
-			l.logger.Errorf(err.Error())
-			return err
 		}
 	}
 
