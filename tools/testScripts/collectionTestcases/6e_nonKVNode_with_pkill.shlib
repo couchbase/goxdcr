@@ -89,10 +89,10 @@ function sanityChecks {
 	checkPipelineLastStatus "C1P0" "Pending"
 
 	# 4. Ensure we don't retry backfill jobs forever on non-KV nodes
-	validateLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG1" 0
-	validateLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG1" 0
-	validateLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG2" 0
-	validateLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG2" 0
+	validateInternalLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG1" 0
+	validateInternalLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG1" 0
+	validateInternalLogWithInstance "C1" "$NIL_BACKFILL_HANDLER_LOG2" 0
+	validateInternalLogWithInstance "C1P0" "$NIL_BACKFILL_HANDLER_LOG2" 0
 }
 
 function checkPipelineLastStatus {

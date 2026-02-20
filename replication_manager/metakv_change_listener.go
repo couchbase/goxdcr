@@ -487,6 +487,22 @@ func needToRestreamPipelineEvenIfStopped(oldSettings, newSettings *metadata.Repl
 	return oldSettings.NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(newSettings)
 }
 
+// cLogBasedLiveSettingsUpdate returns true if any conflict logging based settings will result in
+// a live pipeline update.
+func cLogBasedLiveSettingsUpdate(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
+	return oldSettings.GetCLogPauseReplThreshold() != newSettings.GetCLogPauseReplThreshold() ||
+		oldSettings.GetCLogMonitorDuration() != newSettings.GetCLogMonitorDuration() ||
+		oldSettings.GetCLogSetMetaTimeout() != newSettings.GetCLogSetMetaTimeout() ||
+		oldSettings.GetCLogPoolGetTimeout() != newSettings.GetCLogPoolGetTimeout() ||
+		oldSettings.GetCLogNetworkRetryCount() != newSettings.GetCLogNetworkRetryCount() ||
+		oldSettings.GetCLogNetworkRetryInterval() != newSettings.GetCLogNetworkRetryInterval() ||
+		oldSettings.GetCLogWorkerCount() != newSettings.GetCLogWorkerCount() ||
+		oldSettings.GetCLogQueueCapacity() < newSettings.GetCLogQueueCapacity() ||
+		oldSettings.GetCLogMaxErrorCount() != newSettings.GetCLogMaxErrorCount() ||
+		oldSettings.GetCLogErrorTimeWindow() != newSettings.GetCLogErrorTimeWindow() ||
+		oldSettings.GetCLogReattemptDuration() != newSettings.GetCLogReattemptDuration()
+}
+
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, newSpecInternalId string) error {
 	// perform live update on pipeline if qualifying settings have been changed
 	isOldReplHighPriority := rscl.resourceManager.IsReplHighPriority(topic, oldSettings.GetPriority())
@@ -510,8 +526,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetHlvBasedShortCircuitToggle() != newSettings.GetHlvBasedShortCircuitToggle() ||
 		oldSettings.GetForwardLocalOnlyFlag() != newSettings.GetForwardLocalOnlyFlag() ||
 		oldSettings.GetMinPVLenForMobile() != newSettings.GetMinPVLenForMobile() ||
-		oldSettings.GetCLogPauseReplThreshold() != newSettings.GetCLogPauseReplThreshold() ||
-		oldSettings.GetCLogMonitorDuration() != newSettings.GetCLogMonitorDuration() {
+		cLogBasedLiveSettingsUpdate(oldSettings, newSettings) {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
