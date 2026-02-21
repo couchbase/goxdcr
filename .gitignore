@@ -55,3 +55,4 @@ testOutput/
 # agent contexts
 AGENTS.md
 .agent-context/*
+.github/*
