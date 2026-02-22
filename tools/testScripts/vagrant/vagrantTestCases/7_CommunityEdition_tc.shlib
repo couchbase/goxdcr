@@ -1,0 +1,205 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+# C1 and C2 will be used for CE/EE edition tests
+CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C1P"]=15001 ["C2"]=15002 ["C2P"]=15003)
+CLUSTER_NAME_SSLPORT_MAP=(["C1"]=15020 ["C1P"]=15021 ["C2"]=15022 ["C2P"]=15023)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C1P"]=15997 ["C2"]=15998 ["C2P"]=15999)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C1P"]=15101 ["C2"]=15102 ["C2P"]=15103)
+VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=15203)
+VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
+VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C1P"]="192.168.56.3" ["C2"]="192.168.56.4" ["C2P"]="192.168.56.5")
+VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1" "B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Test cases assume vagrant up has already been called
+
+# Helper function to create replication expecting failure
+function createBucketReplicationExpectingFailure {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local -a replProperties=$5
+
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
+
+	echo "Attempting to create replication from $sourceCluster/$sourceBucket to $targetCluster/$targetBucket (expecting failure)..."
+
+	insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
+	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
+	getBucketReplPropertiesRESTString
+
+	repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
+
+	# Check if replication creation failed as expected
+	# CE to CE XDCR should fail with an error message
+	# TODO: Make sure the right CE error is grepped
+	if [[ $(echo "$repId" | grep -c error) -gt 0 ]]; then
+		echo "SUCCESS: Replication creation failed as expected - $repId"
+		return 0
+	else
+		echo "ERROR: Replication should have failed but succeeded - $repId"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+}
+
+function runDataLoadAndCheck {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	runCbWorkloadGenBucket "$sourceCluster" "$sourceBucket"
+	sleep 20
+	checkUnidirectionalChangesLeft
+}
+
+function testCERestrictions {
+	local sourceVersion="$1"
+	local targetVersion="$2"
+	local shouldFail=$3
+
+	echo "============================================================================"
+	echo "Testing $sourceVersion -> $targetVersion XDCR"
+	echo "============================================================================"
+
+	vagrantRemoveCbServerAll
+
+	vagrantInstallCBServer 0 "$sourceVersion"
+	vagrantInstallCBServer 2 "$targetVersion"
+	sleep 10
+
+	setupTopologies
+
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 5
+
+	if (($shouldFail > 0)); then
+		createBucketReplicationExpectingFailure "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	else
+		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	fi
+
+	echo "Testing $sourceVersion -> $targetVersion XDCR passed"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}
+
+function testCERestrictionsMixedMode {
+	local oldSourceVersion="$1"
+	local newSourceVersion="$2"
+	local targetVersion="$3"
+
+	echo "============================================================================"
+	echo "Testing $oldSourceVersion -> $newSourceVersion upgrade test"
+	echo "============================================================================"
+
+	vagrantRemoveCbServerAll
+
+	vagrantInstallCBServer 0 "$oldSourceVersion"
+	vagrantInstallCBServer 1 "$newSourceVersion"
+	vagrantInstallCBServer 2 "$targetVersion"
+	sleep 10
+
+	setupTopologies
+	sleep 5
+
+	# Shorten the amount of time pipeline restarts
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 10
+
+	createRemoteClusterReference "C1" "C2"
+	sleep 5
+
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	sleep 5
+
+	addNodesIn
+	sleep 5
+	echo "Rebalancing nodes to become a 2-node source cluster"
+	startRebalancing "C1"
+
+	# Wait for existing replication to autopause
+	sleep 60
+
+	echo "validating that existing replication after upgrade autopauses"
+	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
+	echo "existing replication after upgrade has autopaused"
+
+	echo "creating replication from $newSourceVersion should fail"
+	createBucketReplicationExpectingFailure "C1P" "B0" "C2" "B0" DefaultBucketReplProperties
+	echo "creating replication from $newSourceVersion failed"
+
+	echo "creating replication from $oldSourceVersion should succeed"
+	createBucketReplication "C1" "B0" "C2" "B0" DefaultBucketReplProperties
+	echo "creating replication from $oldSourceVersion succeeded, but should autopause in 60s"
+	sleep 60
+
+	echo "validating that new replication after upgrade autopauses"
+	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
+	echo "new replication after upgrade has autopaused"
+
+	echo "Testing $oldSourceVersion -> $newSourceVersion upgrade test passed"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}
+
+# XDCR CE restriction enforcements were added in 8.0.2 and 8.1.0.
+function runTestCase {
+	# Use "totoro-ce" for CE edition and "totoro" for EE edition
+	#testCERestrictions "totoro-ce" "totoro-ce" 1
+	testCERestrictions "totoro-ce" "totoro" 0
+	testCERestrictions "totoro" "totoro-ce" 0
+	testCERestrictions "totoro" "totoro" 0
+
+	# Use "morpheus-ce" for CE edition and "morpheus" for EE edition
+	#testCERestrictions "morpheus-ce" "morpheus-ce" 1
+	testCERestrictions "morpheus-ce" "morpheus" 0
+	testCERestrictions "morpheus" "morpheus-ce" 0
+	testCERestrictions "morpheus" "morpheus" 0
+
+	return #TODO:remove
+	# Test mixed mode while upgrading from < 8.0.2, < 8.1.0 to >= 8.0.2, >= 8.1.0
+	testCERestrictionsMixedMode "neo-ce" "totoro-ce" "neo-ce"
+	testCERestrictionsMixedMode "trinity-ce" "totoro-ce" "trinity-ce"
+	testCERestrictionsMixedMode "neo-ce" "morpheus-ce" "neo-ce"
+	testCERestrictionsMixedMode "trinity-ce" "morpheus-ce" "trinity-ce"
+
+	echo "============================================================================"
+	echo "ALL TESTS PASSED SUCCESSFULLY"
+	echo "============================================================================"
+}

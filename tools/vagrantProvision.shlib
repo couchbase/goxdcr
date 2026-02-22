@@ -57,9 +57,13 @@ function vscp {
 
 declare -A CBServerLink=(
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-linux_arm64.deb"
+	["neo-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-community_neo-linux_arm64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-linux_arm64.deb"
+	["trinity-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-community_trinity-linux_arm64.deb"
 	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-linux_arm64.deb"
+	["morpheus-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-community_morpheus-linux_arm64.deb"
 	["totoro"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/totoro/latest/couchbase-server-enterprise_totoro-linux_arm64.deb"
+	["totoro-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/totoro/latest/couchbase-server-community_totoro-linux_arm64.deb"
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
@@ -115,14 +119,22 @@ function vagrantRemoveCbServer {
 	local i=$1
 	local cmd
 
+	# Remove couchbase-server package
 	cmd="${VSSH[$i]} \"sudo dpkg --purge couchbase-server\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 
+	# Remove couchbase-server-community package
+	cmd="${VSSH[$i]} \"sudo dpkg --purge couchbase-server-community\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	# Forcefully remove Couchbase directories
 	cmd="${VSSH[$i]} \"sudo rm -rf /opt/couchbase\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 
+	# Kill any lingering socat processes
 	cmd="${VSSH[$i]} \"sudo pkill -9 socat\""
 	echo "==== Running $cmd ===="
 	eval $cmd
