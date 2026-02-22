@@ -37,38 +37,39 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
+CEError="Cannot create XDCR between two Community Edition clusters"
+
 # Test cases assume vagrant up has already been called
 
 # Helper function to create replication expecting failure
 function createBucketReplicationExpectingFailure {
-	local sourceCluster=$1
-	local sourceBucket=$2
-	local targetCluster=$3
-	local targetBucket=$4
-	local -a replProperties=$5
+    local sourceCluster=$1
+    local sourceBucket=$2
+    local targetCluster=$3
+    local targetBucket=$4
+    local -a replProperties=$5
 
-	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
-	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
+    local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+    local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
 
-	echo "Attempting to create replication from $sourceCluster/$sourceBucket to $targetCluster/$targetBucket (expecting failure)..."
+    echo "Attempting to create replication from $sourceCluster/$sourceBucket to $targetCluster/$targetBucket (expecting failure)..."
 
-	insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
-	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
-	getBucketReplPropertiesRESTString
+    insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
+    getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
+    getBucketReplPropertiesRESTString
 
-	repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
+    repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
 
-	# Check if replication creation failed as expected
-	# CE to CE XDCR should fail with an error message
-	# TODO: Make sure the right CE error is grepped
-	if [[ $(echo "$repId" | grep -c error) -gt 0 ]]; then
-		echo "SUCCESS: Replication creation failed as expected - $repId"
-		return 0
-	else
-		echo "ERROR: Replication should have failed but succeeded - $repId"
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
+    # Check if replication creation failed as expected
+    # CE to CE XDCR should fail with an error message
+    if [[ $(echo "$repId" | grep -c "$CEError") -gt 0 ]]; then
+        echo "SUCCESS: Replication creation failed as expected - $repId"
+        return 0
+    else
+        echo "ERROR: Replication should have failed but succeeded - $repId"
+        dumpDebugInfoBeforeExit
+        exit 1
+    fi
 }
 
 function runDataLoadAndCheck {
@@ -97,14 +98,27 @@ function testCERestrictions {
 	setupTopologies
 
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	sleep 5
-
-	if (($shouldFail > 0)); then
-		createBucketReplicationExpectingFailure "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	else
-		createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	fi
+	refResult=$(createRemoteClusterReference "C1" "C2")
+    if [[ $(echo "$refResult" | grep -c "$CEError") -gt 0 ]]; then
+        if (($shouldFail > 0)); then
+            echo "The test expects remote reference creation to fail and it did"
+            return
+        else
+            echo "ERROR: The test expects remote reference creation to succeed, but it did not (refResult=$refResult)"
+            dumpDebugInfoBeforeExit
+            exit 1
+        fi
+    else
+        if (($shouldFail > 0)); then
+            echo "ERROR: The test expects remote reference creation to fail with $CEError, but it did not (refResult=$refResult)"
+            dumpDebugInfoBeforeExit
+            exit 1
+        else
+            echo "The test expects remote reference to succeed and it did"
+            sleep 5
+            createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+        fi
+    fi
 
 	echo "Testing $sourceVersion -> $targetVersion XDCR passed"
 
@@ -178,16 +192,16 @@ function testCERestrictionsMixedMode {
 	cleanupBuckets
 }
 
-# XDCR CE restriction enforcements were added in 8.0.2 and 8.1.0.
+# Note: XDCR CE restriction enforcements were added in 8.0.2 and 8.1.0.
 function runTestCase {
 	# Use "totoro-ce" for CE edition and "totoro" for EE edition
-	#testCERestrictions "totoro-ce" "totoro-ce" 1
+	testCERestrictions "totoro-ce" "totoro-ce" 1
 	testCERestrictions "totoro-ce" "totoro" 0
 	testCERestrictions "totoro" "totoro-ce" 0
 	testCERestrictions "totoro" "totoro" 0
 
 	# Use "morpheus-ce" for CE edition and "morpheus" for EE edition
-	#testCERestrictions "morpheus-ce" "morpheus-ce" 1
+	testCERestrictions "morpheus-ce" "morpheus-ce" 1
 	testCERestrictions "morpheus-ce" "morpheus" 0
 	testCERestrictions "morpheus" "morpheus-ce" 0
 	testCERestrictions "morpheus" "morpheus" 0

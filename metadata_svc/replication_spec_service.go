@@ -441,6 +441,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	var targetKVVBMap map[string][]uint16
 	var rcCapability metadata.Capability
 	var manifestsPair *metadata.CollectionsManifestPair
+	var targetIsEE bool
 
 	tgtSideWaitGrpPhase1.Add(1)
 	go func() {
@@ -541,11 +542,25 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 						errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
 						service.logger.Error(errMsg)
 						validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+						return
 					} else if hasSharedExternalHostname {
-						errMsg := fmt.Sprintf("XDCR is not supported when multiple nodes in the target cluster share the same external hostname. Please verify the cluster setup.")
-						service.logger.Error(errMsg)
-						validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
+						service.logger.Errorf("%v, useExternal=%v", base.ErrUnsupportedAlternateAddressing, useExternal)
+						validateTargetBucketErrMap[base.ExternalAddressSetup] = base.ErrUnsupportedAlternateAddressing
+						return
 					}
+
+					clusterInfo, err := fetchRemoteClusterInfo(service.logger, service.utils, targetClusterRef)
+					if err != nil {
+						const msg = "error fetching /pools information from target to check if it's running EE"
+						service.logger.Errorf("%s: %v", msg, err)
+						validateTargetBucketErrMap[base.PoolsPath] = fmt.Errorf("%s: %w", msg, err)
+						return
+					}
+
+					targetIsEE = parseIsEnterpriseFromClusterInfo(clusterInfo)
+				} else {
+					// TODO: MB-70748 - should CNG targets be always considered as EE?
+					targetIsEE = true
 				}
 			}
 			if len(validateTargetBucketErrMap) > 0 {
@@ -599,6 +614,17 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	}
 	if validateNonIdenticalErr != nil {
 		return "", "", nil, nil, validateNonIdenticalErr, nil, nil
+	}
+
+	sourceIsEE, sourceEEErr := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+	if sourceEEErr != nil {
+		errMap["IsMyClusterEnterprise"] = sourceEEErr
+		return "", "", nil, errMap, nil, nil, nil
+	}
+
+	if !sourceIsEE && !targetIsEE {
+		errMap["isEnterprise"] = base.ErrCERestrictionsBreached
+		return "", "", nil, errMap, nil, nil, nil
 	}
 
 	if performRemoteValidation && sourceBucketNumberOfVbs != targetBucketNumberOfVbs && !base.IsClusterCompatible(sourceCompat, base.VersionForVariableVBSupport) {

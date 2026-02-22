@@ -3234,17 +3234,57 @@ func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClust
 	return nil
 }
 
+// fetchRemoteClusterInfo retrieves remote cluster's /pools information.
+func fetchRemoteClusterInfo(logger *log.CommonLogger, utils utilities.UtilsIface, ref *metadata.RemoteClusterReference) (map[string]interface{}, error) {
+	startTime := time.Now()
+	hostAddr, err := ref.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+	clusterInfo, err, statusCode := utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), logger)
+	logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v", err, statusCode, time.Since(startTime))
+	if err != nil || statusCode != http.StatusOK {
+		if statusCode == http.StatusUnauthorized {
+			return nil, wrapAsInvalidRemoteClusterError(fmt.Sprintf("%v. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", base.RemoteClusterAuthErrString, statusCode, hostAddr, base.PoolsPath))
+		} else {
+			if err == nil {
+				err = fmt.Errorf("Received non-OK HTTP status %v from %v%v", statusCode, hostAddr, base.PoolsPath)
+			}
+
+			hostname := base.GetHostName(hostAddr)
+			port, err := base.GetPortNumber(hostAddr)
+			if err != nil {
+				return nil, wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", hostAddr))
+			}
+			return nil, formErrorFromValidatingRemotehost(ref, hostname, port, err)
+		}
+	}
+
+	return clusterInfo, nil
+}
+
+// parseIsEnterpriseFromClusterInfo returns whether remote cluster represented by clusterInfo is running
+// enterprise edition.
+func parseIsEnterpriseFromClusterInfo(clusterInfo map[string]interface{}) bool {
+	isEnterprise, ok := clusterInfo[base.IsEnterprise].(bool)
+	if !ok {
+		isEnterprise = false
+	}
+
+	return isEnterprise
+}
+
 // validate remote cluster info
 // when updateRef is true, update internal fields in ref such as ActiveHostName
 // this is the case when ref is being created or updated by user
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateRef bool) error {
-	if ref.IsEncryptionEnabled() {
-		isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
-		if err != nil {
-			return err
-		}
+	sourceIsEE, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
+	if err != nil {
+		return err
+	}
 
-		if !isEnterprise {
+	if ref.IsEncryptionEnabled() {
+		if !sourceIsEE {
 			return wrapAsInvalidRemoteClusterError("Encryption can only be used in enterprise edition when the entire cluster is running at least 2.5 version of Couchbase Server")
 		}
 
@@ -3277,40 +3317,18 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	srvStop := service.utils.StartDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), base.DiagNetworkThreshold)
 	ref.PopulateDnsSrvIfNeeded(service.logger)
 	srvStop()
-	refHostName, err := ref.MyConnectionStr()
-	if err != nil {
-		return wrapAsInvalidRemoteClusterError(err.Error())
-	}
-	hostName := base.GetHostName(refHostName)
-	port, err := base.GetPortNumber(refHostName)
-	if err != nil {
-		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Failed to resolve address for \"%v\". The hostname may be incorrect or not resolvable.", refHostName))
-	}
 
 	if updateRef {
-		err = setHostNamesAndSecuritySettings(service.logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
+		err := setHostNamesAndSecuritySettings(service.logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict(), nil)
 		if err != nil {
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 		service.logger.Infof("%s after set hostname and security, ref: %s", ref.Name(), ref.SmallString())
 	}
 
-	startTime := time.Now()
-	hostAddr, err := ref.MyConnectionStr()
+	clusterInfo, err := fetchRemoteClusterInfo(service.logger, service.utils, ref)
 	if err != nil {
 		return err
-	}
-	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), service.logger)
-	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
-	if err != nil || statusCode != http.StatusOK {
-		if statusCode == http.StatusUnauthorized {
-			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("%v. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", base.RemoteClusterAuthErrString, statusCode, hostAddr, base.PoolsPath))
-		} else {
-			if err == nil {
-				err = fmt.Errorf("Received non-OK HTTP status %v from %v%v", statusCode, hostAddr, base.PoolsPath)
-			}
-			return service.formErrorFromValidatingRemotehost(ref, hostName, port, err)
-		}
 	}
 
 	// check if remote cluster has been initialized, i.e., has non-empty pools
@@ -3322,18 +3340,16 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError("Remote node is not initialized.")
 	}
 
-	if ref.IsEncryptionEnabled() {
+	// get isEnterprise from the map
+	targetIsEE := parseIsEnterpriseFromClusterInfo(clusterInfo)
+
+	if ref.IsEncryptionEnabled() && !targetIsEE {
 		// check if target cluster supports SSL when SSL is specified
+		return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
+	}
 
-		//get isEnterprise from the map
-		isEnterprise_remote, ok := clusterInfo[base.IsEnterprise].(bool)
-		if !ok {
-			isEnterprise_remote = false
-		}
-
-		if !isEnterprise_remote {
-			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
-		}
+	if !sourceIsEE && !targetIsEE {
+		return wrapAsInvalidRemoteClusterError(base.ErrCERestrictionsBreached.Error())
 	}
 
 	// get remote cluster uuid from the map
@@ -3762,7 +3778,7 @@ func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteCl
 	return ref.ValidateCertificates()
 }
 
-func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {
+func formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {
 	if !ref.IsEncryptionEnabled() {
 		// if encryption is not on, most likely the error is caused by incorrect hostname or firewall.
 		return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not connect to \"%v\" on port %v. This could be due to an incorrect host/port combination or a firewall in place between the servers.", hostName, port))
