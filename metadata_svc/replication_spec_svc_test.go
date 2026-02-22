@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	mrand "math/rand"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,11 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 
 	nonExistentBucketError := errors.New("NonExistentBucketError")
 	utilitiesMock.On("GetNonExistentBucketError").Return(nonExistentBucketError)
+	utilitiesMock.On("GetClusterInfoWStatusCode",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(map[string]interface{}{
+			base.IsEnterprise: true,
+		}, nil, http.StatusOK)
 
 	// Version 5.5
 	utilitiesMock.On("GetClusterCompatibilityFromBucketInfo", mock.Anything, mock.Anything,
@@ -907,4 +913,52 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 			assert.Contains(err.Error(), "error getting cluster compatibility", "Error message mismatch")
 		}
 	})
+}
+
+func TestCERestrictions(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCERestrictions =================")
+
+	test := func(sourceIsEE, targetIsEE, shouldFail bool) {
+		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+			utilitiesMock, replSpecSvc, sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
+		tgtBucketInfofileName := fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
+		setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, sourceIsEE, true, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability, tgtBucketInfofileName)
+
+		// Create a custom GetClusterInfoWStatusCode mock instead of what setupMocks provided.
+		calls := utilitiesMock.ExpectedCalls
+		newCalls := make([]*mock.Call, 0, len(calls))
+		for _, call := range calls {
+			if call.Method == "GetClusterInfoWStatusCode" {
+				continue
+			}
+
+			newCalls = append(newCalls, call)
+		}
+		utilitiesMock.ExpectedCalls = newCalls
+		utilitiesMock.On("GetClusterInfoWStatusCode",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(map[string]interface{}{
+				base.IsEnterprise: targetIsEE,
+			}, nil, http.StatusOK)
+
+		_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+		if shouldFail {
+			assert.Greater(len(errMap), 0)
+			assert.Equal(errMap[base.IsEnterprise], base.ErrCERestrictionsBreached)
+		} else {
+			assert.Equal(len(errMap), 0)
+		}
+	}
+
+	// 1. Source is CE, target is CE - should fail
+	test(false, false, true)
+	// 2. Source is CE, target is EE - should succeed
+	test(false, true, false)
+	// 3. Source is EE, target is CE - should succeed
+	test(true, false, false)
+	// 4. Source is EE, target is EE - should succeed
+	test(true, true, false)
+
+	fmt.Println("============== Test case end: TestCERestrictions =================")
 }

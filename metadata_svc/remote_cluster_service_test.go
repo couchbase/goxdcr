@@ -3150,3 +3150,39 @@ func TestBootstrapNodeMovesWithDNSSrv(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestBootstrapNodeMovesWithDNSSrv =================")
 }
+
+func TestCEEnforcement(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCEEnforcement =================")
+	defer fmt.Println("============== Test case end: TestCEEnforcement =================")
+
+	test := func(sourceIsEE, targetIsEE, shouldFail bool) {
+		_, _, xdcrTopologyMock, utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+		utilitiesMock.On("GetClusterInfoWStatusCode",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(map[string]interface{}{
+				base.Pools:        []interface{}{"dummyElement"},
+				base.IsEnterprise: targetIsEE,
+			}, nil, http.StatusOK)
+		utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
+		xdcrTopologyMock.On("IsMyClusterEnterprise").Return(sourceIsEE, nil)
+		xdcrTopologyMock.On("IsMyClusterEncryptionLevelStrict").Return(false)
+
+		err := remoteClusterSvc.validateRemoteCluster(&metadata.RemoteClusterReference{}, false)
+		if shouldFail {
+			assert.NotNil(err)
+			assert.Equal(err, wrapAsInvalidRemoteClusterError(base.ErrCERestrictionsBreached.Error()))
+		} else {
+			assert.Nil(err)
+		}
+	}
+
+	// 1. Source is CE, target is CE - should fail
+	test(false, false, true)
+	// 2. Source is CE, target is EE - should succeed
+	test(false, true, false)
+	// 3. Source is EE, target is CE - should succeed
+	test(true, false, false)
+	// 4. Source is EE, target is EE - should succeed
+	test(true, true, false)
+}

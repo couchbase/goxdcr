@@ -15,7 +15,7 @@
 CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C1P"]=15001 ["C2"]=15002 ["C2P"]=15003)
 CLUSTER_NAME_SSLPORT_MAP=(["C1"]=15020 ["C1P"]=15021 ["C2"]=15022 ["C2P"]=15023)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C1P"]=15997 ["C2"]=15998 ["C2P"]=15999)
-CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
 VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C1P"]=15101 ["C2"]=15102 ["C2P"]=15103)
 VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=15203)
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
@@ -37,39 +37,37 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
-CEError="Cannot create XDCR between two Community Edition clusters"
-
 # Test cases assume vagrant up has already been called
 
 # Helper function to create replication expecting failure
 function createBucketReplicationExpectingFailure {
-    local sourceCluster=$1
-    local sourceBucket=$2
-    local targetCluster=$3
-    local targetBucket=$4
-    local -a replProperties=$5
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local -a replProperties=$5
 
-    local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
-    local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
 
-    echo "Attempting to create replication from $sourceCluster/$sourceBucket to $targetCluster/$targetBucket (expecting failure)..."
+	echo "Attempting to create replication from $sourceCluster/$sourceBucket to $targetCluster/$targetBucket (expecting failure)..."
 
-    insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
-    getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
-    getBucketReplPropertiesRESTString
+	insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
+	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
+	getBucketReplPropertiesRESTString
 
-    repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
+	repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
 
-    # Check if replication creation failed as expected
-    # CE to CE XDCR should fail with an error message
-    if [[ $(echo "$repId" | grep -c "$CEError") -gt 0 ]]; then
-        echo "SUCCESS: Replication creation failed as expected - $repId"
-        return 0
-    else
-        echo "ERROR: Replication should have failed but succeeded - $repId"
-        dumpDebugInfoBeforeExit
-        exit 1
-    fi
+	# Check if replication creation failed as expected
+	# CE to CE XDCR should fail with an error message
+	if [[ $(echo "$repId" | grep -c "$CE_ERROR") -gt 0 ]]; then
+		echo "SUCCESS: Replication creation failed as expected - $repId"
+		return 0
+	else
+		echo "ERROR: Replication should have failed but succeeded - $repId"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
 }
 
 function runDataLoadAndCheck {
@@ -95,30 +93,39 @@ function testCERestrictions {
 	vagrantInstallCBServer 2 "$targetVersion"
 	sleep 10
 
+	CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 	setupTopologies
 
 	sleep 5
 	refResult=$(createRemoteClusterReference "C1" "C2")
-    if [[ $(echo "$refResult" | grep -c "$CEError") -gt 0 ]]; then
-        if (($shouldFail > 0)); then
-            echo "The test expects remote reference creation to fail and it did"
-            return
-        else
-            echo "ERROR: The test expects remote reference creation to succeed, but it did not (refResult=$refResult)"
-            dumpDebugInfoBeforeExit
-            exit 1
-        fi
-    else
-        if (($shouldFail > 0)); then
-            echo "ERROR: The test expects remote reference creation to fail with $CEError, but it did not (refResult=$refResult)"
-            dumpDebugInfoBeforeExit
-            exit 1
-        else
-            echo "The test expects remote reference to succeed and it did"
-            sleep 5
-            createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-        fi
-    fi
+	if [[ $(echo "$refResult" | grep -c "$CE_ERROR") -gt 0 ]]; then
+		if (($shouldFail > 0)); then
+			echo "The test expects remote reference creation to fail and it did"
+
+			echo "Expecting self reference creation to also fail"
+			refResult=$(createRemoteClusterReference "C1" "C1")
+			if [[ $(echo "$refResult" | grep -c "$CE_ERROR") -eq 0 ]]; then
+				echo "ERROR: Self reference should not be able to be created in CE"
+				exit 1
+			fi
+			echo "self reference creation failed"
+		else
+			echo "ERROR: The test expects remote reference creation to succeed, but it did not (refResult=$refResult)"
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+	else
+		if (($shouldFail > 0)); then
+			echo "ERROR: The test expects remote reference creation to fail with $CE_ERROR, but it did not (refResult=$refResult)"
+			dumpDebugInfoBeforeExit
+			exit 1
+		else
+			echo "The test expects remote reference to succeed and it did"
+			sleep 5
+			createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+			runDataLoadAndCheck "C1" "B1"
+		fi
+	fi
 
 	echo "Testing $sourceVersion -> $targetVersion XDCR passed"
 
@@ -143,6 +150,7 @@ function testCERestrictionsMixedMode {
 	vagrantInstallCBServer 2 "$targetVersion"
 	sleep 10
 
+	CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 	setupTopologies
 	sleep 5
 
@@ -156,11 +164,13 @@ function testCERestrictionsMixedMode {
 
 	createRemoteClusterReference "C1" "C2"
 	sleep 5
+	createRemoteClusterReference "C1" "C1"
+	sleep 5
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	sleep 5
 
-	addNodesIn
+	addOneNodeIn "C1P" "C1"
 	sleep 5
 	echo "Rebalancing nodes to become a 2-node source cluster"
 	startRebalancing "C1"
@@ -172,9 +182,21 @@ function testCERestrictionsMixedMode {
 	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B1" "B2" "Main" "Paused"
 	echo "existing replication after upgrade has autopaused"
 
+	echo "creating remote cluster reference from $newSourceVersion should fail"
+	refResult=$(createRemoteClusterReference "C1P" "C1P")
+	if [[ $(echo "$refResult" | grep -c "$CE_ERROR") -eq 0 ]]; then
+		echo "ERROR: creating self reference should have failed"
+		exit 1
+	fi
+	echo "creating remote cluster reference from $newSourceVersion failed"
+
 	echo "creating replication from $newSourceVersion should fail"
 	createBucketReplicationExpectingFailure "C1P" "B0" "C2" "B0" DefaultBucketReplProperties
 	echo "creating replication from $newSourceVersion failed"
+
+	echo "creating self replication from $newSourceVersion should fail"
+	createBucketReplicationExpectingFailure "C1P" "B1" "C1" "B2" DefaultBucketReplProperties
+	echo "creating self replication from $newSourceVersion failed"
 
 	echo "creating replication from $oldSourceVersion should succeed"
 	createBucketReplication "C1" "B0" "C2" "B0" DefaultBucketReplProperties
@@ -193,25 +215,27 @@ function testCERestrictionsMixedMode {
 }
 
 # Note: XDCR CE restriction enforcements were added in 8.0.2 and 8.1.0.
+# TODO: Uncomment morpheus tests once backport to 8.0.2 is complete.
 function runTestCase {
-	# Use "totoro-ce" for CE edition and "totoro" for EE edition
-	testCERestrictions "totoro-ce" "totoro-ce" 1
-	testCERestrictions "totoro-ce" "totoro" 0
-	testCERestrictions "totoro" "totoro-ce" 0
+	# Use "totoro-community" for CE edition and "totoro" for EE edition
+	testCERestrictions "totoro-community" "totoro-community" 1
+	testCERestrictions "totoro-community" "totoro" 0
+	testCERestrictions "totoro" "totoro-community" 0
 	testCERestrictions "totoro" "totoro" 0
 
-	# Use "morpheus-ce" for CE edition and "morpheus" for EE edition
-	testCERestrictions "morpheus-ce" "morpheus-ce" 1
-	testCERestrictions "morpheus-ce" "morpheus" 0
-	testCERestrictions "morpheus" "morpheus-ce" 0
-	testCERestrictions "morpheus" "morpheus" 0
+	# Use "morpheus-community" for CE edition and "morpheus" for EE edition
+	#testCERestrictions "morpheus-community" "morpheus-community" 1
+	#testCERestrictions "morpheus-community" "morpheus" 0
+	#testCERestrictions "morpheus" "morpheus-community" 0
+	#testCERestrictions "morpheus" "morpheus" 0
 
-	return #TODO:remove
 	# Test mixed mode while upgrading from < 8.0.2, < 8.1.0 to >= 8.0.2, >= 8.1.0
-	testCERestrictionsMixedMode "neo-ce" "totoro-ce" "neo-ce"
-	testCERestrictionsMixedMode "trinity-ce" "totoro-ce" "trinity-ce"
-	testCERestrictionsMixedMode "neo-ce" "morpheus-ce" "neo-ce"
-	testCERestrictionsMixedMode "trinity-ce" "morpheus-ce" "trinity-ce"
+	testCERestrictionsMixedMode "7.2.4-community" "totoro-community" "7.2.4-community"
+	testCERestrictionsMixedMode "7.6.2-community" "totoro-community" "7.6.2-community"
+	testCERestrictionsMixedMode "8.0.0-community" "totoro-community" "8.0.0-community"
+	#testCERestrictionsMixedMode "7.2.4-community" "morpheus-community" "7.2.4-community"
+	#testCERestrictionsMixedMode "7.6.2-community" "morpheus-community" "7.6.2-community"
+	#testCERestrictionsMixedMode "8.0.0-community" "morpheus-community" "8.0.0-community"
 
 	echo "============================================================================"
 	echo "ALL TESTS PASSED SUCCESSFULLY"

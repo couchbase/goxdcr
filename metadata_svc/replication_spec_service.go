@@ -542,11 +542,9 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 						errMsg := fmt.Sprintf("Failed to verify the external address setup. err=%v", err)
 						service.logger.Error(errMsg)
 						validateTargetBucketErrMap[base.ExternalAddressSetup] = errors.New(errMsg)
-						return
 					} else if hasSharedExternalHostname {
 						service.logger.Errorf("%v, useExternal=%v", base.ErrUnsupportedAlternateAddressing, useExternal)
 						validateTargetBucketErrMap[base.ExternalAddressSetup] = base.ErrUnsupportedAlternateAddressing
-						return
 					}
 
 					clusterInfo, err := fetchRemoteClusterInfo(service.logger, service.utils, targetClusterRef)
@@ -554,7 +552,6 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 						const msg = "error fetching /pools information from target to check if it's running EE"
 						service.logger.Errorf("%s: %v", msg, err)
 						validateTargetBucketErrMap[base.PoolsPath] = fmt.Errorf("%s: %w", msg, err)
-						return
 					}
 
 					targetIsEE = parseIsEnterpriseFromClusterInfo(clusterInfo)
@@ -623,7 +620,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	}
 
 	if !sourceIsEE && !targetIsEE {
-		errMap["isEnterprise"] = base.ErrCERestrictionsBreached
+		errMap[base.IsEnterprise] = base.ErrCERestrictionsBreached
 		return "", "", nil, errMap, nil, nil, nil
 	}
 

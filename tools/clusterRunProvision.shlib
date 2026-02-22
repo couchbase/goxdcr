@@ -717,8 +717,8 @@ function addOneNodeIn {
 		if [[ ! -z "${VAGRANT_VM_IP_MAP[$dependentClusterName]:-}" ]]; then
 			dependentNodeHostname="${VAGRANT_VM_IP_MAP[$dependentClusterName]}"
 			dependentNodePortToUse="18091"
-			# special case for 6.0.x
-			if [[ ! -z "${VAGRANT_VERSION_MAP[$nodeName]:-}" ]] && [[ "${VAGRANT_VERSION_MAP[$nodeName]}" =~ 6\.0\. ]]; then
+			# special case for 6.0.x and community editions
+			if [[ ! -z "${VAGRANT_VERSION_MAP[$nodeName]:-}" ]] && ([[ "${VAGRANT_VERSION_MAP[$nodeName]}" =~ 6\.0\. ]] || [[ "${VAGRANT_VERSION_MAP[$nodeName]}" =~ -community ]]); then
 				httpStr="http://"
 				dependentNodePortToUse="8091"
 			fi

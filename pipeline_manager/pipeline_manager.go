@@ -2454,6 +2454,7 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = false
 	r.currentErrors.LoadErrMap(errs)
+	var errMsgForAutoPause string
 	if r.humanRecoverableTransitionalErrors(errs) {
 		r.humanRecoveryThresholdMtx.Lock()
 		if r.humanRecoveryThresholdTimer == nil {
@@ -2468,9 +2469,14 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 		}
 		r.humanRecoveryThresholdMtx.Unlock()
 	} else if r.casPoisonErrors(errs) {
-		errMsg := base.FlattenErrorMap(errs)
-		r.pipelineMgr.GetLogSvc().Write(errMsg)
-		r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil)
+		errMsgForAutoPause = base.FlattenErrorMap(errs)
+	} else if r.communityEditionErrors(errs) {
+		errMsgForAutoPause = fmt.Sprintf("Replication %s cannot continue. %s.", r.pipeline_name, base.ErrCERestrictionsBreached.Error())
+	}
+
+	if len(errMsgForAutoPause) > 0 {
+		r.pipelineMgr.GetLogSvc().Write(errMsgForAutoPause)
+		r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsgForAutoPause, base.NewEventsMap(), nil)
 		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
 	}
 }
@@ -2585,6 +2591,10 @@ func (r *PipelineUpdater) humanRecoverableTransitionalErrors(errMap base.ErrorMa
 func (r *PipelineUpdater) casPoisonErrors(errMap base.ErrorMap) bool {
 	casPoisonErr := fmt.Errorf(base.PreCheckCASDriftDetected)
 	return base.CheckErrorMapForError(errMap, casPoisonErr, false)
+}
+
+func (r *PipelineUpdater) communityEditionErrors(errMap base.ErrorMap) bool {
+	return base.CheckErrorMapForError(errMap, base.ErrCERestrictionsBreached, false)
 }
 
 func (r *PipelineUpdater) shouldRetryOnRemoteAuthErrAndRemoteClusterName() (bool, string) {

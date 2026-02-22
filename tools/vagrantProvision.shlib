@@ -57,14 +57,16 @@ function vscp {
 
 declare -A CBServerLink=(
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-linux_arm64.deb"
-	["neo-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-community_neo-linux_arm64.deb"
+	["7.2.4-community"]="https://packages.couchbase.com/releases/7.2.4/couchbase-server-community_7.2.4-linux_arm64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-linux_arm64.deb"
-	["trinity-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-community_trinity-linux_arm64.deb"
+	["7.6.2-community"]="https://packages.couchbase.com/releases/7.6.2/couchbase-server-community_7.6.2-linux_arm64.deb"
 	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-linux_arm64.deb"
-	["morpheus-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-community_morpheus-linux_arm64.deb"
+	["morpheus-community"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-community_morpheus-linux_arm64.deb"
+	["8.0.0-community"]="https://packages.couchbase.com/releases/8.0.0/couchbase-server-community_8.0.0-linux_arm64.deb"
 	["totoro"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/totoro/latest/couchbase-server-enterprise_totoro-linux_arm64.deb"
-	["totoro-ce"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/totoro/latest/couchbase-server-community_totoro-linux_arm64.deb"
-	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
+	["totoro-community"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/totoro/latest/couchbase-server-community_totoro-linux_arm64.deb"
+	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..."           # to be filled out
+	["toy-community"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
 declare -A SGWLink=(
