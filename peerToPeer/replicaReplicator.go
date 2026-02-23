@@ -65,6 +65,9 @@ type ReplicaReplicatorImpl struct {
 
 const moduleName = "ReplicaReplicator"
 
+// Replica replicator initialization could potentially slow due to waiting for refresh
+var ReplicaReplicatorTimeout = base.ShortHttpTimeout / 4
+
 func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx *log.LoggerContext, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, replicationSpecSvc service_def.ReplicationSpecSvc, sendReqsFunc func(reqs PeersVBPeriodicReplicateReqs) error, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *ReplicaReplicatorImpl {
 	return &ReplicaReplicatorImpl{
 		bucketTopologySvc:   bucketTopologySvc,
@@ -150,8 +153,24 @@ func (r *ReplicaReplicatorImpl) checkAndUpdateTicker(potentialMinInterval time.D
 			isNew:    oldSpecDuration == 0,
 			done:     make(chan bool),
 		}
-		r.tickerReloadCh <- pair
-		<-pair.done
+
+		select {
+		case r.tickerReloadCh <- pair:
+			select {
+			case <-pair.done:
+			// Done
+			case <-time.After(ReplicaReplicatorTimeout):
+				r.logger.Warnf("Ticker reload for interval %v timed out after %v", potentialMinInterval, ReplicaReplicatorTimeout)
+			}
+		case <-time.After(ReplicaReplicatorTimeout):
+			r.logger.Errorf("Ticker sending for interval %v timed out after %v", potentialMinInterval, ReplicaReplicatorTimeout)
+			// Do the same thing but now in background so it doesn't get lost
+			go func() {
+				// p.initReplicator() should be guaranteed to execute, so tickerReloadCh should be guaranteed to be listened on, so this should not block forever
+				r.tickerReloadCh <- pair
+				<-pair.done
+			}()
+		}
 	}
 }
 
