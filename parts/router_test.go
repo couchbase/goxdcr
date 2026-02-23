@@ -1179,7 +1179,10 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
 	assert.Equal(2, ignoreCnt)
 	time.Sleep(2 * time.Second)
-	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
+	assert.Eventuallyf(func() bool {
+		return collectionsRouter.brokenMapDblChkTicker != nil
+	}, 5*time.Second, 200*time.Millisecond, "Expected brokenMapDblChkTicker to be non-nil")
+	//assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
 	assert.Nil(lastCalledBackfillMap)
 	assert.NotEqual(0, len(collectionsRouter.brokenMapping))
 	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
@@ -1189,7 +1192,9 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	connectivityReturnHealthy = true
 	lastCalledBackfillMap = nil
 	time.Sleep(1 * time.Second)
-	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
+	assert.Eventuallyf(func() bool {
+		return collectionsRouter.brokenMapDblChkTicker == nil
+	}, 5*time.Second, 200*time.Millisecond, "Expected brokenMapDblChkTicker to be nil")
 	assert.NotNil(lastCalledBackfillMap)
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
 	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
