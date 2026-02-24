@@ -13,13 +13,19 @@ func (n *Nozzle) worker(ctx context.Context) {
 		case <-n.stopCh:
 			return
 		case req := <-n.dataCh:
-			n.processReqWithRetry(ctx, req)
-			n.RecycleDataObj(req)
+			dontRecycle := n.processReqWithRetry(ctx, req)
+			if !dontRecycle {
+				n.RecycleDataObj(req)
+			}
 		}
 	}
 }
 
-func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCRequest) {
+// processReqWithRetry processes the request with retry logic for retryable errors.
+// These retryable errors are not network related but instead are errors due to temporary state of the system
+// (e.g resource not available)
+// The function returns a boolean indicating whether the request should not be recycled
+func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCRequest) (dontRecycle bool) {
 	var err error
 	// CNG TODO: Disabled panic recovery for now to surface issues during testing
 	// Raised MB-69560 for tracking
@@ -30,6 +36,8 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 	//	}
 	//}()
 
+	attemptNo := 0
+
 	for {
 		select {
 		case <-n.stopCh:
@@ -37,11 +45,24 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 		default:
 			trace := Trace{}
 			childCtx := startTrace(ctx, &trace)
+			attemptNo++
 			err = n.processReq(childCtx, req)
+
+			// Don't log first attempt errors to avoid log spamming, but log subsequent attempt errors
+			if err != nil && attemptNo > 1 {
+				n.Logger().Errorf("error processing req, key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
+					base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
+					err,
+					req.Req.Opcode, req.Req.Cas)
+			}
 			trace.commitTime = time.Since(req.Start_time)
 
 			n.handleNozzleStats(&trace, err)
-			n.raiseUpstreamErr(req, err)
+			// Don't mark for recycling of req as it gets already recycled
+			// in upstream error callback.
+			if !n.raiseUpstreamErr(req, err) {
+				dontRecycle = true
+			}
 			n.handleVBError(req, err)
 			n.raiseEvents(req, &trace, err)
 			if err == nil {
@@ -49,6 +70,10 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 			}
 
 			if !isMutationRetryable(err) {
+				n.Logger().Errorf("req failed due non-retryable error key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
+					base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
+					err,
+					req.Req.Opcode, req.Req.Cas)
 				return
 			}
 
@@ -58,7 +83,7 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 }
 
 // raiseUpstreamErr raises errors back to upstream if applicable
-func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) {
+func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) (raised bool) {
 	if err == nil {
 		return
 	}
@@ -74,6 +99,8 @@ func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) {
 		return
 	}
 
+	raised = true
 	n.Logger().Errorf("setting error to upstream, err=%v", err)
 	reportFn(req)
+	return
 }

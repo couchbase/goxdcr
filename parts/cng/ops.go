@@ -136,7 +136,6 @@ func (n *Nozzle) PushDocument(ctx context.Context, client base.CngClient, req *b
 	expiryTime := timestamppb.Timestamp{Seconds: int64(expiry), Nanos: 0}
 
 	pushDocReq := &internal_xdcr_v1.PushDocumentRequest{
-		// CNG TODO: use vbuuid
 		BucketName:     n.cfg.Replication.TargetBucketName,
 		ScopeName:      req.TgtColNamespace.ScopeName,
 		CollectionName: req.TgtColNamespace.CollectionName,

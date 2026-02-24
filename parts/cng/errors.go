@@ -15,6 +15,14 @@ var (
 	ErrProcessPanic = errors.New("panic occurred in processing of mutation")
 )
 
+// CNG Error codes which are not retryable
+var nonRetryableErrorCodes = map[CNGErrorCode]bool{
+	ERR_COLLECTION_NOT_FOUND: true,
+	ERR_SCOPE_NOT_FOUND:      true,
+}
+
+// gRPC errors
+
 // CNGErrorCode defines error codes for CNG nozzle related errors
 // This is suppossed to be all encompassing error codes for CNG nozzle
 type CNGErrorCode int
@@ -227,6 +235,11 @@ func isMutationRetryable(err error) bool {
 	cngErr, ok := err.(*CNGError)
 	if !ok {
 		return true // Not a CNGError, treat as retryable
+	}
+
+	_, ok = nonRetryableErrorCodes[cngErr.Code]
+	if ok {
+		return false
 	}
 
 	if cngErr.grpcStatus == nil {
