@@ -12,6 +12,8 @@ replace github.com/couchbase/regulator => ../regulator
 
 replace github.com/couchbase/go_json => ../go_json
 
+replace github.com/couchbase/gocbcrypto => ../gocbcrypto
+
 replace github.com/couchbase/query => ../query
 
 replace github.com/couchbase/query-ee => ../query-ee
