@@ -1054,7 +1054,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 					if helperErr != nil {
 						dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, m, dcp, nil, helperErr))
 					}
-
 					if ignoreResponse {
 						dcp.Logger().Infof("%v ignored rollback message for vb %v with version %v and rollbackseqno %v since it has already been acknowledged\n", dcp.Id(), vbno, m.Opaque, rollbackseq)
 					} else {
@@ -1063,6 +1062,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 							return err2
 						}
 					}
+				} else if m.Status == mc.TMPFAIL {
+					dcp.Logger().Warnf("%v received temporary failure for vb %v. This could be due to the producer being too busy. checkInactiveUprStreams should retry this vb after a delay of %v\n", dcp.Id(), m.VBucket, dcp_inactive_stream_check_interval)
 				} else if m.Status == mc.SUCCESS {
 					vbno := m.VBucket
 					_, ok := dcp.vb_stream_status[vbno]
