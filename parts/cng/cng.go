@@ -82,35 +82,51 @@ func (n *Nozzle) RecycleDataObj(obj any) {
 	n.upstreamObjRecycler(obj)
 }
 
+// enqueueReq tries to enqueue the request into dataCh.
+// It first tries to enqueue without blocking, if it fails, it will try again with blocking.
+func (n *Nozzle) enqueueReq(req *base.WrappedMCRequest) (err error) {
+	n.stats.IncDocsReceived(1)
+
+	// try to enqueue without blocking first
+	select {
+	case <-n.stopCh:
+		err = parts.PartStoppedError
+		return
+	case n.dataCh <- req:
+		return
+	default:
+		n.stats.IncEnqueueBlocked(1)
+	}
+
+	// try again, blocking this time
+	select {
+	case <-n.stopCh:
+		err = parts.PartStoppedError
+		return
+	case n.dataCh <- req:
+		return
+	}
+}
+
 func (n *Nozzle) Receive(data any) error {
 	req, ok := data.(*base.WrappedMCRequest)
 	if !ok {
 		return fmt.Errorf("Invalid data type %T, expected *base.WrappedMCRequest", data)
 	}
 
-	enqueued := true
-	// try to enqueue without blocking first
-	select {
-	case n.dataCh <- req:
-		return nil
-	case <-n.stopCh:
-		return fmt.Errorf("Nozzle %v is stopping", n.Id())
-	default:
-		enqueued = false
-		n.stats.IncEnqueueBlocked(1)
+	if err := n.enqueueReq(req); err != nil {
+		return err
 	}
 
-	if enqueued {
-		return nil
+	req.SiblingReqsMtx.RLock()
+	defer req.SiblingReqsMtx.RUnlock()
+	for _, siblingReq := range req.SiblingReqs {
+		if err := n.enqueueReq(siblingReq); err != nil {
+			return err
+		}
 	}
 
-	// try again, blocking this time
-	select {
-	case n.dataCh <- req:
-		return nil
-	case <-n.stopCh:
-		return fmt.Errorf("Nozzle %v is stopping", n.Id())
-	}
+	return nil
 }
 
 func (n *Nozzle) ResponsibleVBs() (vbs []uint16) {

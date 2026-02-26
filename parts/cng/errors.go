@@ -19,6 +19,7 @@ var (
 var nonRetryableErrorCodes = map[CNGErrorCode]bool{
 	ERR_COLLECTION_NOT_FOUND: true,
 	ERR_SCOPE_NOT_FOUND:      true,
+	ERR_NOZZLE_SHUTDOWN:      true,
 }
 
 // gRPC errors
@@ -38,6 +39,13 @@ type CNGError struct {
 
 	// msg is additional message (can be empty)
 	msg string
+}
+
+func NewCNGError(code CNGErrorCode, msg string) *CNGError {
+	return &CNGError{
+		Code: code,
+		msg:  msg,
+	}
 }
 
 func (c *CNGError) Error() string {
@@ -104,6 +112,8 @@ const (
 	ERR_GRPC_UNAVAILABLE         CNGErrorCode = 23
 	ERR_GRPC_DATA_LOSS           CNGErrorCode = 24
 	ERR_GRPC_UNAUTHENTICATED     CNGErrorCode = 25
+
+	ERR_NOZZLE_SHUTDOWN CNGErrorCode = 100
 )
 
 // grpcErrorInfo holds metadata about a gRPC error code

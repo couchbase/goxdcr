@@ -282,7 +282,8 @@ func (p *ConnPool) WithConn(fn func(client base.CngClient) error) (st PoolCallSt
 	for {
 		select {
 		case <-p.shutdown:
-			err = fmt.Errorf("connection pool is shutting down or already closed")
+			cngErr := NewCNGError(ERR_NOZZLE_SHUTDOWN, "connection pool is shutting down or already closed")
+			err = cngErr
 			return
 		default:
 			// First attempt
@@ -307,7 +308,8 @@ func (p *ConnPool) WithConn(fn func(client base.CngClient) error) (st PoolCallSt
 				if !timer.Stop() {
 					<-timer.C
 				}
-				err = fmt.Errorf("connection pool is shutting down or already closed")
+				cngErr := NewCNGError(ERR_NOZZLE_SHUTDOWN, "connection pool is shutting down or already closed")
+				err = cngErr
 				return
 			case <-timer.C:
 			}

@@ -7,6 +7,9 @@ import (
 
 // Stats holds various statistics for a single the CNG nozzle instance
 type Stats struct {
+	// Docs received from upstream
+	docsReceived uint64
+
 	// Number of documents sent (irrespective of success/failure)
 	docsSent uint64
 
@@ -31,6 +34,10 @@ type Stats struct {
 
 func NewStats() *Stats {
 	return &Stats{}
+}
+
+func (s *Stats) IncDocsReceived(count uint64) {
+	atomic.AddUint64(&s.docsReceived, count)
 }
 
 func (s *Stats) IncDocsSent(count uint64) {
@@ -62,6 +69,7 @@ func (s *Stats) IncErrReporterMissingCount(count uint64) {
 }
 
 func (s *Stats) String() string {
+	docsReceived := atomic.LoadUint64(&s.docsReceived)
 	docsSent := atomic.LoadUint64(&s.docsSent)
 	bytesSent := atomic.LoadUint64(&s.bytesSent)
 	docsFailed := atomic.LoadUint64(&s.docsFailed)
@@ -70,8 +78,8 @@ func (s *Stats) String() string {
 	enqueuedBlocked := atomic.LoadUint64(&s.enqueueBlocked)
 	errUpstreamReporterMissingCount := atomic.LoadUint64(&s.errUpstreamReporterMissingCount)
 
-	return fmt.Sprintf("DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v",
-		docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount)
+	return fmt.Sprintf("DocsReceived: %v, DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v",
+		docsReceived, docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount)
 }
 
 // handleNozzleStats updates the nozzle stats based on the transfer result
