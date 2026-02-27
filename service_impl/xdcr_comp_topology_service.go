@@ -66,6 +66,10 @@ type XDCRTopologySvc struct {
 
 	clusterCompatRLO *RateLimitOperatorCache
 	terseInfoRLO     *RateLimitOperatorCache
+
+	// disableCERestrictions indicates whether goxdcr need to honour ns_server's
+	// diag/eval backdoor and then allow CE -> CE replications.
+	disableCERestrictions bool
 }
 
 type RateLimitOperatorCache struct {
@@ -133,14 +137,15 @@ func (r *RateLimitOperatorCache) GetResult() (interface{}, error) {
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	isEnterprise bool, ipv4, ipv6 string, securitySvc service_def.SecuritySvc,
-	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*XDCRTopologySvc, error) {
+	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, disableCERestrictions bool) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
-		adminport:    adminport,
-		xdcrRestPort: xdcrRestPort,
-		isEnterprise: isEnterprise,
-		securitySvc:  securitySvc,
-		logger:       log.NewLogger("TopoSvc", logger_ctx),
-		utils:        utilsIn,
+		adminport:             adminport,
+		xdcrRestPort:          xdcrRestPort,
+		isEnterprise:          isEnterprise,
+		securitySvc:           securitySvc,
+		logger:                log.NewLogger("TopoSvc", logger_ctx),
+		utils:                 utilsIn,
+		disableCERestrictions: disableCERestrictions,
 	}
 
 	top_svc.clusterCompatRLO = NewRateLimitOperatorCache("topSvc.MyClusterCompat()", base.DiagInternalThreshold,
@@ -801,4 +806,10 @@ func (top_svc *XDCRTopologySvc) MyBuildVersion() (string, error) {
 	}
 
 	return fmt.Sprintf("%s-%s", implVersionParts[0], implVersionParts[1]), nil
+}
+
+// DisableCERestrictions returns whether goxdcr need to honour ns_server's diag/eval backdoor
+// and then allow CE -> CE replications.
+func (top_svc *XDCRTopologySvc) DisableCERestrictions() (bool, error) {
+	return top_svc.disableCERestrictions, nil
 }

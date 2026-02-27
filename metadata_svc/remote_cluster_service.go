@@ -3278,6 +3278,11 @@ func parseIsEnterpriseFromClusterInfo(clusterInfo map[string]interface{}) bool {
 // when updateRef is true, update internal fields in ref such as ActiveHostName
 // this is the case when ref is being created or updated by user
 func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteClusterReference, updateRef bool) error {
+	disableCERestrictions, err := service.xdcr_topology_svc.DisableCERestrictions()
+	if err != nil {
+		return err
+	}
+
 	sourceIsEE, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
 	if err != nil {
 		return err
@@ -3348,7 +3353,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 	}
 
-	if !sourceIsEE && !targetIsEE {
+	if !disableCERestrictions && !sourceIsEE && !targetIsEE {
 		return wrapAsInvalidRemoteClusterError(base.ErrCERestrictionsBreached.Error())
 	}
 

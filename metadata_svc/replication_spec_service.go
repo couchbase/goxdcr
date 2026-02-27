@@ -619,7 +619,13 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errMap, nil, nil, nil
 	}
 
-	if !sourceIsEE && !targetIsEE {
+	disableCERestrictions, disableCEErr := service.xdcr_comp_topology_svc.DisableCERestrictions()
+	if disableCEErr != nil {
+		errMap["DisableCERestrictions"] = disableCEErr
+		return "", "", nil, errMap, nil, nil, nil
+	}
+
+	if !disableCERestrictions && !sourceIsEE && !targetIsEE {
 		errMap[base.IsEnterprise] = base.ErrCERestrictionsBreached
 		return "", "", nil, errMap, nil, nil, nil
 	}

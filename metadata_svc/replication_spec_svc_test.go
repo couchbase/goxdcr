@@ -206,6 +206,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(isEnterprise, nil)
 	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
 	xdcrTopologyMock.On("MyClusterCompatibility").Return(clusterCompatVersion, nil)
+	xdcrTopologyMock.On("DisableCERestrictions").Return(false, nil)
 
 	// LOCAL mock - BucketValidationInfo(logger, req)
 	utilitiesMock.On("BucketValidationInfo", mock.Anything, mock.Anything).Return(bucketInfo,
@@ -919,13 +920,13 @@ func TestCERestrictions(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestCERestrictions =================")
 
-	test := func(sourceIsEE, targetIsEE, shouldFail bool) {
+	test := func(sourceIsEE, targetIsEE, disableCERestrictions, shouldFail bool) {
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 			utilitiesMock, replSpecSvc, sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 		tgtBucketInfofileName := fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 		setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, sourceIsEE, true, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability, tgtBucketInfofileName)
 
-		// Create a custom GetClusterInfoWStatusCode mock instead of what setupMocks provided.
+		// Create a custom GetClusterInfoWStatusCode & DisableCERestrictions mock instead of what setupMocks provided.
 		calls := utilitiesMock.ExpectedCalls
 		newCalls := make([]*mock.Call, 0, len(calls))
 		for _, call := range calls {
@@ -942,6 +943,18 @@ func TestCERestrictions(t *testing.T) {
 				base.IsEnterprise: targetIsEE,
 			}, nil, http.StatusOK)
 
+		calls = xdcrTopologyMock.ExpectedCalls
+		newCalls = make([]*mock.Call, 0, len(calls))
+		for _, call := range calls {
+			if call.Method == "DisableCERestrictions" {
+				continue
+			}
+
+			newCalls = append(newCalls, call)
+		}
+		xdcrTopologyMock.ExpectedCalls = newCalls
+		xdcrTopologyMock.On("DisableCERestrictions").Return(disableCERestrictions, nil)
+
 		_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 		if shouldFail {
 			assert.Greater(len(errMap), 0)
@@ -952,13 +965,22 @@ func TestCERestrictions(t *testing.T) {
 	}
 
 	// 1. Source is CE, target is CE - should fail
-	test(false, false, true)
+	test(false, false, false, true)
+	// 1a. Source is CE, target is CE - should fail,
+	// but CE -> CE restrictions are disabled
+	test(false, false, true, false)
 	// 2. Source is CE, target is EE - should succeed
-	test(false, true, false)
+	test(false, true, false, false)
+	// 2a. Source is CE, target is EE - should succeed
+	test(false, true, true, false)
 	// 3. Source is EE, target is CE - should succeed
-	test(true, false, false)
+	test(true, false, false, false)
+	// 3a. Source is EE, target is CE - should succeed
+	test(true, false, true, false)
 	// 4. Source is EE, target is EE - should succeed
-	test(true, true, false)
+	test(true, true, false, false)
+	// 4a. Source is EE, target is EE - should succeed
+	test(true, true, true, false)
 
 	fmt.Println("============== Test case end: TestCERestrictions =================")
 }

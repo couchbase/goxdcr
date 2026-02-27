@@ -114,6 +114,7 @@ func setupXDCRTopologyMock(topologyMock *service_def.XDCRCompTopologySvc) {
 	topologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 	topologyMock.On("IsMyClusterEncryptionLevelStrict").Return(false)
 	topologyMock.On("IsOrchestratorNode").Return(true, nil)
+	topologyMock.On("DisableCERestrictions").Return(false, nil)
 }
 
 func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
@@ -3156,7 +3157,7 @@ func TestCEEnforcement(t *testing.T) {
 	fmt.Println("============== Test case start: TestCEEnforcement =================")
 	defer fmt.Println("============== Test case end: TestCEEnforcement =================")
 
-	test := func(sourceIsEE, targetIsEE, shouldFail bool) {
+	test := func(sourceIsEE, targetIsEE, disableCERestrictions, shouldFail bool) {
 		_, _, xdcrTopologyMock, utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 		utilitiesMock.On("GetClusterInfoWStatusCode",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -3167,6 +3168,7 @@ func TestCEEnforcement(t *testing.T) {
 		utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
 		xdcrTopologyMock.On("IsMyClusterEnterprise").Return(sourceIsEE, nil)
 		xdcrTopologyMock.On("IsMyClusterEncryptionLevelStrict").Return(false)
+		xdcrTopologyMock.On("DisableCERestrictions").Return(disableCERestrictions, nil)
 
 		err := remoteClusterSvc.validateRemoteCluster(&metadata.RemoteClusterReference{}, false)
 		if shouldFail {
@@ -3178,11 +3180,20 @@ func TestCEEnforcement(t *testing.T) {
 	}
 
 	// 1. Source is CE, target is CE - should fail
-	test(false, false, true)
+	test(false, false, false, true)
+	// 1a. Source is CE, target is CE - should fail,
+	// but CE -> CE restrictions are disabled
+	test(false, false, true, false)
 	// 2. Source is CE, target is EE - should succeed
-	test(false, true, false)
+	test(false, true, false, false)
+	// 2a. Source is CE, target is EE - should succeed
+	test(false, true, true, false)
 	// 3. Source is EE, target is CE - should succeed
-	test(true, false, false)
+	test(true, false, false, false)
+	// 3a. Source is EE, target is CE - should succeed
+	test(true, false, true, false)
 	// 4. Source is EE, target is EE - should succeed
-	test(true, true, false)
+	test(true, true, false, false)
+	// 4a. Source is EE, target is EE - should succeed
+	test(true, true, true, false)
 }

@@ -38,14 +38,15 @@ var options struct {
 	sourceKVAdminPort uint64 //source kv admin port
 	xdcrRestPort      uint64 // port number of XDCR rest server
 
-	sslProxyUpstreamPort uint64 // gometa request port
-	isEnterprise         bool   // whether couchbase is of enterprise edition
-	ipv4                 string // required/optional/off
-	ipv6                 string // required/optional/off
-	isConvert            bool   // whether xdcr is running in conversion/upgrade mode
-	caFileLocation       string
-	clientCertFile       string
-	clientKeyFile        string
+	sslProxyUpstreamPort  uint64 // gometa request port
+	isEnterprise          bool   // whether couchbase is of enterprise edition
+	disableCERestrictions bool   // whether to disable CE restrictions
+	ipv4                  string // required/optional/off
+	ipv6                  string // required/optional/off
+	isConvert             bool   // whether xdcr is running in conversion/upgrade mode
+	caFileLocation        string
+	clientCertFile        string
+	clientKeyFile         string
 
 	// logging related parameters
 	logFileDir          string
@@ -86,6 +87,9 @@ func argParse() {
 		"Internal communication certificate file")
 	flag.StringVar(&options.clientKeyFile, "clientKeyFile", "",
 		"Internal communication key file")
+
+	flag.BoolVar(&options.disableCERestrictions, "disable-CE-restrictions", false,
+		"disable restrictions while creating CE -> CE replications")
 	flag.Parse()
 }
 
@@ -145,7 +149,7 @@ func main() {
 	securitySvc = securitySvc.SetClientKeyFile(options.clientKeyFile).SetClientCertFile(options.clientCertFile)
 	err := securitySvc.Start()
 
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, log.GetOrCreateContext(base.TopoSvcKey), utils)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, log.GetOrCreateContext(base.TopoSvcKey), utils, options.disableCERestrictions)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)

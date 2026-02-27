@@ -60,6 +60,9 @@ type XDCRCompTopologySvc interface {
 
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
+	// DisableCERestrictions returns whether goxdcr need to honour ns_server's diag/eval backdoor
+	// and then allow CE -> CE replications.
+	DisableCERestrictions() (bool, error)
 
 	//is the cluster XDCR is serving ipv6 enabled
 	IsMyClusterIpv6() bool
