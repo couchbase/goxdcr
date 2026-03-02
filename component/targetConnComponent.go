@@ -17,6 +17,7 @@ import (
 
 var ErrClientNotFound = errors.New("client not found")
 var ErrPoolClosed = errors.New("pool is closed")
+var ErrSslConStrNotFound = errors.New("SSL connection string not found")
 
 // RemoteMemcachedComponent is an object to be composed with another object to provide the ability
 // to contact target memcached servers.
@@ -33,8 +34,10 @@ var ErrPoolClosed = errors.New("pool is closed")
 //    Using poolConfigMtx.Lock prevents all client operations while the pool is being reconfigured
 //    or shut down.
 
-//  2. KvMemClientsMtx (inner lock): Protects the KvMemClients map. Always acquire this
-//     lock AFTER poolConfigMtx if you need both locks to avoid deadlock.
+//  2. KvMemClientsMtx (inner lock): Protects the KvMemClients map.
+//     Always acquire this lock AFTER poolConfigMtx if you need both locks to avoid deadlock.
+//
+//  3. sslConStrMtx: Protects SslConStrMap
 //
 // Lock Ordering Rule: poolConfigMtx -> KvMemClientsMtx (*never reverse*)
 type RemoteMemcachedComponent struct {
@@ -45,6 +48,7 @@ type RemoteMemcachedComponent struct {
 
 	// key = kv host name, value = ssl connection str
 	SslConStrMap  map[string]string
+	sslConStrMtx  sync.RWMutex
 	TargetKvVbMap func() (base.KvVBMapType, error)
 
 	LoggerImpl *log.CommonLogger
@@ -72,6 +76,8 @@ type RemoteMemcachedComponent struct {
 	poolConfigMtx sync.RWMutex
 	// closed is used to denote if the component is closed
 	closed atomic.Bool
+	// knownServers denotes the current set of servers in the target topology.
+	knownServers map[string]bool
 }
 
 func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string, userAgent string, maxConnsPerServer int) *RemoteMemcachedComponent {
@@ -86,6 +92,7 @@ func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, util
 		TargetBucketname:  bucketName,
 		UserAgent:         userAgent,
 		MaxConnsPerServer: maxConnsPerServer,
+		knownServers:      map[string]bool{},
 	}
 }
 
@@ -207,6 +214,7 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 		for server_addr := range targetKvVbMap {
 			clientChan := make(chan mcc.ClientIface, r.MaxConnsPerServer)
 			r.KvMemClients[server_addr] = clientChan
+			r.knownServers[server_addr] = true
 
 			client, err := r.GetNewMemcachedClient(server_addr)
 			if err != nil {
@@ -248,13 +256,12 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 		return err
 	}
 
-	r.SslConStrMap = make(map[string]string)
-
 	targetKvVbMap, err := r.TargetKvVbMap()
 	if err != nil {
 		return err
 	}
 
+	newSslConStrMap := make(map[string]string)
 	for server_addr := range targetKvVbMap {
 		ssl_port, ok := ssl_port_map[server_addr]
 		if !ok {
@@ -262,8 +269,12 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 		}
 		host_name := base.GetHostName(server_addr)
 		ssl_con_str := base.GetHostAddr(host_name, uint16(ssl_port))
-		r.SslConStrMap[server_addr] = ssl_con_str
+		newSslConStrMap[server_addr] = ssl_con_str
 	}
+
+	r.sslConStrMtx.Lock()
+	r.SslConStrMap = newSslConStrMap
+	r.sslConStrMtx.Unlock()
 
 	return nil
 }
@@ -275,7 +286,14 @@ func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string) (mc
 		return nil, err
 	}
 	if ref.IsFullEncryption() {
-		ssl_con_str := r.SslConStrMap[server_addr]
+		r.sslConStrMtx.RLock()
+		ssl_con_str, ok := r.SslConStrMap[server_addr]
+		r.sslConStrMtx.RUnlock()
+		if !ok {
+			// This could happen if the server_addr is newly added and the SSL connection string map has not been refreshed yet.
+			// Callers should retry incase of this error
+			return nil, fmt.Errorf("%w for server %v", ErrSslConStrNotFound, server_addr)
+		}
 
 		// getTlsConnFunc is a function that creates a tls connection to the given server address
 		getTlsConnFunc := func(_ interface{}) (interface{}, error) {
@@ -565,51 +583,86 @@ func (r *RemoteMemcachedComponent) MonitorTopology() {
 		case <-r.FinishCh:
 			return
 		case <-ticker.C:
-			serversToDelete, err := r.collectObsoleteServers()
+			serversToDelete, serversToAdd, err := r.diffTopology()
 			if err != nil {
-				r.LoggerImpl.Warnf("failed to identify obsolete servers: %v", err)
+				r.LoggerImpl.Warnf("failed to diff topology: %v", err)
 				continue
 			}
-			// if there are servers to delete, delete them
-			if len(serversToDelete) > 0 {
-				// Acquire poolConfigMtx.Lock to safely remove servers while blocking
-				// all client operations, ensuring no one is using channels we're closing
-				r.poolConfigMtx.Lock()
-				r.removeServers(serversToDelete)
-				r.poolConfigMtx.Unlock()
+
+			if len(serversToDelete) == 0 && len(serversToAdd) == 0 {
+				continue
 			}
+
+			// For new servers under full encryption, refresh the SSL connection string
+			if len(serversToAdd) > 0 && r.RefGetter().IsFullEncryption() {
+				if err := r.Utils.ExponentialBackoffExecutor("GetNewMemcachedClient: RefreshSslConStrMap", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+					base.RemoteMcRetryFactor, r.InitSSLConStrMap); err != nil {
+					// This is a critical failure since without the SSL connection string map, we won't be able to create connections to the new servers at all.
+					// Log the error and continue - Do not update the list of known servers, so that we can retry refreshing the SSL connection string map
+					// in the next iteration of MonitorTopology.
+					r.LoggerImpl.Errorf("failed to refresh SSL connection string map for new servers %v after %v retries: %v", serversToAdd, base.MaxRemoteMcRetry, err)
+					continue
+				}
+			}
+
+			// Acquire poolConfigMtx.Lock to safely modify the pool while blocking
+			// all client operations, ensuring no one is using channels we're closing.
+			r.poolConfigMtx.Lock()
+			if len(serversToDelete) > 0 {
+				r.removeServers(serversToDelete)
+			}
+			if len(serversToAdd) > 0 {
+				r.addServers(serversToAdd)
+			}
+			r.poolConfigMtx.Unlock()
 		}
 	}
 }
 
-// collectObsoleteServers returns a list of servers that are no longer in the target kvVbMap.
-func (r *RemoteMemcachedComponent) collectObsoleteServers() ([]string, error) {
+// diffTopology compares the cached known-server set against the target kvVbMap
+// and returns servers that need to be removed and servers that need to be added.
+func (r *RemoteMemcachedComponent) diffTopology() (serversToDelete, serversToAdd []string, err error) {
 	// fetch the target kvVbMap
 	targetKvVbMap, err := r.TargetKvVbMap()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch target kvVbMap: %w", err)
+		return nil, nil, fmt.Errorf("failed to fetch target kvVbMap: %w", err)
 	}
-
-	// collect the servers that are no longer in the target kvVbMap
-	serversToDelete := make([]string, 0)
 
 	r.KvMemClientsMtx.RLock()
 	defer r.KvMemClientsMtx.RUnlock()
 
-	for serverAddr := range r.KvMemClients {
+	// Servers present in the known set but absent from the topology should be removed.
+	for serverAddr := range r.knownServers {
 		if _, exists := targetKvVbMap[serverAddr]; !exists {
 			serversToDelete = append(serversToDelete, serverAddr)
 		}
 	}
-	return serversToDelete, nil
+
+	// Servers present in the topology but absent from the known set should be added.
+	for serverAddr := range targetKvVbMap {
+		if !r.knownServers[serverAddr] {
+			serversToAdd = append(serversToAdd, serverAddr)
+		}
+	}
+
+	return serversToDelete, serversToAdd, nil
 }
 
-// removeServers deletes a list of servers from the pool
+// removeServers deletes a list of servers from the pool.
+// NOTE: Caller MUST hold a write lock on poolConfigMtx before calling.
 func (r *RemoteMemcachedComponent) removeServers(servers []string) {
 	r.KvMemClientsMtx.Lock()
 	defer r.KvMemClientsMtx.Unlock()
 
 	for _, serverAddr := range servers {
 		r.DeleteMemClientsNoLock(serverAddr)
+		delete(r.knownServers, serverAddr)
+	}
+}
+
+// addServers adds a list of servers to the known set.
+func (r *RemoteMemcachedComponent) addServers(servers []string) {
+	for _, serverAddr := range servers {
+		r.knownServers[serverAddr] = true
 	}
 }

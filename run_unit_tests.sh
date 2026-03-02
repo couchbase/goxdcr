@@ -9,7 +9,7 @@
 # licenses/APL2.txt.
 
 export CGO_CFLAGS="-I$PWD/../../../../../sigar/include"
-export CGO_LDFLAGS="-L$PWD/../../../../../install/lib -lsigar"
+export CGO_LDFLAGS="-L$PWD/../../../../../install/lib -lsigar -Wl,-rpath,$PWD/../../../../../install/lib"
 export DYLD_LIBRARY_PATH="$PWD/../../../../../install/lib:$DYLD_LIBRARY_PATH"
 
 function man() {

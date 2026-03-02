@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -717,6 +718,8 @@ func TestRemoteMemcachedComponent_DeleteMemClientsNoLock(t *testing.T) {
 
 	component.KvMemClients[testServerAddr] = clientChan
 	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
 
 	// Delete clients for one server
 	component.DeleteMemClientsNoLock(testServerAddr)
@@ -725,7 +728,9 @@ func TestRemoteMemcachedComponent_DeleteMemClientsNoLock(t *testing.T) {
 	mockClient1.AssertCalled(t, "Close")
 	mockClient2.AssertCalled(t, "Close")
 
-	// Server should be removed from map
+	// Server should be removed from KvMemClients map
+	// Note: DeleteMemClientsNoLock does NOT remove from knownServers;
+	// that's done by removeServers which wraps this method.
 	_, exists := component.KvMemClients[testServerAddr]
 	assert.False(exists)
 
@@ -753,12 +758,14 @@ func TestRemoteMemcachedComponent_MonitorTopology_RemovesStaleServers(t *testing
 	assert := assert.New(t)
 
 	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
-	defer close(finCh)
 
-	// Start with 3 servers
-	kvVbMapThree := createTestKvVbMapThreeServers()
+	// Use a mutex-protected getter to avoid racing with MonitorTopology reads
+	var topoMtx sync.Mutex
+	currentKvVbMap := createTestKvVbMapThreeServers()
 	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-		return kvVbMapThree, nil
+		topoMtx.Lock()
+		defer topoMtx.Unlock()
+		return currentKvVbMap, nil
 	})
 
 	// Add clients for all 3 servers
@@ -770,6 +777,11 @@ func TestRemoteMemcachedComponent_MonitorTopology_RemovesStaleServers(t *testing
 	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
 	component.KvMemClients[testServerAddr3] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
 
+	// Also populate knownServers so diffTopology has the correct baseline
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+	component.knownServers[testServerAddr3] = true
+
 	component.KvMemClients[testServerAddr] <- mockClient1
 	component.KvMemClients[testServerAddr2] <- mockClient2
 	component.KvMemClients[testServerAddr3] <- mockClient3
@@ -777,24 +789,29 @@ func TestRemoteMemcachedComponent_MonitorTopology_RemovesStaleServers(t *testing
 	// Adjust the topology change check interval to 100ms
 	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
 	base.TopologyChangeCheckInterval = 100 * time.Millisecond
-	defer func() {
-		base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
-	}()
 
 	// Start monitoring
-	go component.MonitorTopology()
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
 
 	// Simulate topology change - remove server3
 	time.Sleep(100 * time.Millisecond)
-	kvVbMapTwo := createTestKvVbMap()
-	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-		return kvVbMapTwo, nil
-	})
+	topoMtx.Lock()
+	currentKvVbMap = createTestKvVbMap()
+	topoMtx.Unlock()
 
 	// Wait for topology check (check interval is adjusted to 100ms)
 	time.Sleep(200 * time.Millisecond)
 
-	// Server3 should eventually be removed (if interval passes)
+	// Stop MonitorTopology before asserting on shared state
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// Server3 should have been removed
 	_, exists := component.KvMemClients[testServerAddr3]
 	assert.False(exists)
 	mockClient3.AssertCalled(t, "Close")
@@ -820,10 +837,10 @@ func TestRemoteMemcachedComponent_MonitorTopology_HandlesErrors(t *testing.T) {
 	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
 
 	// First return success, then error
-	callCount := 0
+	var callCount atomic.Int64
 	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-		callCount++
-		if callCount == 1 {
+		cnt := callCount.Add(1)
+		if cnt == 1 {
 			return createTestKvVbMap(), nil
 		}
 		return nil, errors.New("topology fetch error")
@@ -832,21 +849,23 @@ func TestRemoteMemcachedComponent_MonitorTopology_HandlesErrors(t *testing.T) {
 	// Adjust the topology change check interval to 100ms
 	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
 	base.TopologyChangeCheckInterval = 100 * time.Millisecond
-	defer func() {
-		base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
-	}()
 
 	// Start monitoring
-	go component.MonitorTopology()
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
 
 	// Wait a bit then close
 	time.Sleep(500 * time.Millisecond)
 	// ensure the callCount to TargetKvVbMapGetter is greater than 1
-	assert.Greater(callCount, 1)
+	assert.Greater(callCount.Load(), int64(1))
 
-	// close the finish channel
+	// close the finish channel and wait for MonitorTopology to exit
 	close(finCh)
-	time.Sleep(100 * time.Millisecond)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
 
 	// Should not panic on error
 }
@@ -1186,6 +1205,7 @@ func TestRemoteMemcachedComponent_ConcurrentMonitorTopologyAndClose(t *testing.T
 	mockClient1 := createMockClient()
 	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
 	component.KvMemClients[testServerAddr] <- mockClient1
+	component.knownServers[testServerAddr] = true
 
 	var wg sync.WaitGroup
 
@@ -1229,10 +1249,10 @@ func TestRemoteMemcachedComponent_MonitorTopology_RapidTopologyChanges(t *testin
 	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
 
 	// Set up topology that changes rapidly
-	topologyVersion := 0
+	var topologyVersion atomic.Int64
 	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-		topologyVersion++
-		if topologyVersion%2 == 0 {
+		v := topologyVersion.Add(1)
+		if v%2 == 0 {
 			return createTestKvVbMap(), nil
 		}
 		return createTestKvVbMapThreeServers(), nil
@@ -1247,6 +1267,11 @@ func TestRemoteMemcachedComponent_MonitorTopology_RapidTopologyChanges(t *testin
 	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
 	component.KvMemClients[testServerAddr3] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
 
+	// Also populate knownServers so diffTopology has the correct baseline
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+	component.knownServers[testServerAddr3] = true
+
 	component.KvMemClients[testServerAddr] <- mockClient1
 	component.KvMemClients[testServerAddr2] <- mockClient2
 	component.KvMemClients[testServerAddr3] <- mockClient3
@@ -1254,24 +1279,554 @@ func TestRemoteMemcachedComponent_MonitorTopology_RapidTopologyChanges(t *testin
 	// change the topology change check interval to 100ms
 	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
 	base.TopologyChangeCheckInterval = 100 * time.Millisecond
-	defer func() {
-		base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
-	}()
 
 	// Start monitoring
-	go component.MonitorTopology()
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
 
 	// Wait for some topology checks
 	time.Sleep(2 * time.Second)
 
 	// ensure the callCount to TargetKvVbMapGetter is greater than 2
-	assert.Greater(topologyVersion, 2)
+	assert.Greater(topologyVersion.Load(), int64(2))
 
-	// Stop monitoring
+	// Stop monitoring and restore global state
 	close(finCh)
-	time.Sleep(100 * time.Millisecond)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
 
 	// Should not panic despite rapid changes
+}
+
+func TestRemoteMemcachedComponent_DiffTopology_DetectsNewAndObsoleteServers(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_DiffTopology_DetectsNewAndObsoleteServers =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_DiffTopology_DetectsNewAndObsoleteServers =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Known servers are server1 and server2
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+
+	// Topology now has server2 and server3 (server1 removed, server3 added)
+	newKvVbMap := make(base.KvVBMapType)
+	newKvVbMap[testServerAddr2] = []uint16{0, 1, 2, 3}
+	newKvVbMap[testServerAddr3] = []uint16{4, 5, 6, 7}
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return newKvVbMap, nil
+	})
+
+	serversToDelete, serversToAdd, err := component.diffTopology()
+	assert.NoError(err)
+	assert.Equal([]string{testServerAddr}, serversToDelete)
+	assert.Equal([]string{testServerAddr3}, serversToAdd)
+}
+
+func TestRemoteMemcachedComponent_DiffTopology_NoChanges(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_DiffTopology_NoChanges =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_DiffTopology_NoChanges =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Known servers are server1 and server2
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+
+	// Topology still has server1 and server2
+	serversToDelete, serversToAdd, err := component.diffTopology()
+	assert.NoError(err)
+	assert.Empty(serversToDelete)
+	assert.Empty(serversToAdd)
+}
+
+func TestRemoteMemcachedComponent_DiffTopology_ErrorFetchingKvVbMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_DiffTopology_ErrorFetchingKvVbMap =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_DiffTopology_ErrorFetchingKvVbMap =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return nil, errors.New("topology fetch error")
+	})
+
+	serversToDelete, serversToAdd, err := component.diffTopology()
+	assert.Error(err)
+	assert.Nil(serversToDelete)
+	assert.Nil(serversToAdd)
+}
+
+func TestRemoteMemcachedComponent_AddServers(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_AddServers =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_AddServers =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Start with server1 only
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+
+	// Add server2 and server3
+	component.poolConfigMtx.Lock()
+	component.addServers([]string{testServerAddr2, testServerAddr3})
+	component.poolConfigMtx.Unlock()
+
+	// addServers only updates knownServers; KvMemClients channels are created
+	// lazily on-demand by AcquireClient, so KvMemClients should be unchanged.
+	assert.Len(component.KvMemClients, 1, "KvMemClients should still only contain server1")
+
+	// Verify knownServers tracks all 3 servers
+	assert.True(component.knownServers[testServerAddr])
+	assert.True(component.knownServers[testServerAddr2])
+	assert.True(component.knownServers[testServerAddr3])
+}
+
+func TestRemoteMemcachedComponent_AddServers_SkipsDuplicates(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_AddServers_SkipsDuplicates =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_AddServers_SkipsDuplicates =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Start with server1 already in the pool with a client
+	mockClient := createMockClient()
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr] <- mockClient
+	component.knownServers[testServerAddr] = true
+
+	// Try to add server1 again
+	component.poolConfigMtx.Lock()
+	component.addServers([]string{testServerAddr})
+	component.poolConfigMtx.Unlock()
+
+	// Should not overwrite the existing channel - the client should still be there
+	assert.Len(component.KvMemClients, 1)
+	assert.Equal(1, len(component.KvMemClients[testServerAddr]))
+}
+
+func TestRemoteMemcachedComponent_MonitorTopology_AddsNewServers(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_AddsNewServers =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_AddsNewServers =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Start with only server1 and server2
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology returns 3 servers (server3 is new)
+	kvVbMapThree := createTestKvVbMapThreeServers()
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return kvVbMapThree, nil
+	})
+
+	// Adjust the topology change check interval to 100ms
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	// Start monitoring
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
+
+	// Wait for at least one topology check
+	time.Sleep(300 * time.Millisecond)
+
+	// Stop MonitorTopology before reading shared state
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// Server3 should have been added to knownServers.
+	// KvMemClients channels are created lazily by AcquireClient.
+	assert.True(component.knownServers[testServerAddr3], "New server3 should be tracked in knownServers")
+}
+
+func TestRemoteMemcachedComponent_MonitorTopology_AddsNewServersWithSSL(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_AddsNewServersWithSSL =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_AddsNewServersWithSSL =================")
+	assert := assert.New(t)
+
+	component, utils, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Create SSL-enabled ref
+	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
+	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
+	component.SetRefGetter(func() *metadata.RemoteClusterReference {
+		return sslRef
+	})
+
+	// Mock SSL port map for all 3 servers
+	sslPortMap := base.SSLPortMap{
+		testServerAddr:  11207,
+		testServerAddr2: 11208,
+		testServerAddr3: 11209,
+	}
+	utils.On("GetMemcachedSSLPortMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sslPortMap, nil)
+
+	// Mock ExponentialBackoffExecutor to call the actual InitSSLConStrMap function
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			// Call InitSSLConStrMap to populate SslConStrMap
+			component.InitSSLConStrMap()
+		}).
+		Return(nil)
+
+	// Start with only server1 and server2
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology returns 3 servers (server3 is new)
+	kvVbMapThree := createTestKvVbMapThreeServers()
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return kvVbMapThree, nil
+	})
+
+	// Adjust the topology change check interval to 100ms
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	// Start monitoring
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
+
+	// Wait for at least one topology check
+	time.Sleep(300 * time.Millisecond)
+
+	// Stop MonitorTopology before reading shared state
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// Server3 should have been added to knownServers (channels are created lazily)
+	knownServer3 := component.knownServers[testServerAddr3]
+	assert.True(knownServer3, "New server3 should be tracked in knownServers")
+
+	// SSL map should have been refreshed and include server3
+	assert.NotNil(component.SslConStrMap)
+	assert.Equal(testServerAddr3SslConnStr, component.SslConStrMap[testServerAddr3])
+
+	// Verify GetMemcachedSSLPortMap was called (SSL map refresh triggered)
+	utils.AssertCalled(t, "GetMemcachedSSLPortMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds verifies that when
+// InitSSLConStrMap fails the exponential retry on the first MonitorTopology cycle, the new servers
+// are NOT added to knownServers. On the next cycle, the SSL refresh succeeds and the servers are added.
+func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds =================")
+	assert := assert.New(t)
+
+	component, utils, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Create SSL-enabled ref
+	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
+	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
+	component.SetRefGetter(func() *metadata.RemoteClusterReference {
+		return sslRef
+	})
+
+	// Mock SSL port map for all 3 servers (needed when InitSSLConStrMap actually executes)
+	sslPortMap := base.SSLPortMap{
+		testServerAddr:  11207,
+		testServerAddr2: 11208,
+		testServerAddr3: 11209,
+	}
+	utils.On("GetMemcachedSSLPortMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sslPortMap, nil)
+
+	// First call to ExponentialBackoffExecutor: fail (simulates all retries exhausted)
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("SSL refresh failed after retries")).Once()
+
+	// Second call to ExponentialBackoffExecutor: succeed and actually run InitSSLConStrMap
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			component.InitSSLConStrMap()
+		}).
+		Return(nil)
+
+	// Start with only server1 and server2
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology returns 3 servers (server3 is new)
+	kvVbMapThree := createTestKvVbMapThreeServers()
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return kvVbMapThree, nil
+	})
+
+	// Adjust the topology change check interval to 100ms
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	// Start monitoring
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
+
+	// After first cycle (~100ms): SSL refresh failed, server3 should NOT be added
+	time.Sleep(150 * time.Millisecond)
+
+	component.poolConfigMtx.RLock()
+	knownAfterFirstCycle := component.knownServers[testServerAddr3]
+	component.poolConfigMtx.RUnlock()
+
+	assert.False(knownAfterFirstCycle, "Server3 should NOT be in knownServers after failed SSL refresh")
+
+	// After second cycle (~200ms): SSL refresh succeeds, server3 should be added
+	time.Sleep(200 * time.Millisecond)
+
+	// Stop MonitorTopology before reading SslConStrMap (which is unprotected)
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// Now safe to read shared state without locks
+	knownAfterSecondCycle := component.knownServers[testServerAddr3]
+	assert.True(knownAfterSecondCycle, "Server3 should be in knownServers after successful SSL refresh")
+
+	// SSL map should have been refreshed and include server3
+	assert.NotNil(component.SslConStrMap)
+	assert.Equal(testServerAddr3SslConnStr, component.SslConStrMap[testServerAddr3])
+}
+
+// TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshPersistentFailure verifies that when
+// InitSSLConStrMap persistently fails exponential retry across multiple MonitorTopology cycles,
+// the new servers are never added to knownServers or KvMemClients.
+func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshPersistentFailure(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshPersistentFailure =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshPersistentFailure =================")
+	assert := assert.New(t)
+
+	component, utils, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Create SSL-enabled ref
+	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
+	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
+	component.SetRefGetter(func() *metadata.RemoteClusterReference {
+		return sslRef
+	})
+
+	// Track how many times ExponentialBackoffExecutor is called
+	var backoffCallCount int
+	var backoffCallCountMtx sync.Mutex
+
+	// All calls to ExponentialBackoffExecutor fail (SSL consistently unavailable)
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			backoffCallCountMtx.Lock()
+			backoffCallCount++
+			backoffCallCountMtx.Unlock()
+		}).
+		Return(errors.New("SSL refresh failed after retries"))
+
+	// Start with only server1 and server2
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology returns 3 servers (server3 is new)
+	kvVbMapThree := createTestKvVbMapThreeServers()
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return kvVbMapThree, nil
+	})
+
+	// Adjust the topology change check interval to 100ms
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	// Start monitoring
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
+
+	// Wait for multiple topology cycles
+	time.Sleep(500 * time.Millisecond)
+
+	// Stop MonitorTopology before reading shared state
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// Server3 should NEVER be added since SSL refresh always fails
+	_, existsServer3 := component.KvMemClients[testServerAddr3]
+	knownServer3 := component.knownServers[testServerAddr3]
+	totalServers := len(component.KvMemClients)
+
+	assert.False(existsServer3, "Server3 should NOT be in KvMemClients when SSL refresh persistently fails")
+	assert.False(knownServer3, "Server3 should NOT be in knownServers when SSL refresh persistently fails")
+	assert.Equal(2, totalServers, "Should still have only the original 2 servers")
+
+	// Verify that multiple retry attempts were made
+	backoffCallCountMtx.Lock()
+	callCount := backoffCallCount
+	backoffCallCountMtx.Unlock()
+	assert.Greater(callCount, 1, "ExponentialBackoffExecutor should have been called multiple times across topology cycles")
+
+	// SslConStrMap should be nil (never populated)
+	assert.Nil(component.SslConStrMap)
+}
+
+// TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL_MissingSslConStr verifies that
+// GetNewMemcachedClient returns ErrSslConStrNotFound when the SSL connection string for
+// a server has not been populated yet (e.g., the server is newly added and MonitorTopology
+// hasn't refreshed the SSL map yet).
+func TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL_MissingSslConStr(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL_MissingSslConStr =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL_MissingSslConStr =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Create SSL-enabled ref
+	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
+	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
+	component.SetRefGetter(func() *metadata.RemoteClusterReference {
+		return sslRef
+	})
+
+	// Populate SslConStrMap with only server1, missing server2
+	component.SslConStrMap = map[string]string{
+		testServerAddr: testServerAddr1SslConnStr,
+	}
+
+	// Trying to create a client for server2 should fail with ErrSslConStrNotFound
+	client, err := component.GetNewMemcachedClient(testServerAddr2)
+
+	assert.Nil(client)
+	assert.Error(err)
+	assert.True(errors.Is(err, ErrSslConStrNotFound), "Error should wrap ErrSslConStrNotFound")
+	assert.Contains(err.Error(), testServerAddr2, "Error message should contain the server address")
+}
+
+// TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds_WithAcquireClient
+// is an end-to-end test that verifies: when a new server is added to the topology with SSL,
+// the SSL refresh initially fails, AcquireClient for the new server returns ErrSslConStrNotFound
+// (which callers can retry), and once MonitorTopology successfully refreshes the SSL map on a
+// subsequent cycle, AcquireClient succeeds.
+func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds_WithAcquireClient(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds_WithAcquireClient =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds_WithAcquireClient =================")
+	assert := assert.New(t)
+
+	component, utils, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Create SSL-enabled ref
+	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
+	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
+	component.SetRefGetter(func() *metadata.RemoteClusterReference {
+		return sslRef
+	})
+
+	// Mock SSL port map for all 3 servers
+	sslPortMap := base.SSLPortMap{
+		testServerAddr:  11207,
+		testServerAddr2: 11208,
+		testServerAddr3: 11209,
+	}
+	utils.On("GetMemcachedSSLPortMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(sslPortMap, nil)
+
+	mockClient := createMockClient()
+	// Mock TLS connection creation for when AcquireClient eventually succeeds
+	utils.On("ExponentialBackoffExecutorWithFinishSignal", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockClient, nil)
+
+	// First call to ExponentialBackoffExecutor (MonitorTopology SSL refresh): fail
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(errors.New("SSL refresh failed after retries")).Once()
+
+	// Second call to ExponentialBackoffExecutor (MonitorTopology SSL refresh): succeed
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			component.InitSSLConStrMap()
+		}).
+		Return(nil)
+
+	// Start with server1 and server2, with SSL map already populated for them
+	component.SslConStrMap = map[string]string{
+		testServerAddr:  testServerAddr1SslConnStr,
+		testServerAddr2: testServerAddr2SslConnStr,
+	}
+	component.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology returns 3 servers (server3 is new)
+	kvVbMapThree := createTestKvVbMapThreeServers()
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return kvVbMapThree, nil
+	})
+
+	// Adjust the topology change check interval to 100ms
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	// Start monitoring
+	monitorDone := make(chan struct{})
+	go func() {
+		component.MonitorTopology()
+		close(monitorDone)
+	}()
+
+	// After first cycle: SSL refresh failed, server3 not yet in the pool.
+	// AcquireClient for server3 should fail with ErrSslConStrNotFound
+	// (Because the channel is not yet created and createClientChannel will be called,
+	// but GetNewMemcachedClient will fail because SslConStrMap doesn't have server3)
+	time.Sleep(150 * time.Millisecond)
+
+	client, err := component.AcquireClient(testServerAddr3)
+	assert.Nil(client, "AcquireClient for server3 should fail before SSL map is refreshed")
+	assert.Error(err)
+	assert.True(errors.Is(err, ErrSslConStrNotFound),
+		"AcquireClient should return ErrSslConStrNotFound for server3 before SSL refresh")
+
+	// After second cycle: SSL refresh succeeds, server3 added with SSL map populated.
+	// AcquireClient for server3 should now succeed.
+	time.Sleep(200 * time.Millisecond)
+
+	client, err = component.AcquireClient(testServerAddr3)
+	assert.NotNil(client, "AcquireClient for server3 should succeed after SSL map is refreshed")
+	assert.NoError(err)
+
+	// Clean up
+	component.ReleaseClient(testServerAddr3, client)
+	close(finCh)
+	<-monitorDone
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
 }
 
 func TestRemoteMemcachedComponent_InitSSLConStrMap_AlternateAddressError(t *testing.T) {

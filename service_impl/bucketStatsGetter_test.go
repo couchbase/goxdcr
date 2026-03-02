@@ -76,7 +76,7 @@ func setupTestRemoteMemcachedComponent(provider *ClusterBucketStatsProvider, uti
 	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockClient, nil).Maybe()
 
 	// Mark the provider as initialized since we've manually set up the component
-	provider.initDone.Store(true)
+	provider.initialized.Store(true)
 }
 
 func createTestFailoverLog() *base.BucketFailoverLog {
@@ -1021,7 +1021,7 @@ func TestCngBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
 	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
-	provider.initDone.Store(true)
+	provider.initialized.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -1098,7 +1098,7 @@ func TestCngBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
 	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
-	provider.initDone.Store(true)
+	provider.initialized.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -1172,7 +1172,7 @@ func TestCngBucketStatsProvider_GetFailoverLog_Error(t *testing.T) {
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
 	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
-	provider.initDone.Store(true)
+	provider.initialized.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 
@@ -1216,7 +1216,7 @@ func TestCngBucketStatsProvider_GetVBucketStats_Error(t *testing.T) {
 	provider := NewCngBucketStatsProvider(testBucketName, utilsMockObj, logger, getGrpcOpts)
 	// Mock cngConn to avoid nil pointer and mark as initialized
 	provider.cngConn = &base.CngConn{}
-	provider.initDone.Store(true)
+	provider.initialized.Store(true)
 
 	vblist := []uint16{0, 1, 2, 3}
 

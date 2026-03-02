@@ -3166,8 +3166,8 @@ func (_m *UtilsIface) GetFailoverLog(conn memcached.ClientIface, dataTransferCtx
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(memcached.ClientIface) error); ok {
-		r2 = rf(conn)
+	if rf, ok := ret.Get(2).(func(memcached.ClientIface, *utils.Context) error); ok {
+		r2 = rf(conn, dataTransferCtx)
 	} else {
 		r2 = ret.Error(2)
 	}

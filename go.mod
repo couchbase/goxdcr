@@ -1,6 +1,6 @@
 module github.com/couchbase/goxdcr/v8
 
-go 1.24.0
+go 1.24.13
 
 replace github.com/couchbase/eventing => ../eventing
 
@@ -31,12 +31,12 @@ replace github.com/couchbase/hebrew => ../../../../../hebrew
 replace github.com/couchbase/cbauth => ../cbauth
 
 require (
-	github.com/couchbase/cbauth v0.1.13
+	github.com/couchbase/cbauth v0.1.18
 	github.com/couchbase/eventing-ee v0.0.0-00010101000000-000000000000
 	github.com/couchbase/go-couchbase v0.1.1
 	github.com/couchbase/gocb/v2 v2.9.4
 	github.com/couchbase/gocbcore/v9 v9.1.11
-	github.com/couchbase/gomemcached v0.3.3
+	github.com/couchbase/gomemcached v0.3.4
 	github.com/couchbase/goprotostellar v1.0.3-0.20250919201325-19d1f4819cdb
 	github.com/couchbase/goutils v0.1.2
 	github.com/couchbase/tools-common/http v1.0.7
@@ -59,26 +59,26 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/corpix/uarand v0.0.0-20170723150923-031be390f409 // indirect
 	github.com/couchbase/clog v0.1.0 // indirect
-	github.com/couchbase/go_json v0.0.0-20220330123059-4473a21887c8 // indirect
+	github.com/couchbase/go_json v0.0.0-20250803152502-4641f4ef8578 // indirect
 	github.com/couchbase/query v0.0.0-20231201224521-b47444ea33a9 // indirect
 	github.com/couchbase/regulator v0.0.0-00010101000000-000000000000 // indirect
 	github.com/couchbase/tools-common/errors v1.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
-	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/kr/text v0.2.0 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.65.0 // indirect
+	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/santhosh-tekuri/jsonschema v1.2.4 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

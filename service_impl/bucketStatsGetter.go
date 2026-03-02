@@ -44,10 +44,10 @@ type ClusterBucketStatsProvider struct {
 	utils utils.UtilsIface
 	// bucketTopologySvc provides access to the bucket topology service
 	bucketTopologySvc service_def.BucketTopologySvc
-	// initDoneOnce is used to ensure that the init is done only once
-	initDoneOnce sync.Once
-	// initDone is used to denote if the init is done
-	initDone atomic.Bool
+	// initMu protects initialization, allowing only one goroutine to attempt initialization at a time
+	initMtx sync.Mutex
+	// initialized is set to true after successful initialization
+	initialized atomic.Bool
 	// finCh is used to denote the end of the lifecycle of the ClusterBucketStatsProvider
 	finCh chan bool
 	// logger provides access to the logger
@@ -83,53 +83,62 @@ func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remote
 
 // Init the ClusterBucketStatsProvider
 func (provider *ClusterBucketStatsProvider) Init() error {
-	var initErr error
-	provider.initDoneOnce.Do(func() {
-		userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
-		provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.maxConnectionsPerServer)
-		provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
-			ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
-			return ref
-		}).SetAlternateAddressChecker(func(ref *metadata.RemoteClusterReference) (bool, error) {
-			return provider.remoteClusterSvc.ShouldUseAlternateAddress(ref)
-		}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-			remoteOnlySpec := &metadata.ReplicationSpecification{
-				TargetClusterUUID: provider.clusterUuid,
-				TargetBucketName:  provider.bucketName,
-			}
-			subsId := fmt.Sprintf("bucketInfoGetter_%d", atomic.AddUint64(&provider.subscriptionCounter, 1))
-			targetNotificationCh, err := provider.bucketTopologySvc.SubscribeToRemoteBucketFeed(remoteOnlySpec, subsId)
-			if err != nil {
-				return nil, err
-			}
-			var latestTargetBucketTopology service_def.TargetNotification
-			defer provider.bucketTopologySvc.UnSubscribeRemoteBucketFeed(remoteOnlySpec, subsId)
-			select {
-			case latestTargetBucketTopology = <-targetNotificationCh:
-				defer latestTargetBucketTopology.Recycle()
-				kvVBMap := latestTargetBucketTopology.GetTargetServerVBMap()
-				return kvVBMap.Clone(), nil
-			default:
-				return nil, base.ErrorTargetBucketTopologyNotReady
-			}
-		})
-
-		initErr = base.ExecWithTimeout(provider.remoteMemcachedComponent.InitConnections, base.ShortHttpTimeout, provider.logger)
-	})
-
-	if initErr != nil {
-		return initErr
+	// Fast path: already initialized successfully
+	if provider.initialized.Load() {
+		return nil
 	}
 
-	provider.initDone.CompareAndSwap(false, true)
+	provider.initMtx.Lock()
+	defer provider.initMtx.Unlock()
 
+	// Double-check after acquiring lock
+	if provider.initialized.Load() {
+		return nil
+	}
+
+	userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
+	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.maxConnectionsPerServer)
+	provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
+		ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
+		return ref
+	}).SetAlternateAddressChecker(func(ref *metadata.RemoteClusterReference) (bool, error) {
+		return provider.remoteClusterSvc.ShouldUseAlternateAddress(ref)
+	}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		remoteOnlySpec := &metadata.ReplicationSpecification{
+			TargetClusterUUID: provider.clusterUuid,
+			TargetBucketName:  provider.bucketName,
+		}
+		subsId := fmt.Sprintf("bucketInfoGetter_%d", atomic.AddUint64(&provider.subscriptionCounter, 1))
+		targetNotificationCh, err := provider.bucketTopologySvc.SubscribeToRemoteBucketFeed(remoteOnlySpec, subsId)
+		if err != nil {
+			return nil, err
+		}
+		var latestTargetBucketTopology service_def.TargetNotification
+		defer provider.bucketTopologySvc.UnSubscribeRemoteBucketFeed(remoteOnlySpec, subsId)
+		select {
+		case latestTargetBucketTopology = <-targetNotificationCh:
+			defer latestTargetBucketTopology.Recycle()
+			kvVBMap := latestTargetBucketTopology.GetTargetServerVBMap()
+			return kvVBMap.Clone(), nil
+		default:
+			return nil, base.ErrorTargetBucketTopologyNotReady
+		}
+	})
+
+	err := base.ExecWithTimeout(provider.remoteMemcachedComponent.InitConnections, base.ShortHttpTimeout, provider.logger)
+	if err != nil {
+		return err
+	}
+
+	// Only start MonitorTopology and mark as initialized on success
 	go provider.remoteMemcachedComponent.MonitorTopology()
+	provider.initialized.Store(true)
 	return nil
 }
 
 // InitDone indicates whether the provider has been fully initialized
 func (provider *ClusterBucketStatsProvider) InitDone() bool {
-	return provider.initDone.Load()
+	return provider.initialized.Load()
 }
 
 // Close the ClusterBucketStatsProvider
@@ -499,6 +508,12 @@ func (provider *ClusterBucketStatsProvider) IsRetryableError(err error) bool {
 		return true
 	}
 
+	if errors.Is(err, Component.ErrSslConStrNotFound) {
+		// This error indicates that the server is newly added and the SSL connection string map has not been refreshed yet.
+		// This is a temporary condition that should be resolved with time, so we consider it retryable.
+		return true
+	}
+
 	// try to unwrap the error into a memcached response
 	if resp, ok := err.(*gomemcached.MCResponse); ok {
 		switch resp.Status {
@@ -577,10 +592,10 @@ type CngBucketStatsProvider struct {
 	cngConn *base.CngConn
 	// finCh is used to denote the end of the lifecycle of the CngBucketStatsProvider
 	finCh chan struct{}
-	// initDoneOnce is used to ensure that the init is done only once
-	initDoneOnce sync.Once
-	// initDone is used to denote if the init is done
-	initDone atomic.Bool
+	// initMu protects initialization - allows only one goroutine to attempt init at a time
+	initMu sync.Mutex
+	// initialized is set to true after successful initialization
+	initialized atomic.Bool
 	// mutex is used to protect the operations
 	mutex sync.Mutex
 	// context is used to track the lifecycle of the CngBucketStatsProvider
@@ -605,21 +620,30 @@ func NewCngBucketStatsProvider(bucketName string, utils utils.UtilsIface, logger
 
 // Init the CngBucketStatsProvider
 func (provider *CngBucketStatsProvider) Init() error {
-	var initErr error
-	provider.initDoneOnce.Do(func() {
-		grpcOpts, err := provider.getGrpcOpts()
-		if err != nil {
-			initErr = fmt.Errorf("failed to get gRPC options: %w", err)
-			return
-		}
-		provider.cngConn, initErr = base.NewCngConn(grpcOpts)
-	})
-
-	if initErr != nil {
-		return initErr
+	// Fast path: already initialized successfully
+	if provider.initialized.Load() {
+		return nil
 	}
 
-	provider.initDone.CompareAndSwap(false, true)
+	provider.initMu.Lock()
+	defer provider.initMu.Unlock()
+
+	// Double-check after acquiring lock
+	if provider.initialized.Load() {
+		return nil
+	}
+
+	grpcOpts, err := provider.getGrpcOpts()
+	if err != nil {
+		return fmt.Errorf("failed to get gRPC options: %w", err)
+	}
+
+	provider.cngConn, err = base.NewCngConn(grpcOpts)
+	if err != nil {
+		return err
+	}
+
+	provider.initialized.Store(true)
 	return nil
 }
 
@@ -646,7 +670,7 @@ func (provider *CngBucketStatsProvider) Close() error {
 
 // InitDone indicates whether the provider has been fully initialized
 func (provider *CngBucketStatsProvider) InitDone() bool {
-	return provider.initDone.Load()
+	return provider.initialized.Load()
 }
 
 // isClosed checks if the provider is closed

@@ -486,7 +486,7 @@ func TestDoGetRemoteClustersRequest(t *testing.T) {
 				remoteClusterSvc.On("RemoteClusterByUuid", "test-uuid", false).Return(ref, nil)
 				// Mock manifest retrieval to return a validation error
 				manifestError := errors.New("failed to retrieve bucket manifest")
-				remoteClusterSvc.On("GetManifestByUuid", "test-uuid", "test-bucket", false, true).Return(nil, manifestError)
+				remoteClusterSvc.On("GetManifestByUuid", base.NewGetManifestOpts("test-uuid", "test-bucket", false, true)).Return(nil, manifestError)
 				remoteClusterSvc.On("CheckAndUnwrapRemoteClusterError", manifestError).Return(true, manifestError)
 			},
 			expectedStatusCode: http.StatusBadRequest,

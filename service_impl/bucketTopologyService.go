@@ -104,10 +104,13 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 		go func() {
 			defer waitGrp.Done()
 
+			var watcher *BucketTopologySvcWatcher
 			localRetryOp := func() error {
-				watcher := b.getOrCreateLocalWatcher(specCpy)
 				if watcher == nil {
-					return base.ErrorNilPtr
+					watcher = b.getOrCreateLocalWatcher(specCpy)
+					if watcher == nil {
+						return base.ErrorNilPtr
+					}
 				}
 				localStartErr := watcher.Start()
 				if localStartErr != nil && localStartErr != ErrorWatcherAlreadyStarted {
@@ -126,13 +129,17 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 		go func() {
 			defer waitGrp.Done()
 
+			var watcher *BucketTopologySvcWatcher
 			retryOp := func() error {
-				watcher, startErr := b.getOrCreateRemoteWatcher(specCpy)
-				if startErr != nil {
-					b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", startErr)
-					return startErr
+				if watcher == nil {
+					var createErr error
+					watcher, createErr = b.getOrCreateRemoteWatcher(specCpy)
+					if createErr != nil {
+						b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", createErr)
+						return createErr
+					}
 				}
-				startErr = watcher.Start()
+				startErr := watcher.Start()
 				if startErr != nil && startErr != ErrorWatcherAlreadyStarted {
 					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
 					return startErr
@@ -147,13 +154,17 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 		}()
 		go func() {
 			defer waitGrp.Done()
+			var statsProvider service_def.BucketStatsProvider
 			retryStatsOp := func() error {
-				statsProvider, err := b.getOrCreateTargetStatsProvider(specCpy)
-				if err != nil {
-					b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
-					return err
+				if statsProvider == nil {
+					var err error
+					statsProvider, err = b.getOrCreateTargetStatsProvider(specCpy)
+					if err != nil {
+						b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
+						return err
+					}
 				}
-				err = statsProvider.Init()
+				err := statsProvider.Init()
 				if err != nil {
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
 					return err
@@ -808,10 +819,13 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 		go func() {
 			defer waitGrp.Done()
 
+			var watcher *BucketTopologySvcWatcher
 			localRetryOp := func() error {
-				watcher := b.getOrCreateLocalWatcher(newSpec)
 				if watcher == nil {
-					return base.ErrorNilPtr
+					watcher = b.getOrCreateLocalWatcher(newSpec)
+					if watcher == nil {
+						return base.ErrorNilPtr
+					}
 				}
 				localStartErr := watcher.Start()
 				if localStartErr != nil && localStartErr != ErrorWatcherAlreadyStarted {
@@ -829,11 +843,15 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 		go func() {
 			defer waitGrp.Done()
+			var remoteWatcher *BucketTopologySvcWatcher
 			retryRemoteOp := func() error {
-				remoteWatcher, remoteErr := b.getOrCreateRemoteWatcher(newSpec)
-				if remoteErr != nil {
-					b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
-					return remoteErr
+				if remoteWatcher == nil {
+					var remoteErr error
+					remoteWatcher, remoteErr = b.getOrCreateRemoteWatcher(newSpec)
+					if remoteErr != nil {
+						b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
+						return remoteErr
+					}
 				}
 				remoteStartErr := remoteWatcher.Start()
 				if remoteStartErr != nil && remoteStartErr != ErrorWatcherAlreadyStarted {
@@ -851,13 +869,17 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 		go func() {
 			defer waitGrp.Done()
+			var statsProvider service_def.BucketStatsProvider
 			retryStatsOp := func() error {
-				statsProvider, err := b.getOrCreateTargetStatsProvider(newSpec)
-				if err != nil {
-					b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
-					return err
+				if statsProvider == nil {
+					var err error
+					statsProvider, err = b.getOrCreateTargetStatsProvider(newSpec)
+					if err != nil {
+						b.logger.Errorf("getOrCreateTargetStatsProvider has error: %v", err)
+						return err
+					}
 				}
-				err = statsProvider.Init()
+				err := statsProvider.Init()
 				if err != nil {
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
 					return err
