@@ -1,0 +1,283 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+CLUSTER_NAME_SECURE_PORT_MAP=(["C1"]=19000 ["C2"]=19002)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=13003)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["numVBuckets"]=1024)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1")
+# Target bucket has no scope initially to create broken map
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="")
+
+# Scopes -> Collections
+# ----------------------
+# Create 10000 collections on source
+declare -a collection10kArr=()
+function setup10kCollections {
+	for ((i = 1; i <= 10000; i = (($i + 1)))); do
+		collection10kArr[${#collection10kArr[@]}]="col$i"
+	done
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection10kArr[@]})
+}
+
+function runDataLoad {
+	local collectionsToRunLoad=2000
+	local itemsPerCollection=5
+	local concurrency=50
+
+	echo "RUNNING dataload for $collectionsToRunLoad collections..."
+	initProcessPool $concurrency
+
+	local oldCBWORKLOADGEN="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$itemsPerCollection"
+	# Run CBWorkloadgen in parallel
+	for ((i = 1; i <= $collectionsToRunLoad; i = (($i + 1)))); do
+		addJobToPool "runCbWorkloadGenCollection" "C1" "B0" "S1" "col$i"
+	done
+
+	runProcessPool
+	CBWORKLOAD_COLLECTION_NUM_ITEMS="$oldCBWORKLOADGEN"
+	echo "RUNNING dataload DONE"
+}
+
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+
+declare LOGMSG=$BROKEN_MSG
+
+function runOneReplicationCycleAndPause {
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	local clusterName
+
+	setup10kCollections
+
+	# With high number of collections, processing will take time, use parallelism
+	setManifestParallelConfig 1 50 100 5
+
+	setupCluster
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local -i currentInstanceCnt
+	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+
+	setCustomManifestRefreshInterval "C1"
+
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
+	local currentXdcrLog
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	local currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
+	local currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
+	local currentSetOpErr=$(echo "$currentXdcrLog" | grep -c "$METAKV_SET_OP_ERR")
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
+	printGlobalScopeAndCollectionInfo
+
+	trap killAllBgJobs EXIT
+	runDataLoad
+
+	echo "Sleeping 30 seconds before changes left check"
+	sleep 30
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
+	validateInternalLogWithInstance "C1" "$METAKV_SET_OP_ERR" $(($currentSetOpErr))
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	validateBrokenMapExists "C1"
+
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
+
+	# At this stage, we have all 10k collections with broken map due to no target scope
+}
+
+C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
+CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+CKPT_RESUME_FOUND="checkpoint documents for"
+LOADED_BROKEN_MAP="Loaded brokenMap: map"
+LOADED_BROKEN_MAP_ENTRIES="CollectionNamespaceMapping with [0-9]\+ entries"
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	echo "Sleeping 15 secs before rebalancing node in"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" "strict"
+
+	echo "Sleeping before checking logs"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	grepForPanics
+}
+
+function runReplicationResume {
+	local logs
+	local logsC1P
+	local resumeFrom0Cnt
+
+	logs=$(getInternalNodeXdcrLog "C1")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
+
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 40 seconds for resume to finish"
+	sleep 40
+
+	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
+	logs=$(getInternalNodeXdcrLog "C1")
+	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill), expecting $(($curCkptsFoundDocsCnt + 1))"
+		exit 1
+	fi
+	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
+	if (($foundDocCount == 0)); then
+		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	local ckptFoundWith0Count=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
+	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
+		echo "C1P unable to find upserted checkpoints"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCntC1P + 1)) $(($curCkptRetrievedCntC1P + 2))
+
+	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
+	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
+	# pulled by C1P, but no ckpt pulled
+	# That's ok... so skip checking those
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
+	if (($resumeFrom0Cnt > 10)); then
+		echo "C1P has at least ten VBs that resumed from seqno 0"
+		exit 1
+	fi
+	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_ENTRIES")
+	if (($resumeLoadBrokenMapCnt == 0)); then
+		echo "C1P did not load broken map from checkpoint migration"
+		exit 1
+	fi
+
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running P2P with 10k collections broken map and rebalancing a node in securely"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	runOneReplicationCycleAndPause
+	runOneRebalanceCycle 1 1
+	runReplicationResume
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
+	done
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	# clean up requires turning off security
+	echo "Turning off encryption..."
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+	sleep 15
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	resetCustomManifestRefreshInterval "C1"
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+
+	# because certs were generated for testing, regenerate certs so following tests won't run into unknown CA issues
+	regenerateCertificate "C1"
+	cleanupClientCertMaps
+
+	# Reset the nodes after test to reload non-10k collections
+	hardResetNodes
+}
