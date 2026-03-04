@@ -162,8 +162,8 @@ func TestMonitorOneReplicationOnce(t *testing.T) {
 				assert.Equal(t, monitorStateNormal, stat.state)
 				assert.Equal(t, 50, stat.windowThreshold)
 				assert.Equal(t, 30, stat.windowMonitorDuration)
-				// windowConflicts should be set to initial count on first cycle
-				assert.Equal(t, int64(25), stat.windowConflicts)
+				// windowConflicts should be 0 on first cycle (not initial count)
+				assert.Equal(t, int64(0), stat.windowConflicts)
 				assert.Equal(t, stat.windowStartTimestamp, stat.timestamp)
 			},
 		},
@@ -473,28 +473,46 @@ func TestMonitorOneReplicationOnce(t *testing.T) {
 			},
 		},
 
-		// First cycle threshold breach - verifies conflicts in cycle #1 are not ignored
+		// Second cycle threshold breach - verifies immediate autopause when threshold is breached in second cycle
 		{
-			name:                  "FirstCycle_ThresholdBreached_ImmediateAutopause",
-			spec:                  createTestSpec("repl1", 10, 60, true), // threshold=10
-			mockGetConflicts:      15,                                    // 15 conflicts on first cycle
+			name: "SecondCycle_ThresholdBreached_ImmediateAutopause",
+			spec: createTestSpec("repl1", 10, 60, true), // threshold=10
+			existingStats: &stats{
+				timestamp:             time.Now().Add(-1 * time.Second).UnixNano(),
+				conflicts:             5,  // conflicts from first cycle
+				windowStartTimestamp:  time.Now().Add(-1 * time.Second).UnixNano(),
+				windowConflicts:       0,  // windowConflicts from first cycle (always 0)
+				windowThreshold:       10,
+				windowMonitorDuration: 60,
+				state:                 monitorStateNormal,
+			},
+			mockGetConflicts:      17,   // delta=12, total windowConflicts=0+12=12 >= 10
 			expectAutopauseCalled: true,
 			expectUIErrorCalled:   true,
 			validateFunc: func(t *testing.T, m *monitorImpl, topic string) {
 				// Stat should be deleted after successful autopause
 				dontRequireStat(t, m, topic)
-				// This proves that conflicts from the 0th to 1st second are NOT ignored
+				// This demonstrates immediate autopause when threshold is breached in second cycle
 			},
 		},
 		{
-			name:             "FirstCycle_BelowThreshold_NoAutopause",
-			spec:             createTestSpec("repl1", 100, 60, true), // threshold=100
-			mockGetConflicts: 50,                                     // 50 conflicts, below threshold
+			name: "SecondCycle_BelowThreshold_NoAutopause",
+			spec: createTestSpec("repl1", 100, 60, true), // threshold=100
+			existingStats: &stats{
+				timestamp:             time.Now().Add(-1 * time.Second).UnixNano(),
+				conflicts:             30, // conflicts from first cycle
+				windowStartTimestamp:  time.Now().Add(-1 * time.Second).UnixNano(),
+				windowConflicts:       0,  // windowConflicts from first cycle (always 0)
+				windowThreshold:       100,
+				windowMonitorDuration: 60,
+				state:                 monitorStateNormal,
+			},
+			mockGetConflicts: 50, // delta=20, total windowConflicts=0+20=20 < 100
 			validateFunc: func(t *testing.T, m *monitorImpl, topic string) {
 				stat := requireStat(t, m, topic)
 				assert.Equal(t, int64(50), stat.conflicts)
-				// windowConflicts set to initial count on first cycle
-				assert.Equal(t, int64(50), stat.windowConflicts)
+				// windowConflicts shows accumulated conflicts from second cycle
+				assert.Equal(t, int64(20), stat.windowConflicts) // 0 + (50-30) = 20
 				assert.Equal(t, monitorStateNormal, stat.state)
 			},
 		},
