@@ -1442,7 +1442,7 @@ func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string,
 }
 
 func errMeansReqNeedsToBeRetried(err error) bool {
-	return err != nil && err != QueuedForRetry && err != errorStopped
+	return err != nil && err != QueuedForRetry && err != errorStopped && err != base.ErrorNoSourceKV
 }
 
 func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest) bool {
