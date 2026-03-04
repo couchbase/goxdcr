@@ -27,17 +27,17 @@ type ReplicationConfig struct {
 	TargetBucketName  string
 	TargetBucketUUID  string
 
-	vbUUIDMap map[uint16]string
+	vbUUIDMap map[uint16]uint64
 }
 
 func (rc *ReplicationConfig) SetVBUUIDMap(m map[uint16]*internal_xdcr_v1.GetVbucketInfoResponse) (err error) {
-	rc.vbUUIDMap = make(map[uint16]string)
+	rc.vbUUIDMap = make(map[uint16]uint64)
 	for vbNo, info := range m {
 		if info == nil || len(info.Vbuckets) == 0 {
 			err = fmt.Errorf("no vbucket info found for vbucket %v", vbNo)
 			return
 		}
-		rc.vbUUIDMap[vbNo] = fmt.Sprintf("%s", info.Vbuckets[0].GetUuid())
+		rc.vbUUIDMap[vbNo] = info.Vbuckets[0].GetUuid()
 	}
 
 	return nil

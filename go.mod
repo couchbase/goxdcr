@@ -37,7 +37,7 @@ require (
 	github.com/couchbase/gocb/v2 v2.9.4
 	github.com/couchbase/gocbcore/v9 v9.1.11
 	github.com/couchbase/gomemcached v0.3.4
-	github.com/couchbase/goprotostellar v1.0.3-0.20250919201325-19d1f4819cdb
+	github.com/couchbase/goprotostellar v1.0.3
 	github.com/couchbase/goutils v0.1.2
 	github.com/couchbase/tools-common/http v1.0.7
 	github.com/couchbaselabs/gojsonsm v1.0.1

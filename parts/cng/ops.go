@@ -225,7 +225,7 @@ func handlePushDocErr(origErr error, rsp *PushDocRsp) (err error) {
 }
 
 // getTargetVBUUID gets the target vbuuid for a given vbucket number
-func (n *Nozzle) getTargetVBUUID(vbNo uint16) (vbuuid string, err error) {
+func (n *Nozzle) getTargetVBUUID(vbNo uint16) (vbuuid uint64, err error) {
 	vbuuid, ok := n.cfg.Replication.vbUUIDMap[vbNo]
 	if !ok {
 		err = fmt.Errorf("unable to find vbuuid for vbucket %v", vbNo)
