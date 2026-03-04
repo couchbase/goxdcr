@@ -48,6 +48,7 @@ declare -A CLUSTER_NAME_SSLPORT_MAP
 declare -A CLUSTER_SETUP_DONE_MAP
 declare -A CLUSTER_NAME_SECURE_PORT_MAP
 declare -A CLUSTER_NAME_XDCR_PORT_MAP
+declare -A CLUSTER_NAME_FQDN_MAP
 declare -A CLUSTER_NAME_KV_PORT_MAP
 declare -A CLUSTER_NAME_BUCKET_MAP
 declare -A BUCKET_NAME_RAMQUOTA_MAP
@@ -544,14 +545,19 @@ function setupCluster {
 			initPort=8091
 		fi
 
-		local hostIP="127.0.0.1"
-		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
-			hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+		# Prefer FQDN if available, then Vagrant IP, then default to 127.0.0.1
+		local hostName=""
+		if [[ ! -z "${CLUSTER_NAME_FQDN_MAP[$clusterName]:-}" ]]; then
+			hostName=${CLUSTER_NAME_FQDN_MAP[$clusterName]}
+		elif [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+			hostName=${VAGRANT_VM_IP_MAP[$clusterName]}
+		else
+			hostName="127.0.0.1"
 		fi
-		echo "SETTING up cluster name $clusterName on port $port with hostIP $hostIP"
+		echo "SETTING up cluster name $clusterName on port $port with hostName $hostName"
 
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
-		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostIP" >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostName" >/dev/null 2>&1
 		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv >/dev/null 2>&1
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
 		if (($? != 0)); then
@@ -589,18 +595,23 @@ function setupClusterWithN1QL {
 			initPort=8091
 		fi
 
-		local hostIP="127.0.0.1"
-		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
-			hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+		# Prefer FQDN if available, then Vagrant IP, then default to 127.0.0.1
+		local hostName=""
+		if [[ ! -z "${CLUSTER_NAME_FQDN_MAP[$clusterName]:-}" ]]; then
+			hostName=${CLUSTER_NAME_FQDN_MAP[$clusterName]}
+		elif [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+			hostName=${VAGRANT_VM_IP_MAP[$clusterName]}
+		else
+			hostName="127.0.0.1"
 		fi
-		echo "SETTING up cluster name $clusterName on port $port with hostIP $hostIP"
+		echo "SETTING up cluster name $clusterName on port $port with hostName $hostName"
 
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
 		if (($? != 0)); then
 			echo "Node $port not found. Skipping cluster_run XDCR init"
 			exit 1
 		fi
-		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostIP" >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostName" >/dev/null 2>&1
 		if (($? != 0)); then
 			echo "non-0 error when renaming node"
 			exit 1
@@ -1679,7 +1690,7 @@ function setupTopologies {
 function createRemoteClusterReference {
 	local source=$1
 	local target=$2
-	local targetHost=${3:-"127.0.0.1"}
+	local targetHost=${3:-}
 	local remoteUser=${4:-$DEFAULT_ADMIN}
 	local remotePassword=${5:-$DEFAULT_PW}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
@@ -1688,7 +1699,23 @@ function createRemoteClusterReference {
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
-	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+
+	# Resolve sourceHost: FQDN > CLUSTER_NAME_HOST_MAP > 127.0.0.1
+	local sourceHost=""
+	if [[ ! -z "${CLUSTER_NAME_FQDN_MAP[$source]:-}" ]]; then
+		sourceHost=${CLUSTER_NAME_FQDN_MAP[$source]}
+	else
+		sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	fi
+
+	# Resolve targetHost if not explicitly provided: FQDN > Vagrant > 127.0.0.1
+	if [[ -z "$targetHost" ]]; then
+		if [[ ! -z "${CLUSTER_NAME_FQDN_MAP[$target]:-}" ]]; then
+			targetHost=${CLUSTER_NAME_FQDN_MAP[$target]}
+		else
+			targetHost="127.0.0.1"
+		fi
+	fi
 
 	# special case handling for Vagrant
 	if [[ ! -z "${VAGRANT_VM_IP_MAP[$target]:-}" ]]; then

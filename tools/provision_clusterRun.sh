@@ -32,6 +32,7 @@ DEFAULT_PW="wewewe"
 # -----------------
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_FQDN_MAP=(["C1"]="node9000.localhost" ["C2"]="node9001.localhost")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")

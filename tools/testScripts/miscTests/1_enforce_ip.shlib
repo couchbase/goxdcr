@@ -16,6 +16,7 @@ set -u
 CLUSTER_NAME_HOST_MAP=(["C1"]="127.0.0.1" ["C2"]="127.0.0.1")
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_FQDN_MAP=(["C1"]="node9000.localhost" ["C2"]="node9001.localhost")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
@@ -89,7 +90,7 @@ function setIpFamily {
 }
 
 function replicationWithIpAddress {
-	local remoteIp=$1
+	local remoteIp=${1:-}
 	local cleanup=${2:-"true"}
 	createRemoteClusterReference "C1" "C2" $remoteIp
 	remote=$(getRemoteCluster "C1" "C2")
@@ -135,7 +136,8 @@ function testCreateRemote {
 
 	echo
 	echo "===== Test 3: C1:ipv4 only, C2 default: localhost address works."
-	replicationWithIpAddress "localhost"
+	# CLUSTER_NAME_FQDN_MAP exists, no need to pass
+	replicationWithIpAddress
 
 	echo
 	echo "===== Test 4: C1:ipv4 only, C2 ipv6 only: both address families fail."
@@ -153,7 +155,9 @@ function testCreateRemote {
 		echo "Remote cluster reference C2 at C1 was created but should not"
 		exit 1
 	fi
-	createRemoteClusterReference "C1" "C2" "localhost"
+
+	# CLUSTER_NAME_FQDN_MAP exists, no need to pass
+	createRemoteClusterReference "C1" "C2"
 	remote=$(getRemoteCluster "C1" "C2")
 	if (($remote > 0)); then
 		echo "Remote cluster reference C2 at C1 was created but should not"
@@ -204,7 +208,7 @@ function testChangeRemote {
 	echo
 	echo "===== Test 1: C1:ipv4 only, C2 default: changing remote to ipv6 address fails."
 	setIpFamily "C1" "ipv4" "true"
-	sleep 10
+	sleep 30
 	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
 	count=$(echo $result | grep -c "The cluster is ipv4 only")
 	if (($count != 1)); then
@@ -355,5 +359,29 @@ function runTestCase {
 	runCbWorkloadGenBucket "C1" "B1" 1000
 
 	testCreateRemote
+
+	# For changing remote test, the source needs to use FQDN for hostname but the target cannot
+	cleanupBuckets
+	unset CLUSTER_NAME_FQDN_MAP
+	declare -gA CLUSTER_NAME_FQDN_MAP
+	hardResetNodes
+
+	sleep 10
+
+	CLUSTER_NAME_FQDN_MAP=(["C1"]="node9000.localhost")
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	sleep 10
+
+	runCbWorkloadGenBucket "C1" "B1" 1000
+
 	testChangeRemote
+
+	cleanupBuckets
+	unset CLUSTER_NAME_FQDN_MAP
+	declare -gA CLUSTER_NAME_FQDN_MAP
+	hardResetNodes
 }
