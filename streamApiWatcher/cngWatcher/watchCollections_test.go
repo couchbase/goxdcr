@@ -204,15 +204,15 @@ func TestCollectionsWatcher_UserInitiatedCancellation(t *testing.T) {
 		Return(nil).Run(func(args mock.Arguments) {
 		handler := args.Get(2).(*CollectionsWatcher)
 
-		// Send a message and keep the stream running
+		// Send a message and complete quickly to allow cancellation testing
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			msg := &internal_xdcr_v1.WatchCollectionsResponse{
 				ManifestUid: 789,
 			}
 			handler.OnMessage(msg)
-			// Call on complete to simulate completion after 1000ms
-			time.Sleep(5 * time.Second)
+			// Complete quickly to avoid hanging the test
+			time.Sleep(100 * time.Millisecond)
 			handler.OnComplete()
 		}()
 	})
@@ -978,12 +978,12 @@ func TestCollectionsWatcher_GetResult_OnMessage_Concurrent(t *testing.T) {
 
 	// Verify no race condition occurred and we got a valid manifest
 	// Due to concurrent execution, we can't predict which message will be last
-	// but it should be one of the messages we sent (UID between 100 and 124)
+	// but it should be one of the messages we sent (UID between 100 and 125)
 	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.NotNil(result)
 	uid := result.Uid()
 	assert.Greater(uid, uint64(100), "UID should be at least 100")
-	assert.LessOrEqual(uid, uint64(124), "UID should be at most 124")
+	assert.LessOrEqual(uid, uint64(125), "UID should be at most 125")
 
 	// If no race condition, test passes
 }

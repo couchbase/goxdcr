@@ -854,24 +854,21 @@ func TestClusterBucketStatsProvider_Concurrent_GetFailoverLog(t *testing.T) {
 	utils := &utilsMock.UtilsIface{}
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
-	mcClient := &clientMocks.ClientIface{}
-
 	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger)
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
-	mcClient.On("Close").Return(nil)
+
+	// Initialize empty connection pools for both servers - start with no connections
+	// so that the GetRemoteMemcachedConnection mock will be called to create them
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
 	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] = make(chan mcc.ClientIface, provider.remoteMemcachedComponent.MaxConnsPerServer)
-	provider.remoteMemcachedComponent.KvMemClients[testServerAddr] <- mcClient
-	provider.remoteMemcachedComponent.KvMemClients[testServerAddr2] <- mcClient
 
 	failoverLog := createTestFailoverLog()
 	utils.On("GetFailoverLog", mock.AnythingOfType("*mocks.ClientIface"), mock.Anything).Return(failoverLog.FailoverLogMap, nil, nil)
-	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	// Execute concurrent requests
 	var wg sync.WaitGroup
-	numConcurrentRequests := 10
+	numConcurrentRequests := 50
 	vblist := []uint16{0, 1, 2, 3, 4, 5, 6, 7}
 
 	for i := 0; i < numConcurrentRequests; i++ {
