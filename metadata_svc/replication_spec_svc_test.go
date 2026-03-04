@@ -793,7 +793,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 			clusterVersion:   preversion80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
-			expectedErrMsg:   "must be upgraded to atleast 8.0.1",
+			expectedErrMsg:   "must be upgraded to at least 8.0.1",
 		},
 		{
 			name:             "Filter expression is not key-only",
