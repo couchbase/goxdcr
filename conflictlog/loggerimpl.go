@@ -642,23 +642,18 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 	}
 
 	switch err {
-	case baseclog.ErrTMPFAIL:
-		fallthrough
-	case baseclog.ErrNotMyVBucket:
-		fallthrough
-	case baseclog.ErrUnknownCollection:
+	case baseclog.ErrTMPFAIL, baseclog.ErrNotMyVBucket,
+		baseclog.ErrUnknownCollection, baseclog.ErrTimeout,
+		baseclog.ErrThrottle, iopool.ErrConnPoolGetTimeout,
+		baseclog.ErrQueueFull, baseclog.ErrLoggerHibernated:
 		return needRetryErr, refreshBucketInfo
-	case baseclog.ErrImpossibleResp:
-		fallthrough
-	case baseclog.ErrFatalResp:
-		fallthrough
-	case baseclog.ErrEACCESS:
-		fallthrough
-	case baseclog.ErrGuardrail:
-		fallthrough
-	case baseclog.ErrUnknownResp:
+	case baseclog.ErrImpossibleResp, baseclog.ErrFatalResp,
+		baseclog.ErrEACCESS, baseclog.ErrGuardrail,
+		baseclog.ErrUnknownResp:
 		return noRetryErr, refreshBucketInfo
 	default:
+		// Note that unknownErr category errors will be logged.
+		// Rest all are assumed to have stats to debug.
 		return unknownErr, refreshBucketInfo
 	}
 }
@@ -721,7 +716,10 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 		// across the iterations and calls all of them when function exits which
 		// will be error prone in this case
 		err = fn(conn)
-		if err != nil {
+		writeErr, refreshBucketInfo := l.processWriteError(err, originatingPipelineType)
+		if writeErr == unknownErr {
+			// All other errors except unknownErr category will have prometheus stats. Avoid
+			// logging all errors to avoid log spamming and unwanted file IO.
 			l.logger.Errorf("writeDocRetry failed bucketName=%s bucketUUID=%s vbCount=%d err=%v",
 				bucketName, bucketUUID, vbCount, err)
 		}
@@ -740,7 +738,6 @@ func (l *LoggerImpl) writeDocRetry(bucketName string, fn func(conn Connection) e
 			return
 		}
 
-		writeErr, refreshBucketInfo := l.processWriteError(err, originatingPipelineType)
 		if err == nil || writeErr.noRetryNeeded() {
 			// there was no network error and the write was a success or
 			// the write returned a status code which cannot be fixed by retry
