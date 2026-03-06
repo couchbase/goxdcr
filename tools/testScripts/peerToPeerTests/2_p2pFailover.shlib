@@ -125,7 +125,6 @@ function runTestCase {
 	cleanupGoxdcrLogs
 
 	runOneRebalanceCycle
-	runOneReplicationCycle
 
 	local currentXdcrLog
 	local -i currentHandlingInstanceCnt
@@ -133,11 +132,14 @@ function runTestCase {
 	local -i currentBackfillStartCntC1
 	local -i currentBackfillStartCntC1P
 
+	currentBackfillStartCntC1P=$(getInternalNodeXdcrLog "C1P" | grep -c "$BACKFILL_START_MSG")
+
+	runOneReplicationCycle
+
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 	currentBackfillStartCntC1=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_START_MSG")
-	currentBackfillStartCntC1P=$(getInternalNodeXdcrLog "C1P" | grep -c "$BACKFILL_START_MSG")
 
 	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
 	echo "Done - Sleeping 10 minutes to ensure multiple requests have been handled"
