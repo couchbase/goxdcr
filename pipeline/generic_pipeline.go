@@ -298,7 +298,7 @@ func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.Replicat
 	stopwatch := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v - getHlvVbMaxCasRemote", spec.UniqueId()), base.DiagNetworkThreshold)
 	defer stopwatch()
 
-	targetNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, genPipelineId)
+	targetNotificationCh, errCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, genPipelineId)
 	if err != nil {
 		return false, nil, err
 	}
@@ -308,9 +308,20 @@ func (genericPipeline *GenericPipeline) getRemoteHlvInfo(spec *metadata.Replicat
 	select {
 	case latestTargetNotification = <-targetNotificationCh:
 		defer latestTargetNotification.Recycle()
-	case <-finCh:
-		// should be timed out
-		return false, nil, fmt.Errorf("getRemoteHlvInfo closed for %v", spec.UniqueId())
+		// Drain errCh just in case
+		select {
+		case <-errCh:
+		default:
+		}
+		break
+	default:
+		select {
+		case err = <-errCh:
+			return false, nil, err
+		case <-finCh:
+			// should be timed out
+			return false, nil, fmt.Errorf("getRemoteHlvInfo closed for %v", spec.UniqueId())
+		}
 	}
 
 	targetHlvEnable := latestTargetNotification.GetTargetEnableCrossClusterVersioning()

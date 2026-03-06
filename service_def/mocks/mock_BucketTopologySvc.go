@@ -450,7 +450,7 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketMaxVbCasStatFeed_Call) RunAndR
 }
 
 // SubscribeToRemoteBucketFeed provides a mock function with given fields: spec, subscriberId
-func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
+func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, chan error, error) {
 	ret := _m.Called(spec, subscriberId)
 
 	if len(ret) == 0 {
@@ -458,8 +458,9 @@ func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.Replicat
 	}
 
 	var r0 chan service_def.TargetNotification
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, error)); ok {
+	var r1 chan error
+	var r2 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, chan error, error)); ok {
 		return rf(spec, subscriberId)
 	}
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.TargetNotification); ok {
@@ -470,13 +471,21 @@ func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.Replicat
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, string) error); ok {
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, string) chan error); ok {
 		r1 = rf(spec, subscriberId)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(chan error)
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r2 = rf(spec, subscriberId)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // BucketTopologySvc_SubscribeToRemoteBucketFeed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubscribeToRemoteBucketFeed'
@@ -498,12 +507,12 @@ func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) Run(run func(spec 
 	return _c
 }
 
-func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) Return(_a0 chan service_def.TargetNotification, _a1 error) *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) Return(_a0 chan service_def.TargetNotification, _a1 chan error, _a2 error) *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, error)) *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call {
+func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, chan error, error)) *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call {
 	_c.Call.Return(run)
 	return _c
 }

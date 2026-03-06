@@ -576,9 +576,9 @@ func setupPausedStatsMocks(backfillSvc *service_def.BackfillReplSvc, remoteSvc *
 	bucketSvc.On("SubscribeToLocalBucketHighSeqnosFeed", mock.Anything, mock.Anything, mock.Anything).Run(func(mock.Arguments) {
 		ch <- notx
 	}).Return(ch, nil, nil)
-	bucketSvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	bucketSvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		ch <- notx
-	}).Return(ch, nil, nil)
+	}).Return(ch, nil)
 	bucketSvc.On("UnSubscribeToLocalBucketHighSeqnosFeed", mock.Anything, mock.Anything).Return(nil)
 	bucketSvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(nil)
 

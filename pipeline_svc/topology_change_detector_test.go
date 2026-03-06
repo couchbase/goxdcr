@@ -82,7 +82,7 @@ func TestMonitorTarget_InitOriginalMap_SameVBs(t *testing.T) {
 	targetVbUpdateCh := make(chan service_def.TargetNotification, 1)
 
 	// Setup bucket topology service mock
-	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", spec, mock.Anything).Return((chan service_def.TargetNotification)(targetVbUpdateCh), nil)
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", spec, mock.Anything).Return((chan service_def.TargetNotification)(targetVbUpdateCh), make(chan error, 1), nil)
 	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", spec, mock.Anything).Return(nil)
 
 	// Create mock target notification
@@ -184,7 +184,7 @@ func TestMonitorTarget_InitOriginalMap_DifferentVBs(t *testing.T) {
 	targetVbUpdateCh := make(chan service_def.TargetNotification, 1)
 
 	// Setup bucket topology service mock
-	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", spec, mock.Anything).Return((chan service_def.TargetNotification)(targetVbUpdateCh), nil)
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", spec, mock.Anything).Return((chan service_def.TargetNotification)(targetVbUpdateCh), make(chan error, 1), nil)
 	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", spec, mock.Anything).Return(nil)
 
 	// Create mock target notification

@@ -231,17 +231,29 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		return nil, nil, err
 	}
 
-	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, xdcrf.bucketSvcId)
+	targetBucketFeed, errCh, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {
 		xdcrf.logger.Errorf("Error subscribing to remote feed for spec %v", spec.Id)
 		return nil, nil, err
 	}
 	var latestTargetBucketTopology service_def.TargetNotification
 	defer xdcrf.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, xdcrf.bucketSvcId)
+	// The idea of subscription system is that if there's cached information from before, return that
+	// Only return error if the cached information doesn't exist
 	select {
 	case latestTargetBucketTopology = <-targetBucketFeed:
+		// Drain the errCh before unsubscription if it has anything
+		select {
+		case <-errCh:
+		default:
+		}
 	default:
-		return nil, nil, base.ErrorSourceBucketTopologyNotReady
+		select {
+		case err = <-errCh:
+			return nil, nil, err
+		default:
+			return nil, nil, base.ErrorTargetBucketTopologyNotReady
+		}
 	}
 	targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
 	defer latestTargetBucketTopology.Recycle()

@@ -2361,7 +2361,7 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		// we are using the remote feed instead, which has a dependency on the agent
 		// However, since this feed is supposed to have been initialized, just use
 		// current topology framework instead of exposing the underlying implementation details
-		targetBucketFeed, err := agent.bucketTopologySvc().SubscribeToRemoteBucketFeed(remoteOnlySpec, userAgentStr)
+		targetBucketFeed, errCh, err := agent.bucketTopologySvc().SubscribeToRemoteBucketFeed(remoteOnlySpec, userAgentStr)
 		if err != nil {
 			return nil, err
 		}
@@ -2369,8 +2369,19 @@ func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) 
 		defer agent.bucketTopologySvc().UnSubscribeRemoteBucketFeed(remoteOnlySpec, userAgentStr)
 		select {
 		case latestTargetBucketTopology = <-targetBucketFeed:
+			// Drain the errCh just in case
+			select {
+			case <-errCh:
+			default:
+			}
 		default:
-			return nil, base.ErrorTargetBucketTopologyNotReady
+			// Didn't receive a valid topology, check errors
+			select {
+			case err = <-errCh:
+				return nil, err
+			default:
+				return nil, base.ErrorTargetBucketTopologyNotReady
+			}
 		}
 		targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
 		defer latestTargetBucketTopology.Recycle()

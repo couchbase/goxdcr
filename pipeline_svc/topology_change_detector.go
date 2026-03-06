@@ -695,7 +695,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
-	targetVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+	targetVbUpdateCh, errCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
 	if subscribeErr != nil {
 		*initErr = subscribeErr
 		initWg.Done()
@@ -703,24 +703,35 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	}
 	initWg.Done()
 
-	// Init with initial info
-	firstNotification := <-targetVbUpdateCh
-	target_server_vb_map := firstNotification.GetTargetServerVBMap()
+	// Init with initial info - select on notification or error
+	select {
+	case firstNotification := <-targetVbUpdateCh:
+		target_server_vb_map := firstNotification.GetTargetServerVBMap()
 
-	// Wait for vblistOriginal to be done first
-	// monitorSource must have had occurred first already
-	<-top_detect_svc.vblistOriginalInitDone
+		// Wait for vblistOriginal to be done first
+		// monitorSource must have had occurred first already
+		<-top_detect_svc.vblistOriginalInitDone
 
-	switch top_detect_svc.variableVBMode {
-	case true:
-		top_detect_svc.target_vb_server_map_original = target_server_vb_map.CompileLookupIndex()
-	case false:
-		top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
-	}
-	top_detect_svc.targetKvVbMapOriginal = target_server_vb_map
+		switch top_detect_svc.variableVBMode {
+		case true:
+			top_detect_svc.target_vb_server_map_original = target_server_vb_map.CompileLookupIndex()
+		case false:
+			top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
+		}
+		top_detect_svc.targetKvVbMapOriginal = target_server_vb_map
 
-	if spec != nil && spec.Settings != nil {
-		top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
+		if spec != nil && spec.Settings != nil {
+			top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
+		}
+	case errFromErrCh := <-errCh:
+		*initErr = errFromErrCh
+		// unsubscribe before returning
+		unsubErr := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+		if unsubErr != nil {
+			top_detect_svc.Logger().Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), unsubErr)
+		}
+		initWg.Done()
+		return
 	}
 
 	go func() {
@@ -812,6 +823,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					}
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling target topology change. err=%v", err)
 				}
+			case topologyUpdateonceErr := <-errCh:
+				top_detect_svc.logger.Errorf("TopologyChangeDetectorSvc monitorTarget received error from errCh: %v", topologyUpdateonceErr)
 			}
 		}
 	}()

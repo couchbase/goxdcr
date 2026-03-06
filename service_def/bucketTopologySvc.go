@@ -28,7 +28,7 @@ type BucketTopologySvc interface {
 	SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, chan error, error)
-	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
+	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, chan error, error)
 	SubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, chan error, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error

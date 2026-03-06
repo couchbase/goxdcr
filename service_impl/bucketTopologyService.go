@@ -10,6 +10,7 @@ package service_impl
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -166,6 +167,11 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				}
 				err := statsProvider.Init()
 				if err != nil {
+					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
+						// IPv4 or IPv6 family only error means retrying is fruitless
+						// Let it pass and remote cluster will mark it as RC_ERROR
+						return nil
+					}
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
 					return err
 				}
@@ -247,8 +253,17 @@ func (b *BucketTopologyService) getStreamApiCallback(spec *metadata.ReplicationS
 		err := updater()
 		if err != nil {
 			b.logger.Errorf("StreamApi update for local BucketTopologySvcWatcher for bucket %v resulted in err '%v'", spec.SourceBucketName, err.Error())
+			watcher.latestCacheMtx.Lock()
+			watcher.latestErrMap[TOPOLOGY] = err
+			watcher.latestCacheMtx.Unlock()
+			watcher.topologyErrChsMtx.RLock()
+			watcher.sendErrorIfAnyAfterUpdate(err, watcher.topologyErrChs)
+			watcher.topologyErrChsMtx.RUnlock()
 			return
 		}
+		watcher.latestCacheMtx.Lock()
+		delete(watcher.latestErrMap, TOPOLOGY)
+		watcher.latestCacheMtx.Unlock()
 		watcher.latestCacheMtx.RLock()
 		notification := watcher.latestCached.Clone(1).(*Notification) // Set to 1 by default, changed later
 		watcher.latestCacheMtx.RUnlock()
@@ -697,16 +712,22 @@ func (b *BucketTopologyService) getRemoteWatcher(spec *metadata.ReplicationSpeci
 	return watcher, nil
 }
 
-func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
+func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, chan error, error) {
 	watcher, err := b.getRemoteWatcher(spec)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return watcher.registerAndGetCh(spec, subscriberId, TOPOLOGY, nil).(chan service_def.TargetNotification), nil
+	retCh := watcher.registerAndGetCh(spec, subscriberId, TOPOLOGY, nil).(chan service_def.TargetNotification)
+	errCh, err := watcher.registerAndGetErrCh(spec, subscriberId, TOPOLOGY)
+	if err != nil {
+		watcher.unregisterCh(spec, subscriberId, TOPOLOGY)
+		return nil, nil, err
+	}
+	return retCh, errCh, nil
 }
 
 func (b *BucketTopologyService) UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, TOPOLOGY, true /*isSource*/, false /* errChPresent */)
+	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, TOPOLOGY, true /*isSource*/, false /*errChPresent*/)
 }
 
 func (b *BucketTopologyService) SubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, chan error, error) {
@@ -766,7 +787,7 @@ func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpe
 }
 
 func (b *BucketTopologyService) UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, TOPOLOGY, false /*isSource*/, false /*errChPresent*/)
+	return b.unSubscribeToBucketFeedInternal(spec, subscriberId, TOPOLOGY, false /*isSource*/, true /*errChPresent*/)
 }
 
 func (b *BucketTopologyService) unSubscribeToBucketFeedInternal(spec *metadata.ReplicationSpecification, subscriberId string, subscribeType string, isSource bool, errChPresent bool) error {
@@ -882,6 +903,11 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 				err := statsProvider.Init()
 				if err != nil {
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
+					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
+						// IPv4 or IPv6 family only error means retrying is fruitless
+						// Let it pass and remote cluster will mark it as RC_ERROR
+						return nil
+					}
 					return err
 				}
 				return nil
@@ -1278,12 +1304,19 @@ type BucketTopologySvcWatcher struct {
 	maxCasChs              map[string]interface{}
 
 	//error channels to notify the listeners of any errors during the update process
-	maxCasErrChsMtx sync.RWMutex
-	maxCasErrChs    map[string]chan error
+	topologyErrChsMtx sync.RWMutex
+	topologyErrChs    map[string]chan error
+	maxCasErrChsMtx   sync.RWMutex
+	maxCasErrChs      map[string]chan error
 
 	latestCacheMtx sync.RWMutex
 	latestCached   *Notification
 	cachePopulated bool
+
+	// Caches the latest error per update type (e.g. TOPOLOGY, MAXCAS) so that
+	// late subscribers who register after the error occurred can still receive it.
+	// Protected by latestCacheMtx.
+	latestErrMap map[string]error
 
 	logger       *log.CommonLogger
 	firstToStart uint32
@@ -1431,6 +1464,8 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		objsPool:                      sharedPool,
 		maxCasChs:                     map[string]interface{}{},
 		maxCasErrChs:                  map[string]chan error{},
+		topologyErrChs:                map[string]chan error{},
+		latestErrMap:                  map[string]error{},
 	}
 	watcher.latestCached.SetNumberOfReaders(1)
 	return watcher
@@ -1652,6 +1687,8 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	case TOPOLOGY:
 		channelsMap = bw.topologyNotifyChs
 		mutex = &bw.topologyNotifyMtx
+		errChannelsMap = bw.topologyErrChs
+		errMutex = &bw.topologyErrChsMtx
 	case HIGHSEQNOS:
 		channelsMap = bw.highSeqnosChs
 		mutex = &bw.highSeqnosChsMtx
@@ -1679,6 +1716,10 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	err := customUpdateFunc()
 	if err != nil {
 		bw.logger.Errorf("BucketTopologySvcWatcher for local? %v bucket %v updating resulted in err %v - bypassing notification", bw.source, bw.bucketName, err)
+		// Cache the error so that late subscribers can receive it upon registration
+		bw.latestCacheMtx.Lock()
+		bw.latestErrMap[updateType] = err
+		bw.latestCacheMtx.Unlock()
 		if errChannelsMap != nil {
 			errMutex.RLock()
 			bw.sendErrorIfAnyAfterUpdate(err, errChannelsMap)
@@ -1686,6 +1727,10 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		}
 		return
 	}
+	// Clear any previously cached error on success
+	bw.latestCacheMtx.Lock()
+	delete(bw.latestErrMap, updateType)
+	bw.latestCacheMtx.Unlock()
 	bw.latestCacheMtx.RLock()
 	notification := bw.latestCached.Clone(1).(*Notification) // Set to 1 by default, changed later
 	bw.latestCacheMtx.RUnlock()
@@ -1777,6 +1822,9 @@ func (bw *BucketTopologySvcWatcher) registerAndGetErrCh(spec *metadata.Replicati
 	var specifiedErrChs map[string]chan error
 	var mutex *sync.RWMutex
 	switch chType {
+	case TOPOLOGY:
+		specifiedErrChs = bw.topologyErrChs
+		mutex = &bw.topologyErrChsMtx
 	case MAXCAS:
 		specifiedErrChs = bw.maxCasErrChs
 		mutex = &bw.maxCasErrChsMtx
@@ -1785,10 +1833,24 @@ func (bw *BucketTopologySvcWatcher) registerAndGetErrCh(spec *metadata.Replicati
 		return nil, fmt.Errorf("failed to register error chan for subscriber %v. err=unknown channel type %v", subscriberId, chType)
 	}
 	fullSubscriberId := compileFullSubscriberId(spec, subscriberId)
+
+	// Check if there is already a cached error for this update type.
+	// If so, pre-seed the new channel so late subscribers get the error
+	// immediately, mirroring how registerAndGetCh pre-seeds with cached notifications.
+	bw.latestCacheMtx.RLock()
+	cachedErr := bw.latestErrMap[chType]
+	bw.latestCacheMtx.RUnlock()
+
 	mutex.Lock()
 	defer mutex.Unlock()
 	newErrCh := make(chan error, base.BucketTopologyWatcherErrChanLen)
 	specifiedErrChs[fullSubscriberId] = newErrCh
+	if cachedErr != nil {
+		select {
+		case newErrCh <- cachedErr:
+		default:
+		}
+	}
 	return newErrCh, nil
 }
 
@@ -1796,6 +1858,9 @@ func (bw *BucketTopologySvcWatcher) unregisterErrCh(spec *metadata.ReplicationSp
 	var specifiedErrChs map[string]chan error
 	var mutex *sync.RWMutex
 	switch chType {
+	case TOPOLOGY:
+		specifiedErrChs = bw.topologyErrChs
+		mutex = &bw.topologyErrChsMtx
 	case MAXCAS:
 		specifiedErrChs = bw.maxCasErrChs
 		mutex = &bw.maxCasErrChsMtx

@@ -153,7 +153,7 @@ func TestClusterBucketStatsProvider_Init_Success(t *testing.T) {
 	targetNotification.On("Recycle").Return()
 	targetNotificationCh <- targetNotification
 
-	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, nil)
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, make(chan error, 1), nil)
 	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(nil)
 
 	// Mock GetRemoteMemcachedConnection for memcached client creation
@@ -196,7 +196,7 @@ func TestClusterBucketStatsProvider_Init_TargetBucketTopologyNotReady(t *testing
 
 	// Mock empty notification channel (topology not ready)
 	targetNotificationCh := make(chan service_def.TargetNotification, 1)
-	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, nil)
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, make(chan error, 1), nil)
 	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(nil)
 
 	utils.On("ExecWithTimeout", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -1322,7 +1322,7 @@ func TestClusterBucketStatsProvider_SubscriptionCounter_Increment(t *testing.T) 
 	callCount := 0
 	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Run(func(args mock.Arguments) {
 		callCount++
-	}).Return(make(chan service_def.TargetNotification, 1), nil)
+	}).Return(make(chan service_def.TargetNotification, 1), make(chan error, 1), nil)
 	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(nil)
 
 	utils.On("ExecWithTimeout", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -1654,7 +1654,7 @@ func setupBasicMocksForProvider(provider *ClusterBucketStatsProvider, mockUtils 
 
 	targetNotificationCh := make(chan service_def.TargetNotification, 1)
 	targetNotificationCh <- mockTargetNotification
-	mockBucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.Anything, mock.Anything).Return(targetNotificationCh, nil)
+	mockBucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.Anything, mock.Anything).Return(targetNotificationCh, make(chan error, 1), nil)
 	mockBucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.Anything, mock.Anything).Return(nil)
 
 	// Setup memcached connection

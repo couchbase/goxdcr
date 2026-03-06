@@ -109,7 +109,7 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 			TargetBucketName:  provider.bucketName,
 		}
 		subsId := fmt.Sprintf("bucketInfoGetter_%d", atomic.AddUint64(&provider.subscriptionCounter, 1))
-		targetNotificationCh, err := provider.bucketTopologySvc.SubscribeToRemoteBucketFeed(remoteOnlySpec, subsId)
+		targetNotificationCh, errCh, err := provider.bucketTopologySvc.SubscribeToRemoteBucketFeed(remoteOnlySpec, subsId)
 		if err != nil {
 			return nil, err
 		}
@@ -119,9 +119,21 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 		case latestTargetBucketTopology = <-targetNotificationCh:
 			defer latestTargetBucketTopology.Recycle()
 			kvVBMap := latestTargetBucketTopology.GetTargetServerVBMap()
+			// The idea of subscription system is that if there's cached information from before, return that
+			// Only return error if the cached information doesn't exist
+			// Drain the errCh before unsubscription if it has anything
+			select {
+			case <-errCh:
+			default:
+			}
 			return kvVBMap.Clone(), nil
 		default:
-			return nil, base.ErrorTargetBucketTopologyNotReady
+			select {
+			case errFromErrCh := <-errCh:
+				return nil, errFromErrCh
+			default:
+				return nil, base.ErrorTargetBucketTopologyNotReady
+			}
 		}
 	})
 
