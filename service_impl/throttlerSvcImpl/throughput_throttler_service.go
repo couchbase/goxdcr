@@ -181,9 +181,18 @@ func (throttler *ThroughputThrottler) updateOnce() {
 		baseQuota := throughput_limit / int64(base.NumberOfSlotsForThroughputThrottling)
 		remainder := throughput_limit % int64(base.NumberOfSlotsForThroughputThrottling)
 
-		// If the throughput limit is very low and the quota is depleted, inject a minimal quota to unblock processing
-		if throughput_limit < int64(base.NumberOfSlotsForThroughputThrottling) && currentQuota == 0 {
+		// If the throughput limit is very low (less than one token per slot), inject exactly 1 token
+		// per slot unconditionally. This ensures consumers are unblocked at every slot tick regardless
+		// of whether the previous token was already consumed.
+		//
+		// We cap at NumberOfSlotsForThroughputThrottling (rather than throughput_limit) so that
+		// tokens can accumulate up to one per slot without being immediately capped back to the
+		// sub-1-per-slot limit, while still preventing unbounded growth.
+		if throughput_limit < int64(base.NumberOfSlotsForThroughputThrottling) {
 			new_throughput_quota += 1
+			if new_throughput_quota > int64(base.NumberOfSlotsForThroughputThrottling) {
+				new_throughput_quota = int64(base.NumberOfSlotsForThroughputThrottling)
+			}
 		} else {
 			// Distribute the remainder tokens evenly across the initial slots in the cycle.
 			// The remainder is always in the range [1, base.NumberOfSlotsForThroughputThrottling - 1].
@@ -200,11 +209,11 @@ func (throttler *ThroughputThrottler) updateOnce() {
 				baseQuota += 1
 			}
 			new_throughput_quota += baseQuota
-		}
 
-		if new_throughput_quota > throughput_limit {
-			// keep quota below limit
-			new_throughput_quota = throughput_limit
+			if new_throughput_quota > throughput_limit {
+				// keep quota below limit
+				new_throughput_quota = throughput_limit
+			}
 		}
 		if atomic.CompareAndSwapInt64(&throttler.throughput_quota, currentQuota, new_throughput_quota) {
 			break
