@@ -3225,13 +3225,14 @@ func (docMeta *DocumentMetadata) IsLocked() bool {
 }
 
 func IsDocLocked(resp *mc.MCResponse) bool {
-	if resp.Opcode == GET_WITH_META && resp.Cas == MaxCas {
-		return true
-	} else if (resp.Opcode == mc.SUBDOC_MULTI_LOOKUP || resp.Opcode == mc.GETEX) &&
-		resp.Status == mc.LOCKED {
-		return true
+	switch resp.Opcode {
+	case GET_WITH_META, mc.GETEX:
+		return resp.Cas == MaxCas
+	case mc.SUBDOC_MULTI_LOOKUP:
+		return resp.Status == mc.LOCKED || resp.Cas == MaxCas
+	default:
+		return false
 	}
-	return false
 }
 
 type SubdocOpType uint8
