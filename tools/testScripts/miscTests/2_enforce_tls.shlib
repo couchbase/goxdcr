@@ -161,7 +161,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
 		exit 1
@@ -184,7 +184,7 @@ function testChangeTLS {
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
 		exit 1
@@ -204,7 +204,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
 		exit 1
@@ -225,7 +225,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"
 		exit 1
@@ -264,7 +264,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
 		exit 1
@@ -287,7 +287,7 @@ function testChangeTLS {
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
 		exit 1
@@ -307,7 +307,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
 		exit 1
@@ -328,7 +328,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"
 		exit 1
