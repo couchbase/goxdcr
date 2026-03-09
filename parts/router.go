@@ -503,7 +503,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.
 		}
 		if checkManifestId == targetManifestId {
 			// Only consolidate if the router's view of the target is agreed
-			c.brokenMapping.Consolidate(*brokenMappingsRO)
+			c.brokenMapping.Consolidate(*brokenMappingsRO, nil)
 		}
 		c.brokenDenyMtx.Unlock()
 	}

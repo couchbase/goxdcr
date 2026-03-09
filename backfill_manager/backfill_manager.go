@@ -1596,7 +1596,7 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 
 		// Add the newly identified backfill requirements to the existing requirements
 		// This ensures that recreated collections are properly backfilled
-		diffPair.Added.Consolidate(backfillsNeededDueToTargetRecreation)
+		diffPair.Added.Consolidate(backfillsNeededDueToTargetRecreation, nil)
 		backfillReq = diffPair
 	}
 

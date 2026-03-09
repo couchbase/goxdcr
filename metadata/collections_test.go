@@ -428,7 +428,7 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 	//Removed:
 	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1|
 
-	nsMap.Consolidate(nsMap2)
+	nsMap.Consolidate(nsMap2, nil)
 	assert.Equal(2, len(nsMap))
 	_, _, tgtList, exists := nsMap.Get(&defaultNamespace, nil)
 	assert.True(exists)

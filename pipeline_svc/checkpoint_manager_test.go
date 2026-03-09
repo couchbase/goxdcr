@@ -2231,3 +2231,782 @@ func TestCkptMgrNoPanicOnMissingTargetOpaque(t *testing.T) {
 		assert.Contains(err.Error(), "ValidateTargetOpaque: GlobalTimestamp is empty")
 	})
 }
+
+// TestLoadBrokenMappingCommit_SmallDataset tests loadBrokenMappingCommit with a small dataset
+// This test validates basic functionality with minimal records and mappings
+func TestLoadBrokenMappingCommit_SmallDataset(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_SmallDataset =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_SmallDataset =================")
+	assert := assert.New(t)
+
+	// Create checkpoint manager with necessary fields
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create a small broken mapping with 2 namespace mappings
+	brokenMap1 := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+	ns3, err := base.NewCollectionNamespaceFromString("scope2.collection1")
+	assert.Nil(err)
+
+	brokenMap1.AddSingleMapping(&ns1, &ns2)
+	brokenMap1.AddSingleMapping(&ns1, &ns3)
+
+	// Create a checkpoint record with broken mappings
+	// Need to set Target_vb_opaque to make it a traditional checkpoint
+	record1 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 1,
+			Seqno:         100,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "test_uuid_1",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   100,
+			TargetManifest: 10,
+		},
+	}
+	// Set the broken mappings using the public API
+	err = record1.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap1)
+	assert.Nil(err)
+	// Populate the SHA256 for the broken mapping
+	err = record1.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	// Create cacheLookupMap with 1 record for manifest ID 10
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[10] = metadata.CheckpointRecordsList{record1}
+
+	// Call loadBrokenMappingCommit
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 10)
+
+	// Verify the result
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(10), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 1) // One source namespace
+	// Verify the mapping contains the expected namespaces
+	_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	assert.True(exists)
+}
+
+// TestLoadBrokenMappingCommit_SmallDatasetMultipleRecords tests loadBrokenMappingCommit with small dataset
+// but multiple checkpoint records in the same manifest
+func TestLoadBrokenMappingCommit_SmallDatasetMultipleRecords(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_SmallDatasetMultipleRecords =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_SmallDatasetMultipleRecords =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create 3 different broken mappings for 3 records
+	brokenMap1 := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+	brokenMap1.AddSingleMapping(&ns1, &ns2)
+
+	brokenMap2 := make(metadata.CollectionNamespaceMapping)
+	ns3, err := base.NewCollectionNamespaceFromString("scope2.collection1")
+	assert.Nil(err)
+	ns4, err := base.NewCollectionNamespaceFromString("scope2.collection2")
+	assert.Nil(err)
+	brokenMap2.AddSingleMapping(&ns3, &ns4)
+
+	brokenMap3 := make(metadata.CollectionNamespaceMapping)
+	ns5, err := base.NewCollectionNamespaceFromString("scope3.collection1")
+	assert.Nil(err)
+	ns6, err := base.NewCollectionNamespaceFromString("scope3.collection2")
+	assert.Nil(err)
+	brokenMap3.AddSingleMapping(&ns5, &ns6)
+
+	// Create 3 checkpoint records with broken mappings
+	record1 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{Failover_uuid: 1, Seqno: 100},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_1",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   100,
+			TargetManifest: 20,
+		},
+	}
+	err = record1.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap1)
+	assert.Nil(err)
+	err = record1.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	record2 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{Failover_uuid: 2, Seqno: 200},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_2",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   200,
+			TargetManifest: 20,
+		},
+	}
+	err = record2.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap2)
+	assert.Nil(err)
+	err = record2.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	record3 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{Failover_uuid: 3, Seqno: 300},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_3",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   300,
+			TargetManifest: 20,
+		},
+	}
+	err = record3.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap3)
+	assert.Nil(err)
+	err = record3.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	// Create cacheLookupMap with 3 records for manifest ID 20
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[20] = metadata.CheckpointRecordsList{record1, record2, record3}
+
+	// Call loadBrokenMappingCommit
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 20)
+
+	// Verify the result - all 3 namespace sources should be consolidated
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(20), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 3) // Three source namespaces
+	_, _, _, exists1 := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	_, _, _, exists3 := ckmgr.cachedBrokenMap.brokenMap.Get(&ns3, nil)
+	_, _, _, exists5 := ckmgr.cachedBrokenMap.brokenMap.Get(&ns5, nil)
+	assert.True(exists1)
+	assert.True(exists3)
+	assert.True(exists5)
+}
+
+// TestLoadBrokenMappingCommit_MaxRecordsSmallMappings tests with up to 5 records (small dataset)
+// each with small broken mappings
+func TestLoadBrokenMappingCommit_MaxRecordsSmallMappings(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_MaxRecordsSmallMappings =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_MaxRecordsSmallMappings =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create 5 checkpoint records (max for this test) each with different broken mappings
+	var records metadata.CheckpointRecordsList
+	var allSourceNamespaces []*base.CollectionNamespace
+
+	for i := 0; i < 5; i++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+		// Each record has 2 namespace mappings
+		srcNs, err := base.NewCollectionNamespaceFromString(fmt.Sprintf("scope%d.collection1", i))
+		assert.Nil(err)
+		tgtNs, err := base.NewCollectionNamespaceFromString(fmt.Sprintf("scope%d.collection2", i))
+		assert.Nil(err)
+		brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+		allSourceNamespaces = append(allSourceNamespaces, &srcNs)
+
+		record := &metadata.CheckpointRecord{
+			SourceVBTimestamp: metadata.SourceVBTimestamp{
+				Failover_uuid: uint64(i + 1),
+				Seqno:         uint64((i + 1) * 100),
+			},
+			TargetVBTimestamp: metadata.TargetVBTimestamp{
+				Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+					Target_vb_uuid: fmt.Sprintf("uuid_%d", i),
+					Startup_time:   "2026-03-09",
+				},
+				Target_Seqno:   uint64((i + 1) * 100),
+				TargetManifest: 30,
+			},
+		}
+		err = record.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+		assert.Nil(err)
+		err = record.PopulateBrokenMappingSha()
+		assert.Nil(err)
+		records = append(records, record)
+	}
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[30] = records
+
+	// Call loadBrokenMappingCommit
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 30)
+
+	// Verify all records were processed and consolidated
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(30), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 5) // 5 source namespaces consolidated
+
+	for _, ns := range allSourceNamespaces {
+		_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(ns, nil)
+		assert.True(exists)
+	}
+}
+
+// TestLoadBrokenMappingCommit_LargeDatasetWithLargeMappings tests with large broken mappings
+// This exercises the compiledIndex creation and usage during Consolidate operations
+// Each record has many namespace mappings (simulating large broken mapping sets)
+func TestLoadBrokenMappingCommit_LargeDatasetWithLargeMappings(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_LargeDatasetWithLargeMappings =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_LargeDatasetWithLargeMappings =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create 5 checkpoint records, each with large broken mappings (2000+ entries each)
+	var records metadata.CheckpointRecordsList
+	numMappingsPerRecord := 2000 // Large number of mappings per record
+	var allSourceNamespaces []*base.CollectionNamespace
+	var namespaceCounter int
+
+	for recordIdx := 0; recordIdx < 5; recordIdx++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Each record creates 120 different namespace mappings
+		for mappingIdx := 0; mappingIdx < numMappingsPerRecord; mappingIdx++ {
+			srcStr := fmt.Sprintf("src_scope_%d_%d.src_col_%d", recordIdx, mappingIdx/10, mappingIdx)
+			tgtStr := fmt.Sprintf("tgt_scope_%d_%d.tgt_col_%d", recordIdx, mappingIdx/10, mappingIdx)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			// Only track first occurrence of each namespace
+			if mappingIdx == 0 {
+				allSourceNamespaces = append(allSourceNamespaces, &srcNs)
+			}
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+			namespaceCounter++
+		}
+
+		record := &metadata.CheckpointRecord{
+			SourceVBTimestamp: metadata.SourceVBTimestamp{
+				Failover_uuid: uint64(recordIdx + 100),
+				Seqno:         uint64((recordIdx + 1) * 1000),
+			},
+			TargetVBTimestamp: metadata.TargetVBTimestamp{
+				Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+					Target_vb_uuid: fmt.Sprintf("uuid_%d", recordIdx),
+					Startup_time:   "2026-03-09",
+				},
+				Target_Seqno:   uint64((recordIdx + 1) * 1000),
+				TargetManifest: 40,
+			},
+		}
+		err := record.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+		assert.Nil(err)
+		err = record.PopulateBrokenMappingSha()
+		assert.Nil(err)
+		records = append(records, record)
+	}
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[40] = records
+
+	// Call loadBrokenMappingCommit - this will exercise CreateLookupIndex and Consolidate
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 40)
+
+	// Verify the result
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(40), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	// We should have numMappingsPerRecord * 5 unique source namespaces (numMappingsPerRecord per record)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, numMappingsPerRecord*5)
+
+	// Count total target mappings across all sources
+	totalTargetCount := 0
+	for _, tgtList := range ckmgr.cachedBrokenMap.brokenMap {
+		totalTargetCount += len(tgtList)
+	}
+	assert.Equal(numMappingsPerRecord*5, totalTargetCount)
+}
+
+// TestLoadBrokenMappingCommit_LargeDatasetMixedScenario tests a complex scenario with:
+// - 5 checkpoint records (max allowed per checkpoint)
+// - Each record has very large broken mapping sets
+// - Some overlapping namespaces between records (testing Consolidate behavior)
+// - Exercises the compiledIndex lookup during consolidation
+func TestLoadBrokenMappingCommit_LargeDatasetMixedScenario(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_LargeDatasetMixedScenario =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_LargeDatasetMixedScenario =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create 5 checkpoint records with large overlapping broken mappings
+	var records metadata.CheckpointRecordsList
+	numMappingsPerRecord := 2500
+	sharedSourceNamespaces := make(map[int]*base.CollectionNamespace)
+
+	// Pre-create some shared source namespaces to be used across multiple records
+	for i := 0; i < 3; i++ {
+		sharedStr := fmt.Sprintf("shared_scope_%d.shared_col", i)
+		sharedNs, err := base.NewCollectionNamespaceFromString(sharedStr)
+		assert.Nil(err)
+		sharedSourceNamespaces[i] = &sharedNs
+	}
+
+	for recordIdx := 0; recordIdx < 5; recordIdx++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Add shared mappings to create overlap across records
+		for sharedIdx := 0; sharedIdx < 3; sharedIdx++ {
+			// Each record maps the shared source to different targets
+			for variantIdx := 0; variantIdx < 10; variantIdx++ {
+				tgtStr := fmt.Sprintf("tgt_shared_scope_%d_%d_%d.col_%d", sharedIdx, recordIdx, variantIdx, sharedIdx)
+				tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+				assert.Nil(err)
+				brokenMap.AddSingleMapping(sharedSourceNamespaces[sharedIdx], &tgtNs)
+			}
+		}
+
+		// Add unique mappings specific to this record
+		for mappingIdx := 0; mappingIdx < numMappingsPerRecord-30; mappingIdx++ {
+			srcStr := fmt.Sprintf("unique_src_scope_%d_%d.col_%d", recordIdx, mappingIdx/15, mappingIdx)
+			tgtStr := fmt.Sprintf("unique_tgt_scope_%d_%d.col_%d", recordIdx, mappingIdx/15, mappingIdx)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+		}
+
+		record := &metadata.CheckpointRecord{
+			SourceVBTimestamp: metadata.SourceVBTimestamp{
+				Failover_uuid: uint64(recordIdx + 1000),
+				Seqno:         uint64((recordIdx + 1) * 5000),
+			},
+			TargetVBTimestamp: metadata.TargetVBTimestamp{
+				Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+					Target_vb_uuid: fmt.Sprintf("uuid_%d", recordIdx),
+					Startup_time:   "2026-03-09",
+				},
+				Target_Seqno:   uint64((recordIdx + 1) * 5000),
+				TargetManifest: 50,
+			},
+		}
+		err := record.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+		assert.Nil(err)
+		err = record.PopulateBrokenMappingSha()
+		assert.Nil(err)
+		records = append(records, record)
+	}
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[50] = records
+
+	// Call loadBrokenMappingCommit with complex overlapping data
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 50)
+
+	// Verify the result
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(50), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+
+	// Verify that shared sources are consolidated properly
+	for sharedIdx := 0; sharedIdx < 3; sharedIdx++ {
+		sharedSrc := sharedSourceNamespaces[sharedIdx]
+		_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(sharedSrc, nil)
+		assert.True(exists)
+		// Each shared source should have 5*10 = 50 target mappings (5 records × 10 variants)
+		_, _, tgtList, existsFromGet := ckmgr.cachedBrokenMap.brokenMap.Get(sharedSrc, nil)
+		assert.True(existsFromGet)
+		assert.Equal(50, len(tgtList))
+	}
+
+	// Verify total number of source namespaces
+	// 3 shared + (5 * (numMappingsPerRecord-30)) unique sources
+	expectedUniqueSources := 3 + (5 * (numMappingsPerRecord - 30))
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, expectedUniqueSources)
+}
+
+// TestLoadBrokenMappingCommit_WithNilRecords tests handling of nil checkpoint records
+// Ensures robustness when records list contains nil entries
+func TestLoadBrokenMappingCommit_WithNilRecords(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_WithNilRecords =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_WithNilRecords =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create valid broken mappings
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope.collection")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope.collection2")
+	assert.Nil(err)
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	validRecord := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 1,
+			Seqno:         100,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "test_uuid",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   100,
+			TargetManifest: 60,
+		},
+	}
+	err = validRecord.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+	assert.Nil(err)
+	err = validRecord.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	// Create a list with nil and valid records
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[60] = metadata.CheckpointRecordsList{nil, validRecord, nil, validRecord}
+
+	// Call loadBrokenMappingCommit - should skip nil records without error
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 60)
+
+	// Verify that valid records were still processed
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(60), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 1)
+	_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	assert.True(exists)
+}
+
+// TestLoadBrokenMappingCommit_WithEmptyBrokenMappings tests handling of records with empty broken mappings
+// Ensures records with no broken mappings don't interfere with consolidation
+func TestLoadBrokenMappingCommit_WithEmptyBrokenMappings(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_WithEmptyBrokenMappings =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_WithEmptyBrokenMappings =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create one record with broken mappings and one with empty mappings
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope.collection")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope.collection2")
+	assert.Nil(err)
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	recordWithMappings := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 1,
+			Seqno:         100,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "test_uuid",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   100,
+			TargetManifest: 70,
+		},
+	}
+	err = recordWithMappings.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+	assert.Nil(err)
+	err = recordWithMappings.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	// Record with nil broken mappings
+	emptyRecord := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 2,
+			Seqno:         200,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "test_uuid_2",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   200,
+			TargetManifest: 70,
+		},
+	}
+
+	// Record with empty broken mappings
+	emptyMapRecord := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 3,
+			Seqno:         300,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "test_uuid_3",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   300,
+			TargetManifest: 70,
+		},
+	}
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[70] = metadata.CheckpointRecordsList{recordWithMappings, emptyRecord, emptyMapRecord}
+
+	// Call loadBrokenMappingCommit
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 70)
+
+	// Verify only the record with mappings was processed
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(70), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 1)
+	_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	assert.True(exists)
+}
+
+// TestLoadBrokenMappingCommit_MultiManifestSelection tests that only the highest manifestId is loaded
+// Ensures the function correctly filters to load only the highest manifest version
+func TestLoadBrokenMappingCommit_MultiManifestSelection(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_MultiManifestSelection =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_MultiManifestSelection =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create broken mappings for different manifest versions
+	brokenMapV1 := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("v1.col")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("v1.col2")
+	assert.Nil(err)
+	brokenMapV1.AddSingleMapping(&ns1, &ns2)
+
+	recordV1 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 1,
+			Seqno:         100,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "v1_uuid",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   100,
+			TargetManifest: 80,
+		},
+	}
+	err = recordV1.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMapV1)
+	assert.Nil(err)
+	err = recordV1.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	brokenMapV2 := make(metadata.CollectionNamespaceMapping)
+	ns3, err := base.NewCollectionNamespaceFromString("v2.col")
+	assert.Nil(err)
+	ns4, err := base.NewCollectionNamespaceFromString("v2.col2")
+	assert.Nil(err)
+	brokenMapV2.AddSingleMapping(&ns3, &ns4)
+
+	recordV2 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: 2,
+			Seqno:         200,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "v2_uuid",
+				Startup_time:   "2026-03-09",
+			},
+			Target_Seqno:   200,
+			TargetManifest: 90,
+		},
+	}
+	err = recordV2.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMapV2)
+	assert.Nil(err)
+	err = recordV2.PopulateBrokenMappingSha()
+	assert.Nil(err)
+
+	// Create cacheLookupMap with records from multiple manifest versions
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[80] = metadata.CheckpointRecordsList{recordV1}
+	cacheLookupMap[90] = metadata.CheckpointRecordsList{recordV2}
+
+	// Call loadBrokenMappingCommit with highest manifest ID 90
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 90)
+
+	// Verify that only V2 (manifest 90) was loaded
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(90), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 1)
+	_, _, _, exists3 := ckmgr.cachedBrokenMap.brokenMap.Get(&ns3, nil)
+	assert.True(exists3)
+	_, _, _, exists1 := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	assert.False(exists1)
+}
+
+// TestLoadBrokenMappingCommit_VeryLargeMappingCompilationIndex tests with extremely large mappings
+// to ensure the compiledIndex is properly created and used during Consolidate
+// 5 records × 200 mappings each = 1000 total mappings
+func TestLoadBrokenMappingCommit_VeryLargeMappingCompilationIndex(t *testing.T) {
+	fmt.Println("============== Test case start: TestLoadBrokenMappingCommit_VeryLargeMappingCompilationIndex =================")
+	defer fmt.Println("============== Test case end: TestLoadBrokenMappingCommit_VeryLargeMappingCompilationIndex =================")
+	assert := assert.New(t)
+
+	ckmgr := &CheckpointManager{
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create 5 checkpoint records with very large broken mappings (5000 mappings each)
+	var records metadata.CheckpointRecordsList
+	numMappingsPerRecord := 5000
+	uniqueSourceCount := 0
+
+	for recordIdx := 0; recordIdx < 5; recordIdx++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Create 200 unique namespace mappings per record
+		for mappingIdx := 0; mappingIdx < numMappingsPerRecord; mappingIdx++ {
+			srcStr := fmt.Sprintf("large_src_scope_%d_%d.large_src_col_%d", recordIdx, mappingIdx/20, mappingIdx%20)
+			tgtStr := fmt.Sprintf("large_tgt_scope_%d_%d.large_tgt_col_%d", recordIdx, mappingIdx/20, mappingIdx%20)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+
+			// Count unique sources
+			if mappingIdx == 0 {
+				uniqueSourceCount++
+			}
+		}
+
+		record := &metadata.CheckpointRecord{
+			SourceVBTimestamp: metadata.SourceVBTimestamp{
+				Failover_uuid: uint64(recordIdx + 500),
+				Seqno:         uint64((recordIdx + 1) * 10000),
+			},
+			TargetVBTimestamp: metadata.TargetVBTimestamp{
+				Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{
+					Target_vb_uuid: fmt.Sprintf("uuid_%d", recordIdx),
+					Startup_time:   "2026-03-09",
+				},
+				Target_Seqno:   uint64((recordIdx + 1) * 10000),
+				TargetManifest: 100,
+			},
+		}
+		err := record.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(brokenMap)
+		assert.Nil(err)
+		err = record.PopulateBrokenMappingSha()
+		assert.Nil(err)
+		records = append(records, record)
+	}
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+	cacheLookupMap[100] = records
+
+	// Call loadBrokenMappingCommit - compiledIndex will be created and exercised
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, 100)
+
+	// Verify the result
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(100), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	// We should have numMappingsPerRecord * 5 unique source namespaces
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, numMappingsPerRecord*5)
+
+	// Verify total target count
+	totalTargetCount := 0
+	for _, tgtList := range ckmgr.cachedBrokenMap.brokenMap {
+		totalTargetCount += len(tgtList)
+	}
+	assert.Equal(numMappingsPerRecord*5, totalTargetCount)
+}

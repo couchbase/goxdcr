@@ -207,7 +207,7 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	addedRemovedPair.Added = added
 	addedRemovedPair.Removed = removed
 
-	backfillsNeeded.Consolidate(added)
+	backfillsNeeded.Consolidate(added, nil)
 
 	// Then, find out if any target Collection UID changed from underneath the manifests
 	// These target collections need to be backfilled that couldn't be discovered from the namespacemappings
@@ -218,7 +218,7 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	}
 	backfillsNeededDueToTargetRecreation := srcToTargetMapping.GetSubsetBasedOnSpecifiedTargets(changedTargets)
 
-	backfillsNeeded.Consolidate(backfillsNeededDueToTargetRecreation)
+	backfillsNeeded.Consolidate(backfillsNeededDueToTargetRecreation, nil)
 	return backfillsNeeded, addedRemovedPair, nil
 }
 
@@ -1843,11 +1843,18 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 	return
 }
 
-func (c *CollectionNamespaceMapping) Consolidate(otherRO CollectionNamespaceMapping) {
+//
+// Consolidate will add any new mappings from otherRO into c.
+// If a source namespace exists in both c and otherRO, their target lists will be consolidated.
+// The index is optional. If provided, it will be updated with any new source namespaces added to c.
+func (c *CollectionNamespaceMapping) Consolidate(otherRO CollectionNamespaceMapping, index CollectionNamespaceMappingIdx) {
 	for otherSrcRO, otherTgtListRO := range otherRO {
-		srcPtr, _, tgtList, exists := c.Get(otherSrcRO.CollectionNamespace, nil)
+		srcPtr, _, tgtList, exists := c.Get(otherSrcRO.CollectionNamespace, index)
 		if !exists {
 			(*c)[otherSrcRO] = otherTgtListRO.Clone()
+			if index != nil {
+				index.Add(otherSrcRO)
+			}
 		} else if !tgtList.IsSame(otherTgtListRO) {
 			tgtList.Consolidate(otherTgtListRO)
 			(*c)[srcPtr] = tgtList
@@ -1941,6 +1948,14 @@ func (c *CollectionNamespaceMapping) ToExternalMap() map[string][]string {
 
 // A collection namespace Mapping Index - The key will be simply "Scope.Collection"
 type CollectionNamespaceMappingIdx map[string]*SourceNamespace
+
+func (ci *CollectionNamespaceMappingIdx) Add(src *SourceNamespace) {
+	if ci == nil {
+		return
+	}
+
+	(*ci)[src.ToIndexString()] = src
+}
 
 func (c CollectionNamespaceMapping) CreateLookupIndex() CollectionNamespaceMappingIdx {
 	idx := make(CollectionNamespaceMappingIdx)
@@ -3049,7 +3064,7 @@ func (p *PipelineEventBrokenMap) RegisterDismissAction(level int, srcDesc string
 
 	p.cachedBrokenMapMtx.Lock()
 	defer p.cachedBrokenMapMtx.Unlock()
-	p.userDismissedBrokenMap.Consolidate(userRequestedMapping)
+	p.userDismissedBrokenMap.Consolidate(userRequestedMapping, nil)
 	p.userDismissedBrokenIdx = p.userDismissedBrokenMap.CreateLookupIndex()
 	p.userDismissUpdated = true
 	return nil

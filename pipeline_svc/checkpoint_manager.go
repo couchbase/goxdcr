@@ -1364,6 +1364,7 @@ func (ckmgr *CheckpointManager) loadBrokenMappingsLegacy(ckptDocs map[uint16]*me
 func (ckmgr *CheckpointManager) loadBrokenMappingCommit(cacheLookupMap map[uint64]metadata.CheckpointRecordsList, highestManifestId uint64) {
 	ckmgr.cachedBrokenMap.lock.Lock()
 	defer ckmgr.cachedBrokenMap.lock.Unlock()
+	compiledIndex := ckmgr.cachedBrokenMap.brokenMap.CreateLookupIndex()
 
 	listToTraverse := cacheLookupMap[highestManifestId]
 	for _, record := range listToTraverse {
@@ -1383,7 +1384,7 @@ func (ckmgr *CheckpointManager) loadBrokenMappingCommit(cacheLookupMap map[uint6
 			if brokenMapping == nil || len(*brokenMapping) == 0 {
 				continue
 			}
-			ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMapping)
+			ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMapping, compiledIndex)
 		}
 	}
 	ckmgr.cachedBrokenMap.correspondingTargetManifest = highestManifestId
@@ -1482,14 +1483,14 @@ func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata
 	if ckptMgr.cachedBrokenMap.correspondingTargetManifest == onePair.ManifestId {
 		// Consolidate
 		if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
-			ckptMgr.cachedBrokenMap.brokenMap.Consolidate(*onePair.BrokenMap)
+			ckptMgr.cachedBrokenMap.brokenMap.Consolidate(*onePair.BrokenMap, nil)
 		}
 	} else if onePair.ManifestId < ckptMgr.cachedBrokenMap.correspondingTargetManifest {
 		// Put in history
 		brokenMapHistory, historyExists := ckptMgr.cachedBrokenMap.brokenMapHistories[onePair.ManifestId]
 		if historyExists {
 			if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
-				brokenMapHistory.Consolidate(*onePair.BrokenMap)
+				brokenMapHistory.Consolidate(*onePair.BrokenMap, nil)
 			}
 		} else {
 			ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
@@ -2761,7 +2762,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			// No need to re-check because OnEvent() is serialized
 			// First, absorb any new broken mappings (case 1 and 2)
-			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
+			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap, nil)
 
 			// Consider three collection routers: A, B, and C.
 			// - A and B initially had broken mappings: c1 -> c1 and c2 -> c2.
