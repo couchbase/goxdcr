@@ -1636,9 +1636,16 @@ function changeRemoteClusterReferenceToSecure {
 	fi
 
 	echo "Change remote cluster reference from $source to $target ($targetHost:$targetPort) to SECURE"
-	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${remoteClusterCert}\""
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+
+	# Check if target cluster requires restrictHostnameReplace
+	local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=\${remoteClusterCert}\""
+
+	if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+		curlCmd="$curlCmd -d restrictHostnameReplace=1"
+	fi
+
+	echo "$curlCmd"
+	eval "$curlCmd"
 }
 
 function testIdleXdcrCPU {

@@ -253,17 +253,8 @@ func (b *BucketTopologyService) getStreamApiCallback(spec *metadata.ReplicationS
 		err := updater()
 		if err != nil {
 			b.logger.Errorf("StreamApi update for local BucketTopologySvcWatcher for bucket %v resulted in err '%v'", spec.SourceBucketName, err.Error())
-			watcher.latestCacheMtx.Lock()
-			watcher.latestErrMap[TOPOLOGY] = err
-			watcher.latestCacheMtx.Unlock()
-			watcher.topologyErrChsMtx.RLock()
-			watcher.sendErrorIfAnyAfterUpdate(err, watcher.topologyErrChs)
-			watcher.topologyErrChsMtx.RUnlock()
 			return
 		}
-		watcher.latestCacheMtx.Lock()
-		delete(watcher.latestErrMap, TOPOLOGY)
-		watcher.latestCacheMtx.Unlock()
 		watcher.latestCacheMtx.RLock()
 		notification := watcher.latestCached.Clone(1).(*Notification) // Set to 1 by default, changed later
 		watcher.latestCacheMtx.RUnlock()

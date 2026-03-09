@@ -192,13 +192,21 @@ function changeRemoteClusterReference {
 	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 
 	echo "Change remote cluster reference $target to $targetHost" >&1
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+
+	# Check if target cluster requires restrictHostnameReplace
+	local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW"
+
+	if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+		curlCmd="$curlCmd -d restrictHostnameReplace=1"
+	fi
+
+	eval "$curlCmd"
 }
 
-function testChangeRemote {
-	echo "=================================================="
-	echo "====== Change Remote Cluster Reference Test ======"
-	echo "=================================================="
+function testChangeRemoteC1FQDN {
+	echo "==============================================================="
+	echo "====== Change Remote Cluster Reference Test C1 with FQDN ======"
+	echo "==============================================================="
 
 	echo "Create ipv4 remote and replication"
 	sleep 5
@@ -256,40 +264,6 @@ function testChangeRemote {
 	fi
 
 	echo
-	echo "===== Test 4: C1 ipv4 (only=false), C2:ipv6 only: existing remote with ipv4 address will not be able to connect."
-	setIpFamily "C2" "ipv6" "true"
-	sleep 30
-	result=$(getRemoteClusters "C1")
-	count=$(echo $result | grep -c "RC_ERROR")
-	if (($count == 0)); then
-		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
-		exit 1
-	fi
-	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "User intervention may be required")
-	if (($count == 0)); then
-		echo "Change C2 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
-		exit 1
-	fi
-
-	echo
-	echo "===== Test 5: C1 ipv4 (only=false), Change C2 to default. The previous erroring replication should work now."
-	setIpFamily "C2" "ipv4" "false"
-	sleep 20
-	result=$(checkReplicationInfos "C1")
-	count=$(echo $result | grep -c "User intervention may be required")
-	if (($count != 0)); then
-		echo "Change C2 to ipv4 only should cause existing replication connection issues to go away but replicationInfos returned $result"
-		exit 1
-	fi
-	result=$(getRemoteClusters "C1")
-	count=$(echo $result | grep -c "RC_OK")
-	if (($count == 0)); then
-		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
-		exit 1
-	fi
-
-	echo
 	echo "===== Test 6: C1 ipv6 only, C2 default: The previous ipv4 address will fail"
 	setIpFamily "C1" "ipv6" "true"
 	sleep 20
@@ -341,9 +315,80 @@ function testChangeRemote {
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 
-	echo "========================================================="
-	echo "====== Passed Change Remote Cluster Reference Test ======"
-	echo "========================================================="
+	echo "==============================================================="
+	echo "====== Passed Change Remote Cluster Reference Test Part1 ======"
+	echo "==============================================================="
+}
+
+function testChangeRemoteC2FQDN {
+	echo "==============================================================="
+	echo "====== Change Remote Cluster Reference Test C2 with FQDN ======"
+	echo "==============================================================="
+
+	echo "Create ipv4 remote and replication"
+	sleep 5
+	# cleanup = false so the replication will exist for the following test case.
+	replicationWithIpAddress "127.0.0.1" "false"
+
+	echo
+	echo "===== Test 4: C1 ipv4 (only=false), C2:ipv6 only: existing remote with ipv4 address will not be able to connect."
+	setIpFamily "C2" "ipv6" "true"
+	sleep 30
+	result=$(getRemoteClusters "C1")
+	# This test does something interesting where C2 has the hostname set up to be an FQDN
+	# while the source remote cluster ref is created with "do not replace" turned on
+	# 2026-03-05T15:56:36.305-08:00 INFO GOXDCR.RemClusterSvc: remoteCluster/9lQxsIflsArllryza82uPzpbgnKykHybJ__FS3JQSf4= useExternal: false cachedRefNodesList in refresh: [[node9001.localhost:9001 ]]
+	# So, the node list returned will technically have 2 entries
+	#
+	# node Status is map[127.0.0.1:9001:RC_ERROR node9001.localhost:9001:RC_OK]. ConnErrCount is 1 totalCount is 2
+	# Because of this, as long as RC_OK doesn't show up, we're ok
+	count=$(echo $result | grep -c "RC_OK")
+	if (($count > 0)); then
+		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR or RC_DEGRADED but it returned $result"
+		exit 1
+	fi
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 5: C1 ipv4 (only=false), Change C2 to default. The previous erroring replication should work now."
+	setIpFamily "C2" "ipv4" "false"
+	sleep 20
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count != 0)); then
+		echo "Change C2 to ipv4 only should cause existing replication connection issues to go away but replicationInfos returned $result"
+		exit 1
+	fi
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_OK")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_OK but it returned $result"
+		exit 1
+	fi
+
+}
+
+function internalPresetup {
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	sleep 10
+	runCbWorkloadGenBucket "C1" "B1" 1000
+}
+
+function internalCleanup {
+	cleanupBuckets
+	unset CLUSTER_NAME_FQDN_MAP
+	declare -gA CLUSTER_NAME_FQDN_MAP
+	hardResetNodes
+	sleep 10
 }
 
 function runTestCase {
@@ -361,27 +406,16 @@ function runTestCase {
 	testCreateRemote
 
 	# For changing remote test, the source needs to use FQDN for hostname but the target cannot
-	cleanupBuckets
-	unset CLUSTER_NAME_FQDN_MAP
-	declare -gA CLUSTER_NAME_FQDN_MAP
-	hardResetNodes
-
-	sleep 10
-
+	internalCleanup
 	CLUSTER_NAME_FQDN_MAP=(["C1"]="node9000.localhost")
-	setupTopologies
-	if (($? != 0)); then
-		exit $?
-	fi
+	internalPresetup
+	testChangeRemoteC1FQDN
+	internalCleanup
 
-	sleep 10
-
-	runCbWorkloadGenBucket "C1" "B1" 1000
-
-	testChangeRemote
-
-	cleanupBuckets
-	unset CLUSTER_NAME_FQDN_MAP
-	declare -gA CLUSTER_NAME_FQDN_MAP
-	hardResetNodes
+	internalCleanup
+	CLUSTER_NAME_FQDN_MAP=(["C2"]="node9001.localhost")
+	CLUSTER_NAME_NO_REPLACE_MAP=(["C2"]="true")
+	internalPresetup
+	testChangeRemoteC2FQDN
+	internalCleanup
 }

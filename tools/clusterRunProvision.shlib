@@ -45,6 +45,7 @@ RR_REST="settings/resourceManagement/bucket/residentRatio"
 declare -A CLUSTER_NAME_HOST_MAP
 declare -A CLUSTER_NAME_PORT_MAP
 declare -A CLUSTER_NAME_SSLPORT_MAP
+declare -A CLUSTER_NAME_NO_REPLACE_MAP
 declare -A CLUSTER_SETUP_DONE_MAP
 declare -A CLUSTER_NAME_SECURE_PORT_MAP
 declare -A CLUSTER_NAME_XDCR_PORT_MAP
@@ -1725,7 +1726,15 @@ function createRemoteClusterReference {
 	fi
 
 	echo "Creating remote cluster reference from $source to $target using $remoteUser"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword
+
+	# Check if target cluster requires restrictHostnameReplace
+	local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword"
+
+	if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+		curlCmd="$curlCmd -d restrictHostnameReplace=1"
+	fi
+
+	eval "$curlCmd"
 	echo ""
 }
 
@@ -1744,7 +1753,15 @@ function createHalfSecureRemoteClusterReference {
 	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 
 	echo "Creating half secure remote cluster reference from $source to $target using $remoteUser"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword -d encryptionType=half -d demandEncryption=on
+
+	# Check if target cluster requires restrictHostnameReplace
+	local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$remoteUser -d password=$remotePassword -d encryptionType=half -d demandEncryption=on"
+
+	if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+		curlCmd="$curlCmd -d restrictHostnameReplace=1"
+	fi
+
+	eval "$curlCmd"
 	echo ""
 }
 
@@ -3439,15 +3456,28 @@ function createSecureRemoteClusterReference {
 
 	if [[ -z "${clientCertFile:-}" ]]; then
 		echo "Creating SECURE remote cluster reference from $source to $target"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+
+		# Check if target cluster requires restrictHostnameReplace
+		local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=\${targetHost}:\${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=\${remoteClusterCert}\""
+
+		if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+			curlCmd="$curlCmd -d restrictHostnameReplace=1"
+		fi
+
+		eval "$curlCmd"
 	else
 		echo "Creating SECURE remote cluster reference from $source to $target ($targetHost) using client key $clientKeyFile and cert $clientCertFile"
 		local clientKeyData="$(cat $clientKeyFile)"
 		local clientCertData="$(cat $clientCertFile)"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} \
-			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}" \
-			--data-urlencode "clientKey=${clientKeyData}" --data-urlencode "clientCertificate=${clientCertData}"
+
+		# Check if target cluster requires restrictHostnameReplace
+		local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=\${targetHost}:\${targetSecurePort} -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=\${remoteClusterCert}\" --data-urlencode \"clientKey=\${clientKeyData}\" --data-urlencode \"clientCertificate=\${clientCertData}\""
+
+		if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+			curlCmd="$curlCmd -d restrictHostnameReplace=1"
+		fi
+
+		eval "$curlCmd"
 	fi
 
 }
@@ -3499,15 +3529,28 @@ function editSecureRemoteClusterReference {
 
 	if [[ -z "${clientCertFile:-}" ]]; then
 		echo "Editing remote cluster reference from $source to $target"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=${targetHost}:${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+
+		# Check if target cluster requires restrictHostnameReplace
+		local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=\${targetHost}:\${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=\${remoteClusterCert}\""
+
+		if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+			curlCmd="$curlCmd -d restrictHostnameReplace=1"
+		fi
+
+		eval "$curlCmd"
 	else
 		echo "Editing remote cluster reference from $source to $target ($targetHost) using client key $clientKeyFile and cert $clientCertFile"
 		local clientKeyData="$(cat $clientKeyFile)"
 		local clientCertData="$(cat $clientCertFile)"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=${targetHost}:${targetSecurePort} \
-			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}" \
-			--data-urlencode "clientKey=${clientKeyData}" --data-urlencode "clientCertificate=${clientCertData}"
+
+		# Check if target cluster requires restrictHostnameReplace
+		local curlCmd="$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=\${targetHost}:\${targetSecurePort} -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=\${remoteClusterCert}\" --data-urlencode \"clientKey=\${clientKeyData}\" --data-urlencode \"clientCertificate=\${clientCertData}\""
+
+		if [[ "${CLUSTER_NAME_NO_REPLACE_MAP[$target]:-}" == "true" ]]; then
+			curlCmd="$curlCmd -d restrictHostnameReplace=1"
+		fi
+
+		eval "$curlCmd"
 	fi
 
 }
