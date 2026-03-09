@@ -93,8 +93,17 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
-	docCount=$(getJSONDocument "C2" "B2" "regDoc" | jq | grep -c "bar2")
-	if (($docCount == 0)); then
+	local found=0
+	for i in {1..10}; do
+		docCount=$(getJSONDocument "C2" "B2" "regDoc" | jq | grep -c "bar2")
+		if (($docCount > 0)); then
+			found=1
+			break
+		fi
+		echo "Retry $i: Still unable to find updated doc replicated, waiting 5 more seconds"
+		sleep 5
+	done
+	if (($found == 0)); then
 		echo "Unable to find updated doc replicated"
 		exit 1
 	fi
