@@ -377,6 +377,8 @@ function testNegativeCases {
 		exit $?
 	fi
 
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 15
 	createRemoteClusterReference "C1" "C2"
 	err="cLogPauseReplThreshold and cLogMonitorDuration settings should be enabled together by configuring a positive integer"
 
