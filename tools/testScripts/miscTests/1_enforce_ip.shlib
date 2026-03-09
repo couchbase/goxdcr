@@ -138,7 +138,9 @@ function testCreateRemote {
 	echo "===== Test 3: C1:ipv4 only, C2 default: localhost address works."
 	# CLUSTER_NAME_FQDN_MAP exists, no need to pass
 	replicationWithIpAddress
+}
 
+function testCreateRemoteC2FQDN {
 	echo
 	echo "===== Test 4: C1:ipv4 only, C2 ipv6 only: both address families fail."
 	setIpFamily "C2" "ipv6" "true"
@@ -163,10 +165,13 @@ function testCreateRemote {
 		echo "Remote cluster reference C2 at C1 was created but should not"
 		exit 1
 	fi
+}
 
+function testCreateRemoteC1AndC2FQDN {
 	echo
 	echo "===== Test 5: C1:ipv6 only, C2:ipv6 only: localhost works."
 	setIpFamily "C1" "ipv6" "true"
+	setIpFamily "C2" "ipv6" "true"
 	sleep 10
 	replicationWithIpAddress "localhost"
 
@@ -404,6 +409,20 @@ function runTestCase {
 	runCbWorkloadGenBucket "C1" "B1" 1000
 
 	testCreateRemote
+
+	internalCleanup
+	CLUSTER_NAME_FQDN_MAP=(["C2"]="node9001.localhost")
+	CLUSTER_NAME_NO_REPLACE_MAP=(["C2"]="true")
+	internalPresetup
+	testCreateRemoteC2FQDN
+	internalCleanup
+
+	internalCleanup
+	CLUSTER_NAME_FQDN_MAP=(["C1"]="node9000.localhost" ["C2"]="node9001.localhost")
+	CLUSTER_NAME_NO_REPLACE_MAP=(["C1"]="true" ["C2"]="true")
+	internalPresetup
+	testCreateRemoteC1AndC2FQDN
+	internalCleanup
 
 	# For changing remote test, the source needs to use FQDN for hostname but the target cannot
 	internalCleanup
