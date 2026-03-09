@@ -2931,13 +2931,15 @@ func (docMeta *DocumentMetadata) IsLocked() bool {
 	return docMeta != nil && docMeta.Cas == MaxCas
 }
 
-func IsDocLocked(resp *gomemcached.MCResponse) bool {
-	if resp.Opcode == GET_WITH_META && resp.Cas == MaxCas {
-		return true
-	} else if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP && resp.Status == gomemcached.LOCKED {
-		return true
+func IsDocLocked(resp *mc.MCResponse) bool {
+	switch resp.Opcode {
+	case GET_WITH_META:
+		return resp.Cas == MaxCas
+	case mc.SUBDOC_MULTI_LOOKUP:
+		return resp.Status == mc.LOCKED || resp.Cas == MaxCas
+	default:
+		return false
 	}
-	return false
 }
 
 type SubdocOpType uint8
