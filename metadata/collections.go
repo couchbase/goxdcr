@@ -1949,6 +1949,7 @@ func (c *CollectionNamespaceMapping) ToExternalMap() map[string][]string {
 // A collection namespace Mapping Index - The key will be simply "Scope.Collection"
 type CollectionNamespaceMappingIdx map[string]*SourceNamespace
 
+// The index should not be used concurrently since this Add() method is not thread safe
 func (ci *CollectionNamespaceMappingIdx) Add(src *SourceNamespace) {
 	if ci == nil {
 		return

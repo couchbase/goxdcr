@@ -3010,3 +3010,554 @@ func TestLoadBrokenMappingCommit_VeryLargeMappingCompilationIndex(t *testing.T) 
 	}
 	assert.Equal(numMappingsPerRecord*5, totalTargetCount)
 }
+
+// TestRestoreBrokenMappingManifests_SmallTraditionalPair tests restoreBrokenMappingManifests with a small traditional broken map
+// This test validates basic functionality of restoring a traditional (non-global) broken mapping
+func TestRestoreBrokenMappingManifests_SmallTraditionalPair(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_SmallTraditionalPair =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_SmallTraditionalPair =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	updateSettingsCalled := false
+	var capturedSettings map[string]interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		updateSettingsCalled = true
+		capturedSettings = settings
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create a small traditional broken mapping with 2 namespace mappings
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	// Create traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 10,
+		BrokenMap:  &brokenMap,
+	}
+
+	// Empty global pairs
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	// Call restoreBrokenMappingManifests
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify UpdateSettings was called with traditional mapping
+	assert.True(updateSettingsCalled)
+	assert.NotNil(capturedSettings)
+	assert.Contains(capturedSettings, metadata.BrokenMappingsUpdateKey)
+
+	// Verify the broken map was restored to the cachedBrokenMap
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(10), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, 1)
+	_, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(&ns1, nil)
+	assert.True(exists)
+}
+
+// TestRestoreBrokenMappingManifests_LargeTraditionalPair tests restoreBrokenMappingManifests with a large traditional broken map
+// This test validates the function handles large broken mapping sets with many namespace mappings
+func TestRestoreBrokenMappingManifests_LargeTraditionalPair(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_LargeTraditionalPair =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_LargeTraditionalPair =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	updateSettingsCalled := false
+	var capturedSettings map[string]interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		updateSettingsCalled = true
+		capturedSettings = settings
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create a large traditional broken mapping with 1000 namespace mappings
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	numMappings := 1000
+	var sourceNamespaces []*base.CollectionNamespace
+
+	for i := 0; i < numMappings; i++ {
+		srcStr := fmt.Sprintf("scope%d.src_col_%d", i/100, i)
+		tgtStr := fmt.Sprintf("scope%d.tgt_col_%d", i/100, i)
+
+		srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+		assert.Nil(err)
+		tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+		assert.Nil(err)
+
+		brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+
+		// Track first occurrence of each source namespace
+		if i == 0 {
+			sourceNamespaces = append(sourceNamespaces, &srcNs)
+		}
+	}
+
+	// Create traditional pair with large broken map
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 20,
+		BrokenMap:  &brokenMap,
+	}
+
+	// Empty global pairs
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	// Call restoreBrokenMappingManifests
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify UpdateSettings was called with traditional mapping
+	assert.True(updateSettingsCalled)
+	assert.NotNil(capturedSettings)
+	assert.Contains(capturedSettings, metadata.BrokenMappingsUpdateKey)
+
+	// Verify the large broken map was restored to the cachedBrokenMap
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	assert.Equal(uint64(20), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	// Should have 1000 unique source namespaces (one per mapping)
+	assert.Len(ckmgr.cachedBrokenMap.brokenMap, numMappings)
+
+	// Verify total targets across all sources
+	totalTargets := 0
+	for _, tgtList := range ckmgr.cachedBrokenMap.brokenMap {
+		totalTargets += len(tgtList)
+	}
+	assert.Equal(numMappings, totalTargets)
+}
+
+// TestRestoreBrokenMappingManifests_SmallGlobalPairs tests restoreBrokenMappingManifests with small global broken maps
+// This test validates basic functionality of restoring global (scope-level) broken mappings
+func TestRestoreBrokenMappingManifests_SmallGlobalPairs(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_SmallGlobalPairs =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_SmallGlobalPairs =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	updateSettingsCalled := false
+	var capturedSettings map[string]interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		updateSettingsCalled = true
+		capturedSettings = settings
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create empty traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 0,
+		BrokenMap:  nil,
+	}
+
+	// Create small global pairs for 3 scopes
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	for scopeId := uint16(0); scopeId < 3; scopeId++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Create 2 namespace mappings per scope
+		for colIdx := 0; colIdx < 2; colIdx++ {
+			srcStr := fmt.Sprintf("scope%d.src_col_%d", scopeId, colIdx)
+			tgtStr := fmt.Sprintf("scope%d.tgt_col_%d", scopeId, colIdx)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+		}
+
+		pair := metadata.ManifestIdAndBrokenMapPair{
+			ManifestId: uint64(30 + scopeId),
+			BrokenMap:  &brokenMap,
+		}
+		globalPairs[scopeId] = pair
+	}
+
+	// Call restoreBrokenMappingManifests
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify UpdateSettings was called with global mapping
+	assert.True(updateSettingsCalled)
+	assert.NotNil(capturedSettings)
+	assert.Contains(capturedSettings, metadata.GlobalBrokenMappingUpdateKey)
+
+	// Verify the global broken maps were restored to the cachedBrokenMap
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	// The mapping should be updated with the latest scope's manifest ID
+	assert.Equal(uint64(32), ckmgr.cachedBrokenMap.correspondingTargetManifest)
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+}
+
+// TestRestoreBrokenMappingManifests_LargeGlobalPairs tests restoreBrokenMappingManifests with large global broken maps
+// This test validates handling of large global broken mappings with many scopes and namespace mappings each
+func TestRestoreBrokenMappingManifests_LargeGlobalPairs(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_LargeGlobalPairs =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_LargeGlobalPairs =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	updateSettingsCalled := false
+	var capturedSettings map[string]interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		updateSettingsCalled = true
+		capturedSettings = settings
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create empty traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 0,
+		BrokenMap:  nil,
+	}
+
+	// Create large global pairs for 10 scopes, each with 1000 mappings
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+	numScopes := 10
+	numMappingsPerScope := 1000
+
+	for scopeId := uint16(0); scopeId < uint16(numScopes); scopeId++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Create many namespace mappings per scope
+		for colIdx := 0; colIdx < numMappingsPerScope; colIdx++ {
+			srcStr := fmt.Sprintf("scope%d.src_col_%d", scopeId, colIdx)
+			tgtStr := fmt.Sprintf("scope%d.tgt_col_%d", scopeId, colIdx)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+		}
+
+		pair := metadata.ManifestIdAndBrokenMapPair{
+			ManifestId: uint64(40 + scopeId),
+			BrokenMap:  &brokenMap,
+		}
+		globalPairs[scopeId] = pair
+	}
+
+	// Call restoreBrokenMappingManifests
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify UpdateSettings was called with global mapping
+	assert.True(updateSettingsCalled)
+	assert.NotNil(capturedSettings)
+	assert.Contains(capturedSettings, metadata.GlobalBrokenMappingUpdateKey)
+
+	// Verify the large global broken maps were restored to the cachedBrokenMap
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	// The mapping should be updated with one of the scope's manifest ID.
+	// Since map iteration is random, we just verify it's in the valid range (40-49)
+	assert.GreaterOrEqual(ckmgr.cachedBrokenMap.correspondingTargetManifest, uint64(40))
+	assert.LessOrEqual(ckmgr.cachedBrokenMap.correspondingTargetManifest, uint64(49))
+	assert.NotNil(ckmgr.cachedBrokenMap.brokenMap)
+	// Due to the way restoreBrokenMapHistoryNoLock works, only the LAST scope processed
+	// will be in the current brokenMap (with others in history).
+	// Since map iteration is random, we just verify we have numMappingsPerScope mappings
+	assert.Equal(numMappingsPerScope, len(ckmgr.cachedBrokenMap.brokenMap))
+
+	// Verify the last scope's targets are present
+	totalTargets := 0
+	for _, tgtList := range ckmgr.cachedBrokenMap.brokenMap {
+		totalTargets += len(tgtList)
+	}
+	assert.Equal(numMappingsPerScope, totalTargets)
+}
+
+// TestRestoreBrokenMappingManifests_TraditionalWithRollBack tests restoreBrokenMappingManifests with rollback flag set to true
+// This test validates that the isRollBack flag is correctly passed to UpdateSettings for traditional mappings
+func TestRestoreBrokenMappingManifests_TraditionalWithRollBack(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_TraditionalWithRollBack =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_TraditionalWithRollBack =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	var capturedArgsList []interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		if argsList, ok := settings[metadata.BrokenMappingsUpdateKey]; ok {
+			capturedArgsList = argsList.([]interface{})
+		}
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create a small traditional broken mapping
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	// Create traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 10,
+		BrokenMap:  &brokenMap,
+	}
+
+	// Empty global pairs
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	// Call restoreBrokenMappingManifests with isRollBack = true
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, true)
+
+	// Verify UpdateSettings was called and isRollBack flag is set correctly
+	assert.NotNil(capturedArgsList)
+	assert.Len(capturedArgsList, 3) // brokenMap, manifestId, isRollBack
+	isRollBack, ok := capturedArgsList[2].(bool)
+	assert.True(ok)
+	assert.True(isRollBack) // Verify the flag is set to true
+}
+
+// TestRestoreBrokenMappingManifests_GlobalWithRollBack tests restoreBrokenMappingManifests with rollback flag set to true for global mappings
+// This test validates that the isRollBack flag is correctly passed to UpdateSettings for global mappings
+func TestRestoreBrokenMappingManifests_GlobalWithRollBack(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_GlobalWithRollBack =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_GlobalWithRollBack =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	var capturedArgsList []interface{}
+
+	mockPipeline.On("UpdateSettings", mock.MatchedBy(func(settings map[string]interface{}) bool {
+		if argsList, ok := settings[metadata.GlobalBrokenMappingUpdateKey]; ok {
+			capturedArgsList = argsList.([]interface{})
+		}
+		return true
+	})).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create empty traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 0,
+		BrokenMap:  nil,
+	}
+
+	// Create small global pairs
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	pair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 10,
+		BrokenMap:  &brokenMap,
+	}
+	globalPairs[0] = pair
+
+	// Call restoreBrokenMappingManifests with isRollBack = true
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, true)
+
+	// Verify UpdateSettings was called and isRollBack flag is set correctly
+	assert.NotNil(capturedArgsList)
+	assert.Len(capturedArgsList, 2) // globalPairs, isRollBack
+	isRollBack, ok := capturedArgsList[1].(bool)
+	assert.True(ok)
+	assert.True(isRollBack) // Verify the flag is set to true
+}
+
+// TestRestoreBrokenMappingManifests_EmptyData tests restoreBrokenMappingManifests with empty/nil data
+// This test validates that the function returns early when no valid data is provided
+func TestRestoreBrokenMappingManifests_EmptyData(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_EmptyData =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_EmptyData =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	updateSettingsCalled := false
+
+	mockPipeline.On("UpdateSettings", mock.Anything).Run(func(args mock.Arguments) {
+		updateSettingsCalled = true
+	}).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 0,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Create empty traditional pair and empty global pairs
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 0,
+		BrokenMap:  nil,
+	}
+
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	// Call restoreBrokenMappingManifests with empty data
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify UpdateSettings was NOT called (early return)
+	assert.False(updateSettingsCalled)
+}
+
+// TestRestoreBrokenMappingManifests_ManifestIdHistories tests that restoreBrokenMappingManifests properly manages broken map histories
+// This test validates that when multiple manifest IDs are involved, they are properly stored in brokenMapHistories
+func TestRestoreBrokenMappingManifests_ManifestIdHistories(t *testing.T) {
+	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_ManifestIdHistories =================")
+	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_ManifestIdHistories =================")
+	assert := assert.New(t)
+
+	// Setup checkpoint manager with pipeline mock
+	mockPipeline := &commonMock.Pipeline{}
+	mockPipeline.On("UpdateSettings", mock.Anything).Return(nil)
+
+	ckmgr := &CheckpointManager{
+		pipeline: mockPipeline,
+		cachedBrokenMap: brokenMappingWithLock{
+			brokenMap:                   make(metadata.CollectionNamespaceMapping),
+			correspondingTargetManifest: 100,
+			lock:                        sync.RWMutex{},
+			brokenMapHistories:          make(map[uint64]metadata.CollectionNamespaceMapping),
+		},
+	}
+
+	// Initialize the brokenMapHistories with an old manifest
+	oldBrokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, err := base.NewCollectionNamespaceFromString("scope1.collection1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("scope1.collection2")
+	assert.Nil(err)
+	oldBrokenMap.AddSingleMapping(&ns1, &ns2)
+	ckmgr.cachedBrokenMap.brokenMapHistories[50] = oldBrokenMap
+
+	// Create empty traditional pair
+	traditionalPair := metadata.ManifestIdAndBrokenMapPair{
+		ManifestId: 0,
+		BrokenMap:  nil,
+	}
+
+	// Create global pairs with manifest IDs less than current (should go to history)
+	globalPairs := make(map[uint16]metadata.ManifestIdAndBrokenMapPair)
+
+	for scopeId := uint16(0); scopeId < 3; scopeId++ {
+		brokenMap := make(metadata.CollectionNamespaceMapping)
+
+		// Create 2 namespace mappings per scope
+		for colIdx := 0; colIdx < 2; colIdx++ {
+			srcStr := fmt.Sprintf("scope%d.src_col_%d", scopeId, colIdx)
+			tgtStr := fmt.Sprintf("scope%d.tgt_col_%d", scopeId, colIdx)
+
+			srcNs, err := base.NewCollectionNamespaceFromString(srcStr)
+			assert.Nil(err)
+			tgtNs, err := base.NewCollectionNamespaceFromString(tgtStr)
+			assert.Nil(err)
+
+			brokenMap.AddSingleMapping(&srcNs, &tgtNs)
+		}
+
+		pair := metadata.ManifestIdAndBrokenMapPair{
+			ManifestId: uint64(70 + scopeId*5),
+			BrokenMap:  &brokenMap,
+		}
+		globalPairs[scopeId] = pair
+	}
+
+	// Call restoreBrokenMappingManifests
+	ckmgr.restoreBrokenMappingManifests(traditionalPair, globalPairs, false)
+
+	// Verify histories were updated
+	ckmgr.cachedBrokenMap.lock.RLock()
+	defer ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	// Check that histories contain the old manifest ID
+	_, historyExists := ckmgr.cachedBrokenMap.brokenMapHistories[50]
+	assert.True(historyExists)
+}

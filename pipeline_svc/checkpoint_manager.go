@@ -1462,19 +1462,20 @@ func (ckmgr *CheckpointManager) restoreBrokenMappingManifests(traditionalPair me
 	// Restore to brokenmap histories
 	ckmgr.cachedBrokenMap.lock.Lock()
 	defer ckmgr.cachedBrokenMap.lock.Unlock()
+	compiledIndex := ckmgr.cachedBrokenMap.brokenMap.CreateLookupIndex()
 	if traditionalPair.BrokenMap != nil || traditionalPair.ManifestId != 0 {
 		// Traditional restore
-		ckmgr.restoreBrokenMapHistoryNoLock(traditionalPair)
+		ckmgr.restoreBrokenMapHistoryNoLock(traditionalPair, compiledIndex)
 	} else {
 		// Global restore
 		for _, onePair := range globalPairs {
-			ckmgr.restoreBrokenMapHistoryNoLock(onePair)
+			ckmgr.restoreBrokenMapHistoryNoLock(onePair, compiledIndex)
 		}
 	}
 }
 
 // write lock must be held
-func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata.ManifestIdAndBrokenMapPair) {
+func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata.ManifestIdAndBrokenMapPair, index metadata.CollectionNamespaceMappingIdx) {
 	if onePair.ManifestId == 0 {
 		// Not a valid brokenmap to restore
 		return
@@ -1483,14 +1484,14 @@ func (ckptMgr *CheckpointManager) restoreBrokenMapHistoryNoLock(onePair metadata
 	if ckptMgr.cachedBrokenMap.correspondingTargetManifest == onePair.ManifestId {
 		// Consolidate
 		if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
-			ckptMgr.cachedBrokenMap.brokenMap.Consolidate(*onePair.BrokenMap, nil)
+			ckptMgr.cachedBrokenMap.brokenMap.Consolidate(*onePair.BrokenMap, index)
 		}
 	} else if onePair.ManifestId < ckptMgr.cachedBrokenMap.correspondingTargetManifest {
 		// Put in history
 		brokenMapHistory, historyExists := ckptMgr.cachedBrokenMap.brokenMapHistories[onePair.ManifestId]
 		if historyExists {
 			if onePair.BrokenMap != nil && len(*onePair.BrokenMap) > 0 {
-				brokenMapHistory.Consolidate(*onePair.BrokenMap, nil)
+				brokenMapHistory.Consolidate(*onePair.BrokenMap, index)
 			}
 		} else {
 			ckptMgr.cachedBrokenMap.correspondingTargetManifest = onePair.ManifestId
