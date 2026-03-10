@@ -2542,6 +2542,7 @@ func newConnectivityHelperConnStatus(status metadata.ConnectivityStatus) *servic
 	connectivityHelperMock := &service_def.ConnectivityHelperSvc{}
 	connectivityHelperMock.On("GetOverallStatus").Return(status)
 	connectivityHelperMock.On("SyncWithValidList", mock.Anything).Return()
+	connectivityHelperMock.On("MarkNode", mock.Anything, mock.Anything).Return(false, false)
 	return connectivityHelperMock
 }
 
