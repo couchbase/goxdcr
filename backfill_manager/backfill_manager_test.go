@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,9 +94,13 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	pipelineMgr.On("BackfillMappingStatusUpdate", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	pipelineMgr.On("RequestBackfill", mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
+	xdcrTopologyMock.On("IsKVNode").Return(true, nil)
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)
 	backfillReplSvc.On("RaiseUnrecoverableBackfillsIfNeeded").Return(make(chan bool))
 	utils.On("ExponentialBackoffExecutor", "checkForKVNode", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration {
+		return time.Duration(0)
+	})
 
 	sourceCh := make(chan service_def_real.SourceNotification, base.BucketTopologyWatcherChanLen)
 	var vbsList []uint16
@@ -261,8 +266,18 @@ func setupStartupManifests(manifestSvc *service_def.CollectionsManifestSvc,
 		manifestPair, ok := colMap[replId]
 		if ok {
 			manifestSvc.On("GetLastPersistedManifests", spec).Return(manifestPair, nil)
+			// Use MatchedBy to match by spec ID instead of exact object equality
+			manifestSvc.On("GetStartingManifests", mock.MatchedBy(func(s *metadata.ReplicationSpecification) bool {
+				return s != nil && s.Id == spec.Id
+			})).Return(manifestPair.Source, manifestPair.Target, nil)
+
 		} else {
 			manifestSvc.On("GetLastPersistedManifests", spec).Return(nil, service_def_real.ManifestNotFoundErr)
+			defaultManifest := metadata.NewDefaultCollectionsManifest()
+			// Use MatchedBy to match by spec ID instead of exact object equality
+			manifestSvc.On("GetStartingManifests", mock.MatchedBy(func(s *metadata.ReplicationSpecification) bool {
+				return s != nil && s.Id == spec.Id
+			})).Return(&defaultManifest, &defaultManifest, nil)
 		}
 	}
 }
@@ -796,6 +811,125 @@ func TestBackfillMgrUpdateCache(t *testing.T) {
 		assert.True(tgtEqual)
 	}
 }
+
+// TestDeadlockDeleteHandlerWhileMetaKvOpInProgress reproduces the deadlock:
+//
+// Goroutine A (DeleteReplication):
+//	deleteBackfillRequestHandler → Lock() write → Stop() → Wait()
+//
+// Goroutine B (run()):
+//	batchPersistCh → metaKvOp → SetBackfillReplSpec (blocked)
+//
+// Deadlock occurs when delete holds write lock while run is stuck
+func TestDeadlockDeleteHandlerWhileMetaKvOpInProgress(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestDeadlockDeleteHandlerWhileMetaKvOpInProgress =================")
+	defer fmt.Println("============== Test case end: TestDeadlockDeleteHandlerWhileMetaKvOpInProgress =================")
+
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils := setupBoilerPlate()
+	specs, manifestPairs := setupStartupSpecs(1)
+	setupReplStartupSpecs(replSpecSvc, specs)
+	setupBackfillSpecs(backfillReplSvc, specs)
+	setupStartupManifests(manifestSvc, specs, manifestPairs)
+	mockGetLatestManifests(manifestSvc, specs, manifestPairs)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil, utils, nil)
+
+	specId := getSpecId(0)
+	spec := specs[specId]
+
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc, utils)
+	assert.NotNil(backfillMgr)
+	assert.Nil(backfillMgr.Start())
+
+	time.Sleep(200 * time.Millisecond)
+
+	runEnteringMock := make(chan struct{})
+	allowMockToReturn := make(chan struct{})
+
+	callCount := uint32(0)
+
+	// Block SetBackfillReplSpec on first call to simulate run() stuck in metaKvOp
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Unset()
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) {
+		callNum := atomic.AddUint32(&callCount, 1)
+		if callNum == 1 {
+			close(runEnteringMock)
+			<-allowMockToReturn
+			// NOW simulate the real metakv service calling the callback
+			// This callback tries to acquire RLock on specReqHandlersMtx
+			// If delete holds the write lock, run() will deadlock here
+			specArg := args.Get(0).(*metadata.BackfillReplicationSpec)
+			// Create a DIFFERENT spec by modifying the old one so oldSpec.SameAs(newSpec) returns false
+			// This forces the code path to reach internalGetHandler which tries RLock
+			oldSpec := specArg.Clone()
+			newSpec := specArg.Clone()
+			// Modify one field to make them different
+			newSpec.InternalId = "modified_" + newSpec.InternalId
+			_ = backfillMgr.backfillReplSpecChangeHandlerCallback(specArg.Id, oldSpec, newSpec)
+		}
+	}).Return(nil)
+
+	backfillMgr.specReqHandlersMtx.RLock()
+	handler := backfillMgr.specToReqHandlerMap[specId]
+	backfillMgr.specReqHandlersMtx.RUnlock()
+	assert.NotNil(handler)
+
+	backfillReq := metadata.CollectionNamespaceMapping{
+		&metadata.SourceNamespace{
+			CollectionNamespace: &base.CollectionNamespace{
+				ScopeName:      "default",
+				CollectionName: "_default",
+			},
+		}: metadata.CollectionNamespaceList{
+			&base.CollectionNamespace{
+				ScopeName:      "default",
+				CollectionName: "_default",
+			},
+		},
+	}
+
+	go func() {
+		_ = handler.HandleBackfillRequest(backfillReq, "test_req")
+	}()
+
+	waitCtx := time.NewTimer(5 * time.Second)
+	defer waitCtx.Stop()
+
+	select {
+	case <-runEnteringMock:
+		// run() is blocked in SetBackfillReplSpec
+	case <-waitCtx.C:
+		t.Fatal("timed out waiting for run() to enter SetBackfillReplSpec")
+	}
+
+	// Now call delete while run() is stuck in SetBackfillReplSpec
+	// If deleteBackfillRequestHandler holds the lock while calling Stop(),
+	// it will deadlock because Stop() waits for run() to exit,
+	// but run() might be blocked trying to acquire the lock for some operation
+	deleteDone := make(chan struct{})
+	go func() {
+		defer close(deleteDone)
+		_ = backfillMgr.deleteBackfillRequestHandler(specId, spec.InternalId)
+	}()
+
+	// Give delete goroutine time to acquire write lock and enter Stop() → Wait()
+	time.Sleep(200 * time.Millisecond)
+
+	// Unblock SetBackfillReplSpec - allow run() to continue
+	close(allowMockToReturn)
+
+	// Check if delete completes (indicating no deadlock)
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+
+	select {
+	case <-deleteDone:
+		t.Logf("Test passed - no deadlock detected")
+	case <-timeout.C:
+		t.Fatal("deadlock detected: deleteBackfillRequestHandler did not return within 3 seconds")
+	}
+}
+
 func TestRemovedNamespacesDiff(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRemovedNamespacesDiff =================")
