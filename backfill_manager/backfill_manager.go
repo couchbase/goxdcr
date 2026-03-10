@@ -533,18 +533,18 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) error {
 	b.specReqHandlersMtx.Lock()
 	reqHandler, exists := b.specToReqHandlerMap[replId]
-	defer b.specReqHandlersMtx.Unlock()
-
 	if !exists {
+		b.specReqHandlersMtx.Unlock()
 		return base.ErrorNotFound
 	}
+	delete(b.specToReqHandlerMap, replId)
+	b.specReqHandlersMtx.Unlock()
 
 	stopFunc := b.utils.StartDiagStopwatch(fmt.Sprintf("deleteBackfillRequestHandler(%v,%v)", replId, internalId),
 		base.DiagInternalThreshold)
 	b.logger.Infof("Stopping backfill request handler for spec %v internalId %v", replId, internalId)
 	reqHandler.Stop()
 	stopFunc()
-	delete(b.specToReqHandlerMap, replId)
 	return nil
 }
 
