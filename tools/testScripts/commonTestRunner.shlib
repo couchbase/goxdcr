@@ -106,7 +106,41 @@ cngPath=""
 cngMode=0
 mutationDiffResultsEnc=""
 productionTestsOnly=0
-tests=$(ls ${testCasesDirectory:-} | sort -V)
+
+# Custom sort function to properly order tests numerically first, then alphabetically by suffix
+# e.g., 0, 0a, 0b, 1, 1a, 10, 10a instead of 0, 0a, 0b, 0c, 1, 10, 10a
+sortTests() {
+	local -a testArray=()
+	while IFS= read -r line; do
+		testArray+=("$line")
+	done
+
+	# Use printf and sort with a custom key that pads numbers
+	# Compatible with both GNU awk and BSD awk (macOS)
+	printf '%s\n' "${testArray[@]}" | awk '
+	{
+		# Extract leading digits using regex matching
+		if ($0 ~ /^[0-9]+/) {
+			# Find where digits end
+			for (i = 1; i <= length($0); i++) {
+				c = substr($0, i, 1)
+				if (c !~ /[0-9]/) {
+					break
+				}
+			}
+			num = substr($0, 1, i-1)
+			suffix = substr($0, i)
+		} else {
+			num = 0
+			suffix = $0
+		}
+		# Print with zero-padded number (10 digits should be enough) for proper numeric sorting
+		printf "%010d %s %s\n", num, suffix, $0
+	}
+	' | sort | cut -d' ' -f3-
+}
+
+tests=$(ls ${testCasesDirectory:-} | sortTests)
 testsToRun=$tests
 
 OVERRIDE_MOBILE=0
