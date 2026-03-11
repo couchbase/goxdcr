@@ -106,6 +106,8 @@ function runTestCase {
 	if (($found == 0)); then
 		echo "Unable to find updated doc replicated"
 		exit 1
+	else
+		echo "Found updated doc replicated to Target"
 	fi
 
 	grepForPanics

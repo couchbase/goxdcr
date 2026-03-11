@@ -1193,22 +1193,31 @@ from datetime import timedelta
 import sys
 import time
 
-bootstrap="127.0.0.1:$kvPort"
-bucket_name="$bucketName"
+try:
+    bootstrap="127.0.0.1:$kvPort"
+    bucket_name="$bucketName"
 
-# Connect options - authentication
-auth = PasswordAuthenticator(
-    "$DEFAULT_ADMIN",
-    "$DEFAULT_PW",
-)
+    # Connect options - authentication
+    auth = PasswordAuthenticator(
+        "$DEFAULT_ADMIN",
+        "$DEFAULT_PW",
+    )
 
-cluster = Cluster('couchbase://{}'.format(bootstrap), ClusterOptions(auth))
-bucket = cluster.bucket(bucket_name)
+    cluster = Cluster('couchbase://{}'.format(bootstrap), ClusterOptions(auth))
+    bucket = cluster.bucket(bucket_name)
 
-cb_coll = bucket.default_collection()
-cb_coll.get_and_lock("$docName", timedelta(seconds=$secsToLock))
+    cb_coll = bucket.default_collection()
+    cb_coll.get_and_lock("$docName", timedelta(seconds=$secsToLock))
+except Exception as e:
+    print(f"Error: {e}", file=sys.stderr)
+    sys.exit(1)
 
 END
+
+	if [ $? -ne 0 ]; then
+		echo "failed to lock document $docName in bucket $bucketName on cluster $clusterName"
+		exit 1
+	fi
 }
 
 function deleteJSONDocument {

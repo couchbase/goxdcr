@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# Test to examine GETEX response on a locked document
+
+# main logic all exist elsewhere
+. ./clusterRunProvision.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
+# set globals
+# -----------------
+DEFAULT_ADMIN="Administrator"
+DEFAULT_PW="wewewe"
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000)
+CLUSTER_NAME_KV_PORT_MAP=(["C1"]=12000)
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]})
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running GETEX on locked document test"
+	echo "============================================================================"
+
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Setup cluster and bucket
+	echo "Setting up cluster and bucket..."
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	echo "Now calling Go test TestGetExOnLockedDoc to perform GETEX on locked document..."
+
+	# Export the password environment variable that the Go test expects
+	export XDCR_UNIT_TEST_PW="$DEFAULT_PW"
+
+	# Run the Go test with verbose output - it will perform GETEX and print the response
+	go test -v -timeout 120s -count=1 -run ^TestGetExOnLockedDoc$ github.com/couchbase/goxdcr/v8/parts
+	local exitCode=$?
+
+	# Unset the environment variable
+	unset XDCR_UNIT_TEST_PW
+
+	if (($exitCode != 0)); then
+		echo "FAILED - GETEX test failed"
+		cleanupBuckets
+		exit $exitCode
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBuckets
+}

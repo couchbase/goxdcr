@@ -2052,6 +2052,155 @@ func TestCasPoisonKVProtection(t *testing.T) {
 	verifyCasPoisonStats(t, a, srcprometheusPort, numOfDocs+1)
 }
 
+// Requires a cluster_run running. Used by miscTests/5c_testLockedGetExResponse.shlib
+// go test -v -timeout 120s -count=1 -run ^TestGetExOnLockedDoc$ github.com/couchbase/goxdcr/v8/parts
+func TestGetExOnLockedDoc(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestGetExOnLockedDoc")
+	}
+
+	fmt.Println("============== Test case start: TestGetExOnLockedDoc =================")
+	defer fmt.Println("============== Test case end: TestGetExOnLockedDoc =================")
+
+	assert := assert.New(t)
+
+	bucketName := "B1"
+
+	// Use raw memcached client to send GETEX
+	kvHost := fmt.Sprintf("127.0.0.1:%s", srcKVPort)
+	fmt.Printf("\nConnecting to KV at: %s\n", kvHost)
+
+	conn, err := mcc.Connect("tcp", kvHost)
+	assert.Nil(err, "KV connection should succeed")
+	defer conn.Close()
+
+	// Authenticate
+	_, err = conn.Auth(username, password)
+	assert.Nil(err, "Authentication should succeed")
+
+	// Enable collections, xattr support using HELO
+	requestedFeatures := utilsReal.HELOFeatures{
+		Collections:      true, // Enable collections support
+		Xattribute:       true,
+		Xerror:           true,
+		DataType:         true,
+		SnappyEverywhere: true,
+	}
+
+	logger := log.NewLogger("TestGetExOnLockedDoc", log.DefaultLoggerContext)
+	_, err = utilsReal.NewUtilities().SendHELOWithFeatures(conn, "xdcr_getex_test", 10*time.Second, 10*time.Second, requestedFeatures, logger)
+	assert.Nil(err, "HELO should succeed")
+
+	// Select bucket
+	_, err = conn.SelectBucket(bucketName)
+	assert.Nil(err, "Bucket selection should succeed")
+
+	// Encode collection ID for _default collection (collection ID 0) - used for all operations
+	collectionID := base.DefaultCollectionId
+	var collIdBytes [binary.MaxVarintLen32]byte
+	collIdLen := binary.PutUvarint(collIdBytes[:], uint64(collectionID))
+
+	// First, create a test document to verify GETEX works
+	testKey := "dummyDoc"
+	testValue := []byte(`{"test":"value"}`)
+
+	fmt.Printf("\n=== Creating test document '%s' in _default._default collection ===\n", testKey)
+	setReq := &mc.MCRequest{
+		Opcode:    mc.SET,
+		Key:       []byte(testKey),
+		Body:      testValue,
+		Extras:    make([]byte, 8), // flags (4 bytes) + expiry (4 bytes)
+		CollIdLen: collIdLen,
+	}
+	copy(setReq.CollId[:], collIdBytes[:collIdLen])
+	// flags = 0, expiry = 0
+	binary.BigEndian.PutUint32(setReq.Extras[0:4], 0)
+	binary.BigEndian.PutUint32(setReq.Extras[4:8], 0)
+
+	err = conn.Transmit(setReq)
+	assert.Nil(err, "SET transmit should succeed")
+
+	setResp, err := conn.Receive()
+	assert.Nil(err, "SET should succeed")
+	fmt.Printf("Document created successfully (CAS: %d)\n", setResp.Cas)
+
+	// Wait 10 seconds before locking
+	fmt.Println("\nSleeping for 10 seconds before locking document...")
+	time.Sleep(10 * time.Second)
+
+	// Lock dummyDoc using GET_LOCKED (get and lock) command
+	// Opcode 0x94 is GET_LOCKED (not defined in mc_constants.go but it's the standard memcached opcode)
+	const GET_LOCKED = mc.CommandCode(0x94)
+	lockDuration := uint32(30) // Lock for 30 seconds
+	fmt.Printf("\n=== Locking document '%s' for %d seconds ===\n", testKey, lockDuration)
+	getLockReq := &mc.MCRequest{
+		Opcode:    GET_LOCKED,
+		Key:       []byte(testKey),
+		Extras:    make([]byte, 4), // Lock duration in seconds
+		CollIdLen: collIdLen,
+	}
+	copy(getLockReq.CollId[:], collIdBytes[:collIdLen])
+	binary.BigEndian.PutUint32(getLockReq.Extras[0:4], lockDuration)
+
+	err = conn.Transmit(getLockReq)
+	assert.Nil(err, "GET_LOCKED transmit should succeed")
+
+	lockResp, err := conn.Receive()
+	assert.Nil(err, "GET_LOCKED should succeed")
+
+	fmt.Println("Document locked successfully")
+	fmt.Printf("CAS from GET_LOCKED: %d (0x%016x)\n", lockResp.Cas, lockResp.Cas)
+
+	// GET_META on the locked document
+	fmt.Printf("\n=== GET_META on locked '%s' ===\n", testKey)
+	getMetaReq := &mc.MCRequest{
+		Opcode:    mc.GET_META,
+		Key:       []byte(testKey),
+		Extras:    []byte{byte(base.ReqExtMetaDataType)},
+		CollIdLen: collIdLen,
+	}
+	copy(getMetaReq.CollId[:], collIdBytes[:collIdLen])
+
+	err = conn.Transmit(getMetaReq)
+	assert.Nil(err, "GET_META transmit should succeed")
+
+	getMetaResp, err := conn.Receive()
+	assert.Nil(err, "GET_META should succeed")
+
+	getMetaCas := getMetaResp.Cas
+	fmt.Println("GET_META succeeded")
+	fmt.Printf("  Status: 0x%04x (%s)\n", getMetaResp.Status, getMetaResp.Status)
+	fmt.Printf("  CAS: %d (0x%016x)\n", getMetaCas, getMetaCas)
+
+	// Test GETEX on the locked document
+	fmt.Printf("\n=== Testing GETEX on locked '%s' ===\n", testKey)
+	const GETEX = mc.CommandCode(0x49)
+	testGetExReq := &mc.MCRequest{
+		Opcode:    GETEX,
+		Key:       []byte(testKey),
+		CollIdLen: collIdLen,
+	}
+	copy(testGetExReq.CollId[:], collIdBytes[:collIdLen])
+
+	err = conn.Transmit(testGetExReq)
+	assert.Nil(err, "GETEX transmit should succeed")
+
+	testResp, err := conn.Receive()
+	assert.Nil(err, "GETEX should succeed")
+
+	fmt.Println("GETEX succeeded")
+	fmt.Printf("  Status: 0x%04x (%s)\n", testResp.Status, testResp.Status)
+	fmt.Printf("  CAS: %d (0x%016x)\n", testResp.Cas, testResp.Cas)
+
+	// Assert 1: GETEX CAS matches GET_META CAS
+	assert.Equal(getMetaCas, testResp.Cas, "GETEX CAS should match GET_META CAS")
+	fmt.Println("GETEX CAS matches GET_META CAS")
+
+	// Assert 2: GETEX CAS equals base.MaxCas
+	assert.Equal(uint64(base.MaxCas), testResp.Cas, "GETEX CAS should match base.MaxCas")
+	fmt.Printf("GETEX CAS matches base.MaxCas (0x%016x)\n", uint64(base.MaxCas))
+}
+
 func setupForPVPruningTest(a *assert.Assertions, bucketName string, srcNode, tgtNode int) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func()) {
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
