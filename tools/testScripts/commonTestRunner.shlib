@@ -106,7 +106,7 @@ cngPath=""
 cngMode=0
 mutationDiffResultsEnc=""
 productionTestsOnly=0
-tests=$(ls ${testCasesDirectory:-} | sort)
+tests=$(ls ${testCasesDirectory:-} | sort -V)
 testsToRun=$tests
 
 OVERRIDE_MOBILE=0

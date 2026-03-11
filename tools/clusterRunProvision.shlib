@@ -2299,7 +2299,6 @@ function stopWhenAnyBgJobStops {
 		jobsCnt=$(jobs -l | grep -c "Running")
 		sleep 3
 	done
-	exit 0
 }
 
 # Input: 1. clusterName
