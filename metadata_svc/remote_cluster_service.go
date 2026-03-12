@@ -3936,6 +3936,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 				newAgent = NewRemoteCngAgent(service.utils, service.metakv_svc, service.uilog_svc, service.xdcr_topology_svc, service.getReplReader(), service.logger)
 			default:
 				// should never happen
+				service.agentMutex.Unlock()
 				return nil, false, fmt.Errorf("unknown remoteType %v for reference %v", ref.GetRemoteType(), ref.Name())
 			}
 			service.addAgentToAgentMapNoLock(ref, newAgent)
