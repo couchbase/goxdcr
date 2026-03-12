@@ -929,6 +929,54 @@ function getInternalNodeNsServerErrorLog {
 	cat $error
 }
 
+function getInternalNodeHttpAccessInternalLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "http_access_internal.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local httpAccessInternal=${logfileDir}/http_access_internal.log
+	if ! [[ -f "$httpAccessInternal" ]]; then
+		echo "Unable to find file $httpAccessInternal"
+		return 1
+	fi
+
+	cat $httpAccessInternal
+}
+
+function getInternalNodeHttpAccessLog {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeLog "$clusterName" "http_access.log"
+		return $?
+	fi
+
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+	local httpAccess=${logfileDir}/http_access.log
+	if ! [[ -f "$httpAccess" ]]; then
+		echo "Unable to find file $httpAccess"
+		return 1
+	fi
+
+	cat $httpAccess
+}
+
 # Used only if the log needs to be clean for parsing purposes
 function clearInternalNodeXdcrLog {
 	local clusterName=$1
@@ -1857,6 +1905,8 @@ function dumpDebugInfoBeforeExit {
 		getInternalNodeNsServerDebugLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_debug.log
 		getInternalNodeNsServerErrorLog "$clusterName" >${testOutputDir}/node${clusterName}_nsServer_error.log
 		getInternalNodeMetaKvLog "$clusterName" >${testOutputDir}/node${clusterName}_metakv.log
+		getInternalNodeHttpAccessInternalLog "$clusterName" >${testOutputDir}/node${clusterName}_http_access_internal.log
+		getInternalNodeHttpAccessLog "$clusterName" >${testOutputDir}/node${clusterName}_http_access.log
 
 		if [[ -n "${shouldRunCbCollect:-}" && "${shouldRunCbCollect}" != "false" ]]; then
 			runCbCollectInfo "$clusterName" "${testOutputDir}/cbcollect_${clusterName}.zip"
