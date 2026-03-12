@@ -221,5 +221,5 @@ function runTestCase {
 
 	# magma test cleanup
 	cleanupBucketNamePropertyMap
-	sleep 20
+	sleep 40
 }
