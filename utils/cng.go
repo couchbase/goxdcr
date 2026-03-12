@@ -154,8 +154,23 @@ func (u *Utilities) GetBucketInfoFromCNG(logger *log.CommonLogger, req *GetBucke
 		req.HostAddr: vblist,
 	}
 
-	// CNG TODO: Read bucket type from response
-	// Ticket on ING team: https://jira.issues.couchbase.com/browse/ING-1382
-	bucketInfo[base.BucketTypeKey] = base.CouchbaseBucketType
+	bucketType, err := mapBucketTypeFromCNG(rsp.GetBucketType())
+	if err != nil {
+		return nil, err
+	}
+
+	bucketInfo[base.BucketTypeKey] = bucketType
 	return bucketInfo, nil
+}
+
+// map the bucket type constants from CNG to the ones used in xdcr
+func mapBucketTypeFromCNG(cngBucketType internal_xdcr_v1.BucketType) (string, error) {
+	switch cngBucketType {
+	case internal_xdcr_v1.BucketType_BUCKET_TYPE_COUCHBASE:
+		return base.CouchbaseBucketType, nil
+	case internal_xdcr_v1.BucketType_BUCKET_TYPE_EPHEMERAL:
+		return base.EphemeralBucketType, nil
+	default:
+		return "", fmt.Errorf("unknown bucket type from cng: %v", cngBucketType)
+	}
 }
