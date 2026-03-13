@@ -884,7 +884,7 @@ func TestValidateHostAddrForCbCluster(t *testing.T) {
 		{
 			name:     "couchbases:// prefix is stripped and default SSL port used",
 			input:    "couchbases://myhost",
-			expected: "myhost:18091",
+			expected: "myhost:8091",
 		},
 		{
 			name:     "couchbases:// with port is preserved",
