@@ -2361,13 +2361,18 @@ function prettyPrintManifest {
 		# Get individual collections within this scope
 		local collectionsList=$(echo "$scopeOutput" | jq '.collections')
 		local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
-		for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
-			local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
-			local collectionName=$(echo "$collectionsOutput" | jq '.name')
-			local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
-			local collectionUIDdec=$(hexStringToDec "$collectionUID")
-			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUIDdec)"
-		done
+		if (( $collectionsListLen > $BULK_COLLECTION_THRESHOLD ));then
+		  echo "  Too many collections to list. Total collections: $collectionsListLen"
+		else
+			local j
+			for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
+				local collectionOutput=$(echo "$collectionsList" | jq .[$j])
+				local collectionName=$(echo "$collectionOutput" | jq '.name')
+				local collectionUID=$(echo "$collectionOutput" | jq '.uid')
+				local collectionUIDdec=$(hexStringToDec "$collectionUID")
+				echo "  CollectionName $collectionName (UID $collectionUIDdec)"
+			done
+		fi
 	done
 }
 
