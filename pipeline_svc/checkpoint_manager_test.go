@@ -295,6 +295,118 @@ func TestMergeNoConsensusCkpt(t *testing.T) {
 	assert.NotNil(err)
 }
 
+// TestCombinePeerCkptDocsWithStaleLocalInternalId tests that when a local checkpoint doc
+// has a stale SpecInternalId (from a previous bucket incarnation / bucket recreate), it should
+// NOT be merged into the output.  The combined result should only contain the peer's records.
+//
+// Specifically it validates the fix in combinePeerCkptDocsWithLocalCkptDoc: stale local docs
+// are replaced with a fresh empty doc (stamped with the current spec ID) before peer records
+// are merged in, preventing unresolvable SHA references from surviving into the output.
+func TestCombinePeerCkptDocsWithStaleLocalInternalId(t *testing.T) {
+	fmt.Println("============== Test case start: TestCombinePeerCkptDocsWithStaleLocalInternalId =================")
+	defer fmt.Println("============== Test case end: TestCombinePeerCkptDocsWithStaleLocalInternalId =================")
+	assert := assert.New(t)
+
+	// The current (post-bucket-recreate) spec has a NEW internal ID.
+	currentSpec, _ := metadata.NewReplicationSpecification("srcBucket", "", "", "tgtBucket", "")
+	currentInternalId := "newSpecInternalId-after-recreate"
+	currentSpec.InternalId = currentInternalId
+
+	// The stale internal ID is what the OLD checkpoint docs in metakv are stamped with.
+	staleInternalId := "oldSpecInternalId-before-recreate"
+
+	const testVB = uint16(7)
+
+	// staleRecord simulates a checkpoint from BEFORE the bucket was recreated.
+	// It carries a non-empty BrokenMappingSha256 that references the OLD broken-mapping doc
+	// (which was wiped when the InternalId mismatch was detected by GetMappingsDoc).
+	staleRecord := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Seqno:                  9000,
+			Dcp_snapshot_seqno:     9000,
+			Dcp_snapshot_end_seqno: 9000,
+			Failover_uuid:          111,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:        9000,
+			BrokenMappingSha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		},
+	}
+
+	// freshRecord is what the peer node sends — it was created AFTER the bucket recreate
+	// and therefore belongs to the new spec incarnation.
+	freshRecord := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Seqno:                  100,
+			Dcp_snapshot_seqno:     100,
+			Dcp_snapshot_end_seqno: 100,
+			Failover_uuid:          222,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno: 100,
+		},
+	}
+
+	// currDocs represents what CheckpointsDocs() returned from metakv —
+	// stale docs that survived because the broken-mapping doc was emptied (so
+	// populateActualMapping was skipped and the stale ckpt doc was loaded OK).
+	currDocs := map[uint16]*metadata.CheckpointsDoc{
+		testVB: {
+			Checkpoint_records: metadata.CheckpointRecordsList{staleRecord},
+			SpecInternalId:     staleInternalId, // <-- OLD incarnation
+		},
+	}
+
+	// filteredMap is the validated/filtered peer checkpoint data.
+	filteredMap := map[uint16]*metadata.CheckpointsDoc{
+		testVB: {
+			Checkpoint_records: metadata.CheckpointRecordsList{freshRecord},
+			SpecInternalId:     currentInternalId, // <-- NEW incarnation from peer
+		},
+	}
+
+	testLogger := log.NewLogger("TestCombinePeerCkptDocsWithStaleLocalInternalId", nil)
+
+	// Call the function under test — no failover logs needed for this unit test.
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currDocs, currentSpec, testLogger)
+
+	// -----------------------------------------------------------------------
+	// Assertions: after the merge the output should reflect ONLY the new spec.
+	// -----------------------------------------------------------------------
+
+	resultDoc, exists := currDocs[testVB]
+	assert.True(exists, "result doc for testVB must exist")
+	assert.NotNil(resultDoc)
+
+	// ASSERTION 1: The output doc's SpecInternalId must be the NEW one.
+	// The fix discards the stale local doc and replaces it with a fresh one
+	// stamped with the current spec ID before merging peer records into it.
+	assert.Equal(currentInternalId, resultDoc.SpecInternalId,
+		"output doc SpecInternalId should be the current spec ID, not the stale one")
+
+	// Collect the sha strings from output records so we can reason about them.
+	var outputShas []string
+	var outputSeqnos []uint64
+	for _, rec := range resultDoc.Checkpoint_records {
+		if rec == nil {
+			continue
+		}
+		outputShas = append(outputShas, rec.BrokenMappingSha256)
+		outputSeqnos = append(outputSeqnos, rec.Seqno)
+	}
+
+	// ASSERTION 2: The output must NOT contain any record that references the stale
+	// broken-mapping SHA (i.e. staleRecord's SHA must have been discarded).
+	for _, sha := range outputShas {
+		assert.NotEqual(staleRecord.BrokenMappingSha256, sha,
+			"stale broken-mapping SHA from old incarnation must not appear in merged output")
+	}
+
+	// ASSERTION 3: The fresh record's seqno must be present in the output.
+	assert.Contains(outputSeqnos, freshRecord.Seqno,
+		"fresh peer record seqno must survive in the merged output")
+}
+
 func TestMergEmptyCkpts(t *testing.T) {
 	fmt.Println("============== Test case start: TestMergEmptyCkpts =================")
 	defer fmt.Println("============== Test case end: TestMergEmptyCkpts =================")
@@ -302,6 +414,8 @@ func TestMergEmptyCkpts(t *testing.T) {
 
 	filteredMap := make(map[uint16]*metadata.CheckpointsDoc)
 	currentDocs := make(map[uint16]*metadata.CheckpointsDoc)
+
+	testLogger := log.NewLogger("TestMergEmptyCkpts", nil)
 
 	spec, _ := metadata.NewReplicationSpecification("", "", "", "", "")
 	filteredMap[0] = &metadata.CheckpointsDoc{
@@ -311,7 +425,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 	}
 
 	assert.Len(currentDocs, 0)
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 0)
 
 	var recordsList metadata.CheckpointRecordsList
@@ -324,7 +438,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 	}
 
 	assert.Len(currentDocs, 0)
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 1)
 
 	filteredMap[1] = &metadata.CheckpointsDoc{
@@ -333,7 +447,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 		Revision:           nil,
 	}
 	filteredMap[2] = &metadata.CheckpointsDoc{}
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 2)
 }
 
