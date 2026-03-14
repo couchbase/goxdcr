@@ -209,6 +209,8 @@ func TestMergEmptyCkpts(t *testing.T) {
 	filteredMap := make(map[uint16]*metadata.CheckpointsDoc)
 	currentDocs := make(map[uint16]*metadata.CheckpointsDoc)
 
+	testLogger := log.NewLogger("TestMergEmptyCkpts", nil)
+
 	spec, _ := metadata.NewReplicationSpecification("", "", "", "", "")
 	filteredMap[0] = &metadata.CheckpointsDoc{
 		Checkpoint_records: nil,
@@ -217,7 +219,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 	}
 
 	assert.Len(currentDocs, 0)
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 0)
 
 	var recordsList metadata.CheckpointRecordsList
@@ -230,7 +232,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 	}
 
 	assert.Len(currentDocs, 0)
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 1)
 
 	filteredMap[1] = &metadata.CheckpointsDoc{
@@ -239,7 +241,7 @@ func TestMergEmptyCkpts(t *testing.T) {
 		Revision:           nil,
 	}
 	filteredMap[2] = &metadata.CheckpointsDoc{}
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec, testLogger)
 	assert.Len(currentDocs, 2)
 }
 
