@@ -3842,7 +3842,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 				}
 			}
 
-			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
+			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec, ckmgr.logger)
 			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs, combinedGInfoShaMapFromPeers)
 			if err != nil {
 				errList[i] = err
@@ -3870,8 +3870,10 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	}
 }
 
-func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog, currDocs map[uint16]*metadata.CheckpointsDoc, spec *metadata.ReplicationSpecification) {
+func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog, currDocs map[uint16]*metadata.CheckpointsDoc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger) {
 	// create empty docs for missing VBs
+	var staleVBs []uint16
+	var staleSpecInternalId string
 	for vb, ckptDoc := range filteredMap {
 		if ckptDoc == nil || ckptDoc.Len() == 0 {
 			continue
@@ -3879,7 +3881,20 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 		docs, exists := currDocs[vb]
 		if !exists || docs == nil {
 			currDocs[vb] = metadata.NewCheckpointsDoc(spec.InternalId)
+		} else if docs.SpecInternalId != spec.InternalId {
+			// The local doc belongs to an old bucket incarnation (stale SpecInternalId).
+			// Its checkpoint records reference SHAs from the old broken-mapping doc which
+			// has already been wiped on InternalId mismatch detection.  Merging them would
+			// inject unresolvable SHA references into the output, so discard the stale doc
+			// entirely and start fresh for this VB.
+			staleVBs = append(staleVBs, vb)
+			staleSpecInternalId = docs.SpecInternalId
+			currDocs[vb] = metadata.NewCheckpointsDoc(spec.InternalId)
 		}
+	}
+	if len(staleVBs) > 0 {
+		logger.Warnf("combinePeerCkptDocsWithLocalCkptDoc: discarded stale local checkpoint docs for %d VBs %v with stale SpecInternalId=%q (current=%q) before merge",
+			len(staleVBs), staleVBs, staleSpecInternalId, spec.InternalId)
 	}
 
 	// This is where we combine with what checkpoints are currently stored (loaded via CheckpointsDocs() above)
