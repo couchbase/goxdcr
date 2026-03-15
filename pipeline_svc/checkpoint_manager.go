@@ -3862,6 +3862,28 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 				}
 			}
 
+			// Delete stale local checkpoint docs from metakv so they will not be reloaded later.
+			// A stale local doc carries a previous spec incarnation's internal ID.
+			var staleVBs []uint16
+			for vbno, oneDoc := range currDocs {
+				if oneDoc == nil || oneDoc.SpecInternalId == "" || oneDoc.SpecInternalId == spec.InternalId {
+					continue
+				}
+				staleVBs = append(staleVBs, vbno)
+			}
+			if len(staleVBs) > 0 {
+				ckmgr.logger.Warnf("mergeFinalCkpts: found %d stale local checkpoint docs for topic %v and currentSpecInternalId=%q. stale vbs=%v",
+					len(staleVBs), ckptTopic, spec.InternalId, staleVBs)
+				for _, vbno := range staleVBs {
+					delErr := ckmgr.checkpoints_svc.DelCheckpointsDoc(ckptTopic, vbno, spec.InternalId)
+					if delErr != nil {
+						errList[i] = fmt.Errorf("mergeFinalCkpts failed to delete stale ckpt doc topic=%v vb=%v: %w", ckptTopic, vbno, delErr)
+						return
+					}
+					delete(currDocs, vbno)
+				}
+			}
+
 			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec, ckmgr.logger)
 			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs, combinedGInfoShaMapFromPeers)
 			if err != nil {

@@ -451,6 +451,103 @@ func TestMergEmptyCkpts(t *testing.T) {
 	assert.Len(currentDocs, 2)
 }
 
+// TestMergeFinalCkpts_StaleDocsShouldBeDeletedFromMetaKV is intentionally written to fail
+// until stale checkpoint docs are physically deleted from metakv during merge.
+//
+// Current behavior (bug): stale docs are handled in-memory for merge, but DelCheckpointsDoc
+// is not called, so stale docs can still be reloaded later.
+func TestMergeFinalCkpts_StaleDocsShouldBeDeletedFromMetaKV(t *testing.T) {
+	const (
+		oldSpecInternalID = "old-spec-id-12345"
+		newSpecInternalID = "new-spec-id-67890"
+		mainTopic         = "test-repl/source/target"
+		oldSHA            = "old-sha-abcdef1234567890"
+	)
+
+	assert := assert.New(t)
+	t.Logf("DEBUG test start: setting up stale local ckpt docs for topic=%s", mainTopic)
+
+	ckptSvc := &service_def.CheckpointsService{}
+	utilsMock := &utilities.UtilsIface{}
+	logger := log.NewLogger("TestMergeFinalCkpts_StaleDocsShouldBeDeletedFromMetaKV", nil)
+
+	// Stopwatch is used throughout merge flow
+	utilsMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration {
+		return 0
+	})
+
+	// Pipeline/spec wiring
+	spec, _ := metadata.NewReplicationSpecification("srcBucket", "", "", "tgtBucket", "")
+	spec.InternalId = newSpecInternalID
+	genSpec := &mocks2.GenericSpecification{}
+	genSpec.On("GetReplicationSpec").Return(spec)
+	pipeline := &commonMock.Pipeline{}
+	pipeline.On("Specification").Return(genSpec)
+	pipeline.On("Topic").Return(mainTopic)
+
+	// Local stale docs returned by CheckpointsDocs(mainTopic, true)
+	staleLocalDocs := map[uint16]*metadata.CheckpointsDoc{
+		100: {
+			SpecInternalId: oldSpecInternalID,
+			Checkpoint_records: metadata.CheckpointRecordsList{
+				&metadata.CheckpointRecord{TargetVBTimestamp: metadata.TargetVBTimestamp{BrokenMappingSha256: oldSHA}},
+			},
+		},
+	}
+
+	backfillTopic := common.ComposeFullTopic(mainTopic, common.BackfillPipeline)
+
+	ckptSvc.On("CheckpointsDocs", mainTopic, true).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG CheckpointsDocs(main): returning stale docs with old SpecInternalId=%s", oldSpecInternalID)
+	}).Return(staleLocalDocs, nil).Once()
+	ckptSvc.On("CheckpointsDocs", backfillTopic, true).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG CheckpointsDocs(backfill): returning MetadataNotFoundErr")
+	}).Return(nil, service_def_real.MetadataNotFoundErr).Once()
+
+	// This is the expected behavior after the deletion fix: stale local docs should be removed.
+	// The current code path does not call this, so this test should fail on expectations.
+	ckptSvc.On("DelCheckpointsDoc", mainTopic, uint16(100), newSpecInternalID).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG DelCheckpointsDoc called for stale vb=%d", args.Get(1).(uint16))
+	}).Return(nil).Once()
+
+	// Downstream calls required for mergeAndPersistBrokenMappingDocsAndCkpts
+	ckptSvc.On("LoadBrokenMappings", mock.Anything).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG LoadBrokenMappings called for topic=%s", args.String(0))
+	}).Return(metadata.ShaToCollectionNamespaceMap{}, nil, nil, false, nil).Twice()
+	ckptSvc.On("LoadGlobalInfoMapping", mock.Anything).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG LoadGlobalInfoMapping called for topic=%s", args.String(0))
+	}).Return(metadata.ShaToGlobalInfoMap{}, &metadata.GlobalInfoCompressedDoc{SpecInternalId: newSpecInternalID}, nil, false, nil).Twice()
+	ckptSvc.On("UpsertAndReloadCheckpointCompleteSet", mock.Anything, mock.Anything, mock.Anything, newSpecInternalID, mock.Anything).Run(func(args mock.Arguments) {
+		t.Logf("DEBUG UpsertAndReloadCheckpointCompleteSet called for topic=%s", args.String(0))
+	}).Return(nil).Twice()
+
+	ckmgr := &CheckpointManager{
+		checkpoints_svc: ckptSvc,
+		utils:           utilsMock,
+		pipeline:        pipeline,
+		logger:          logger,
+	}
+
+	peerDocsMain := map[uint16]*metadata.CheckpointsDoc{
+		100: {
+			SpecInternalId: newSpecInternalID,
+			Checkpoint_records: metadata.CheckpointRecordsList{
+				&metadata.CheckpointRecord{SourceVBTimestamp: metadata.SourceVBTimestamp{Seqno: 5000}},
+			},
+		},
+	}
+
+	filteredMaps := []metadata.VBsCkptsDocMap{peerDocsMain, map[uint16]*metadata.CheckpointsDoc{}}
+
+	t.Logf("DEBUG invoking mergeFinalCkpts")
+	err := ckmgr.mergeFinalCkpts(filteredMaps, nil, nil, metadata.ShaToCollectionNamespaceMap{}, newSpecInternalID, metadata.ShaToGlobalInfoMap{})
+	assert.NoError(err)
+
+	// Expected-to-fail assertion before deletion fix is implemented.
+	assert.True(ckptSvc.AssertExpectations(t),
+		"EXPECTED FAILURE BEFORE FIX: stale checkpoint docs should be deleted from metakv via DelCheckpointsDoc")
+}
+
 const kvKey = "serverName"
 const srcBucketName = "srcBucket"
 const tgtBucketName = "tgtBucket"
