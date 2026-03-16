@@ -565,7 +565,7 @@ func TestHeartBeatManager_SendHeartbeat_ComposeRequestError(t *testing.T) {
 	// Mock MyConnectionStr to succeed but MyHostAddr to fail during compose request
 	topologyMock.On("MyHostAddr").Return("", fmt.Errorf("host addr error")).Once()
 
-	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts)
+	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts, nil)
 	assert.NotNil(response)
 	assert.NotEqual(codes.OK, response.Code())
 	assert.Equal(codes.Unknown, response.Code())
@@ -613,7 +613,7 @@ func TestHeartBeatManager_SendHeartbeat_Success(t *testing.T) {
 		Return(successResponse).
 		Once()
 
-	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts)
+	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts, nil)
 	assert.NotNil(response)
 	assert.Equal(codes.OK, response.Code())
 	assert.NoError(response.Error)
@@ -659,7 +659,7 @@ func TestHeartBeatManager_SendHeartbeat_RPCFailure(t *testing.T) {
 	hbManager.lastSentHeartbeatMetadata = originalMetadata
 	hbManager.mutex.Unlock()
 
-	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts)
+	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts, nil)
 	assert.NotNil(response)
 	assert.Equal(codes.Unavailable, response.Code())
 	assert.Error(response.Error)
@@ -840,7 +840,7 @@ func TestHeartBeatManager_FullHeartbeatFlow_Integration(t *testing.T) {
 	assert.Equal(specsTypeCasted, metadata.SourceSpecsList)
 
 	// 3. Send heartbeat
-	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts)
+	response := hbManager.sendHeartbeat(metadata, createTestGrpcOpts, nil)
 	assert.NotNil(response)
 	assert.Equal(codes.OK, response.Code())
 	assert.NoError(response.Error)

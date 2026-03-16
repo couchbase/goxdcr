@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
+	"github.com/couchbase/goxdcr/v8/utils"
 	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -61,6 +62,7 @@ func setupTestServices() (services, *utilsMock.UtilsIface, *service_def.Metadata
 	}
 
 	topologySvcMock.On("MyClusterUUID").Return(testUuid, nil)
+	utilsMock.On("GetDataUsageTrackingCtx").Return(utils.NewDataTrackingCtx()).Maybe()
 
 	return services, utilsMock, metakvMock, uiLogMock
 }

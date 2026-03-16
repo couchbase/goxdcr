@@ -86,6 +86,13 @@ type RemoteAgentManifestOps interface {
 	GetManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error)
 }
 
+// RemoteAgentDataUsage defines methods for tracking data usage statistics.
+type RemoteAgentDataUsage interface {
+	// GetDataUsage returns the data usage statistics for the remote cluster.
+	// The first int64 represents the accumulated data sent, and the second represents the accumulated data received.
+	GetDataUsage() (int64, int64)
+}
+
 // AgentConfig defines the setter methods for configuring the remote agent.
 type RemoteAgentConfig interface {
 	// SetCapability sets the cluster compatibility of the remote cluster.
@@ -110,4 +117,5 @@ type RemoteAgentIface interface {
 	RemoteAgentMetadata
 	RemoteAgentConfig
 	RemoteAgentManifestOps
+	RemoteAgentDataUsage
 }

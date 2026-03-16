@@ -11,6 +11,7 @@ package cngAgent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -185,6 +186,10 @@ type RemoteCngAgent struct {
 	heartbeatManager *heartBeatManager
 	// remoteDataProvider encapsulates the data providers for the remote cluster
 	remoteDataProvider *remoteDataProvider
+	// dataSentBytes tracks the total data sent to the remote cluster
+	dataSentBytes atomic.Uint64
+	// dataReceivedBytes tracks the total data received from the remote cluster
+	dataReceivedBytes atomic.Uint64
 }
 
 var _ metadata_svc.RemoteAgentIface = &RemoteCngAgent{}

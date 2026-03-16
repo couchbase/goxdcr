@@ -102,6 +102,8 @@ func setupTestRefreshSnapShot(agent *RemoteCngAgent, ref *metadata.RemoteCluster
 	return newRefreshSnapShot(ref, capability, agent.services, agent.logger)
 }
 
+
+
 // ============= Test Cases for refreshState =============
 
 func TestRefreshState_BeginOp_Success(t *testing.T) {
@@ -358,7 +360,8 @@ func TestRefreshSnapShot_PerformRefreshOp_Success(t *testing.T) {
 	clusterInfoResp := createTestClusterInfoResponse(testUuid)
 	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(clusterInfoResp)
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.NoError(err)
 	assert.Equal(codes.OK, statusCode)
 	assert.False(refreshSnapshot.promoteStageToPrimary) // Should remain false for successful primary auth
@@ -379,7 +382,8 @@ func TestRefreshSnapShot_PerformRefreshOp_UUIDMismatch(t *testing.T) {
 	clusterInfoResp := createTestClusterInfoResponse(differentUuid)
 	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(clusterInfoResp)
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Equal(metadata_svc.UUIDMismatchError, err)
 	assert.Equal(codes.OK, statusCode)
 
@@ -403,7 +407,8 @@ func TestRefreshSnapShot_PerformRefreshOp_PrimaryAuthFailsRetriesWithStaged(t *t
 	// Second call (staged creds) should succeed
 	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(clusterInfoResp).Once()
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.NoError(err)
 	assert.Equal(codes.OK, statusCode)
 	assert.True(refreshSnapshot.promoteStageToPrimary) // Should be true when staged creds succeed
@@ -426,7 +431,8 @@ func TestRefreshSnapShot_PerformRefreshOp_BothCredentialsFail(t *testing.T) {
 	// Second call (staged creds) also fails
 	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(createTestClusterInfoErrorResponse(codes.Unauthenticated, fmt.Errorf("staged auth failed"))).Once()
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Error(err)
 	assert.Contains(err.Error(), "authentication failed with both primary and staged credentials")
 	assert.Equal(codes.Unauthenticated, statusCode)
@@ -446,7 +452,8 @@ func TestRefreshSnapShot_PerformRefreshOp_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Error(err)
 	assert.Contains(err.Error(), "context canceled")
 	assert.Equal(codes.Canceled, statusCode)
@@ -463,7 +470,8 @@ func TestRefreshSnapShot_PerformRefreshOp_NetworkError(t *testing.T) {
 	// Setup network error
 	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(createTestClusterInfoErrorResponse(codes.Unavailable, fmt.Errorf("network error")))
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Error(err)
 	assert.Contains(err.Error(), "failed to contact target")
 	assert.Equal(codes.Unavailable, statusCode)
@@ -811,7 +819,8 @@ func TestRefreshSnapShot_PerformRefreshOp_ConnectionStringError(t *testing.T) {
 	refreshSnapshot := setupTestRefreshSnapShot(agent, invalidRef)
 	ctx := context.Background()
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Error(err)
 	assert.Contains(err.Error(), "failed to construct grpcOpts")
 	assert.Equal(codes.Internal, statusCode)
@@ -832,7 +841,8 @@ func TestRefreshSnapShot_PerformRefreshOp_GrpcOptionsError(t *testing.T) {
 
 	// The certificate issue will be detected during the actual grpc call, not grpc options creation
 
-	statusCode, err := refreshSnapshot.performRefreshOp(ctx)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	statusCode, err := refreshSnapshot.performRefreshOp(ctx, trackingCtx)
 	assert.Error(err)
 	assert.Contains(err.Error(), "failed to contact target")
 	assert.Equal(codes.Unknown, statusCode)

@@ -12,13 +12,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 var _ metadata_svc.RemoteAgentRefresh = &RemoteCngAgent{}
@@ -133,8 +136,9 @@ func buildRefreshError(refName string, code codes.Code, responseErr error, bothC
 	}
 }
 
-// performRefreshOp performs the actual refresh operation to contact the remote cluster
-func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, error) {
+// performRefreshOp performs the actual refresh operation to contact the remote cluster.
+// trackingCtx is used to accumulate data sent/received sizes during the operation.
+func (r *refreshSnapShot) performRefreshOp(ctx context.Context, trackingCtx *utilities.Context) (codes.Code, error) {
 	connStr, err := r.refCache.MyConnectionStr()
 	if err != nil {
 		return codes.FailedPrecondition, fmt.Errorf("failed to get connection string: %w", err)
@@ -160,11 +164,22 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context) (codes.Code, err
 
 		timeoutCtx, cancel := context.WithTimeout(ctx, base.ShortHttpTimeout)
 		defer cancel()
+		grpcReq := &internal_xdcr_v1.GetClusterInfoRequest{}
 		request := &base.GrpcRequest[*internal_xdcr_v1.GetClusterInfoRequest]{
 			Context: timeoutCtx,
-			Request: &internal_xdcr_v1.GetClusterInfoRequest{},
+			Request: grpcReq,
 		}
-		return r.services.utils.CngGetClusterInfo(cngConn.Client(), request)
+		response := r.services.utils.CngGetClusterInfo(cngConn.Client(), request)
+
+		// Update the tracking context with the actual proto message sizes
+		if trackingCtx != nil && trackingCtx.TrackDataSentAndReceived {
+			atomic.AddInt64(&trackingCtx.DataSent, int64(proto.Size(grpcReq)))
+			if response.Response() != nil {
+				atomic.AddInt64(&trackingCtx.DataReceived, int64(proto.Size(response.Response())))
+			}
+		}
+
+		return response
 	}
 
 	// Ensure context hasn't been canceled before starting
@@ -272,8 +287,11 @@ func (agent *RemoteCngAgent) Refresh() error {
 	defer agent.refreshState.endOp(&opErr)
 
 	ref, _ := agent.GetReferenceClone(false)
+	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+	defer agent.flushTrackingCtx(trackingCtx)
+
 	snapShot := newRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
-	statusCode, opErr = snapShot.performRefreshOp(opContext)
+	statusCode, opErr = snapShot.performRefreshOp(opContext, trackingCtx)
 
 	if opContext.Err() != nil && errors.Is(opErr, opContext.Err()) {
 		// if the refresh operation failed due to context cancellation, don't update health tracker

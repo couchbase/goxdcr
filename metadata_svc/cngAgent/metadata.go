@@ -11,6 +11,7 @@ package cngAgent
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -18,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
 var _ metadata_svc.RemoteAgentMetadata = &RemoteCngAgent{}
@@ -169,4 +171,27 @@ func (agent *RemoteCngAgent) SetReplReader(reader service_def.ReplicationSpecRea
 	defer agent.heartbeatManager.mutex.Unlock()
 
 	agent.heartbeatManager.specsReader = reader
+}
+
+// -------- RemoteAgentDataUsage Methods ----------
+
+func (agent *RemoteCngAgent) GetDataUsage() (int64, int64) {
+	dataSent := int64(agent.dataSentBytes.Load())
+	dataReceived := int64(agent.dataReceivedBytes.Load())
+	return dataSent, dataReceived
+}
+
+// flushTrackingCtx flushes the accumulated data from the tracking context to the agent's data usage counters.
+func (agent *RemoteCngAgent) flushTrackingCtx(ctx *utilities.Context) {
+	if ctx == nil || !ctx.TrackDataSentAndReceived {
+		return
+	}
+	sent := atomic.LoadInt64(&ctx.DataSent)
+	received := atomic.LoadInt64(&ctx.DataReceived)
+	if sent > 0 {
+		agent.dataSentBytes.Add(uint64(sent))
+	}
+	if received > 0 {
+		agent.dataReceivedBytes.Add(uint64(received))
+	}
 }

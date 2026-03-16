@@ -2854,8 +2854,7 @@ func (service *RemoteClusterService) GetDataUsages() (map[string][]int64, error)
 	defer service.agentMutex.RUnlock()
 
 	for uuid, agent := range service.agentCacheUuidMap {
-		dataSent := int64(agent.(*RemoteClusterAgent).dataSentBytes.Load())
-		dataReceived := int64(agent.(*RemoteClusterAgent).dataReceivedBytes.Load())
+		dataSent, dataReceived := agent.GetDataUsage()
 		dataUsagesMap[uuid] = []int64{dataSent, dataReceived}
 	}
 
@@ -4330,6 +4329,12 @@ End Unit test functions
 
 var coolDownPeriod = 3 * time.Second
 var coolDownError = fmt.Errorf("This remote cluster has recently just serviced manifest retrieval request and is currently in cool down. Please wait %v", coolDownPeriod)
+
+func (agent *RemoteClusterAgent) GetDataUsage() (int64, int64) {
+	dataSent := int64(agent.dataSentBytes.Load())
+	dataReceived := int64(agent.dataReceivedBytes.Load())
+	return dataSent, dataReceived
+}
 
 func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(requestOpts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
 	if err := requestOpts.Validate(); err != nil {

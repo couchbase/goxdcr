@@ -3,14 +3,17 @@ package cngAgent
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/peerToPeer"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // allowedToSendHeartbeats checks if the it is allowed to send heartbeats to the remote cluster.
@@ -137,8 +140,8 @@ func (heartbeatStats *heartbeatStats) update(response *base.GrpcResponse[*intern
 	}
 }
 
-// sendHeartbeat sends the heartbeat to the remote cluster.
-func (hbt *heartBeatManager) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata, getGrpcOpts func() *base.GrpcOptions) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
+// sendHeartbeat sends the heartbeat to the remote cluster and updates the tracking context with data exchanged.
+func (hbt *heartBeatManager) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadata, getGrpcOpts func() *base.GrpcOptions, trackingCtx *utilities.Context) *base.GrpcResponse[*internal_xdcr_v1.HeartbeatResponse] {
 	grpcOpts := getGrpcOpts()
 	req, err := hbt.composeHeartbeatRequest(hbMetadata, grpcOpts.ConnStr)
 	if err != nil {
@@ -169,15 +172,24 @@ func (hbt *heartBeatManager) sendHeartbeat(hbMetadata *metadata.HeartbeatMetadat
 	ctx, cancel := context.WithTimeout(context.Background(), base.ShortHttpTimeout)
 	defer cancel()
 
+	grpcReq := &internal_xdcr_v1.HeartbeatRequest{
+		Payload: serializedReq,
+	}
 	request := &base.GrpcRequest[*internal_xdcr_v1.HeartbeatRequest]{
 		Context: ctx,
-		Request: &internal_xdcr_v1.HeartbeatRequest{
-			Payload: serializedReq,
-		},
+		Request: grpcReq,
 	}
 	response := hbt.services.utils.CngHeartbeat(conn.Client(), request)
+
+	// Update the tracking context with the actual proto message sizes
+	if trackingCtx != nil && trackingCtx.TrackDataSentAndReceived {
+		atomic.AddInt64(&trackingCtx.DataSent, int64(proto.Size(grpcReq)))
+		if response.Response() != nil {
+			atomic.AddInt64(&trackingCtx.DataReceived, int64(proto.Size(response.Response())))
+		}
+	}
+
 	if response.Code() == codes.OK {
-		// In case of success, update the last sent heartbeat metadata
 		hbt.mutex.Lock()
 		hbt.lastSentHeartbeatMetadata = hbMetadata
 		hbt.mutex.Unlock()
@@ -250,7 +262,9 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			}
 			agent.heartbeatManager.mutex.RUnlock()
 			// send the heartbeat
-			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts)
+			trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts, trackingCtx)
+			agent.flushTrackingCtx(trackingCtx)
 			agent.heartbeatManager.heartbeatStats.update(response)
 			// delay the next heartbeat by atmost SrcHeartbeatMaxInterval
 			maxHBIntervalTicker.Reset(base.SrcHeartbeatMaxInterval())
@@ -266,7 +280,9 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 				agent.logger.Warnf("%v: failed to generate heartbeat metadata for cluster %v due to: %v", refName, clonedRef.Uuid(), err)
 				continue
 			}
-			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts)
+			trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
+			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts, trackingCtx)
+			agent.flushTrackingCtx(trackingCtx)
 			agent.heartbeatManager.heartbeatStats.update(response)
 
 			// delay the next heartbeat by atleast SrcHeartbeatMinInterval
