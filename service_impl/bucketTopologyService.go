@@ -668,7 +668,12 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 		var storageBackend string
 		var targetServerVBMap map[string][]uint16
 
-		if !utils.IsBucketInfoFromCng(targetBucketInfo) {
+		if utils.IsBucketInfoFromCng(targetBucketInfo) {
+			targetServerVBMap, err = b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, targetBucketInfo, shouldUseExternal)
+			if err != nil {
+				return err
+			}
+		} else {
 			shouldUseTerseInfo, err := b.utils.ShouldUseTerseBucketInfo(targetBucketInfo, connStr, spec.TargetBucketName, shouldUseExternal, perUpdateRef.IsHttps())
 			if err != nil {
 				return err
