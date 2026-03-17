@@ -3686,3 +3686,17 @@ function checkECCVMismatchUIErrors {
 		echo "Found exactly $maxInstanceCnt instances of the warning in the UI errors list"
 	fi
 }
+
+# disableCERestrictions calls the diag/eval backdoor to lift the CE restrictions
+# enforced from 8.1.0
+function disableCERestrictions {
+	local clusterName=$1
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		local idx=$(getClusterIdx "$clusterName")
+		${VSSH[$idx]} "curl -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/diag/eval -d \"ns_config:set(disable_ce_restrictions, true).\""
+		return $?
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	$CURL -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag/eval -d "ns_config:set(disable_ce_restrictions, true)."
+}

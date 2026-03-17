@@ -109,6 +109,33 @@ function testCERestrictions {
 				exit 1
 			fi
 			echo "self reference creation failed"
+
+			echo "Testing diag/eval backdoor to disable CE restrictions"
+			disableCERestrictions "C1"
+			echo "Waiting for 15s for goxdcr to restart with --disableCERestrictions"
+			sleep 15
+
+			refResult=$(createRemoteClusterReference "C1" "C2")
+			if [[ $(echo "$refResult" | grep -c "$CE_ERROR") -gt 0 ]]; then
+				echo "ERROR: Reference creation should work after disableCERestrictions"
+				exit 1
+			fi
+
+			refResult=$(createRemoteClusterReference "C1" "C1")
+			if [[ $(echo "$refResult" | grep -c "$CE_ERROR") -gt 0 ]]; then
+				echo "ERROR: Self reference creation should also work after disableCERestrictions"
+				exit 1
+			fi
+
+			sleep 5
+
+			createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+			runDataLoadAndCheck "C1" "B1"
+
+			sleep 5
+
+			createBucketReplication "C1" "B0" "C1" "B2" DefaultBucketReplProperties
+			runDataLoadAndCheck "C1" "B0"
 		else
 			echo "ERROR: The test expects remote reference creation to succeed, but it did not (refResult=$refResult)"
 			dumpDebugInfoBeforeExit
@@ -214,8 +241,7 @@ function testCERestrictionsMixedMode {
 	cleanupBuckets
 }
 
-# Note: XDCR CE restriction enforcements were added in 8.0.2 and 8.1.0.
-# TODO: Uncomment morpheus tests once backport to 8.0.2 is complete.
+# Note: XDCR CE restriction enforcements were added in 8.1.0 (not backported)
 function runTestCase {
 	# Use "totoro-community" for CE edition and "totoro" for EE edition
 	testCERestrictions "totoro-community" "totoro-community" 1
@@ -223,19 +249,10 @@ function runTestCase {
 	testCERestrictions "totoro" "totoro-community" 0
 	testCERestrictions "totoro" "totoro" 0
 
-	# Use "morpheus-community" for CE edition and "morpheus" for EE edition
-	#testCERestrictions "morpheus-community" "morpheus-community" 1
-	#testCERestrictions "morpheus-community" "morpheus" 0
-	#testCERestrictions "morpheus" "morpheus-community" 0
-	#testCERestrictions "morpheus" "morpheus" 0
-
-	# Test mixed mode while upgrading from < 8.0.2, < 8.1.0 to >= 8.0.2, >= 8.1.0
+	# Test mixed mode while upgrading from < 8.1.0 to >= 8.1.0
 	testCERestrictionsMixedMode "7.2.4-community" "totoro-community" "7.2.4-community"
 	testCERestrictionsMixedMode "7.6.2-community" "totoro-community" "7.6.2-community"
 	testCERestrictionsMixedMode "8.0.0-community" "totoro-community" "8.0.0-community"
-	#testCERestrictionsMixedMode "7.2.4-community" "morpheus-community" "7.2.4-community"
-	#testCERestrictionsMixedMode "7.6.2-community" "morpheus-community" "7.6.2-community"
-	#testCERestrictionsMixedMode "8.0.0-community" "morpheus-community" "8.0.0-community"
 
 	echo "============================================================================"
 	echo "ALL TESTS PASSED SUCCESSFULLY"
