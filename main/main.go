@@ -88,7 +88,7 @@ func argParse() {
 	flag.StringVar(&options.clientKeyFile, "clientKeyFile", "",
 		"Internal communication key file")
 
-	flag.BoolVar(&options.disableCERestrictions, "disable-CE-restrictions", false,
+	flag.BoolVar(&options.disableCERestrictions, "disableCERestrictions", false,
 		"disable restrictions while creating CE -> CE replications")
 	flag.Parse()
 }
