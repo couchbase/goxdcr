@@ -36,6 +36,12 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 declare -a scope1Arr=("S1" "S2")
 BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
 
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
 function setIpFamily {
 	local cluster=$1
 	local ip=$2
