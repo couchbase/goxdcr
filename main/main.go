@@ -282,6 +282,11 @@ func main() {
 			replication_spec_svc,
 			globalSettings.GetCLogPoolGCInterval(), globalSettings.GetCLogPoolReapInterval(), globalSettings.GetCLogPoolConnLimit())
 
+		service_impl.StartBucketConfigManager(log.DefaultLoggerContext, service_impl.BucketConfigManagerServices{
+			ReplSvc:          replication_spec_svc,
+			RemoteClusterSvc: remote_cluster_svc,
+		})
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),

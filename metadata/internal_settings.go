@@ -313,6 +313,8 @@ const (
 	// threshold for compiling lookup index during CollectionNamespaceMapping marshalling
 	// if the mapping size exceeds this threshold, an index will be compiled to speed up lookups
 	ColMarshalIdxThresholdKey = "ColMappingLargeThreshold"
+
+	DisableBucketConfigManagerKey = "DisableBucketConfigManager"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -463,6 +465,7 @@ var MaxAllowedRCDegradedCyclesForCngConfig = &SettingsConfig{base.MaxAllowedRCDe
 var ColMarshalIdxThresholdConfig = &SettingsConfig{base.ColMappingLargeThreshold, &Range{1, 10000}}
 var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
 var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
+var DisableBucketConfigManagerConfig = &SettingsConfig{false, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -613,6 +616,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ColMarshalIdxThresholdKey:                     ColMarshalIdxThresholdConfig,
 	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
 	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,
+	DisableBucketConfigManagerKey:                 DisableBucketConfigManagerConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

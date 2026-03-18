@@ -1292,7 +1292,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	collectionsWatcherWaitTime time.Duration, collectionsWatcherBackoffFactor int, collectionsWatcherMaxWaitTime time.Duration,
 	maxAllowedRCDegradedCyclesForCng int,
 	colMarshalIdxThreshold int,
-	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int) {
+	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
+	disableBucketConfigManager bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1492,6 +1493,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxAllowedRCDegradedCyclesForCng = maxAllowedRCDegradedCyclesForCng
 	ColMappingLargeThreshold = colMarshalIdxThreshold
+
+	DisableBucketConfigManager = disableBucketConfigManager
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -1657,6 +1660,8 @@ const (
 var CLogSkipTlsVerify bool
 var CLogResourceManagerBoost int
 var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
+
+var DisableBucketConfigManager bool
 
 // Required for conflict resolution
 const (
@@ -2127,3 +2132,5 @@ var (
 
 // When enabled, only "local mutations" will be batched for replication
 const ForwardLocalOnlyKey = "forwardLocalOnly"
+
+const CngGuardrailKey = "cngGuardrail"
