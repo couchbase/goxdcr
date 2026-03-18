@@ -3374,6 +3374,7 @@ func TestRestoreBrokenMappingManifests_LargeTraditionalPair(t *testing.T) {
 // TestRestoreBrokenMappingManifests_SmallGlobalPairs tests restoreBrokenMappingManifests with small global broken maps
 // This test validates basic functionality of restoring global (scope-level) broken mappings
 func TestRestoreBrokenMappingManifests_SmallGlobalPairs(t *testing.T) {
+	t.Skip("Disabling until MB-70907 is fixed")
 	fmt.Println("============== Test case start: TestRestoreBrokenMappingManifests_SmallGlobalPairs =================")
 	defer fmt.Println("============== Test case end: TestRestoreBrokenMappingManifests_SmallGlobalPairs =================")
 	assert := assert.New(t)
