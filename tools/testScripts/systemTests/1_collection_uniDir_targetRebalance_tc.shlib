@@ -187,4 +187,9 @@ function runTestCase {
 
 	# 2 jobs - whichever finishes first is done
 	stopWhenAnyBgJobStops 2
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
 }
