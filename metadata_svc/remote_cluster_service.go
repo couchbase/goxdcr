@@ -4113,14 +4113,14 @@ func (service *RemoteClusterService) GetCapability(ref *metadata.RemoteClusterRe
 // The new agent is started first to ensure continuity. Once the new agent is
 // running successfully, the old agent is stopped and replaced atomically.
 func (service *RemoteClusterService) SwitchAgents(incomingRef *metadata.RemoteClusterReference, specs map[string]*metadata.ReplicationSpecification) error {
-	service.agentMutex.Lock()
-	defer service.agentMutex.Unlock()
-
 	// Get the old agent
+	service.agentMutex.RLock()
 	oldAgent, exists := service.agentMap[incomingRef.Id()]
 	if !exists {
+		service.agentMutex.RUnlock()
 		return errors.New(fmt.Sprintf("Cannot find old agent given the Id: %v", incomingRef.Id()))
 	}
+	service.agentMutex.RUnlock()
 
 	// Create the new agent based on the new remote type
 	var newAgent RemoteAgentIface
@@ -4146,16 +4146,6 @@ func (service *RemoteClusterService) SwitchAgents(incomingRef *metadata.RemoteCl
 		return err
 	}
 
-	// At this point, the new agent has been successfully started.
-	// Stop the old agent in the background and remove it from the agent map
-	go oldAgent.Stop()
-	delete(service.agentMap, incomingRef.Id())
-	delete(service.agentCacheRefNameMap, incomingRef.Name())
-	delete(service.agentCacheUuidMap, incomingRef.Uuid())
-
-	// Register the new agent in agent maps
-	service.addAgentToAgentMapNoLock(incomingRef, newAgent)
-
 	// Register the specs with the new agent
 	errMap := base.ErrorMap{}
 	for _, spec := range specs {
@@ -4170,6 +4160,20 @@ func (service *RemoteClusterService) SwitchAgents(incomingRef *metadata.RemoteCl
 		// should never occur
 		return fmt.Errorf("failed to register one or more specs with the new agent: %v", base.FlattenErrorMap(errMap))
 	}
+
+	// At this point, the new agent has been successfully started.
+	// Stop the old agent in the background and remove it from the agent map
+	go oldAgent.Stop()
+
+	service.agentMutex.Lock()
+	delete(service.agentMap, incomingRef.Id())
+	delete(service.agentCacheRefNameMap, incomingRef.Name())
+	delete(service.agentCacheUuidMap, incomingRef.Uuid())
+
+	// Register the new agent in agent maps
+	service.addAgentToAgentMapNoLock(incomingRef, newAgent)
+
+	service.agentMutex.Unlock()
 
 	return nil
 }

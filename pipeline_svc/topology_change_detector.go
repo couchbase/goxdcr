@@ -776,7 +776,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 
 	// Wait for vblistOriginal to be done first
 	// monitorSource must have had occurred first already
-	<-top_detect_svc.vblistOriginalInitDone
+	select {
+	case <-top_detect_svc.vblistOriginalInitDone:
+	case <-top_detect_svc.finish_ch:
+		initWg.Done()
+		return
+	}
 
 	var targetNotifyCh chan service_def.TargetNotification
 	var targetErrCh chan error
@@ -795,7 +800,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 
 	// The default BucketTopology refresh interval is 10 seconds.
 	// A 15-second timeout is configured to allow sufficient time for atleast one refresh cycle to complete.
-	ctx, cancel := context.WithTimeout(context.Background(), base.TopologyChangeCheckInterval+5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), base.TopologyChangeCheckInterval+base.BucketWatcherWarmupTimeout)
 	defer cancel()
 
 	//initialize target topology baseline
@@ -829,6 +834,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 		case <-ctx.Done():
 			*initErr = fmt.Errorf("timed out waiting for initial target notification to set baseline topology")
 			// unsubscribe before returning since initialization is not successful
+			top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
+			initWg.Done()
+			return
+		case <-top_detect_svc.finish_ch:
+			// unsubscribe before returning since topology change detector is stopping
 			top_detect_svc.unsubscribeTarget(spec, mainPipeline.InstanceId())
 			initWg.Done()
 			return
