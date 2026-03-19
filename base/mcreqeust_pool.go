@@ -75,10 +75,12 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.HLVModeOptions.IncludeTgtHlv = false
 	req.HLVModeOptions.SourceDocMetadata = nil
 	req.MouAfterProcessing = nil
-	req.ResetSubdocOptionsForRetry()
+	req.ResetExOptionsForRetry()
 	req.ResetCLogOptions()
 	req.Size = 0
 	req.OrigSrcVB = nil
+	req.IsExpirationEvent = false
+	req.Expiry = 0
 	return req
 }
 

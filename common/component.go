@@ -104,9 +104,7 @@ const (
 	HlvPruned                ComponentEventType = iota
 	HlvPrunedAtMerge         ComponentEventType = iota
 	// DCP SeqnoAdv
-	SeqnoAdvReceived ComponentEventType = iota
-	// We use subdoc multipath sets and deletes when we have a specific mobile/xdcr case to avoid cas rollback on target
-	DocsSentWithSubdocCmd   ComponentEventType = iota
+	SeqnoAdvReceived        ComponentEventType = iota
 	DocsSentWithPoisonedCas ComponentEventType = iota
 	// Any metadata transferred by any components outside of the context of actual document replication should raise this event
 	SystemMetadataTransferred ComponentEventType = iota

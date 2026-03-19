@@ -320,6 +320,9 @@ const (
 	TimeoutWaitForOngoingCkptOpsKey = "TimeoutWaitForOngoingCkptOps"
 
 	MaxKeepAliveTokensForCkptMgrKey = "MaxKeepAliveTokensForCkptMgr"
+	// DisableMutateWithMetaKey is a switch to disable MutateWithMeta and only allow subdoc operations
+	// in the mobile mode. If set to true, subdoc operation will be used in place of mutateWithMeta.
+	DisableMutateWithMetaKey = "DisableMutateWithMeta"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -473,6 +476,7 @@ var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFr
 var DisableBucketConfigManagerConfig = &SettingsConfig{false, nil}
 var TimeoutWaitForOngoingCkptOpsConfig = &SettingsConfig{int(base.TimeoutWaitForOngoingCkptOps / time.Second), &Range{5, 300}}
 var MaxKeepAliveTokensForCkptMgrConfig = &SettingsConfig{base.MaxKeepAliveTokensForCkptMgr, &Range{50, 1000}}
+var DisableMutateWithMetaConfig = &SettingsConfig{base.DisableMutateWithMeta, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -626,6 +630,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	DisableBucketConfigManagerKey:                 DisableBucketConfigManagerConfig,
 	TimeoutWaitForOngoingCkptOpsKey:               TimeoutWaitForOngoingCkptOpsConfig,
 	MaxKeepAliveTokensForCkptMgrKey:               MaxKeepAliveTokensForCkptMgrConfig,
+	DisableMutateWithMetaKey:                      DisableMutateWithMetaConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

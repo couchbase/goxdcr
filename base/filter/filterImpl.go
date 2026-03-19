@@ -344,7 +344,7 @@ func (filter *FilterImpl) filterNecessarySystemXattrsRelatedUprEvent(uprEvent *m
 		}
 
 		var modifiedBodyHasAtLeastOneXattr bool
-		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr, nil, nil)
+		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr, nil, nil, nil)
 		endBodyPos = len(body) - 1
 		bodyHasBeenModified = true
 		if uprEvent.DataType&mcc.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {

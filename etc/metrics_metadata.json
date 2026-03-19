@@ -770,7 +770,7 @@
     },
     "xdcr_docs_sent_with_subdoc_delete_total": {
         "type": "counter",
-        "help": "The number of deletes issued using subdoc command instead of delete_with_meta to avoid cas rollback on target",
+        "help": "The number of deletes issued using subdoc (or MutateWithMeta) command instead of delete_with_meta to avoid cas rollback on target",
         "added": "7.6.6",
         "labels": [
             "sourceBucketName",
@@ -778,11 +778,12 @@
             "targetBucketName",
             "pipelineType"
         ],
+        "notes": "MutateWithMeta is used when both source and target cluster are 8.1+. Subdoc command is used otherwise",
         "stability": "committed"
     },
     "xdcr_docs_sent_with_subdoc_set_total": {
         "type": "counter",
-        "help": "The number of sets issued using subdoc command instead of set_with_meta to avoid cas rollback on target",
+        "help": "The number of sets issued using subdoc (or MutateWithMeta) command instead of set_with_meta to avoid cas rollback on target",
         "added": "7.6.6",
         "labels": [
             "sourceBucketName",
@@ -790,6 +791,7 @@
             "targetBucketName",
             "pipelineType"
         ],
+        "notes": "MutateWithMeta is used when both source and target cluster are 8.1+. Subdoc command is used otherwise",
         "stability": "committed"
     },
     "xdcr_docs_unable_to_filter_total": {

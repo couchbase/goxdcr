@@ -1455,7 +1455,7 @@ func TestMigrationFilterAfterStrippingTxnXattr(t *testing.T) {
 	composer := base.NewXattrComposer(body)
 	err = composer.WriteKV([]byte(txnXattrKey), []byte(txnXattrVal))
 	a.Nil(err)
-	body, _ = composer.FinishAndAppendDocValue([]byte(val), nil, nil)
+	body, _ = composer.FinishAndAppendDocValue([]byte(val), nil, nil, nil)
 	body = snappy.Encode(nil, body)
 
 	uprEvent := &base.WrappedUprEvent{

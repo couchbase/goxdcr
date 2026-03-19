@@ -55,43 +55,43 @@ const (
 	default_demandEncryption bool = false
 )
 
-var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{
-	SETTING_BATCHCOUNT:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
-	SETTING_RESP_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_WRITE_TIMEOUT:           base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_READ_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_MAX_RETRY_INTERVAL:      base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_SELF_MONITOR_INTERVAL:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_BATCH_EXPIRATION_TIME:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
-	SETTING_OPTI_REP_THRESHOLD:      base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
-	XMEM_SETTING_DEMAND_ENCRYPTION:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-	XMEM_SETTING_ENCRYPTION_TYPE:    base.NewSettingDef(reflect.TypeOf((*string)(nil)), false),
-	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
-	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
-}
+var (
+	xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{
+		SETTING_BATCHCOUNT:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+		SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+		SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+		SETTING_RESP_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_WRITE_TIMEOUT:           base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_READ_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_MAX_RETRY_INTERVAL:      base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_SELF_MONITOR_INTERVAL:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_BATCH_EXPIRATION_TIME:   base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
+		SETTING_OPTI_REP_THRESHOLD:      base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+		XMEM_SETTING_DEMAND_ENCRYPTION:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+		XMEM_SETTING_ENCRYPTION_TYPE:    base.NewSettingDef(reflect.TypeOf((*string)(nil)), false),
+		XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
+		XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+		XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+	}
 
-var UninitializedReseverationNumber = -1
+	UninitializedReseverationNumber = -1
+
+	ErrorXmemIsStuck        = errors.New("Xmem is stuck")
+	ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
+	ErrorFatalError         = errors.New("received connection fatal error")
+
+	GetMetaClientName        = "client_getMeta"
+	SetMetaClientName        = "client_setMeta"
+	GetMetaClientNameForHELO = "GET"
+	SetMetaClientNameForHELO = "SET"
+)
 
 func GetErrorXmemTargetUnknownCollection(mcr *base.WrappedMCRequest) error {
 	return fmt.Errorf("%v scope %v collection %v given known manifest ID %v", base.StringTargetCollectionMappingErr,
 		mcr.GetSourceCollectionNamespace().ScopeName, mcr.GetSourceCollectionNamespace().CollectionName, mcr.GetManifestId())
 }
 
-var ErrorXmemIsStuck = errors.New("Xmem is stuck")
-
-var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
-
-var ErrorFatalError = errors.New("received connection fatal error")
-
-type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)
-
-var GetMetaClientName = "client_getMeta"
-var SetMetaClientName = "client_setMeta"
-var GetMetaClientNameForHELO = "GET"
-var SetMetaClientNameForHELO = "SET"
+type ConflictResolver func(logger *log.CommonLogger, uncompressFunc base.UncompressFunc, req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, targetCanMutateWithMeta bool) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)
 
 /************************************
 /* struct bufferedMCRequest
@@ -872,6 +872,10 @@ type XmemNozzle struct {
 
 	// dev replication options for troubleshooting. Must not be nil.
 	devReplOpts base.DevReplOpts
+
+	// targetCanMutateWithMeta represents if the target cluster supports
+	// the MutateWithMeta command.
+	targetCanMutateWithMeta atomic.Bool
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -1162,7 +1166,7 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 				Seqno:         request.Seqno,
 				VbucketCommon: VbucketCommon{VBucket: request.Req.VBucket},
 				Opcode:        request.GetMemcachedCommand(),
-				IsExpirySet:   (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
+				IsExpirySet:   request.Expiry > 0,
 				ManifestId:    request.GetManifestId(),
 				Cloned:        request.Cloned,
 				CloneSyncCh:   request.ClonedSyncCh,
@@ -1493,7 +1497,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 								Seqno:         item.Seqno,
 								VbucketCommon: VbucketCommon{VBucket: item.Req.VBucket},
 								Opcode:        item.GetMemcachedCommand(),
-								IsExpirySet:   (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+								IsExpirySet:   item.Expiry > 0,
 								ManifestId:    item.GetManifestId(),
 								Cloned:        item.Cloned,
 								CloneSyncCh:   item.ClonedSyncCh,
@@ -1594,7 +1598,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					VbucketCommon:  VbucketCommon{VBucket: item.Req.VBucket},
 					Opcode:         item.GetMemcachedCommand(),
-					IsExpirySet:    len(item.Req.Extras) >= 28 && (binary.BigEndian.Uint32(item.Req.Extras[24:28])&base.IS_EXPIRATION != 0),
+					IsExpirySet:    item.IsExpirationEvent,
 					ManifestId:     item.GetManifestId(),
 					Cloned:         item.Cloned,
 					CloneSyncCh:    item.ClonedSyncCh,
@@ -1693,8 +1697,9 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	}
 
 	// Compress it if needed
-	// if the request is a subdoc op, then the body would be composed of operational specs. KV doesn't support snappy compression on it.
-	if !req.IsSubdocOp() && req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
+	// If the request is a subdoc op, then the body would be composed of operational specs. KV doesn't support snappy compression on it.
+	// Even for MutateWithMeta command, since KV needs to perform CAS macro expansion, it expects the client to not compress it.
+	if req.IsAddOrSetOrDelWithMetaOp() && req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
 		maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
 		bodyBytes, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
 		if err != nil {
@@ -2574,7 +2579,7 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 			} else if base.IsSuccessGetResponse(resp.Resp) {
 				conflictLoggingIsOn := xmem.canLogConflict(wrappedReq, resp)
 
-				CDResult, CRResult, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, conflictLoggingIsOn, xmem.uncompressBody, xmem.Logger())
+				CDResult, CRResult, err := xmem.conflict_resolver(xmem.Logger(), xmem.uncompressBody, wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, conflictLoggingIsOn, xmem.targetCanMutateWithMeta.Load())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
@@ -2823,8 +2828,11 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 		return mouIsReplicated, nil
 	}
 
-	req := wrappedReq.Req
-	body := req.Body
+	var (
+		req        = wrappedReq.Req
+		body       = req.Body
+		isDeletion = wrappedReq.GetMemcachedCommand() == base.DELETE_WITH_META
+	)
 
 	it, err := base.NewXattrIterator(body)
 	if err != nil {
@@ -2837,6 +2845,16 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 		}
 
 		xattrKey := string(key)
+		if isDeletion && base.IsUserXattrKey(xattrKey) {
+			// User xattrs are not stored in tombstones. If we send them as is,
+			// kv_engine will strip them before storing anyways for some commands
+			// like delete_with_meta. However for commands like MutateWithMeta, the
+			// target kv_engine will return an error and therefore we will ensure that even if
+			// DCP mistakenly sends user xattrs with tombstones, we will not consider
+			// them before sending it to target kv_engine.
+			continue
+		}
+
 		switch xattrKey {
 		case base.XATTR_HLV:
 			if updatedHLV {
@@ -2914,19 +2932,20 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		return err
 	}
 
-	updateHLV := crMeta.NeedToUpdateHlv(sourceDocMeta, vbHlvMaxCas, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
-
+	// For a subdoc op and MutateWithMeta op, we should always update HLV,
+	// given that we need to perform a cas macro expansion.
+	// Otherwise the target cas will rollback.
 	if wrappedReq.IsSubdocOp() {
-		// for a subdoc op, we should always update HLV,
-		// given that we need to perform a cas macro expansion.
-		// Otherwise the target cas will rollback.
 		return xmem.updateSystemXattrForSubdocOp(wrappedReq, lookup, sourceDocMeta, true)
+	} else if wrappedReq.IsMutateWithMetaOp() {
+		return xmem.updateSystemXattrForMutateWithMetaOp(wrappedReq, lookup, sourceDocMeta, true)
 	} else {
+		updateHLV := crMeta.NeedToUpdateHlv(sourceDocMeta, vbHlvMaxCas, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
 		return xmem.updateSystemXattrForMetaOp(wrappedReq, lookup, sourceDocMeta, updateHLV)
 	}
 }
 
-// will update the system xattr to replicate when using the *_WITH_META commands.
+// will update the system xattr to replicate when using the DEL/SET/ADD_WITH_META commands.
 func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCRequest, lookup *base.WrappedMCResponse, sourceDocMeta *crMeta.CRMetadata, updateHLV bool) (err error) {
 	// Now we need to update HLV xattr either because of new changes or because we have to prune
 	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
@@ -2939,10 +2958,16 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	// 	xattr1, xattr2, ... xattrN will each look like	- | xattrKey | 0x00 | xattrVal | 0x00 |
 	//	docBody											- actual document body without any xattrs
 
+	mutateWithMeta := wrappedReq.IsMutateWithMetaOp()
 	defer func() {
-		// set opcode, CAS and extras (flags) for NoTargetCR SetWMeta mutations.
-		wrappedReq.SetCasAndFlagsForMetaOp(lookup)
-		wrappedReq.Req.Opcode = wrappedReq.GetMemcachedCommand()
+		// Sets opcode and CAS for the command. It also sets extras (options) for
+		// NoTargetCR set/del/add_with_meta mutations.
+		wrappedReq.SetCasAndOptionsForMetaOp(lookup)
+		if mutateWithMeta {
+			wrappedReq.Req.Opcode = base.MUTATE_WITH_META
+		} else {
+			wrappedReq.Req.Opcode = wrappedReq.GetMemcachedCommand()
+		}
 	}()
 
 	needToModifyBody := updateHLV || wrappedReq.HLVModeOptions.PreserveSync
@@ -2960,6 +2985,12 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 			len(xmem.sourceActorId) + 3 /* "<bucketId>", */ +
 			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
 			20 /* "0x<16byte>" */ + 2 /* }\x00 */
+
+		if mutateWithMeta {
+			// Extras section for MutateWithMeta will be encoded as a JSON object at the end
+			// of body section as well.
+			maxBodyIncrease += base.MutateWithMetaExtrasMaxLen
+		}
 	}
 
 	var targetSyncVal []byte
@@ -2987,9 +3018,10 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	}
 
 	xattrComposer := base.NewXattrComposer(newbody)
+	var cvCasOffset int
 
 	if updateHLV {
-		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer, int(xmem.config.minPVLen.Load()))
+		_, cvCasPos, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer, int(xmem.config.minPVLen.Load()))
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, sourceMeta=%s in updateSystemXattrForTarget, err=%v",
 				base.UdTagBegin, req.Key, base.UdTagEnd,
@@ -2999,10 +3031,22 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 			return err
 		}
 
+		cvCasOffset = cvCasPos
+
 		xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
 		if pruned {
 			xmem.RaiseEvent(common.NewEvent(common.HlvPruned, nil, xmem, nil, nil))
 		}
+	}
+
+	if wrappedReq.IsMutateWithMetaOp() && cvCasOffset <= 0 {
+		// MutateWithMeta will need CAS macro-expansion of cvCas.
+		err = fmt.Errorf("empty cvCASOffset for mutateWithMeta: key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, sourceMeta=%s in updateSystemXattrForTarget",
+			base.UdTagBegin, req.Key, base.UdTagEnd,
+			base.UdTagBegin, req, base.UdTagEnd,
+			base.UdTagBegin, req.Body, base.UdTagEnd,
+			sourceDocMeta)
+		return err
 	}
 
 	if wrappedReq.HLVModeOptions.PreserveSync && len(targetSyncVal) > 0 {
@@ -3019,8 +3063,15 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 		return err
 	}
 
-	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
-	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, req, lookup)
+	// Tombstones don't have document body. Some with commands like delete_with_meta, kv_engine
+	// will strip the body before storing it. However some new commands like MutateWithMeta will
+	// return an error. Therefore we will be cautious to always send empty body if it's a tombstone,
+	// even if DCP mistakenly sends us a tombstone with body.
+	docWithoutXattr := []byte{}
+	if wrappedReq.GetMemcachedCommand() != base.DELETE_WITH_META {
+		docWithoutXattr = base.FindSourceBodyWithoutXattr(req)
+	}
+	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, &cvCasOffset, wrappedReq, lookup)
 	req.Body = out
 
 	if atLeastOneXattr {
@@ -3032,10 +3083,28 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	return nil
 }
 
-// will update the system xattr to replicate when using the subdoc SET or subdoc DELETE commands.
+// updateSystemXattrForMutateWithMetaOp will update the system xattr to replicate when using the MutateWithMeta command.
+// Refer https://github.com/couchbase/kv_engine/blob/master/docs/mutate-with-meta.md for more information.
+func (xmem *XmemNozzle) updateSystemXattrForMutateWithMetaOp(wrappedReq *base.WrappedMCRequest, lookup *base.WrappedMCResponse, sourceDocMeta *crMeta.CRMetadata, updateHLV bool) (err error) {
+	wrappedReq.SetExOptionsForRetry(wrappedReq.Req.Body, wrappedReq.Req.Extras, wrappedReq.Req.DataType)
+
+	req := wrappedReq.Req
+
+	// The document body for MutateWithMeta looks exactly like that for set/add/del_with_meta. The only difference
+	// is the extras section and opcode, which we will compose separately.
+	err = xmem.updateSystemXattrForMetaOp(wrappedReq, lookup, sourceDocMeta, true)
+	if err != nil {
+		return fmt.Errorf("error composing document body for mutateWithMeta command: key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, err=%v",
+			base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
+	}
+
+	return nil
+}
+
+// updateSystemXattrForSubdocOp will update the system xattr to replicate when using the subdoc SET or subdoc DELETE commands.
 func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCRequest, lookup *base.WrappedMCResponse, sourceDocMeta *crMeta.CRMetadata, updateHLV bool) (err error) {
 
-	wrappedReq.SetSubdocOptionsForRetry(wrappedReq.Req.Body, wrappedReq.Req.Extras, wrappedReq.Req.DataType)
+	wrappedReq.SetExOptionsForRetry(wrappedReq.Req.Body, wrappedReq.Req.Extras, wrappedReq.Req.DataType)
 
 	req := wrappedReq.Req
 	var spec base.SubdocMutationPathSpec
@@ -3071,7 +3140,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 			wrappedReq.AddByteSliceForXmemToRecycle(newHlv)
 		}
 
-		pos, pruned, err := crMeta.ConstructHlv(newHlv, 0, sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, int(xmem.config.minPVLen.Load()))
+		pos, _, pruned, err := crMeta.ConstructHlv(newHlv, 0, sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, int(xmem.config.minPVLen.Load()))
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForSubdocOp, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
 			return err
@@ -3101,7 +3170,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 
 	// if we are not replicating source _mou or if source doesn't have _mou,
 	// we have to individually add a spec to remove target _mou, if it has it.
-	if !mouReplicated && wrappedReq.SubdocCmdOptions.TargetHasMou {
+	if !mouReplicated && wrappedReq.ExCmdOptions.TargetHasMou {
 		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MOU), nil)
 		specs = append(specs, spec)
 	}
@@ -3144,7 +3213,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 
 	var accessDeleted bool
 	// body path
-	switch wrappedReq.SubdocCmdOptions.SubdocOp {
+	switch wrappedReq.ExCmdOptions.ExOp {
 	case base.SubdocDelete:
 		// CMD_DELETE - subdoc delete - no doc body
 		spec = base.NewSubdocMutationPathSpec(uint8(mc.DELETE), uint8(0), []byte(""), nil)
@@ -3154,7 +3223,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 		body := base.FindSourceBodyWithoutXattr(wrappedReq.Req)
 		spec = base.NewSubdocMutationPathSpec(uint8(mc.SET), uint8(0), []byte(""), body)
 	default:
-		panic(fmt.Sprintf("unknown subdoc op %v", wrappedReq.SubdocCmdOptions.SubdocOp))
+		panic(fmt.Sprintf("unknown subdoc op %v", wrappedReq.ExCmdOptions.ExOp))
 	}
 	specs = append(specs, spec)
 
@@ -3168,7 +3237,7 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	}
 
 	// Compose the subdoc request and also set the appropriate CAS.
-	_, err = base.ComposeRequestForSubdocMutation(specs, req, lookup.Resp.Cas, newbody, accessDeleted, wrappedReq.SubdocCmdOptions.TargetDocIsTombstone, true)
+	_, err = base.ComposeRequestForSubdocMutation(specs, req, lookup.Resp.Cas, newbody, accessDeleted, wrappedReq.ExCmdOptions.TargetDocIsTombstone, true)
 	if err != nil {
 		return err
 	}
@@ -3377,19 +3446,9 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	return err
 }
 
-func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures, setMeta bool) error {
-	if !setMeta {
-		// getMeta client
-		if xmem.conflictLoggingEnabled() &&
-			(!features.DataType || !features.Xattribute || !features.SnappyEverywhere) {
-			err := fmt.Errorf("%v JSON, XATTR and SnappyEverywhere needs to be enabled for GetEx command. features=%+v", xmem.Id(), features)
-			xmem.Logger().Error(err.Error())
-			return err
-		}
-		return nil
-	}
-
-	// setMeta client
+// validateFeaturesForSetWithMetaClient validates the returned HELO features from the server
+// for the setWithMeta client.
+func (xmem *XmemNozzle) validateFeaturesForSetWithMetaClient(features utilities.HELOFeatures) error {
 	if xmem.compressionSetting != features.CompressionType {
 		errMsg := fmt.Sprintf("%v Attempted to send HELO with compression type: %v, but received response with %v",
 			xmem.Id(), xmem.compressionSetting, features.CompressionType)
@@ -3413,7 +3472,32 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures, setMet
 			xmem.Id())
 	}
 
+	if features.MutateWithMeta && !base.DisableMutateWithMeta {
+		xmem.targetCanMutateWithMeta.Store(true)
+	}
+
 	return nil
+}
+
+// validateFeaturesForGetMetaClient validates the returned HELO features from the server for
+// the getMeta client.
+func (xmem *XmemNozzle) validateFeaturesForGetMetaClient(features utilities.HELOFeatures) error {
+	// getMeta client
+	if xmem.conflictLoggingEnabled() &&
+		(!features.DataType || !features.Xattribute || !features.SnappyEverywhere) {
+		err := fmt.Errorf("%v JSON, XATTR and SnappyEverywhere needs to be enabled for GetEx command. features=%+v", xmem.Id(), features)
+		xmem.Logger().Error(err.Error())
+		return err
+	}
+	return nil
+}
+
+func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures, setMeta bool) error {
+	if setMeta {
+		return xmem.validateFeaturesForSetWithMetaClient(features)
+	} else {
+		return xmem.validateFeaturesForGetMetaClient(features)
+	}
 }
 
 func (xmem *XmemNozzle) getPoolName() string {
@@ -3911,21 +3995,12 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				resp_wait_time = time.Since(*sent_time)
 				manifestId = wrappedReq.GetManifestId()
 
-				isExpiration := false
-				subdocOpType := base.NotSubdoc
-				if wrappedReq.IsSubdocOp() {
-					isExpiration = (len(req.Extras) > 1)
-					subdocOpType = wrappedReq.SubdocCmdOptions.SubdocOp
-				} else {
-					isExpiration = len(req.Extras) >= 28 && (binary.BigEndian.Uint32(req.Extras[24:28])&base.IS_EXPIRATION != 0)
-				}
-
 				additionalInfo := DataSentEventAdditional{
 					Seqno:                seqno,
 					VbucketCommon:        VbucketCommon{VBucket: wrappedReq.GetTargetVB()},
 					IsOptRepd:            xmem.optimisticRep(wrappedReq),
 					Opcode:               req.Opcode,
-					IsExpiration:         isExpiration,
+					IsExpiration:         wrappedReq.IsExpirationEvent,
 					Req_size:             req.Size(),
 					Commit_time:          committing_time,
 					Resp_wait_time:       resp_wait_time,
@@ -3936,7 +4011,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					ImportMutation:       wrappedReq.ImportMutation,
 					Cloned:               wrappedReq.Cloned,
 					CloneSyncCh:          wrappedReq.ClonedSyncCh,
-					SubdocOpType:         subdocOpType,
+					ExOpType:             wrappedReq.GetExOp(),
 					CasPoisonProtection:  xmem.handleCasPoisoning(wrappedReq, response),
 				}
 				if wrappedReq.OrigSrcVB != nil {
@@ -3973,14 +4048,16 @@ done:
 }
 
 func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, response *mc.MCResponse) base.TargetKVCasPoisonProtectionMode {
-	isSubDocOp := wrappedReq.IsSubdocOp()
 	sentCas, err := wrappedReq.GetSentCas()
-	if err != nil && !isSubDocOp {
-		// if subDoc is not used and extras.cas is not set then it must be a coding error. Log it
+	if err != nil && wrappedReq.IsAddOrSetOrDelWithMetaOp() {
+		// if subDoc or mutateWithMeta commands are not used and extras.cas is not set then it must be a coding error.
+		// Just log it.
 		// Note: We shouldn't hit this case in practice
-		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v, isSubDocOp: %v", wrappedReq.Req, len(wrappedReq.Req.Extras), isSubDocOp)
+		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v", wrappedReq.Req, len(wrappedReq.Req.Extras))
 	}
-	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && !isSubDocOp { //replace mode
+
+	// Replace mode
+	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && wrappedReq.IsAddOrSetOrDelWithMetaOp() {
 		// Currently CAS regeneration takes place in two scenario's
 		// 1. If SubDoc is used
 		// 2. If there is a CAS poisoned doc and KV's protection mode is set to "replace"
@@ -3994,9 +4071,10 @@ func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, re
 }
 
 func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) {
-	if req.IsSubdocOp() {
-		// If we have used subdoc command before for this request before, enter the retry assuming we wouldn't need subdoc command anymore
-		if req.SubdocCmdOptions.SubdocOp == base.SubdocDelete {
+	if !req.IsAddOrSetOrDelWithMetaOp() {
+		// If we have used subdoc command or mutateWithMeta before for this request before,
+		// enter the retry assuming we wouldn't need subdoc command or mutateWithMeta anymore
+		if req.ExCmdOptions.ExOp.IsDeleteOp() {
 			req.Req.Opcode = mc.DELETE_WITH_META
 		} else {
 			req.Req.Opcode = mc.SET_WITH_META
@@ -4007,16 +4085,16 @@ func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) 
 		// 2. target doc is locked during subdoc_get.
 		// 3. target CAS changes during the write to target when using optimistic CAS locking.
 		// However for (1) and (2), if the req was a subdoc command, req.Req.Body, req.Req.DataType and req.Req.Extras
-		// would not have changed and hence req.SubdocCmdOptions.ReplacedBody will be false. That is, replacing it back
+		// would not have changed and hence req.ExCmdOptions.ReplacedBody will be false. That is, replacing it back
 		// is incorrect for cases (1) and (2)
-		if req.SubdocCmdOptions.ReplacedBody {
+		if req.ExCmdOptions.ReplacedBody {
 			// replace it back
-			req.Req.Body = req.SubdocCmdOptions.BodyPreSubdocCmd
-			req.Req.DataType = req.SubdocCmdOptions.DatatypePreSubdocCmd
-			req.Req.Extras = req.SubdocCmdOptions.ExtrasPreSubdocCmd
+			req.Req.Body = req.ExCmdOptions.BodyPreExCmd
+			req.Req.DataType = req.ExCmdOptions.DatatypePreExCmd
+			req.Req.Extras = req.ExCmdOptions.ExtrasPreExCmd
 		}
 
-		req.ResetSubdocOptionsForRetry()
+		req.ResetExOptionsForRetry()
 	} else {
 		// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
 		if req.Req.Opcode == base.ADD_WITH_META {
@@ -4038,7 +4116,11 @@ func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) 
 }
 
 func (xmem *XmemNozzle) handleVBError(vbno uint16, err error) {
-	additionalInfo := &base.VBErrorEventAdditional{vbno, err, base.VBErrorType_Target}
+	additionalInfo := &base.VBErrorEventAdditional{
+		Vbno:      vbno,
+		Error:     err,
+		ErrorType: base.VBErrorType_Target,
+	}
 	xmem.RaiseEvent(common.NewEvent(common.VBErrorEncountered, nil, xmem, nil, additionalInfo))
 }
 
@@ -4528,16 +4610,6 @@ func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
 	return result
 }
 
-func isCasLockingRequest(req *mc.MCRequest) bool {
-	if req.Opcode == base.ADD_WITH_META && req.Cas == 0 {
-		return true
-	}
-	if req.Opcode == base.SET_WITH_META && req.Cas != 0 {
-		return true
-	}
-	return false
-}
-
 func (xmem *XmemNozzle) ConnType() base.ConnType {
 	return xmem.connType
 }
@@ -4595,18 +4667,22 @@ func (xmem *XmemNozzle) optimisticRep(wrappedReq *base.WrappedMCRequest) bool {
 	return true
 }
 
-func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
-	var features utilities.HELOFeatures
-	features.Xattribute = true
-	features.Xerror = true
-	features.Collections = atomic.LoadUint32(&xmem.collectionEnabled) != 0
+// sendHELOForForSetWithMetaClient composes setWithMeta client specific features and
+// send the HELO message to the server with those features.
+func (xmem *XmemNozzle) sendHELOForForSetWithMetaClient(features utilities.HELOFeatures) (respondedFeatures utilities.HELOFeatures, err error) {
+	// For setMeta, negotiate compression, if it is set
+	features.CompressionType = xmem.compressionSetting
 
-	if setMeta {
-		// For setMeta, negotiate compression, if it is set
-		features.CompressionType = xmem.compressionSetting
-		return xmem.utils.SendHELOWithFeatures(xmem.client_for_setMeta.GetMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
-	}
+	// For mobile mode, check if the server supports MutateWithMeta. If it does,
+	// we will use it when CAS macro expansion is needed, instead of subdoc operations.
+	features.MutateWithMeta = (xmem.getMobileCompatible() != base.MobileCompatibilityOff)
 
+	return xmem.utils.SendHELOWithFeatures(xmem.client_for_setMeta.GetMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
+}
+
+// sendHELOForGetMetaClient composes getMeta client specific features and
+// send the HELO message to the server with those features.
+func (xmem *XmemNozzle) sendHELOForGetMetaClient(features utilities.HELOFeatures) (respondedFeatures utilities.HELOFeatures, err error) {
 	// For a getMeta client with conflict logging on,
 	// To use the GetEx command, we will need the JSON, XATTR and SnappyEverywhere features enabled.
 	if xmem.conflictLoggingEnabled() {
@@ -4616,6 +4692,20 @@ func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	}
 	// Since compression is value only, getMeta does not benefit from it. Use a non-compressed connection
 	return xmem.utils.SendHELOWithFeatures(xmem.client_for_getMeta.GetMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
+}
+
+func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
+	// compose the common features needed for both setWithMeta and getMeta clients.
+	var features utilities.HELOFeatures
+	features.Xattribute = true
+	features.Xerror = true
+	features.Collections = atomic.LoadUint32(&xmem.collectionEnabled) != 0
+
+	if setMeta {
+		return xmem.sendHELOForForSetWithMetaClient(features)
+	} else {
+		return xmem.sendHELOForGetMetaClient(features)
+	}
 }
 
 // compose user agent string for HELO command

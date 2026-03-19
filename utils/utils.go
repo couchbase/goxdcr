@@ -738,6 +738,10 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 		clientFeatureSet = append(clientFeatureSet, mcc.FeatureSnappyEverywhere)
 	}
 
+	if requestedFeatures.MutateWithMeta {
+		clientFeatureSet = append(clientFeatureSet, mcc.FeatureMutateWithMeta)
+	}
+
 	client.SetConnName(userAgent)
 	response, err := client.EnableFeatures(clientFeatureSet)
 
@@ -779,6 +783,9 @@ func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent strin
 			}
 			if feature == base.HELO_FEATURE_SNAPPYEVERYWHERE {
 				respondedFeatures.SnappyEverywhere = true
+			}
+			if feature == base.HELO_MUTATE_WITH_META {
+				respondedFeatures.MutateWithMeta = true
 			}
 			pos += 2
 		}

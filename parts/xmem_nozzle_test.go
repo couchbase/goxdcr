@@ -19,7 +19,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"os"
@@ -85,10 +87,17 @@ var kvStringTgt = fmt.Sprintf("%s:%s", "127.0.0.1", tgtKVPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 var clusterReady = true // Assume we have live cluster initially
 var clusterChecked = false
+var disableMutateWithMeta bool
 
 var events []string
 var eventID int64
 var err error
+
+func TestMain(m *testing.M) {
+	flag.BoolVar(&disableMutateWithMeta, "DisableMutateWithMeta", base.DisableMutateWithMeta, "Run tests with subdoc commands")
+	flag.Parse()
+	os.Exit(m.Run())
+}
 
 func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, optional ...int) (*utilsMock.UtilsIface, map[string]interface{}, *XmemNozzle, *Router, *serviceDefMocks.BandwidthThrottlerSvc, *serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CollectionsManifestSvc, *mocks.PipelineEventsProducer) {
 
@@ -768,7 +777,7 @@ func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, is
 		opts = &gocb.LookupInOptions{
 			Internal: struct {
 				DocFlags gocb.SubdocDocFlag
-				User     []byte
+				User     string
 			}{
 				DocFlags: gocb.SubdocDocFlagAccessDeleted,
 			},
@@ -798,7 +807,7 @@ func checkTargetDNE(bucket *gocb.Bucket, key, path string, isXattr, accessDelete
 		opts = &gocb.LookupInOptions{
 			Internal: struct {
 				DocFlags gocb.SubdocDocFlag
-				User     []byte
+				User     string
 			}{
 				DocFlags: gocb.SubdocDocFlagAccessDeleted,
 			},
@@ -1164,7 +1173,7 @@ func Test_retryAfterCasLockingFailureWithXmemRetry(t *testing.T) {
 	req := &base.WrappedMCRequest{}
 	req.Req = &mc.MCRequest{}
 	req.Req.Opaque = 1
-	req.SubdocCmdOptions = &base.SubdocCmdOptions{SubdocOp: base.SubdocSet, ExtrasPreSubdocCmd: make([]byte, 24), ReplacedBody: true}
+	req.ExCmdOptions = &base.ExCmdOptions{ExOp: base.SubdocSet, ExtrasPreExCmd: make([]byte, 24), ReplacedBody: true}
 
 	xmem.receive_token_ch = make(chan int, 10)
 	xmem.buf = newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger(), xmem.dataPool, base.DevReplOpts{})
@@ -1265,16 +1274,16 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, col
 	pvMap := hlv.GetPV()
 	a.Nil(err)
 	if len(pvMap) > 0 {
-		newPvMap := srcCasMapToHex(pvMap)
-		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PV_PATH, newPvMap, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+		pvList := srcCasMapToDeltas(pvMap)
+		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PV_PATH, pvList, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	} else if meta.HadPv() {
 		mutateInSpec = append(mutateInSpec, gocb.RemoveSpec(crMeta.XATTR_PV_PATH, &gocb.RemoveSpecOptions{IsXattr: true}))
 	}
 	// Update MV
 	mvMap := hlv.GetMV()
 	if len(mvMap) > 0 {
-		newMvMap := srcCasMapToHex(mvMap)
-		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_MV_PATH, newMvMap, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+		mvList := srcCasMapToDeltas(mvMap)
+		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_MV_PATH, mvList, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	} else if meta.HadMv() {
 		mutateInSpec = append(mutateInSpec, gocb.RemoveSpec(crMeta.XATTR_MV_PATH, &gocb.RemoveSpecOptions{IsXattr: true}))
 	}
@@ -1288,9 +1297,10 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, col
 	// Add _mou.pRev
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PREVIOUSREV, fmt.Sprintf(`%v`, preImportRevId), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	res, err := bucket.Scope(scopeName).Collection(colName).MutateIn(key, mutateInSpec, &gocb.MutateInOptions{
+		PreserveExpiry: true,
 		Internal: struct {
 			DocFlags gocb.SubdocDocFlag
-			User     []byte
+			User     string
 		}{
 			DocFlags: gocb.SubdocDocFlagAccessDeleted,
 		},
@@ -1299,15 +1309,32 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, col
 	return res.Cas()
 }
 
-func srcCasMapToHex(input hlv.VersionsMap) (output map[string]string) {
+func srcCasMapToDeltas(input hlv.VersionsMap) (output []string) {
 	if len(input) == 0 {
 		return
 	}
-	output = make(map[string]string)
-	for key, val := range input {
-		hexVal := base.Uint64ToHexLittleEndian(val)
-		output[string(key)] = string(hexVal)
+	output = make([]string, 0, len(input))
+	first := true
+	deltas := input.VersionsDeltas()
+	for _, delta := range deltas {
+		key := delta.GetSource()
+		ver := delta.GetVersion()
+		var value []byte
+		if first {
+			value = base.Uint64ToHexLittleEndian(ver)
+		} else {
+			value = base.Uint64ToHexLittleEndianAndStrip0s(ver)
+		}
+
+		hlvEntry, err := crMeta.ComposeHLVEntry(key, value)
+		if err != nil {
+			panic(err)
+		}
+
+		output = append(output, string(hlvEntry))
+		first = false
 	}
+
 	return
 }
 
@@ -1340,7 +1367,7 @@ func createSDKAgent(agentConfig *gocbcore.AgentConfig) (*gocbcore.Agent, func())
 	return agent, closeFunc
 }
 
-func getDocMeta(agent *gocbcore.Agent, key, collection, scope string) (cas uint64, seqno uint64, datatype uint8, flags uint32, value []byte, expiry uint32) {
+func getDocMeta(agent *gocbcore.Agent, key, collection, scope string) (cas uint64, seqno uint64, datatype uint8, flags uint32, value []byte, expiry uint32, deleted bool) {
 	signal := make(chan error)
 	_, err = agent.GetMeta(
 		gocbcore.GetMetaOptions{
@@ -1355,6 +1382,7 @@ func getDocMeta(agent *gocbcore.Agent, key, collection, scope string) (cas uint6
 			flags = gmr.Flags
 			value = gmr.Value
 			expiry = gmr.Expiry
+			deleted = gmr.Deleted != 0
 			signal <- err
 		},
 	)
@@ -1369,9 +1397,9 @@ func getDocMeta(agent *gocbcore.Agent, key, collection, scope string) (cas uint6
 	return
 }
 
-func getDocMetaAndVV(bucket *gocb.Bucket, agent *gocbcore.Agent, key, collection, scope string, a *assert.Assertions) (cas uint64, seqno uint64, datatype uint8, flags uint32, value []byte, expiry uint32, cvCas, src, ver, importCas, pv, mv []byte) {
+func getDocMetaAndVV(bucket *gocb.Bucket, agent *gocbcore.Agent, key, collection, scope string, a *assert.Assertions) (cas uint64, seqno uint64, datatype uint8, flags uint32, value []byte, expiry uint32, cvCas, src, ver, importCas, pv, mv []byte, deleted bool) {
 	cvCas, src, ver, mv, pv, importCas = getVVXattr(bucket, key, collection, scope, a)
-	cas, seqno, datatype, flags, value, expiry = getDocMeta(agent, key, collection, scope)
+	cas, seqno, datatype, flags, value, expiry, deleted = getDocMeta(agent, key, collection, scope)
 	return
 }
 
@@ -1391,8 +1419,7 @@ func writeDoc(agent *gocbcore.Agent, key, val, collection, scope string, flags u
 	if err == nil {
 		err = <-signal
 		if err != nil {
-			fmt.Printf("Set error, err=%v\n", err)
-			return
+			panic(fmt.Sprintf("Set error, err=%v", err))
 		}
 	}
 }
@@ -1434,8 +1461,7 @@ func deleteDoc(agent *gocbcore.Agent, key, collection, scope string) {
 	if err == nil {
 		err = <-signal
 		if err != nil {
-			fmt.Printf("Delete error, err=%v\n", err)
-			return
+			panic(fmt.Sprintf("Delete error, err=%v", err))
 		}
 	}
 }
@@ -1562,6 +1588,12 @@ func changeClusterRunReplicationSettings(port int, replID, key, val string) {
 	runCmd(cmd, printCmd)
 }
 
+func changeClusterRunInternalSettings(port int, key, val string) {
+	defer time.Sleep(3 * time.Second)
+	cmd := exec.Command(curl, "-s", "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/xdcr/internalSettings", port), "-d", fmt.Sprintf("%v=%v", key, val))
+	runCmd(cmd, printCmd)
+}
+
 func createXdcrInboundUser(port int) {
 	cmd := exec.Command(curl, "-s", "-u", combinedCreds, "-X", PUT, fmt.Sprintf("http://localhost:%v/settings/rbac/users/local/%v", port, xdcrUser), "-d", fmt.Sprintf("%v=%v", "password", password), "-d", "roles=replication_target[*]")
 	runCmd(cmd, printCmd)
@@ -1596,7 +1628,7 @@ func GetPrometheusStats(port int) string {
 	return string(out)
 }
 
-func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, bucketName, docKey, docVal string, srcNode, tgtNode int) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func(), string, uint64, uint64) {
+func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, bucketName, docKey, docVal string, srcNode, tgtNode int, disableMutateWithMeta bool) (*gocb.Bucket, *gocb.Bucket, *gocbcore.Agent, *gocbcore.Agent, string, func(opts *gocb.ClusterCloseOptions) error, func(opts *gocb.ClusterCloseOptions) error, func(), func(), string, uint64, uint64) {
 	setupClusterRunCluster(srcNode)
 	setupClusterRunCluster(tgtNode)
 
@@ -1651,18 +1683,26 @@ func setupForMobileConvergenceTest(a *assert.Assertions, colName, scopeName, buc
 	changeClusterRunReplicationSettings(srcNode, replID1, "mobile", "Active")
 	changeClusterRunReplicationSettings(tgtNode, replID2, "mobile", "Active")
 
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0)
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 1000, base.JSONDataType, math.MaxUint32)
 	time.Sleep(3 * time.Second) // wait for it to replicate
-	cas1, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas2, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
+	cas1, _, _, flags1, _, expiry1, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas2, _, _, flags2, _, expiry2, _, _, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 
 	a.Equal(cas1, cas2)
+	a.Equal(flags1, flags2)
+	a.Equal(expiry1, expiry2)
 
 	// pause the replication to make sure we have a desired state
 	pauseClusterRunReplication(srcNode, replID1)
 	pauseClusterRunReplication(tgtNode, replID2)
 
 	time.Sleep(2 * time.Second)
+
+	if disableMutateWithMeta {
+		fmt.Println("Running tests using subdoc commands")
+		changeClusterRunInternalSettings(9000, "DisableMutateWithMeta", "true")
+		time.Sleep(10 * time.Second)
+	}
 
 	return srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2
 }
@@ -1695,11 +1735,11 @@ func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgt
 }
 
 // this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
-func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, tgtActorId string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
+func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, tgtActorId string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent, disableMutateWithMeta bool) {
 	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(tgtActorId), cas2, 1)
 
-	cas3, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas4, _, _, _, _, _, cvCas4, _, _, importCas4, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
+	cas3, _, _, flags1, _, expiry1, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas4, _, _, flags2, _, expiry2, cvCas4, _, _, importCas4, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas4Int, err := base.HexLittleEndianToUint64(cvCas4)
 	a.Nil(err)
 	importCas4Int, err := base.HexLittleEndianToUint64(importCas4)
@@ -1716,28 +1756,57 @@ func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, r
 	// resume replication from C1 to C2 only and make sure cas doesn't rollback on target
 	resumeClusterRunReplication(srcNode, replID1)
 
-	cas5, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas6, _, _, _, _, _, cvCas6, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
+	cas5, seqno1, _, flags1, _, expiry1, _, _, _, _, _, _, deleted := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas6, seqno2, _, flags2, _, expiry2, cvCas6, _, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas6Int, err := base.HexLittleEndianToUint64(cvCas6)
 	a.Nil(err)
 
-	a.Equal(cas5, cas3)      // no changes on source
-	a.Greater(cas6, cas5)    // check if cas was regenerated
+	a.Equal(cas5, cas3)   // no changes on source
+	a.Greater(cas6, cas5) // check if cas was regenerated
+	if disableMutateWithMeta {
+		// revSeqno is also regenerated along with CAS for subdoc operation.
+		a.Greater(seqno2, seqno1)
+	} else {
+		// revSeqno converges (KV stores it as sent by command.extras.seqno of MutateWithMeta)
+		a.Equal(seqno2, seqno1)
+	}
 	a.Equal(cvCas6Int, cas6) // check if macro-expansion was successful
+	if !disableMutateWithMeta {
+		// MutateWithMeta only validations:
+		// 1. Subdoc operation doesn't replicate deletion time, MutateWithMeta does
+		// 2. Subdoc operation donot have ability to replicate document flags, MutateWithMeta does.
+		a.Equal(expiry1, expiry2)
+		if !deleted {
+			// DCP doesn't populate flags in UPR_DELETIONs, eventhough tombstones
+			// retain them. Therefore source will have flags, target won't.
+			a.Equal(flags1, flags2)
+		}
+	}
 
 	// resume replication from C2 to C1 also, to make sure we have convergence after cas regeneration, but before an import process
 	resumeClusterRunReplication(tgtNode, replID2)
 
-	cas7, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas8, _, _, _, _, _, cvCas8, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
+	cas7, _, _, flags1, _, expiry1, _, _, _, _, _, _, deleted := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas8, _, _, flags2, _, expiry2, cvCas8, _, _, _, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas8Int, err := base.HexLittleEndianToUint64(cvCas8)
 	a.Nil(err)
 	a.Equal(cas8, cas6) // no changes on target
 	a.Equal(cvCas8Int, cvCas6Int)
+	if !disableMutateWithMeta {
+		// MutateWithMeta only validations:
+		// 1. Subdoc operation doesn't replicate deletion time, MutateWithMeta does
+		// 2. Subdoc operation donot have ability to replicate document flags, MutateWithMeta does.
+		a.Equal(expiry1, expiry2)
+		if !deleted {
+			// DCP doesn't populate flags in UPR_DELETIONs, eventhough tombstones
+			// retain them. Therefore source will have flags, target won't.
+			a.Equal(flags1, flags2)
+		}
+	}
 
 	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(tgtActorId), cas8, 1)
-	cas9, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
-	cas10, _, _, _, _, _, cvCas10, _, _, importCas10, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
+	cas9, _, _, flags1, _, expiry1, _, _, _, _, _, _, deleted := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
+	cas10, _, _, flags2, _, expiry2, cvCas10, _, _, importCas10, _, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas10Int, err := base.HexLittleEndianToUint64(cvCas10)
 	a.Nil(err)
 	importCas10Int, err := base.HexLittleEndianToUint64(importCas10)
@@ -1821,17 +1890,17 @@ func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, disableMutateWithMeta)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
 	defer closeFunc4()
 
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // create a mutation on source that is not tombstone. target is already not a tombstone.
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 1000, base.JSONDataType, math.MaxUint32) // create a mutation on source that is not tombstone. target is already not a tombstone.
 
 	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
 	a.Nil(err)
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent, disableMutateWithMeta)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
@@ -1859,18 +1928,18 @@ func TestCasRollbackLWWMobileScenario2(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, disableMutateWithMeta)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
 	defer closeFunc4()
 
-	deleteDoc(tgtAgent, docKey, colName, scopeName)                                 // target doc is a tombstone
-	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0) // source mutation is not a tombstone
+	deleteDoc(tgtAgent, docKey, colName, scopeName)                                                 // target doc is a tombstone
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 1000, base.JSONDataType, math.MaxUint32) // source mutation is not a tombstone
 
 	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
 	a.Nil(err)
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent, disableMutateWithMeta)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
@@ -1898,7 +1967,7 @@ func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, disableMutateWithMeta)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
@@ -1908,7 +1977,7 @@ func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 
 	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
 	a.Nil(err)
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent, disableMutateWithMeta)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
@@ -1936,7 +2005,7 @@ func TestCasRollbackLWWMobileScenario4(t *testing.T) {
 	tgtNode := 9001 // cluster_run target node port
 	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
 
-	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode)
+	srcBucket, tgtBucket, srcAgent, tgtAgent, replID1, closeFunc1, closeFunc2, closeFunc3, closeFunc4, replID2, cas1, cas2 := setupForMobileConvergenceTest(a, colName, scopeName, bucketName, docKey, docVal, srcNode, tgtNode, disableMutateWithMeta)
 	defer closeFunc1(nil)
 	defer closeFunc2(nil)
 	defer closeFunc3()
@@ -1947,7 +2016,7 @@ func TestCasRollbackLWWMobileScenario4(t *testing.T) {
 
 	tgtActorId, err := hlv.UUIDstoDocumentSource(fetchBucketUUID(tgtNode, bucketName), fetchClusterUUID(tgtNode))
 	a.Nil(err)
-	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent)
+	importAfterConvergence(a, colName, scopeName, replID1, replID2, docKey, srcNode, tgtNode, cas1, cas2, string(tgtActorId), srcBucket, tgtBucket, srcAgent, tgtAgent, disableMutateWithMeta)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
@@ -2292,7 +2361,7 @@ func generatePV(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeNa
 	res, err := bucket.Scope(scopeName).Collection(colName).MutateIn(key, mutateInSpec, &gocb.MutateInOptions{
 		Internal: struct {
 			DocFlags gocb.SubdocDocFlag
-			User     []byte
+			User     string
 		}{
 			DocFlags: gocb.SubdocDocFlagAccessDeleted,
 		},

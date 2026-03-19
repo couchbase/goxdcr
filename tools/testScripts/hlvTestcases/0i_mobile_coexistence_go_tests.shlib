@@ -19,9 +19,21 @@ function runSubdocTest {
 	testNum=$1
 	echo "Running subdoc test $testNum"
 	testName="TestCasRollbackLWWMobileScenario$testNum"
-	go test -timeout 120s -run $testName github.com/couchbase/goxdcr/v8/parts
+	go test -timeout 140s -run $testName github.com/couchbase/goxdcr/v8/parts -args -DisableMutateWithMeta=true
 	if (($? != 0)); then
 		echo "failed subdoc test $testNum"
+		exit 1
+	fi
+	reset
+}
+
+function runMutateWithMetaTest {
+	testNum=$1
+	echo "Running MutateWithMeta test $testNum"
+	testName="TestCasRollbackLWWMobileScenario$testNum"
+	go test -timeout 140s -run $testName github.com/couchbase/goxdcr/v8/parts
+	if (($? != 0)); then
+		echo "failed MutateWithMeta test $testNum"
 		exit 1
 	fi
 	reset
@@ -40,7 +52,7 @@ function runPVTests {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running mobile coexistence subdoc test case + other go tests"
+	echo "Running mobile coexistence go tests"
 	echo "============================================================================"
 
 	testForClusterRun
@@ -49,20 +61,24 @@ function runTestCase {
 	fi
 
 	# source and target docs are both not tombstones
+	runMutateWithMetaTest 1
 	runSubdocTest 1
 
 	# target doc is tombstone, but source doc is not
+	runMutateWithMetaTest 2
 	runSubdocTest 2
 
 	# source doc is tombstone, but target doc is not
+	runMutateWithMetaTest 3
 	runSubdocTest 3
 
 	# source and target docs are both tombstones
+	runMutateWithMetaTest 4
 	runSubdocTest 4
 
 	runPVTests
 
 	echo "============================================================================"
-	echo "Mobile coexistence subdoc test + other go tests case passed"
+	echo "Mobile coexistence go tests case passed"
 	echo "============================================================================"
 }

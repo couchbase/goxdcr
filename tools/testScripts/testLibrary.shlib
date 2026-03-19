@@ -3048,7 +3048,7 @@ function grepForLastMappingDocUpdateInMetaKvLogs {
 	cnt=$(echo "$lastUpdate" | grep -c "$pattern")
 	if (($cnt == 0)); then
 		now=$(date)
-		echo "0 occurances found of $pattern in lastUpdate of metakv.log at $now"
+		echo "0 occurrences found of $pattern in lastUpdate of metakv.log at $now"
 		exit 1
 	fi
 

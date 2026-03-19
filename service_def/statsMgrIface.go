@@ -41,7 +41,8 @@ const (
 	ADD_DOCS_CAS_CHANGED_METRIC        = "add_docs_cas_changed"
 	SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC = "subdoc_cmd_docs_cas_changed"
 	GET_DOCS_CAS_CHANGED_METRIC        = base.GetDocsCasChangedCount
-	// To avoid cas rollback for a specific mobile/xdcr case, we send the doc using subdoc command
+	// To avoid cas rollback for a specific mobile/xdcr case, we send the doc using subdoc command.
+	// It tracks MutateWithMeta command (instead of subdoc), when source and target clusters are 8.1+
 	DOCS_SENT_WITH_SUBDOC_SET    = base.DocsSentWithSubdocSet
 	DOCS_SENT_WITH_SUBDOC_DELETE = base.DocsSentWithSubdocDelete
 
@@ -1590,7 +1591,8 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "The number of deletes issued using subdoc command instead of delete_with_meta to avoid cas rollback on target",
+		Description:  "The number of deletes issued using subdoc (or MutateWithMeta) command instead of delete_with_meta to avoid cas rollback on target",
+		Notes:        "MutateWithMeta is used when both source and target cluster are 8.1+. Subdoc command is used otherwise",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
@@ -1598,7 +1600,8 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "The number of sets issued using subdoc command instead of set_with_meta to avoid cas rollback on target",
+		Description:  "The number of sets issued using subdoc (or MutateWithMeta) command instead of set_with_meta to avoid cas rollback on target",
+		Notes:        "MutateWithMeta is used when both source and target cluster are 8.1+. Subdoc command is used otherwise",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

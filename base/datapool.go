@@ -120,7 +120,7 @@ func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 			// if this happens, then we probably have a case where we "put" a byte slice that originated outside of a "get" from datapool
 			errCnt := atomic.AddUint32(&p.errCnt, 1)
 			if (errCnt-1)%uint32(DatapoolLogFrequency) == 0 {
-				// log only once every 10 occurances to reduce spam
+				// log only once every 10 occurrences to reduce spam
 				p.logger_utils.Warnf("Probable misuse of datapool, errCnt=%v, i=%v, cap(out)=%v, sizeRequested=%v", i, errCnt, cap(out), sizeRequested)
 			}
 

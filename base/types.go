@@ -865,7 +865,7 @@ type WrappedMCRequest struct {
 	ClonedSyncCh   chan bool
 
 	HLVModeOptions        HLVModeOptions
-	SubdocCmdOptions      *SubdocCmdOptions
+	ExCmdOptions          *ExCmdOptions
 	ConflictLoggerOptions *CLoggerOptions
 
 	// The followings are established per batch and are references to those established per batch - read only
@@ -880,6 +880,10 @@ type WrappedMCRequest struct {
 	// cache the MCRequest's size for the sake of stats.
 	// Size = Req.HdrSize() + len(Req.Body) + len(Req.ExtMeta)
 	Size int
+	// Expiry represents the expiration time or the delete time set for this event.
+	Expiry uint32
+	// IsExpirationEvent represents whether this event is a UPR_EXPIRATION.
+	IsExpirationEvent bool
 
 	// If VariableVB mode is enabled (not-nil), we need to store the original source VB
 	OrigSrcVB *uint16
@@ -891,15 +895,6 @@ func (req *WrappedMCRequest) Flags() (n uint32, err error) {
 		return
 	}
 	n = binary.BigEndian.Uint32(req.Req.Extras[0:4])
-	return
-}
-
-func (req *WrappedMCRequest) Expiry() (n uint32, err error) {
-	if len(req.Req.Extras) == 0 || len(req.Req.Extras) < 8 {
-		err = fmt.Errorf("Invalid extras for expiry, got len=%v", len(req.Req.Extras))
-		return
-	}
-	n = binary.BigEndian.Uint32(req.Req.Extras[4:8])
 	return
 }
 
@@ -962,54 +957,93 @@ func (req *WrappedMCRequest) SetHLVModeOptions(isMobile, isCCR, crossClusterVers
 	}
 }
 
-// set the intent to use subdoc command
+// SetSubdocOp sets the intent to use subdoc command
 func (req *WrappedMCRequest) SetSubdocOp() {
 	if req == nil {
 		return
 	}
 
-	req.SubdocCmdOptions = &SubdocCmdOptions{}
+	req.ExCmdOptions = &ExCmdOptions{}
 
 	// the actual CAS is not yet set, so cannot set req.Req.Opcode yet
 	opcode := req.GetMemcachedCommand()
 	switch opcode {
 	case mc.DELETE_WITH_META:
-		req.SubdocCmdOptions.SubdocOp = SubdocDelete
+		req.ExCmdOptions.ExOp = SubdocDelete
 	case mc.ADD_WITH_META:
 		fallthrough
 	case mc.SET_WITH_META:
-		req.SubdocCmdOptions.SubdocOp = SubdocSet
+		req.ExCmdOptions.ExOp = SubdocSet
 	default:
 		panic(fmt.Sprintf("invalid memcached opcode %v", opcode))
 	}
 }
 
-// returns true if the command used will be a subdoc operation instead of *_WITH_META
+// SetMutateWithMetaOp sets the intent to use MutateWithMeta command
+func (req *WrappedMCRequest) SetMutateWithMetaOp() {
+	if req == nil {
+		return
+	}
+
+	req.ExCmdOptions = &ExCmdOptions{}
+
+	opcode := req.GetMemcachedCommand()
+	switch opcode {
+	case mc.DELETE_WITH_META:
+		req.ExCmdOptions.ExOp = MutateWithMetaDel
+	case mc.ADD_WITH_META, mc.SET_WITH_META:
+		req.ExCmdOptions.ExOp = MutateWithMetaSet
+	default:
+		panic(fmt.Sprintf("invalid memcached opcode %v", opcode))
+	}
+}
+
+// IsSubdocOp returns true if the command used will be a subdoc operation instead of ADD/DEL/SET_WITH_META
 func (req *WrappedMCRequest) IsSubdocOp() bool {
-	return req.SubdocCmdOptions != nil &&
-		req.SubdocCmdOptions.SubdocOp != NotSubdoc
+	return req.ExCmdOptions != nil &&
+		req.ExCmdOptions.ExOp.IsSubdocOp()
 }
 
-// store some fields incase we need to retry because "cas locking" failed
-// if we need to retry on cas locking failure with *_with_meta, the structure for request body, extras and datatype would be different incase of non-subdoc operations
-func (req *WrappedMCRequest) SetSubdocOptionsForRetry(body, extras []byte, datatype uint8) {
-	if req.SubdocCmdOptions == nil {
-		return
-	}
-	req.SubdocCmdOptions.BodyPreSubdocCmd = body
-	req.SubdocCmdOptions.ExtrasPreSubdocCmd = extras
-	req.SubdocCmdOptions.DatatypePreSubdocCmd = datatype
-	req.SubdocCmdOptions.ReplacedBody = true
+// IsMutateWithMetaOp returns true if the command used will be a MutateWithMeta instead of traditional SET/DEL/ADD_WITH_META
+func (req *WrappedMCRequest) IsMutateWithMetaOp() bool {
+	return req.ExCmdOptions != nil &&
+		req.ExCmdOptions.ExOp.IsMutateWithMetaOp()
 }
 
-func (req *WrappedMCRequest) ResetSubdocOptionsForRetry() {
-	if req.SubdocCmdOptions == nil {
+// IsAddOrSetOrDelWithMetaOp returns true when req is a add/set/del_with_meta request.
+func (req *WrappedMCRequest) IsAddOrSetOrDelWithMetaOp() bool {
+	return !req.IsSubdocOp() && !req.IsMutateWithMetaOp()
+}
+
+// GetExOp returns ExOpType used for the request if applicable. If ExOp is not used,
+// NotExOp is used.
+func (req *WrappedMCRequest) GetExOp() ExOpType {
+	if req.ExCmdOptions == nil {
+		return NotExOp
+	}
+	return req.ExCmdOptions.ExOp
+}
+
+// SetExOptionsForRetry stores some fields incase we need to retry because "cas locking" failed
+// if we need to retry on cas locking failure with add/del/set_with_meta, the structure for request body, extras and datatype would be different incase of non-subdoc operations
+func (req *WrappedMCRequest) SetExOptionsForRetry(body, extras []byte, datatype uint8) {
+	if req.ExCmdOptions == nil {
+		return
+	}
+	req.ExCmdOptions.BodyPreExCmd = body
+	req.ExCmdOptions.ExtrasPreExCmd = extras
+	req.ExCmdOptions.DatatypePreExCmd = datatype
+	req.ExCmdOptions.ReplacedBody = true
+}
+
+func (req *WrappedMCRequest) ResetExOptionsForRetry() {
+	if req.ExCmdOptions == nil {
 		return
 	}
 
-	req.SubdocCmdOptions.BodyPreSubdocCmd = nil
-	req.SubdocCmdOptions.ExtrasPreSubdocCmd = nil
-	req.SubdocCmdOptions = nil
+	req.ExCmdOptions.BodyPreExCmd = nil
+	req.ExCmdOptions.ExtrasPreExCmd = nil
+	req.ExCmdOptions = nil
 }
 
 // This should avoid to be used as this will cause memory allocation
@@ -1086,19 +1120,41 @@ func (req *WrappedMCRequest) GetUncompressedBodySize() int {
 	}
 }
 
-func (req *WrappedMCRequest) SetSkipTargetCRFlag() {
+// setSkipTargetCROpt sets SKIP_CONFLICT_RESOLUTION_FLAG in options.
+func setSkipTargetCROpt(options *uint32) {
+	*options |= SKIP_CONFLICT_RESOLUTION_FLAG
+}
+
+// setRegenerateCASOpt sets REGENERATE_CAS in options.
+func setRegenerateCASOpt(options *uint32) {
+	*options |= REGENERATE_CAS
+}
+
+// setSkipTargetCROpts encodes SKIP_CONFLICT_RESOLUTION_FLAG in the options of
+// a set/del/add_with_meta command. It cannot be used for a mutate_with_meta command,
+// since it uses JSON encoding and not binary encoding of extras. For mutate_with_meta,
+// use setOptsForMutateWithMeta instead.
+func (req *WrappedMCRequest) setSkipTargetCROpts() {
+	if req.IsMutateWithMetaOp() {
+		// MutateWithMeta's extras section format is different.
+		return
+	}
+
 	if len(req.Req.Extras) < 28 {
 		extras := make([]byte, 28)
 		copy(extras, req.Req.Extras)
 		req.Req.Extras = extras
 	}
 	options := binary.BigEndian.Uint32(req.Req.Extras[24:28])
-	options |= SKIP_CONFLICT_RESOLUTION_FLAG
+	setSkipTargetCROpt(&options)
 	binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
 }
 
-// set appropriate CAS and skip target CR flag for *_WITH_META requests
-func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *WrappedMCResponse) {
+// Set appropriate CAS and skip target CR options for ADD/DEL/SET_WITH_META requests. It will
+// also be used for MUTATE_WITH_META requests, since the same CAS will be set the same for both.
+// However options will not be set for MUTATE_WITH_META requests since the extras section differs
+// for both protocols.
+func (req *WrappedMCRequest) SetCasAndOptionsForMetaOp(lookup *WrappedMCResponse) {
 	if req.IsSubdocOp() {
 		return
 	}
@@ -1112,7 +1168,7 @@ func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *WrappedMCResponse) 
 	}
 
 	if req.HLVModeOptions.NoTargetCR {
-		req.SetSkipTargetCRFlag()
+		req.setSkipTargetCROpts()
 	}
 }
 
@@ -1123,7 +1179,7 @@ func (req *WrappedMCRequest) IsCasLockingRequest() bool {
 	if (req.Req.Opcode == SET_WITH_META || req.Req.Opcode == DELETE_WITH_META) && req.Req.Cas != 0 {
 		return true
 	}
-	if req.IsSubdocOp() {
+	if !req.IsAddOrSetOrDelWithMetaOp() {
 		return true
 	}
 	return false
@@ -1164,8 +1220,8 @@ func (wrappedReq *WrappedMCRequest) AddByteSliceForXmemToRecycle(slice []byte) {
 
 func (wrappedReq *WrappedMCRequest) GetSentCas() (uint64, error) {
 	var sentCas uint64
-	isSubDocOp := wrappedReq.IsSubdocOp()
-	if !isSubDocOp && len(wrappedReq.Req.Extras) >= 24 { // extras.cas is set only incase of a non-subdoc operation
+	if wrappedReq.IsAddOrSetOrDelWithMetaOp() && len(wrappedReq.Req.Extras) >= 24 {
+		// extras.cas is set only incase of a set/del/add_with_meta.
 		sentCas = binary.BigEndian.Uint64(wrappedReq.Req.Extras[16:24])
 		return sentCas, nil
 	}
@@ -1843,6 +1899,9 @@ type XattrComposer struct {
 	rawModeStartPos int
 
 	atLeastOneXattr bool
+
+	// bodyOffset represents the position of document body
+	bodyOffset int
 }
 
 type composerMode int
@@ -1952,7 +2011,7 @@ func (x *XattrComposer) CommitRawKVPair() (int, error) {
 // Once all the Xattributes are finished, calculate the whole xattr section and append doc value
 // Remember to set Xattr flag
 // req and lookup are passed in for debugging info only and could be nil.
-func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, lookup *WrappedMCResponse) ([]byte, bool) {
+func (x *XattrComposer) FinishAndAppendDocValue(val []byte, cvCasPos *int, req *WrappedMCRequest, lookup *WrappedMCResponse) ([]byte, bool) {
 	if !x.atLeastOneXattr {
 		// No xattr written - do not do anything
 		copy(x.body[0:len(val)], val)
@@ -1973,12 +2032,17 @@ func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, l
 			respBody = lookup.Resp.Body
 		}
 		if req != nil {
-			reqBody = req.Body
-			key = req.Key
+			reqBody = req.Req.Body
+			key = req.Req.Key
 		}
 		panic(fmt.Sprintf("The whole doc body was not written, key=%v%s%v, x.body=%v%s%v, x.pos=%v, val=%v%v%v, reqBody=%v%v%v, respBody=%v%v%v", UdTagBegin, key, UdTagEnd, UdTagBegin, x.body, UdTagEnd, x.pos, UdTagBegin, val, UdTagEnd, UdTagBegin, reqBody, UdTagEnd, UdTagBegin, respBody, UdTagEnd))
 	}
 	x.pos = x.pos + len(val)
+
+	// If the request is MutateWithMeta, extras is stored at the end of document body section.
+	if req != nil && req.IsMutateWithMetaOp() && cvCasPos != nil {
+		x.pos = req.composeExtrasForMutateWithMeta(x.body, x.pos, *cvCasPos)
+	}
 
 	return x.body[0:x.pos], x.atLeastOneXattr
 }
@@ -3273,13 +3337,46 @@ func IsDocLocked(resp *mc.MCResponse) bool {
 	}
 }
 
-type SubdocOpType uint8
+// ExOpType represents all the "extended", non-traditional operations that are used
+// in selective scenarios, other than the traditional set/add/del_with_meta.
+type ExOpType uint8
 
 const (
-	NotSubdoc    SubdocOpType = iota
-	SubdocSet    SubdocOpType = iota
-	SubdocDelete SubdocOpType = iota
+	// NotExOp indicate that a request is not an "Ex" command (i.e. it is a traditional
+	// set/del/add_with_meta request)
+	NotExOp ExOpType = iota
+
+	// SubdocSet indicates that a request is a subdoc mutation command, which has one of
+	// the spec as a document body SET.
+	SubdocSet
+
+	// SubdocSet indicates that a request is a subdoc mutation command, which has one of
+	// the spec as a document body DELETE.
+	SubdocDelete
+
+	// MutateWithMetaSet indicates that a request is a MutateWithMeta command with
+	// extras.operation as "set" or "add"
+	MutateWithMetaSet
+
+	// MutateWithMetaDel indicates that a request is a MutateWithMeta command with
+	// extras.operation as "delete"
+	MutateWithMetaDel
 )
+
+// IsSubdocOp returns whether t is a subdoc operation.
+func (t ExOpType) IsSubdocOp() bool {
+	return t == SubdocSet || t == SubdocDelete
+}
+
+// IsMutateWithMetaOp returns whether t is a MutateWithMeta operation.
+func (t ExOpType) IsMutateWithMetaOp() bool {
+	return t == MutateWithMetaSet || t == MutateWithMetaDel
+}
+
+// IsDeleteOp returns whether t is a delete operation.
+func (t ExOpType) IsDeleteOp() bool {
+	return t == SubdocDelete || t == MutateWithMetaDel
+}
 
 // This denotes the target KV's Cas Poison protection Mode
 type TargetKVCasPoisonProtectionMode uint8
@@ -3352,14 +3449,16 @@ func (cLogOpts *CLoggerOptions) CacheTargetXattrsIfNeeded(targetResp *WrappedMCR
 	cLogOpts.TargetMou = targetMou
 }
 
-// These options are explicitly set when SubdocOp != NotSubdoc
-// i.e. when subdoc command is used for replication instead of *_with_meta
-type SubdocCmdOptions struct {
-	SubdocOp             SubdocOpType
-	BodyPreSubdocCmd     []byte
-	ExtrasPreSubdocCmd   []byte
-	DatatypePreSubdocCmd uint8
-	ReplacedBody         bool
+// ExCmdOptions represents the options for the "extended" set of commands used
+// for replication other than the traditional set/del/add_with_meta. It is
+// explicitly set when ExOp != NotExOp i.e. when subdoc command or MutateWithMeta
+// commands are used for replication instead of set/del/add_with_meta
+type ExCmdOptions struct {
+	ExOp             ExOpType
+	BodyPreExCmd     []byte
+	ExtrasPreExCmd   []byte
+	DatatypePreExCmd uint8
+	ReplacedBody     bool
 	// booleans to indicate if corresponding target doc has the following non-empty metadata
 	TargetHasPv          bool
 	TargetHasMv          bool

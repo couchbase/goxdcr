@@ -52,8 +52,14 @@ func (cr ConflictResolutionResult) String() string {
 // Timestamp (CAS) based Conflict resolution.
 // Optionally peforms conflict detection if conflict logging is enabled for the replication i.e. logConflict is true.
 // Parses Hlv and other needed xattrs in mobile mode.
-func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId,
-	xattrEnabled, logConflict bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (ConflictDetectionResult, ConflictResolutionResult, error) {
+func ResolveConflictByCAS(
+	logger *log.CommonLogger,
+	uncompressFunc base.UncompressFunc,
+	req *base.WrappedMCRequest,
+	resp *mc.MCResponse,
+	specs []base.SubdocLookupPathSpec,
+	sourceId, targetId hlv.DocumentSourceId,
+	xattrEnabled, logConflict bool, targetCanMutateWithMeta bool) (ConflictDetectionResult, ConflictResolutionResult, error) {
 
 	// No target document, replicate the source document.
 	if resp.Status == mc.KEY_ENOENT {
@@ -62,7 +68,7 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 
 	// Conflict Detection if conflict logging feature is enabled.
 	CDResult, sourceDocMeta, targetDocMeta, err :=
-		DetectConflictIfNeeded(req, resp, specs, sourceId, targetId, xattrEnabled, logConflict, uncompressFunc, logger)
+		DetectConflictIfNeeded(logger, uncompressFunc, req, resp, specs, sourceId, targetId, xattrEnabled, logConflict, targetCanMutateWithMeta)
 	if err == base.ErrorDocumentNotFound {
 		return CDWin, CRSendToTarget, nil
 	} else if err != nil {
@@ -102,8 +108,14 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 // Seqno (RevSeqno) based Conflict resolution.
 // Optionally peforms conflict detection if conflict logging is enabled for the replication i.e. logConflict is true.
 // Parses Hlv and other needed xattrs in mobile mode.
-func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId,
-	xattrEnabled, logConflict bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (ConflictDetectionResult, ConflictResolutionResult, error) {
+func ResolveConflictByRevSeq(
+	logger *log.CommonLogger,
+	uncompressFunc base.UncompressFunc,
+	req *base.WrappedMCRequest,
+	resp *mc.MCResponse,
+	specs []base.SubdocLookupPathSpec,
+	sourceId, targetId hlv.DocumentSourceId,
+	xattrEnabled, logConflict, targetCanMutateWithMeta bool) (ConflictDetectionResult, ConflictResolutionResult, error) {
 
 	// No target document, replicate the source document
 	if resp.Status == mc.KEY_ENOENT {
@@ -112,7 +124,7 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 
 	// Conflict Detection if conflict logging feature is enabled.
 	CDResult, sourceDocMeta, targetDocMeta, err :=
-		DetectConflictIfNeeded(req, resp, specs, sourceId, targetId, xattrEnabled, logConflict, uncompressFunc, logger)
+		DetectConflictIfNeeded(logger, uncompressFunc, req, resp, specs, sourceId, targetId, xattrEnabled, logConflict, targetCanMutateWithMeta)
 	if err == base.ErrorDocumentNotFound {
 		return CDWin, CRSendToTarget, nil
 	} else if err != nil {
@@ -152,8 +164,14 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 // Custom Conflict resolution.
 // Always peforms conflict detection irrepective of the value of logConflict.
 // Always parses Hlv and resolves conflict using hlv.
-func ResolveConflictByHlv(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId,
-	xattrEnabled, logConflict bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (ConflictDetectionResult, ConflictResolutionResult, error) {
+func ResolveConflictByHlv(
+	logger *log.CommonLogger,
+	uncompressFunc base.UncompressFunc,
+	req *base.WrappedMCRequest,
+	resp *mc.MCResponse,
+	specs []base.SubdocLookupPathSpec,
+	sourceId, targetId hlv.DocumentSourceId,
+	xattrEnabled, logConflict, targetCanMutateWithMeta bool) (ConflictDetectionResult, ConflictResolutionResult, error) {
 
 	// No target document, replicate the source document.
 	if resp.Status == mc.KEY_ENOENT {
@@ -162,7 +180,7 @@ func ResolveConflictByHlv(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 
 	// Conflict Detection is always performed in CCR.
 	CDResult, sourceDocMeta, targetDocMeta, err :=
-		DetectConflictIfNeeded(req, resp, specs, sourceId, targetId, xattrEnabled, true, uncompressFunc, logger)
+		DetectConflictIfNeeded(logger, uncompressFunc, req, resp, specs, sourceId, targetId, xattrEnabled, true, targetCanMutateWithMeta)
 	if err == base.ErrorDocumentNotFound {
 		return CDWin, CRSendToTarget, nil
 	} else if err != nil {

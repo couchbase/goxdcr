@@ -52,10 +52,8 @@ func (n *Nozzle) transfer(ctx context.Context, client base.CngClient, req *base.
 	trace.vbno = req.GetSourceVB()
 	trace.opcode = req.Req.Opcode
 
-	expiry, err := req.Expiry()
-	if err != nil {
-		return
-	}
+	expiry := req.Expiry
+
 	flags, err := req.Flags()
 	if err != nil {
 		return

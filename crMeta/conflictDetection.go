@@ -78,8 +78,14 @@ func DetectConflict(source *CRMetadata, target *CRMetadata) (ConflictDetectionRe
 // 2. Conflict logging feature is turned on.
 // Returns conflict detection result if performed,
 // also returns the source and target document metadata for subsequent conflict resolution.
-func DetectConflictIfNeeded(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId,
-	xattrEnabled, needToDetectConflict bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (ConflictDetectionResult, base.DocumentMetadata, base.DocumentMetadata, error) {
+func DetectConflictIfNeeded(
+	logger *log.CommonLogger,
+	uncompressFunc base.UncompressFunc,
+	req *base.WrappedMCRequest,
+	resp *mc.MCResponse,
+	specs []base.SubdocLookupPathSpec,
+	sourceId, targetId hlv.DocumentSourceId,
+	xattrEnabled, needToDetectConflict, targetCanMutateWithMeta bool) (ConflictDetectionResult, base.DocumentMetadata, base.DocumentMetadata, error) {
 
 	// source dcp mutation as "source document"
 	var sourceDoc *SourceDocument
@@ -162,8 +168,8 @@ func DetectConflictIfNeeded(req *base.WrappedMCRequest, resp *mc.MCResponse, spe
 	}
 	targetDocMeta = *targetMeta.docMeta
 
-	// decide if we need to perform subdoc op to avoid target CAS rollback.
-	setSubdocOpIfNeeded(sourceMeta, targetMeta, req)
+	// decide if we need to perform subdoc op or mutateWithMeta to avoid target CAS rollback.
+	setExOpIfNeeded(sourceMeta, targetMeta, req, targetCanMutateWithMeta)
 
 	// perform conflict detection if needed
 	var cdResult ConflictDetectionResult

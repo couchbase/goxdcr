@@ -1824,11 +1824,13 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		}
 		if event.Opcode == mc.UPR_EXPIRATION {
 			options |= base.IS_EXPIRATION
+			wrapped_req.IsExpirationEvent = true
 		}
 		if options > 0 {
 			binary.BigEndian.PutUint32(req.Extras[24:28], options)
 		}
 
+		wrapped_req.Expiry = event.Expiry
 	} else if event.Opcode == mc.UPR_SNAPSHOT {
 		if len(req.Extras) != 28 {
 			req.Extras = make([]byte, 28)

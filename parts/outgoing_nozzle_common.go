@@ -197,7 +197,7 @@ type DataSentEventAdditional struct {
 	ImportMutation       bool
 	Cloned               bool
 	CloneSyncCh          chan bool
-	SubdocOpType         base.SubdocOpType
+	ExOpType             base.ExOpType
 	CasPoisonProtection  base.TargetKVCasPoisonProtectionMode
 	NozzleType           base.XDCROutgoingNozzleType
 }

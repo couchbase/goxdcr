@@ -43,11 +43,12 @@ type HELOFeatures struct {
 	Collections      bool
 	DataType         bool // This is named as JSON in kv_engine's feature.h
 	SnappyEverywhere bool
+	MutateWithMeta   bool
 }
 
 func (h *HELOFeatures) String() string {
-	return fmt.Sprintf("Enabled features: Xattribute: %v CompressionType: %v Xerror: %v Collections: %v DataType: %v",
-		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections, h.DataType)
+	return fmt.Sprintf("Enabled features: Xattribute: %v CompressionType: %v Xerror: %v Collections: %v DataType: %v MutateWithMeta: %v",
+		h.Xattribute, base.CompressionTypeStrings[h.CompressionType], h.Xerror, h.Collections, h.DataType, h.MutateWithMeta)
 }
 
 type CngUtils interface {

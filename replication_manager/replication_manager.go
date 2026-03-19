@@ -393,6 +393,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.DisableBucketConfigManagerKey].(bool),
 		time.Duration(internal_settings.Values[metadata.TimeoutWaitForOngoingCkptOpsKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxKeepAliveTokensForCkptMgrKey].(int),
+		internal_settings.Values[metadata.DisableMutateWithMetaKey].(bool),
 	)
 }
 

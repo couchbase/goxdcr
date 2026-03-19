@@ -1824,7 +1824,7 @@ const (
 // the use of any data structures on the heap
 // Input:
 //
-//		 allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
+//		allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
 //	  bytesToWrite - This can be either key or value in []byte form
 //	  mode - mode above
 //	  pos - current position to continue the write
@@ -2792,4 +2792,12 @@ func ConvertUint16ToUint32(vblist []uint16) []uint32 {
 		result[i] = uint32(vb)
 	}
 	return result
+}
+
+// IsUserXattrKey returns true, if the input key represents a user xattr.
+// Xattrs can be system, virtual or user xattrs. System xattrs begin with _ and
+// virtual xattrs begin with $. Any xattrs which do not begin with _ or $ are user
+// xattrs.
+func IsUserXattrKey(key string) bool {
+	return len(key) > 0 && key[0] != '_' && key[0] != '$'
 }

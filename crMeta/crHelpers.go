@@ -110,33 +110,37 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 
 // This routine construct XATTR _vv:{...} based on meta. The constructed XATTRs includes updates for
 // new change (meta.cas > meta.ver) and pruning in PV
-func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer, minPVLen int) (int, bool, error) {
+func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer, minPVLen int) (int, int, bool, error) {
 	if meta == nil {
-		return 0, false, fmt.Errorf("metadata cannot be nil")
+		return 0, 0, false, fmt.Errorf("metadata cannot be nil")
 	}
 	err := xattrComposer.StartRawMode()
 	if err != nil {
-		return -1, false, err
+		return -1, -1, false, err
 	}
 
 	err = xattrComposer.RawWriteKey([]byte(base.XATTR_HLV))
 	if err != nil {
-		return -1, false, err
+		return -1, -1, false, err
 	}
 
 	body, pos, err := xattrComposer.RawHijackValue()
 	if err != nil {
-		return -1, false, err
+		return -1, -1, false, err
 	}
 
-	var pruned bool
-	*pos, pruned, err = ConstructHlv(body, *pos, meta, pruningWindow, minPVLen)
+	var (
+		pruned   bool
+		cvCasPos int
+	)
+
+	*pos, cvCasPos, pruned, err = ConstructHlv(body, *pos, meta, pruningWindow, minPVLen)
 	if err != nil {
-		return *pos, pruned, err
+		return *pos, cvCasPos, pruned, err
 	}
 
 	*pos, err = xattrComposer.CommitRawKVPair()
-	return *pos, pruned, err
+	return *pos, cvCasPos, pruned, err
 }
 
 // given a version map (PV or MV), this function,
@@ -178,11 +182,13 @@ func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFu
 }
 
 // {"cvCas":...,"src":...,"ver":...
-func formatCv(meta *CRMetadata, body []byte, pos int) int {
+// The function returns final pos after writing CV to body and also the cvCAS offset in body.
+func formatCv(meta *CRMetadata, body []byte, pos int) (int, int) {
 	hlv := meta.GetHLV()
 	cvCas := hlv.GetCvCas()
 	cvCasHex := base.Uint64ToHexLittleEndian(cvCas)
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_CVCAS_FIELD), pos, base.WriteJsonKey, len(HLV_CVCAS_FIELD), true /*firstKey*/)
+	cvCasPos := pos + 1
 	body, pos = base.WriteJsonRawMsg(body, cvCasHex, pos, base.WriteJsonValue, len(cvCasHex), false /*firstKey*/)
 	src := hlv.GetCvSrc()
 	ver := hlv.GetCvVer()
@@ -191,7 +197,7 @@ func formatCv(meta *CRMetadata, body []byte, pos int) int {
 	cvHex := base.Uint64ToHexLittleEndian(ver)
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_VER_FIELD), pos, base.WriteJsonKey, len(HLV_VER_FIELD), false /*firstKey*/)
 	body, pos = base.WriteJsonRawMsg(body, cvHex, pos, base.WriteJsonValue, len(cvHex), false /*firstKey*/)
-	return pos
+	return pos, cvCasPos
 }
 
 func (meta *CRMetadata) HadMv() bool {
@@ -486,17 +492,25 @@ func NewMetadataForTest(key, source []byte, cas, revId uint64, cvCasHex, cvSrc, 
 	return &meta, nil
 }
 
-// Decide if we need to use subdoc op instead of meta op
-func setSubdocOpIfNeeded(sourceMeta, targetMeta *CRMetadata, req *base.WrappedMCRequest) {
+// setExOpIfNeeded decides if we need to use subdoc op or MutateWithMeta instead of meta op
+func setExOpIfNeeded(sourceMeta, targetMeta *CRMetadata, req *base.WrappedMCRequest, targetCanMutateWithMeta bool) {
 	if req.HLVModeOptions.PreserveSync &&
 		targetMeta.IsImportMutation() && sourceMeta.actualCas < targetMeta.actualCas {
 		// This is the case when target CAS will rollback if source wins
-		// So use subdoc command in this case instead of *_WITH_META commands
-		req.SetSubdocOp()
-		req.SubdocCmdOptions.TargetHasPv = targetMeta.hadPv
-		req.SubdocCmdOptions.TargetHasMv = targetMeta.hadMv
-		req.SubdocCmdOptions.TargetHasMou = targetMeta.hadMou
-		req.SubdocCmdOptions.TargetDocIsTombstone = targetMeta.docMeta.Deletion
+		// So either use MutateWithMeta or subdoc command in this case instead of
+		// ADD/DEL/SET_WITH_META commands.
+		if targetCanMutateWithMeta {
+			// If the target supports MutateWithMeta, prefer to use it over subdoc op. This is because
+			// MutateWithMeta is the best of both SetWithMeta and subdoc op, which supports not all the functionality
+			// of setWithMeta command, but also the CAS macro expansion like the subdoc operation provides.
+			req.SetMutateWithMetaOp()
+		} else {
+			req.SetSubdocOp()
+		}
+		req.ExCmdOptions.TargetHasPv = targetMeta.hadPv
+		req.ExCmdOptions.TargetHasMv = targetMeta.hadMv
+		req.ExCmdOptions.TargetHasMou = targetMeta.hadMou
+		req.ExCmdOptions.TargetDocIsTombstone = targetMeta.docMeta.Deletion
 	}
 }
 
@@ -554,10 +568,14 @@ func ParseOneVersionDeltaEntry(entry []byte) (source, version []byte, err error)
 
 // constructs hlv content and writes it to "body" from "pos" index.
 // Increments pos and returns the last position.
-func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Duration, minPVLen int) (int, bool, error) {
-	var err error
+func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Duration, minPVLen int) (int, int, bool, error) {
+	var (
+		cvCasPos int
+		err      error
+	)
+
 	pruneFunc := base.GetHLVPruneFunction(meta.GetDocumentMetadata().Cas, pruningWindow)
-	pos = formatCv(meta, body, pos)
+	pos, cvCasPos = formatCv(meta, body, pos)
 	// Format MV
 	mv := meta.GetHLV().GetMV()
 	if len(mv) > 0 {
@@ -565,7 +583,7 @@ func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Dur
 		body, pos = base.WriteJsonRawMsg(body, []byte(HLV_MV_FIELD), pos, base.WriteJsonKey, len([]byte(HLV_MV_FIELD)), false)
 		pos, _, err = VersionMapToDeltasBytes(mv, body, pos, nil, 0)
 		if err != nil {
-			return pos, false, err
+			return pos, cvCasPos, false, err
 		}
 	}
 	// Format PV
@@ -577,7 +595,7 @@ func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Dur
 		afterKeyPos := pos
 		pos, pruned, err = VersionMapToDeltasBytes(pv, body, pos, &pruneFunc, minPVLen)
 		if err != nil {
-			return pos, pruned, err
+			return pos, cvCasPos, pruned, err
 		}
 		if pos == afterKeyPos {
 			// Did not add PV, need to back off and remove the PV key
@@ -587,5 +605,5 @@ func ConstructHlv(body []byte, pos int, meta *CRMetadata, pruningWindow time.Dur
 	body[pos] = '}'
 	pos++
 
-	return pos, pruned, nil
+	return pos, cvCasPos, pruned, nil
 }

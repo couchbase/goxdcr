@@ -31,10 +31,7 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client base.CngClient, req *
 		return
 	}
 
-	expiry, err := req.Expiry()
-	if err != nil {
-		return
-	}
+	expiry := req.Expiry
 
 	n.Logger().Tracef("checkDocument req key=%[1]s%[3]s%[2]s, seqNo=%[4]v, cas=%[5]v, revSeqNo=%[6]v, expiry=%[7]v",
 		base.UdTagBegin,
@@ -130,10 +127,7 @@ func (n *Nozzle) PushDocument(ctx context.Context, client base.CngClient, req *b
 		return
 	}
 
-	expiry, err := req.Expiry()
-	if err != nil {
-		return
-	}
+	expiry := req.Expiry
 
 	flags, err := req.Flags()
 	if err != nil {

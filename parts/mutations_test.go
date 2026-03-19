@@ -276,7 +276,7 @@ func generateBody(hlv, mou, sync, xattrKey1, xattrVal1, xattrKey2, xattrVal2, do
 		}
 	}
 
-	body, xattr := comp.FinishAndAppendDocValue(doc, nil, nil)
+	body, xattr := comp.FinishAndAppendDocValue(doc, nil, nil, nil)
 	var datatype uint8
 	if xattr {
 		datatype = base.XattrDataType

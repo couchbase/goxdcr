@@ -154,7 +154,7 @@ func InsertConflictXattrToBody(body []byte, datatype uint8) ([]byte, uint8, erro
 	}
 
 	docWithoutXattr := base.FindDocBodyWithoutXattr(body, datatype)
-	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, nil, nil)
+	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, nil, nil, nil)
 
 	if atLeastOneXattr {
 		datatype = datatype | base.PROTOCOL_BINARY_DATATYPE_XATTR

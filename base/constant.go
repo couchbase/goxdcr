@@ -479,23 +479,23 @@ const (
 var MaxVBReps = "max_vbreps"
 
 const (
-	GET                   = mc.CommandCode(0x00)
-	GET_WITH_META         = mc.CommandCode(0xa0)
-	SET_WITH_META         = mc.CommandCode(0xa2)
-	ADD_WITH_META         = mc.CommandCode(0xa4)
-	DELETE_WITH_META      = mc.CommandCode(0xa8)
-	SET_TIME_SYNC         = mc.CommandCode(0xc1)
-	SUBDOC_DICT_UPSERT    = mc.CommandCode(0xc8)
-	SUBDOC_DELETE         = mc.CommandCode(0xc9)
-	SUBDOC_MULTI_MUTATION = mc.CommandCode(0xd1)
+	GET                   = mc.GET
+	MUTATE_WITH_META      = mc.MUTATE_WITH_META
+	GET_WITH_META         = mc.GET_META
+	SET_WITH_META         = mc.SET_WITH_META
+	ADD_WITH_META         = mc.ADD_WITH_META
+	DELETE_WITH_META      = mc.DELETE_WITH_META
+	SUBDOC_DICT_UPSERT    = mc.SUBDOC_DICT_UPSERT
+	SUBDOC_DELETE         = mc.SUBDOC_DELETE
+	SUBDOC_MULTI_MUTATION = mc.SUBDOC_MULTI_MUTATION
 )
 
 // Flags for SUBDOC commands
 const (
 	// Path level flag
-	SUBDOC_FLAG_MKDIR_P       = 0x01
-	SUBDOC_FLAG_XATTR         = 0x04
-	SUBDOC_FLAG_EXPAND_MACROS = 0x10
+	SUBDOC_FLAG_MKDIR_P       = mc.SUBDOC_FLAG_MKDIR_PATH
+	SUBDOC_FLAG_XATTR         = mc.SUBDOC_FLAG_XATTR_PATH
+	SUBDOC_FLAG_EXPAND_MACROS = mc.SUBDOC_FLAG_EXPAND_MACRRO_PATH
 )
 
 const (
@@ -602,6 +602,7 @@ const EOFString = "EOF"
 
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
+var REGENERATE_CAS uint32 = 0x04
 var SKIP_CONFLICT_RESOLUTION_FLAG uint32 = 0x08
 
 // https://github.com/couchbase/kv_engine/blob/master/engines/ep/docs/protocol/del_with_meta.md
@@ -782,6 +783,9 @@ var HELO_FEATURE_SNAPPYEVERYWHERE uint16 = 0x13
 
 // JSON bit will be set in the response packets.
 var HELO_FEATURE_JSON uint16 = 0x0b
+
+// HELO_MUTATE_WITH_META checks if the server support MutateWithMeta command.
+var HELO_MUTATE_WITH_META uint16 = 0x25
 
 // length of random id
 var LengthOfRandomId = 16
@@ -1301,7 +1305,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	colMarshalIdxThreshold int,
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
 	disableBucketConfigManager bool,
-	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int) {
+	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int, disableMutateWithMeta bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1507,6 +1511,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutWaitForOngoingCkptOps = timeoutWaitForOngoingCkptOps
 
 	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
+	DisableMutateWithMeta = disableMutateWithMeta
 }
 
 // Need to escape the () to result in "META().xattrs" literal

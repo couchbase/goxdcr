@@ -1951,9 +1951,9 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 					metricMap[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 				}
 
-			case base.SUBDOC_MULTI_MUTATION:
-				// SUBDOC_MULTI_MUTATION docs written as taken care as part of DocsSentWithSubdocCmd event, so ignore here.
-				// There are no failed CR on target SUBDOC_MULTI_MUTATION docs, because it is only used in mobile mode.
+			case base.SUBDOC_MULTI_MUTATION, base.MUTATE_WITH_META:
+			// SUBDOC_MULTI_MUTATION or MUTATE_WITH_META docs written are taken care separately, so ignore here.
+			// There are no failed CR on target because it is only used in mobile mode.
 
 			default:
 				outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", opcode, event.Component.Id())
@@ -1979,16 +1979,16 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			}
 
 			// record the type of subdoc operation if any
-			subdocOp := event_otherInfo.SubdocOpType
-			if subdocOp != base.NotSubdoc {
-				switch subdocOp {
-				case base.SubdocDelete:
+			exOpType := event_otherInfo.ExOpType
+			if exOpType != base.NotExOp {
+				switch exOpType {
+				case base.SubdocDelete, base.MutateWithMetaDel:
 					metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
 					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
 					if err != nil {
 						return err
 					}
-				case base.SubdocSet:
+				case base.SubdocSet, base.MutateWithMetaSet:
 					metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
 					err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
 					if err != nil {
@@ -1999,7 +1999,6 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 					outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
 					return err
 				}
-
 			}
 		}
 
