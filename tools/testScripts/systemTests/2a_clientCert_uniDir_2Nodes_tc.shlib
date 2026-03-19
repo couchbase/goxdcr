@@ -61,14 +61,14 @@ function runTestCase {
 		exit 1
 	fi
 
-	addNodesIn
-	startRebalancing "C1"
-	startRebalancing "C2"
-
 	setupCertsForTesting
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		setEnableClientCert "$clusterName"
 	done
+
+	addNodesIn
+	startRebalancing "C1"
+	startRebalancing "C2"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5

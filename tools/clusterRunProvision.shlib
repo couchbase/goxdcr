@@ -719,10 +719,18 @@ function addOneNodeIn {
 		# kv node by default
 		service="kv"
 	fi
+	local errRetrySleep=5
 
 	for ((retryCnt = 0; $retryCnt < 5; retryCnt = $(($retryCnt + 1)))); do
 		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port with services=$service"
 		local preAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
+		if [[ -z "$preAddNumNodes" ]] || ! [[ "$preAddNumNodes" =~ ^[0-9]+$ ]]; then
+			echo "Error - failed to get preAddNumNodes node count"
+			echo "Output from getNsServerPoolsDefault on node $nodeName:"
+			getNsServerPoolsDefault "$nodeName"
+			sleep $errRetrySleep
+			continue
+		fi
 
 		httpStr="https://"
 		# Special case for vagrant
@@ -749,9 +757,18 @@ function addOneNodeIn {
 		sleep 10
 
 		local postAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
+		if [[ -z "$postAddNumNodes" ]] || ! [[ "$postAddNumNodes" =~ ^[0-9]+$ ]]; then
+			echo "Error - failed to get post-add node count"
+			echo "Output from getNsServerPoolsDefault on node $nodeName:"
+			getNsServerPoolsDefault "$nodeName"
+			sleep $errRetrySleep
+			continue
+		fi
 
 		if (($postAddNumNodes != $(($preAddNumNodes + 1)))); then
 			echo "Error - adding a node resulted going from $preAddNumNodes to $postAddNumNodes"
+			sleep $errRetrySleep
+			continue
 		else
 			return 0
 		fi
