@@ -113,6 +113,11 @@ function checkItemCnt {
 }
 
 function runDifferFindDifference {
+	if [ "$cngMode" = "1" ]; then
+		echo "XDCR differ will not run in CNG phase 1"
+		return
+	fi
+
 	local sourceCluster=$1
 	local sourceBucket=$2
 	local targetCluster=$3

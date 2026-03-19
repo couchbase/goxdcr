@@ -30,6 +30,9 @@ type Stats struct {
 
 	// Number of times upstream error reporter was missing for a vb
 	errUpstreamReporterMissingCount uint64
+
+	// Number of WrappedMCRequest recycled in the nozzle.
+	requestsRecycled uint64
 }
 
 func NewStats() *Stats {
@@ -68,6 +71,10 @@ func (s *Stats) IncErrReporterMissingCount(count uint64) {
 	atomic.AddUint64(&s.errUpstreamReporterMissingCount, count)
 }
 
+func (s *Stats) IncRequestsRecycled(count uint64) {
+	atomic.AddUint64(&s.requestsRecycled, count)
+}
+
 func (s *Stats) String() string {
 	docsReceived := atomic.LoadUint64(&s.docsReceived)
 	docsSent := atomic.LoadUint64(&s.docsSent)
@@ -77,9 +84,10 @@ func (s *Stats) String() string {
 	itemsInQueue := atomic.LoadUint64(&s.itemsInQueue)
 	enqueuedBlocked := atomic.LoadUint64(&s.enqueueBlocked)
 	errUpstreamReporterMissingCount := atomic.LoadUint64(&s.errUpstreamReporterMissingCount)
+	requestsRecycled := atomic.LoadUint64(&s.requestsRecycled)
 
-	return fmt.Sprintf("DocsReceived: %v, DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v",
-		docsReceived, docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount)
+	return fmt.Sprintf("DocsReceived: %v, DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v, RequestsRecycled: %d",
+		docsReceived, docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount, requestsRecycled)
 }
 
 // handleNozzleStats updates the nozzle stats based on the transfer result

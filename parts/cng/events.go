@@ -7,9 +7,29 @@ import (
 )
 
 func (n *Nozzle) raiseEvents(req *base.WrappedMCRequest, t *Trace, err error) {
+	n.raiseMetadataUsageEvents(req, t)
 	n.raiseSuccessEvent(req, t, err)
 	n.raiseConflictEvent(req, t, err)
 	n.raiseErrorEvent(req, t, err)
+}
+
+// raise events for metadata usage
+// As of now, only CheckDocument RPC is tracked for metadata usage
+func (n *Nozzle) raiseMetadataUsageEvents(req *base.WrappedMCRequest, t *Trace) {
+	if !t.checked || t.checkDocReqBytes == 0 {
+		// t.checkDocReqBytes == 0 means there was an error for which no cost was incurred
+		// so we skip raising metadata usage events in that case
+		return
+	}
+
+	// For CNG we don't use GetDocReceived event. The nearest equivalent for CNG is the GetMetaReceived event
+	n.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, n, nil, parts.GetReceivedEventAdditional{
+		Seqno:       req.Seqno,
+		ManifestId:  req.GetManifestId(),
+		Commit_time: t.checkDocumentLatency,
+		OrigReqSize: t.checkDocReqBytes,
+		RespSize:    t.checkDocRspBytes,
+	}))
 }
 
 // raiseErrorEvent only handles errors and raises relevant events

@@ -79,6 +79,7 @@ func (n *Nozzle) RecycleDataObj(obj any) {
 		n.Logger().Errorf("upstreamObjRecycler is nil, panicking")
 		panic("upstreamObjRecycler is nil")
 	}
+	n.stats.IncRequestsRecycled(1)
 	n.upstreamObjRecycler(obj)
 }
 

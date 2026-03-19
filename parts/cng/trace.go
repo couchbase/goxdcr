@@ -37,6 +37,12 @@ type Trace struct {
 	// conflictCheckRsp holds the response from the conflict check
 	// This is relevant only if checked is true
 	conflictCheckRsp conflictCheckRsp
+	// checkDocReqBytes is the size of request metadata transferred
+	checkDocReqBytes int
+	// checkDocRspBytes is the size of response metadata transferred
+	checkDocRspBytes int
+	// checkDocumentLatency is the latency of the CheckDocument RPC call
+	checkDocumentLatency time.Duration
 
 	// pushed indicates whether pushDocument was performed
 	pushed bool

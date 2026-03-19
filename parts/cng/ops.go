@@ -13,12 +13,19 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // CheckDocument is a wrapper on the actual CheckDocument RPC call + timeout.
 // It mainly maps req to the input params needed by the RPC, which a lot of boilerplate code.
 func (n *Nozzle) CheckDocument(ctx context.Context, client base.CngClient, req *base.WrappedMCRequest) (rsp *internal_xdcr_v1.CheckDocumentResponse, err error) {
+	trace, err := getTrace(ctx)
+	if err != nil {
+		// This error should not happen
+		return
+	}
+
 	revSeqNo, err := req.RevSeqNo()
 	if err != nil {
 		return
@@ -67,9 +74,19 @@ func (n *Nozzle) CheckDocument(ctx context.Context, client base.CngClient, req *
 	//       - Target wins, err == GRPC Error with Code=Aborted, and ErrorInfo with reason=doc_newer
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, n.getRPCDeadline())
 	defer cancel()
+	now := time.Now()
 	rsp, err = client.CheckDocument(ctxWithTimeout, checkDocReq)
 	if err != nil {
 		n.Logger().Tracef("error in checkDoc rpc err=%v", err)
+	}
+
+	// We account for metadata usage when the call is successfull or its not a network error.
+	// This is because there are errors E.g Deadline exceeded, or some logic error for which
+	// the cost of data transfer is still incurred.
+	if err == nil || !n.cfg.Services.Utils.IsSeriousNetError(err) {
+		trace.checkDocReqBytes = proto.Size(checkDocReq)
+		trace.checkDocRspBytes = proto.Size(rsp)
+		trace.checkDocumentLatency = time.Since(now)
 	}
 	return
 }

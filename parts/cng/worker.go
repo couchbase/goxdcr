@@ -48,19 +48,23 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 			attemptNo++
 			err = n.processReq(childCtx, req)
 
-			// Don't log first attempt errors to avoid log spamming, but log subsequent attempt errors
-			if err != nil && attemptNo > 1 {
-				n.Logger().Errorf("error processing req, key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
+			if err != nil {
+				// It is possible that the log below may spam. But at the moment (being new nozzle) the advantages
+				// outweigh the disadvantages. So far this log has been very helpful in
+				// troubleshooting and will be revisited in future.
+				n.Logger().Errorf("error processing req, attempt=%[1]d, key=%[2]s%[3]s%[4]s, opcode=%[5]s, cas=%[6]d err=%[7]s",
+					attemptNo,
 					base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
-					err,
-					req.Req.Opcode, req.Req.Cas)
+					req.Req.Opcode,
+					req.Req.Cas,
+					err.Error())
 			}
 			trace.commitTime = time.Since(req.Start_time)
 
 			n.handleNozzleStats(&trace, err)
 			// Don't mark for recycling of req as it gets already recycled
 			// in upstream error callback.
-			if !n.raiseUpstreamErr(req, err) {
+			if n.raiseUpstreamErr(req, err) {
 				dontRecycle = true
 			}
 			n.handleVBError(req, err)
@@ -83,6 +87,7 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 }
 
 // raiseUpstreamErr raises errors back to upstream if applicable
+// returns true if upstream error was raised
 func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) (raised bool) {
 	if err == nil {
 		return
