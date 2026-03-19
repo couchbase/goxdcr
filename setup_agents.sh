@@ -9,8 +9,8 @@
 # licenses/APL2.txt.
 
 git submodule update --init
-ln -sf .agent-config/AGENTS.md AGENTS.md
+ln -sf .agent-context/AGENTS.md AGENTS.md
 
 # Copilot instructions for legacy JetBrains IDEs
 mkdir -p .github
-ln -sf ../.agent-config/AGENTS.md .github/copilot-instructions.md
+ln -sf ../.agent-context/AGENTS.md .github/copilot-instructions.md
