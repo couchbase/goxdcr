@@ -56,3 +56,4 @@ testOutput/
 AGENTS.md
 .agent-context/*
 .github/*
+.factory/*
