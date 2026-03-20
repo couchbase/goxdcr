@@ -619,7 +619,7 @@ type CngBucketStatsProvider struct {
 	// vbucket count is fixed for the lifetime of the bucket.
 	vbucketIds []uint32
 	// vbucketIdsMu protects access to vbucketIds
-	vbucketIdsMu sync.Mutex
+	vbucketIdsMu sync.RWMutex
 	// utils provides access to the utilities
 	utils utils.UtilsIface
 	// logger provides access to the logger
@@ -841,14 +841,14 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 
 // getVBucketList returns the full vbucket list [0, 1, ..., numVBuckets-1] as uint32.
 func (provider *CngBucketStatsProvider) getVBucketList() ([]uint32, error) {
-	// Protect access to vbucketIds with a mutex since it can be accessed by multiple goroutines concurrently
-	provider.vbucketIdsMu.Lock()
-	defer provider.vbucketIdsMu.Unlock()
-
-	// If vbucketIds is already cached, use it
+	// Fast path: read-lock to check if cache is already populated
+	provider.vbucketIdsMu.RLock()
 	if len(provider.vbucketIds) > 0 {
-		return provider.vbucketIds, nil
+		cached := provider.vbucketIds
+		provider.vbucketIdsMu.RUnlock()
+		return cached, nil
 	}
+	provider.vbucketIdsMu.RUnlock()
 
 	remoteOnlySpec := &metadata.ReplicationSpecification{
 		TargetClusterUUID: provider.clusterUuid,
@@ -863,9 +863,15 @@ func (provider *CngBucketStatsProvider) getVBucketList() ([]uint32, error) {
 	for _, vblist := range tgtKvVBMap {
 		vbucketIds = append(vbucketIds, vblist...)
 	}
+	result := base.ConvertUint16ToUint32(vbucketIds)
 
-	// Cache the vbucket list for future use
-	provider.vbucketIds = base.ConvertUint16ToUint32(vbucketIds)
+	// acquire write lock to populate cache if still empty
+	provider.vbucketIdsMu.Lock()
+	if len(provider.vbucketIds) == 0 {
+		provider.vbucketIds = result
+	}
+	cached := provider.vbucketIds
+	provider.vbucketIdsMu.Unlock()
 
-	return provider.vbucketIds, nil
+	return cached, nil
 }
