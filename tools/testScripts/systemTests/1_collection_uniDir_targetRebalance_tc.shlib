@@ -46,7 +46,7 @@ function runDataLoad {
 	echo "RUNNING dataload DONE"
 }
 
-TOPOLOGY_RESTART_MSG="Restarting pipeline due to target topology change"
+TOPOLOGY_RESTART_MSG="Try to fix .* Restarting pipeline due to target topology change"
 
 function runOneReplicationCycle {
 	local cycleCnt=$1
@@ -126,6 +126,9 @@ function runMultipleReplicationCycles {
 
 	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
 		runOneReplicationCycle $i $totalCount
+		if (($? != 0)); then
+			exit 1
+		fi
 	done
 }
 
@@ -147,7 +150,7 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(($currentTopologyRestartCnt + 1))
 
 	startEjectNode "C2P" "C2"
 	echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
@@ -156,7 +159,7 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(($currentTopologyRestartCnt + 1))
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"
@@ -171,6 +174,9 @@ function runMultipleRebalanceCycles {
 
 	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
 		runOneRebalanceCycle $i $totalCount
+		if (($? != 0)); then
+			exit 1
+		fi
 	done
 }
 
@@ -183,13 +189,23 @@ function runTestCase {
 	trap killAllBgJobs EXIT
 
 	runMultipleReplicationCycles 100 &
+	replCyclesPID=$!
 	runMultipleRebalanceCycles 3 &
+	rebalanceCyclesPID=$!
 
 	# 2 jobs - whichever finishes first is done
-	stopWhenAnyBgJobStops 2
+	stopWhenAnyBgJobStops $replCyclesPID $rebalanceCyclesPID
+	if (($? != 0)); then
+		echo "============================================================================"
+		echo "FAILED"
+		echo "============================================================================"
+		exit 1
+	fi
 
-	cleanupBucketReplications
-	cleanupBuckets
-	cleanupRemoteClusterRefs
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
 
+	# cannot use cleanupBucketReplications & cleanupRemoteClusterRefs - see MB-71040
+	hardResetNodesSynchronously
 }

@@ -525,6 +525,38 @@ function hardResetNodes {
 	declare -gA CLUSTER_SETUP_DONE_MAP
 }
 
+function hardResetNodesSynchronously {
+	local initPort
+	local port
+	local hostIP
+	local clusterName
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+
+		port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
+			initPort="$port"
+		else
+			initPort=8091
+		fi
+
+		hostIP="127.0.0.1"
+		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+			hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+		fi
+
+		echo "RESETTING cluster name $clusterName on port $initPort with hostIP $hostIP"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode
+	done
+
+	echo "sleeping 10 seconds before other 'setupTopologies' may be called"
+	sleep 10
+
+	CLUSTER_SETUP_DONE_MAP=()
+	declare -gA CLUSTER_SETUP_DONE_MAP
+}
+
 function setupCluster {
 	local initPort
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
@@ -2320,12 +2352,26 @@ function waitForBgJobs {
 }
 
 function stopWhenAnyBgJobStops {
-	local totalBgJobs=$1
-	local jobsCnt=$(jobs -l | grep -c "Running")
-	while (($jobsCnt == $totalBgJobs)); do
-		jobsCnt=$(jobs -l | grep -c "Running")
+	local -a bgPIDs=("$@")
+	local totalBgJobs=${#bgPIDs[@]}
+	local runningCnt=$totalBgJobs
+
+	# Wait until one finishes and return its exit code
+	while (($runningCnt == $totalBgJobs)); do
 		sleep 3
+		runningCnt=0
+		for pid in "${bgPIDs[@]}"; do
+			if kill -0 $pid 2>/dev/null; then
+				runningCnt=$((runningCnt + 1))
+			else
+				# This job has finished, return its exit code
+				wait $pid
+				return $?
+			fi
+		done
 	done
+
+	return 0
 }
 
 # Input: 1. clusterName

@@ -56,6 +56,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running simple collection unidirectional test case with client cert"
 	echo "============================================================================"
+
 	setupTopologies
 	if (($? != 0)); then
 		exit 1
@@ -89,4 +90,5 @@ function runTestCase {
 		setDisableClientCert "$clusterName"
 	done
 	cleanupClientCertMaps
+	hardResetNodesSynchronously
 }
