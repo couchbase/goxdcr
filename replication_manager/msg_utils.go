@@ -628,7 +628,7 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 
 	switch remoteType {
 	case metadata.RemoteTypeCbCluster:
-		hostAddr, err1 = base.ValidateHostAddrForCbCluster(hostName)
+		hostAddr, err1 = base.ValidateHostAddrForCbCluster(hostName, secureType)
 		if err1 != nil {
 			errorsMap[base.RemoteClusterHostName] = err1
 		}

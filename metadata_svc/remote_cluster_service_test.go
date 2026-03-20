@@ -507,7 +507,7 @@ func createSSLRemoteClusterRef(id string, helper base2.DnsSrvHelperIface) *metad
 }
 
 func createRemoteClusterRefWithHost(id, host string, helper base2.DnsSrvHelperIface, assert *assert.Assertions) *metadata.RemoteClusterReference {
-	hostAddr, err := base.ValidateHostAddrForCbCluster(host)
+	hostAddr, err := base.ValidateHostAddrForCbCluster(host, base.SecureTypeNone)
 	assert.Nil(err)
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostAddr, "", "", "", false, "", nil, nil, nil, helper)
 	aRef.SetId(id)

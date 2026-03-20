@@ -911,16 +911,23 @@ func normalizeHostAddr(hostAddr string, defaultPort uint16) (string, error) {
 }
 
 // validate host address [provided by user at remote cluster reference creation time] for the target couchbase cluster
-func ValidateHostAddrForCbCluster(hostAddr string) (string, error) {
+func ValidateHostAddrForCbCluster(hostAddr string, secureType string) (string, error) {
 	// Only connection URIs prefixed with "couchbase://" or "couchbases://" are considered valid
 	if IsURL(hostAddr) && !IsCbURL(hostAddr) {
-		return "", fmt.Errorf("the only allowed schemes for couchbase cluster hostnames are %q and %q. Please rectify the hostname", CouchbaseUri, CouchbaseSecureUri)
+		return "", fmt.Errorf("the only allowed schemes for couchbase cluster hostnames are %q and %q. Please correct the hostname", CouchbaseUri, CouchbaseSecureUri)
 	}
 
+	isSecure := strings.HasPrefix(hostAddr, CouchbaseSecureUri)
 	defaultPort := DefaultAdminPort
-	if strings.HasPrefix(hostAddr, CouchbaseSecureUri) {
+
+	if isSecure {
+		// couchbases:// prefix requires full TLS - secureType must be "full"
+		if secureType != SecureTypeFull {
+			return "", fmt.Errorf("secureType must be %q when using %q prefix (secure connection requires full encryption)", SecureTypeFull, CouchbaseSecureUri)
+		}
 		hostAddr = strings.TrimPrefix(hostAddr, CouchbaseSecureUri)
 	} else {
+		// couchbase:// or no prefix - any secureType is valid
 		hostAddr = strings.TrimPrefix(hostAddr, CouchbaseUri)
 	}
 

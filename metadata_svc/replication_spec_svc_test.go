@@ -207,6 +207,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
 	xdcrTopologyMock.On("MyClusterCompatibility").Return(clusterCompatVersion, nil)
 	xdcrTopologyMock.On("DisableCERestrictions").Return(false, nil)
+	xdcrTopologyMock.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, []byte(nil), false, []byte(nil), []byte(nil), nil)
 
 	// LOCAL mock - BucketValidationInfo(logger, req)
 	utilitiesMock.On("BucketValidationInfo", mock.Anything, mock.Anything).Return(bucketInfo,
@@ -230,6 +231,9 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 
 	// Xmem mock
 	utilitiesMock.On("CheckWhetherClusterIsESBasedOnBucketInfo", mock.Anything).Return(isElasticSearch)
+
+	utilitiesMock.On("GetBucketInfo", mock.Anything, mock.Anything).Return(bucketInfo, nil)
+	utilitiesMock.On("GetCrossClusterVersioningFromBucketInfo", mock.Anything).Return(false, nil)
 
 	// client mock
 	clientMock.On("Close").Return(nil)

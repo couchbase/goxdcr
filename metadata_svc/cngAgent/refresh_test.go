@@ -35,7 +35,7 @@ const (
 
 // Helper functions for creating test data specific to refresh tests
 func createTestRemoteClusterReferenceWithCreds() *metadata.RemoteClusterReference {
-	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname)
+	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname, base.SecureTypeNone)
 	primaryCreds := base.Credentials{
 		UserName_: "primary_user",
 		Password_: "primary_pass",

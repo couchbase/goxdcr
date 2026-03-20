@@ -87,7 +87,7 @@ func createTestHeartbeatMetadata() *metadata.HeartbeatMetadata {
 }
 
 func createTestRemoteClusterReferenceWithConnStr() *metadata.RemoteClusterReference {
-	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname)
+	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname, base.SecureTypeNone)
 	ref, _ := metadata.NewRemoteClusterReference(testUuid, testRemoteClusterName, hostAddr, "", "", "", false, "", nil, nil, nil, nil)
 	ref.SetId(testId)
 	return ref

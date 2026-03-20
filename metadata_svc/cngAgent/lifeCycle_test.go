@@ -38,7 +38,7 @@ const (
 
 // Helper functions for creating test data
 func createTestRemoteClusterReference() *metadata.RemoteClusterReference {
-	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname)
+	hostAddr, _ := base.ValidateHostAddrForCbCluster(testHostname, base.SecureTypeNone)
 	ref, _ := metadata.NewRemoteClusterReference(testUuid, testName, hostAddr, "", "", "", false, "", nil, nil, nil, nil)
 	ref.SetId(testId)
 	return ref
