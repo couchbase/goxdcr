@@ -1631,8 +1631,11 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 
 	if ckptRecord.IsTraditional() {
 		for sha, mapping := range allShaToBrokenMaps {
-			if mapping == nil || len(allShaToBrokenMaps) > 1 {
-				return fmt.Errorf("LoadBrokenMapping should expect one non-nil mapping %v len: %v", allShaToBrokenMaps, len(allShaToBrokenMaps))
+			if mapping == nil {
+				return fmt.Errorf("Brokenmapping sha %v is not properly populated", sha)
+			}
+			if len(allShaToBrokenMaps) > 1 {
+				return fmt.Errorf("traditional checkpoint should only have 1 broken mapping, but got %v", len(allShaToBrokenMaps))
 			}
 			if ckptRecord.BrokenMappingSha256 != sha {
 				continue
@@ -3104,6 +3107,11 @@ func (g *GlobalInfoCompressedDoc) ToShaMap() (ShaToGlobalInfoMap, error) {
 	shaMap := make(ShaToGlobalInfoMap)
 	for _, oneRecord := range g.NsMappingRecords {
 		if oneRecord == nil {
+			continue
+		}
+
+		if len(oneRecord.CompressedMapping) == 0 {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("CompressedMapping is nil/empty for sha %v", oneRecord.Sha256Digest)
 			continue
 		}
 

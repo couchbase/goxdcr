@@ -2010,6 +2010,11 @@ func (b *CollectionNsMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error
 			continue
 		}
 
+		if len(oneRecord.CompressedMapping) == 0 {
+			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("CompressedMapping is nil/empty for sha %v", oneRecord.Sha256Digest)
+			continue
+		}
+
 		serializedMap, err := snappy.Decode(nil, oneRecord.CompressedMapping)
 		if err != nil {
 			errorMap[oneRecord.Sha256Digest] = fmt.Errorf("Snappy decompress failed %v", err)

@@ -706,7 +706,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Compre
 		return nil, service_def.MetadataNotFoundErr
 	}
 
-	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc", c.id)
+	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc with %v entries", c.id, len(docReturn.NsMappingRecords))
 	return docReturn, nil
 }
 

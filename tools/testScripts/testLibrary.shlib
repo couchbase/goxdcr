@@ -50,6 +50,7 @@ REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline
 METAKV_SET_OP_ERR="metakv_svc_setOp encountered error"
 CE_ERROR="Cannot create XDCR between two Community Edition clusters"
 REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED="Current cluster encryption level requires the remote-cluster-reference to be of 'Full' encryption-type."
+UNABLE_TO_FIND_SHAS="Unable to find shas"
 
 # HLV Test sleep configs
 HLV_TESTS_INIT_SLEEP_SECS=30

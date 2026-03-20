@@ -102,6 +102,7 @@ REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
 CHECK_CHANGES_LEFT_MAX=10
 declare BULK_COLLECTION_THRESHOLD=10
+declare MAX_MANIFEST_ENTRIES_TO_PRINT=1000
 
 # With python 3.9 to bypass "OpenSSL 3.0's legacy provider failed to load" message when running cbworkloadgen
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
@@ -2377,29 +2378,33 @@ function prettyPrintManifest {
 	local scopesList=$(echo "$manifest" | jq '.scopes')
 	local scopesListLen=$(echo "$manifest" | jq '.scopes | length')
 
-	for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
-		local scopeOutput=$(echo "$scopesList" | jq .[$i])
-		local scopeName=$(echo "$scopeOutput" | jq '.name')
-		local scopeUID=$(echo "$scopeOutput" | jq '.uid')
-		local scopeUIDdec=$(hexStringToDec "$scopeUID")
-		echo "ScopeName $scopeName (UID $scopeUIDdec)"
+	if (($scopesListLen > $MAX_MANIFEST_ENTRIES_TO_PRINT)); then
+		echo "Has too many scopes ($scopesListLen) to print"
+	else
+		for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
+			local scopeOutput=$(echo "$scopesList" | jq .[$i])
+			local scopeName=$(echo "$scopeOutput" | jq '.name')
+			local scopeUID=$(echo "$scopeOutput" | jq '.uid')
+			local scopeUIDdec=$(hexStringToDec "$scopeUID")
+			echo "ScopeName $scopeName (UID $scopeUIDdec)"
 
-		# Get individual collections within this scope
-		local collectionsList=$(echo "$scopeOutput" | jq '.collections')
-		local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
-		if (($collectionsListLen > $BULK_COLLECTION_THRESHOLD)); then
-			echo "  Too many collections to list. Total collections: $collectionsListLen"
-		else
-			local j
-			for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
-				local collectionOutput=$(echo "$collectionsList" | jq .[$j])
-				local collectionName=$(echo "$collectionOutput" | jq '.name')
-				local collectionUID=$(echo "$collectionOutput" | jq '.uid')
-				local collectionUIDdec=$(hexStringToDec "$collectionUID")
-				echo "  CollectionName $collectionName (UID $collectionUIDdec)"
-			done
-		fi
-	done
+			# Get individual collections within this scope
+			local collectionsList=$(echo "$scopeOutput" | jq '.collections')
+			local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
+			if (($collectionsListLen > $BULK_COLLECTION_THRESHOLD)); then
+				echo "  Too many collections to list. Total collections: $collectionsListLen"
+			else
+				local j
+				for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
+					local collectionOutput=$(echo "$collectionsList" | jq .[$j])
+					local collectionName=$(echo "$collectionOutput" | jq '.name')
+					local collectionUID=$(echo "$collectionOutput" | jq '.uid')
+					local collectionUIDdec=$(hexStringToDec "$collectionUID")
+					echo "  CollectionName $collectionName (UID $collectionUIDdec)"
+				done
+			fi
+		done
+	fi
 }
 
 # Function to calculate a checksum signature for a string

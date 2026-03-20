@@ -192,8 +192,8 @@ function runReplicationResume {
 	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "backfill" | grep -cv "${TS_PREFIX}=0")
 
 	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 40 seconds for resume to finish"
-	sleep 40
+	echo "Waiting 60 seconds for resume to finish"
+	sleep 60
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
@@ -259,6 +259,7 @@ function runTestCase {
 		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$UNABLE_TO_FIND_SHAS" 0
 	done
 
 	echo "============================================================================"
