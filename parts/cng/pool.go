@@ -54,11 +54,9 @@ type ConnPool struct {
 }
 
 type PoolConfig struct {
-	ConnCount     int
-	ConnFn        func() (cngConn, error)
-	RetryInterval int // in milliseconds
-
-	UtilsSvc utils.UtilsIface
+	ConnCount int
+	ConnFn    func() (cngConn, error)
+	UtilsSvc  utils.UtilsIface
 }
 
 func (c *PoolConfig) Validate() error {
@@ -67,9 +65,6 @@ func (c *PoolConfig) Validate() error {
 	}
 	if c.ConnFn == nil {
 		return fmt.Errorf("connection creation function cannot be nil")
-	}
-	if c.RetryInterval <= 0 {
-		return fmt.Errorf("retry interval must be > 0")
 	}
 	return nil
 }
@@ -152,8 +147,8 @@ func (p *ConnPool) connect(index int, nwErr error) error {
 
 	wrapper.Close()
 
-	p.logger.Infof("creating connection at index=%d, retryInterval=%d ms, generation=%d, nwErr=%v",
-		index, p.cfg.RetryInterval, gen, nwErr)
+	p.logger.Infof("creating connection at index=%d, generation=%d, nwErr=%v",
+		index, gen, nwErr)
 	// Create new connection
 	newConn, err := p.cfg.ConnFn()
 	if err != nil {

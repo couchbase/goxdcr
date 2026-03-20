@@ -79,23 +79,37 @@ func (s *Services) Validate() error {
 }
 
 type Tunables struct {
-	InsecureSkipVerify bool
-	DataChanSize       int
-	WorkerCount        int
-	ConnCount          int
-	RetryInterval      int // in milliseconds
-	Deadline           time.Duration
-	// OptimisticThresholdSize is the document size (in bytes)
-	// CNG TODO: make it dynamic i.e. settable at runtime
-	OptimisticThresholdSize int
+	DataChanSize int
+	WorkerCount  int
+	ConnCount    int
+	Deadline     time.Duration
 
-	// Live-updateable fields
+	// (live updatable) optimisticThresholdSize is the document size (in bytes) below which we can do optimistic replication.
+	optimisticThresholdSize atomic.Int64
+
+	// (live updatable) Deadline for RPC calls to CNG
 	rpcDeadlineMs atomic.Int64
 }
 
+func (t *Tunables) GetOptimisticThresholdSize() int {
+	v := t.optimisticThresholdSize.Load()
+	if v < 0 {
+		return 0
+	}
+	return int(v)
+}
+
+func (t *Tunables) SetOptimisticThresholdSize(v int) {
+	if v < 0 {
+		v = 0
+	}
+
+	t.optimisticThresholdSize.Store(int64(v))
+}
+
 func (t *Tunables) String() string {
-	return fmt.Sprintf("InsecureSkipVerify=%v, DataChanSize=%d, WorkerCount=%d, ConnCount=%d, RetryInterval=%d, Deadline=%dms, OptimisticThresholdSize=%d",
-		t.InsecureSkipVerify, t.DataChanSize, t.WorkerCount, t.ConnCount, t.RetryInterval, t.Deadline.Milliseconds(), t.OptimisticThresholdSize)
+	return fmt.Sprintf("DataChanSize=%d, WorkerCount=%d, ConnCount=%d, Deadline=%dms, OptimisticThresholdSize=%d",
+		t.DataChanSize, t.WorkerCount, t.ConnCount, t.Deadline.Milliseconds(), t.GetOptimisticThresholdSize())
 }
 
 func (t *Tunables) Validate() (err error) {
@@ -107,9 +121,6 @@ func (t *Tunables) Validate() (err error) {
 	}
 	if t.ConnCount <= 0 {
 		return fmt.Errorf("ConnCount must be positive")
-	}
-	if t.RetryInterval <= 0 {
-		return fmt.Errorf("RetryInterval must be positive")
 	}
 	if t.Deadline <= 0 {
 		return fmt.Errorf("Deadline must be positive")

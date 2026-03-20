@@ -33,7 +33,6 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			// If true, then body is not compressed
 			body = req.Req.Body
 		} else {
-			// CNG TODO: check use of datapool
 			body, err = snappy.Decode(nil, req.Req.Body)
 			if err != nil {
 				logger.Errorf("Failed to snappy decode body for key=%s[1]s%[3]s%[2]s, dataType=%[4]d, buf=%s[1]s%[5]s%[2]s, err=%[6]v",
@@ -61,7 +60,6 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			return c, err
 		}
 
-		// CNG TODO: check use of datapool
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(bodyWithoutXattr)))
 		c.Body = snappy.Encode(cbuf, bodyWithoutXattr)
 		return c, nil
@@ -69,7 +67,6 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 
 	if req.Req.DataType&base.SnappyDataType == 0 {
 		cbuf := make([]byte, snappy.MaxEncodedLen(len(req.Req.Body)))
-		// CNG TODO: check use of datapool
 		c.Body = snappy.Encode(cbuf, req.Req.Body)
 	} else {
 		c.Body = req.Req.Body

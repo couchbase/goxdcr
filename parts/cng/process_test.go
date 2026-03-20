@@ -228,7 +228,7 @@ func TestTransfer(t *testing.T) {
 			})
 			assert.NoError(t, err)
 
-			n.cfg.Tunables.OptimisticThresholdSize = 256
+			n.cfg.Tunables.SetOptimisticThresholdSize(256)
 			n.cfg.Tunables.Deadline = 5 * time.Second
 
 			ctx := context.Background()

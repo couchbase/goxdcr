@@ -178,6 +178,5 @@ func handleConflictCheckErr(origErr error, rsp *conflictCheckRsp) (err error) {
 }
 
 func (n *Nozzle) isOptimistic(req *base.WrappedMCRequest) bool {
-	// CNG TODO: make threshold dynamic i.e. settable at runtime
-	return req.Req.Size() < n.cfg.Tunables.OptimisticThresholdSize
+	return req.Req.Size() < n.cfg.Tunables.GetOptimisticThresholdSize()
 }

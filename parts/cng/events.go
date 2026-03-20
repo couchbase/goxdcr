@@ -80,7 +80,6 @@ func (n *Nozzle) raiseSuccessEvent(req *base.WrappedMCRequest, t *Trace, err err
 		return
 	}
 
-	// CNG TODO: check if failedTargetCR is correct or not
 	// failedTargetCR is true there was a conflict when pushing the doc and not checking for conflicts
 	failedTargetCR := t.pushed && t.pushRsp.isConflict
 
