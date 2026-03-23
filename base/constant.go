@@ -878,6 +878,9 @@ const MaxCas = 0xFFFFFFFFFFFFFFFF
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
 var TimeoutCheckpointBeforeStop = 180 * time.Second
 
+// timeout for waiting for ongoing checkpoint operations to complete before giving up
+var TimeoutWaitForOngoingCkptOps = 180 * time.Second
+
 var TopologyChangeCheckInterval = 10 * time.Second
 
 // the maximum number of topology change checks to wait before pipeline is restarted
@@ -1293,7 +1296,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxAllowedRCDegradedCyclesForCng int,
 	colMarshalIdxThreshold int,
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
-	disableBucketConfigManager bool) {
+	disableBucketConfigManager bool,
+	timeoutWaitForOngoingCkptOps time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1495,6 +1499,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ColMappingLargeThreshold = colMarshalIdxThreshold
 
 	DisableBucketConfigManager = disableBucketConfigManager
+
+	TimeoutWaitForOngoingCkptOps = timeoutWaitForOngoingCkptOps
 }
 
 // Need to escape the () to result in "META().xattrs" literal

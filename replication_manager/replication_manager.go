@@ -391,6 +391,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.CLogMonitorCycleIntervalKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.CLogMonitorCleanupFreqKey].(int),
 		internal_settings.Values[metadata.DisableBucketConfigManagerKey].(bool),
+		time.Duration(internal_settings.Values[metadata.TimeoutWaitForOngoingCkptOpsKey].(int))*time.Second,
 	)
 }
 

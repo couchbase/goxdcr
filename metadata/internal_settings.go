@@ -315,6 +315,9 @@ const (
 	ColMarshalIdxThresholdKey = "ColMappingLargeThreshold"
 
 	DisableBucketConfigManagerKey = "DisableBucketConfigManager"
+
+	// timeout for waiting for ongoing checkpoint operations to complete (in seconds)
+	TimeoutWaitForOngoingCkptOpsKey = "TimeoutWaitForOngoingCkptOps"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -466,6 +469,7 @@ var ColMarshalIdxThresholdConfig = &SettingsConfig{base.ColMappingLargeThreshold
 var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
 var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
 var DisableBucketConfigManagerConfig = &SettingsConfig{false, nil}
+var TimeoutWaitForOngoingCkptOpsConfig = &SettingsConfig{int(base.TimeoutWaitForOngoingCkptOps / time.Second), &Range{5, 300}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -617,6 +621,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
 	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,
 	DisableBucketConfigManagerKey:                 DisableBucketConfigManagerConfig,
+	TimeoutWaitForOngoingCkptOpsKey:               TimeoutWaitForOngoingCkptOpsConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

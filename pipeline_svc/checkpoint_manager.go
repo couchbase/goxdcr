@@ -289,14 +289,25 @@ func (h *checkpointSyncHelper) disableCkptAndWait() {
 	}
 }
 
-// waitForOngoingOps waits for all ongoing checkpoint operations to complete
-func (h *checkpointSyncHelper) waitForOngoingOps() {
-	h.mtx.Lock()
-	defer h.mtx.Unlock()
+// waitForOngoingOps waits for all ongoing checkpoint operations to complete.
+// Returns true if all ops completed, false if the timeout was reached.
+func (h *checkpointSyncHelper) waitForOngoingOps(timeout time.Duration) bool {
+	doneCh := make(chan struct{})
+	go func() {
+		h.mtx.Lock()
+		for len(h.ongoingOps) > 0 {
+			// There are checkpoint ongoing
+			h.cv.Wait()
+		}
+		h.mtx.Unlock()
+		close(doneCh)
+	}()
 
-	for len(h.ongoingOps) > 0 {
-		// There are checkpoint ongoing
-		h.cv.Wait()
+	select {
+	case <-doneCh:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
@@ -886,16 +897,19 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 	var opDoneIdx int
 	err := fmt.Errorf("InitErr")
 	iter := 0
-	registerCkptOpTimeStop := ckmgr.utils.StartDiagStopwatch(fmt.Sprintf("ckmgr.checkpointAllowedHelper.registerCkptOp(false) - %v", ckmgr.pipeline.FullTopic()), base.DiagInternalThreshold)
+	registerCkptOpTimeStop := ckmgr.utils.StartDiagStopwatch(fmt.Sprintf("ckmgr.checkpointAllowedHelper.registerCkptOp(false,true) - %v", ckmgr.pipeline.FullTopic()), base.DiagInternalThreshold)
 	for err != nil {
 		// We should only checkpoint before stop if no concurrent (periodic) checkpoint operation is in progress
 		opDoneIdx, err = ckmgr.checkpointAllowedHelper.registerCkptOp(false, true)
 		if err != nil {
 			if errors.Is(err, errCkptOpOngoing) {
-				ckmgr.logger.Infof("Checkpoint before stop skipped because there were ongoing ops")
-				ckmgr.logger.Infof("Waiting for ongoing ops to complete")
-				ckmgr.checkpointAllowedHelper.waitForOngoingOps()
-				ckmgr.logger.Infof("Ongoing ops completed")
+				ckmgr.logger.Infof("Checkpoint before stop skipped due to ongoing ops, waiting up to %v for completion", base.TimeoutWaitForOngoingCkptOps)
+				completed := ckmgr.checkpointAllowedHelper.waitForOngoingOps(base.TimeoutWaitForOngoingCkptOps)
+				if !completed {
+					ckmgr.logger.Warnf("Timed out waiting for ongoing checkpoint ops to complete after %v", base.TimeoutWaitForOngoingCkptOps)
+				} else {
+					ckmgr.logger.Infof("Ongoing checkpoint ops completed")
+				}
 				registerCkptOpTimeStop()
 				return
 			} else {
