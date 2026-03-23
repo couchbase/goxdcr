@@ -2130,7 +2130,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	// get high seqno and vbuuid for all vbuckets in the pipeline
 	tgtBucketStats, err = ckmgr.getHighSeqNosFromTarget()
 	if err != nil {
-		ckmgr.logger.Errorf("%v: failed to get high seqno and vbuuid from target. err=%w", ckmgr.pipeline.FullTopic(), err)
+		ckmgr.logger.Errorf("%v: failed to get high seqno and vbuuid from target. err=%v", ckmgr.pipeline.FullTopic(), err)
 		return
 	}
 
@@ -2203,7 +2203,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 
 	through_seqno_map, srcManifestIds, tgtManifestIds, tgtBucketStats, err := ckmgr.gatherCkptData(fin_ch)
 	if err != nil {
-		ckmgr.logger.Errorf("%v: failed to gather checkpoint data. err=%w", ckmgr.pipeline.FullTopic(), err)
+		ckmgr.logger.Errorf("%v: failed to gather checkpoint data. err=%v", ckmgr.pipeline.FullTopic(), err)
 		return
 	}
 
@@ -3294,7 +3294,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			tgtBucketFailoverLog.Mutex.RUnlock()
 			err = ModifyBucketFailoverLogForLocalReplicate(tgtFailoverLogForFiltering)
 			if err != nil {
-				ckmgr.logger.Errorf("unable to filter invalid ckpts based on target failover: failed to modify failover logs. err=%w", err)
+				ckmgr.logger.Errorf("unable to filter invalid ckpts based on target failover: failed to modify failover logs. err=%v", err)
 				return err
 			}
 			filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogForFiltering, ckmgr.logger)
@@ -3606,7 +3606,7 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 
 				bMatch, err := IsCkptRecordValidBasedOnTgtFailover(ckptRecord, failoverLog)
 				if err != nil {
-					logger.Errorf("unable to check if ckpt record(creationTime %d) is valid based on target failover. vbno %v err=%w", ckptRecord.CreationTime, vbno, err)
+					logger.Errorf("unable to check if ckpt record(creationTime %d) is valid based on target failover. vbno %v err=%v", ckptRecord.CreationTime, vbno, err)
 					continue
 				}
 				if bMatch {

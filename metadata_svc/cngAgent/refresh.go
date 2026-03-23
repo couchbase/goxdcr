@@ -197,7 +197,7 @@ func (r *refreshSnapShot) performRefreshOp(ctx context.Context, trackingCtx *uti
 
 	clusterInfoResponse := callClusterInfo(grpcOpts)
 	if clusterInfoResponse.Code() == codes.Unauthenticated && r.refCache.HasStagedCreds() {
-		r.logger.Infof("%v: authentication failed with primary credentials: %w. Retrying with staged credentials", r.refCache.Name(), clusterInfoResponse.Err())
+		r.logger.Infof("%v: authentication failed with primary credentials: %v. Retrying with staged credentials", r.refCache.Name(), clusterInfoResponse.Err())
 
 		// Ensure context hasn't been canceled before retrying with staged credentials
 		select {
@@ -265,7 +265,7 @@ func (agent *RemoteCngAgent) runPeriodicRefresh() {
 		case <-ticker.C:
 			err := agent.Refresh()
 			if err != nil {
-				agent.logger.Warnf("%v: Periodic refresher encountered error while doing a refresh. err:%w", agentName, err)
+				agent.logger.Warnf("%v: Periodic refresher encountered error while doing a refresh. err:%v", agentName, err)
 			}
 		}
 	}
@@ -277,7 +277,7 @@ func (agent *RemoteCngAgent) Refresh() error {
 		if err == metadata_svc.RefreshAlreadyActive {
 			// If a refresh is already active, wait for its result
 			err = <-resultCh
-			agent.logger.Infof("%v: Another refresh was already in progress; piggybacked on it. err:%w", agent.Name(), err)
+			agent.logger.Infof("%v: Another refresh was already in progress; piggybacked on it. err:%v", agent.Name(), err)
 			return err
 		}
 		return fmt.Errorf("unable to begin refresh op. err:%w", err)

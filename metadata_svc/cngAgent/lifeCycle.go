@@ -306,7 +306,7 @@ func (agent *RemoteCngAgent) readAfterWrite(key string, incomingRef *metadata.Re
 		// 2. The underlying metakv library sees a 500 status code from ns_server. Given that we do a exponential backoff
 		//    retry, the chances of seeing a persistent 500 after all the retries is extremely rare. In this extremely unlikely case,
 		//    set the revision value on the incomingRef to nil hoping that the revision will be updated in a future metakv callback.
-		agent.logger.Warnf("setting revision to nil on reference %s due to metakv GET error: %w", incomingRef.Name(), err)
+		agent.logger.Warnf("setting revision to nil on reference %s due to metakv GET error: %v", incomingRef.Name(), err)
 		incomingRef.SetRevision(nil)
 		return nil
 	}
@@ -323,7 +323,7 @@ func (agent *RemoteCngAgent) readAfterWrite(key string, incomingRef *metadata.Re
 	refInMetaKv, err := metadata_svc.ConstructRemoteClusterReference(value, rev, true)
 	if err != nil {
 		// An error is returned if unmarshalling fails
-		agent.logger.Errorf("agent.readAfterWrite: unmarshal failed for reference %s. err=%w", incomingRef.Name(), err)
+		agent.logger.Errorf("agent.readAfterWrite: unmarshal failed for reference %s. err=%v", incomingRef.Name(), err)
 		return base.ErrorUnmarshallFailed
 	}
 	// Do a sanity check to make sure there has not been any other writer who updated this reference after we've written.

@@ -530,7 +530,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 func (b *BucketTopologyService) getCredentials(spec *metadata.ReplicationSpecification) *base.Credentials {
 	remoteRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
-		b.logger.Errorf("failed to get credentials for spec %v: unable to retrieve remote cluster reference, err=%w", spec.Id, err)
+		b.logger.Errorf("failed to get credentials for spec %v: unable to retrieve remote cluster reference, err=%v", spec.Id, err)
 		return nil
 	}
 	return &remoteRef.Credentials
