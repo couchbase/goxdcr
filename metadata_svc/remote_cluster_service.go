@@ -3872,6 +3872,11 @@ func ConstructRemoteClusterReference(value []byte, rev interface{}, skipPopulate
 		ref.PopulateDnsSrvIfNeeded(nil)
 	}
 
+	if ref.GetRemoteType() == metadata.RemoteTypeAuto {
+		// For backward compatibility, if remoteType is not set, treat it as a regular Couchbase cluster reference
+		ref.SetRemoteType(metadata.RemoteTypeCbCluster)
+	}
+
 	return ref, err
 }
 
