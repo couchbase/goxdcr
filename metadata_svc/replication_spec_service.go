@@ -722,7 +722,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			return err
 		}
 		if !base.IsClusterCompatible(clusterCompat, base.VersionForCLoggerSupport) {
-			return base.ErrorCLoggingMixedModeUnsupported
+			errorMap[metadata.CLogKey] = base.ErrorCLoggingMixedModeUnsupported
+			return nil
 		}
 
 		// Conflict logging is on. Make sure source bucket enableCrossClusterVersioning is true.
@@ -806,6 +807,16 @@ func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMa
 
 	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.CLogKey])
 	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
+		// Ensure that all nodes in the Target cluster can handle the conflict-logging feature
+		targetClusterCompat, err := service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
+		if err != nil {
+			return err
+		}
+		if !base.IsClusterCompatible(targetClusterCompat, base.VersionForCLoggerSupport) {
+			errorMap[metadata.CLogKey] = base.ErrorCLoggingTargetUnsupported
+			return nil
+		}
+
 		// Conflict logging is on. Make sure target bucket enableCrossClusterVersioning is true.
 		crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
 		if err != nil {
