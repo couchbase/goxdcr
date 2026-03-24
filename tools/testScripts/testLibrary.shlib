@@ -1182,8 +1182,38 @@ function validateXDCRCheckpoints {
 	fi
 }
 
+
+# Kill all background jobs spawned by the current shell.
+#
+# This function safely terminates all background processes managed by the shell's job control.
+# It uses a defensive approach to handle edge cases and prevent errors:
+#
+# - Uses 'jobs -p' to extract only process IDs (cleaner than 'jobs -l')
+# - Checks each process exists before attempting to kill it using 'kill -0'
+# - Handles already-exited processes gracefully without error output
+# - Suppresses stderr for all operations to keep logs clean
+#
+# The 'kill -0' check serves as a safety guard:
+#   - Verifies the process still exists and is owned by this user
+#   - Prevents "No such process" errors if the job already terminated
+#   - Reduces (though doesn't eliminate) the race condition window
+#
+# Edge cases handled:
+#   - Empty job list: while loop simply doesn't iterate
+#   - Process already exited: kill -0 returns non-zero, actual kill is skipped
+#   - Permission denied: kill -0 will fail safely without killing wrong process
+#
+# Exit code: Always succeeds (returns 0), even if no jobs exist or all have exited
+#
+# Note: This function is called by an EXIT trap set in individual test cases.
+#       After test execution, the trap is reset in commonTestRunner.shlib to prevent
+#       interference with subsequent test iterations.
 function killAllBgJobs {
-	jobs -l | awk '{print $2}' | xargs kill
+	jobs -p | while read pid; do
+		if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+			kill "$pid" 2>/dev/null
+		fi
+	done
 }
 
 function xdcrDifferParseOpts {
