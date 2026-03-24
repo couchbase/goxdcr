@@ -1018,6 +1018,11 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	var simplemergerStarted bool
 	var simplemergerStartedMtx sync.Mutex
 	var simplemergerStartedCond = sync.NewCond(&simplemergerStartedMtx)
+	firstSignalSeenCh := make(chan struct{})
+	allowBatchReadCh := make(chan struct{})
+	mergerBatchCh := make(chan *MergeCkptArgs, 1)
+	mergerErrCh := make(chan error, 1)
+	var firstSignalOnce sync.Once
 
 	simpleMergerWaiter.Add(1)
 	// Test simple merger
@@ -1030,21 +1035,20 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 		for {
 			select {
 			case <-ckptMgr.periodicPushRequested:
-				// Sleep here to simulate processing time while another is queued up
+				// Force deterministic ordering: after first wake-up, wait until request #2 is queued.
+				firstSignalOnce.Do(func() {
+					close(firstSignalSeenCh)
+					<-allowBatchReadCh
+				})
 				args := ckptMgr.periodicBatchGetter()
 				if args == nil {
 					continue
 				}
-				assert.NotNil(args)
-				assert.Equal(2, len(args.PushRespChs))
-
-				// This test will have VB 11 and VB 12 merged for both main and backfill pipeline
-				assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline])
-				assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline][11])
-				assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline][12])
-				assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline])
-				assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline][11])
-				assert.Nil(args.PipelinesCkptDocs[common.BackfillPipeline][12])
+				select {
+				case mergerBatchCh <- args:
+				default:
+					mergerErrCh <- fmt.Errorf("unexpected duplicate merged batch")
+				}
 				respToGcCh(args.PushRespChs, nil, ckptMgr.finish_ch)
 			case <-ckptMgr.finish_ch:
 				return
@@ -1079,9 +1083,32 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 
 	respCh := make(chan error)
 	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh, globalTsMap))
+	<-firstSignalSeenCh
 	// Try to queue one again while periodic merge is busy
 	respCh2 := make(chan error)
 	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2, globalTsMap))
+	close(allowBatchReadCh)
+
+	var args *MergeCkptArgs
+	select {
+	case err := <-mergerErrCh:
+		assert.Nil(err)
+	case args = <-mergerBatchCh:
+	case <-time.After(2 * time.Second):
+		assert.Fail("timed out waiting for merged periodic batch")
+	}
+	assert.NotNil(args)
+	if args != nil {
+		assert.Equal(2, len(args.PushRespChs))
+
+		// This test should have VB 11 and VB 12 merged for main pipeline and VB 11 only for backfill.
+		assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline])
+		assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline][11])
+		assert.NotNil(args.PipelinesCkptDocs[common.MainPipeline][12])
+		assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline])
+		assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline][11])
+		assert.Nil(args.PipelinesCkptDocs[common.BackfillPipeline][12])
+	}
 
 	retErr := <-respCh
 	assert.Nil(retErr)
