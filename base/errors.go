@@ -102,6 +102,7 @@ var (
 	ErrorHostNameEmpty                           = errors.New("Hostname is empty")
 	ErrorReplicationSpecNotActive                = errors.New("replication specification not found or no longer active")
 	ErrorCLoggingMixedModeUnsupported            = errors.New("not all nodes support conflict logging feature")
+	ErrorCLoggingTargetUnsupported               = errors.New("Target cluster does not support conflict-logging feature")
 	ErrorSubdocMaxPathLimitBreached              = fmt.Errorf("subdoc max path limit breached")
 	ErrorSeamlessCredsChangeMixedModeUnsupported = errors.New("Seamless credentials change is not supported in mixed-mode clusters. Upgrade all nodes to version >=8.1 to enable credential staging.")
 	ErrUpsertAlreadyOccurring                    = fmt.Errorf("Error upserting mapping as an operation is happening already")
