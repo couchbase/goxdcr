@@ -229,6 +229,7 @@ function testChangeRemoteC1FQDN {
 	setIpFamily "C1" "ipv4" "true"
 	sleep 30
 	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
+	checkForCrash "$result" "changeRemoteClusterReference C1 C2"
 	count=$(echo $result | grep -c "The cluster is ipv4 only")
 	if (($count != 1)); then
 		echo "Change remote to ipv6 should fail but returned unexpected result $result"
@@ -240,12 +241,14 @@ function testChangeRemoteC1FQDN {
 	setIpFamily "C1" "ipv6" "true"
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count == 0)); then
 		echo "Change C1 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
 		echo "Change C1 to ipv6 only should cause existing replication to fail but replicationInfos returned $result"
@@ -262,12 +265,14 @@ function testChangeRemoteC1FQDN {
 	setIpFamily "C1" "ipv4" "false"
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_OK")
 	if (($count == 0)); then
 		echo "remoteClusters should return RC_OK but it should not: $result"
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "The cluster is ipv4 only")
 	if (($count != 0)); then
 		echo "Change C1 back to ipv4 only should restore existing replication but replicationInfos returned $result"
@@ -279,6 +284,7 @@ function testChangeRemoteC1FQDN {
 	setIpFamily "C1" "ipv6" "true"
 	sleep 20
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause existing replication to fail with connection issues but replicationInfos returned $result"
@@ -290,6 +296,7 @@ function testChangeRemoteC1FQDN {
 		exit 1
 	fi
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
@@ -299,6 +306,7 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "===== Test 7: C1 ipv6 only, C2 default: Change remote to ipv6 should fix the replication"
 	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
+	checkForCrash "$result" "changeRemoteClusterReference C1 C2"
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count != 0)); then
 		echo "Change remote cluster ref to ipv6 should work but returned unexpected result $result"
@@ -306,12 +314,14 @@ function testChangeRemoteC1FQDN {
 	fi
 	sleep 20
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count != 0)); then
 		echo "Expect replication to work but replicationInfos returned $result"
 		exit 1
 	fi
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_OK")
 	if (($count == 0)); then
 		echo "Change remote ref to ipv6 address only should cause remoteClusters to return RC_OK but it returned $result"
@@ -346,6 +356,7 @@ function testChangeRemoteC2FQDN {
 	setIpFamily "C2" "ipv6" "true"
 	sleep 30
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	# This test does something interesting where C2 has the hostname set up to be an FQDN
 	# while the source remote cluster ref is created with "do not replace" turned on
 	# 2026-03-05T15:56:36.305-08:00 INFO GOXDCR.RemClusterSvc: remoteCluster/9lQxsIflsArllryza82uPzpbgnKykHybJ__FS3JQSf4= useExternal: false cachedRefNodesList in refresh: [[node9001.localhost:9001 ]]
@@ -359,6 +370,7 @@ function testChangeRemoteC2FQDN {
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
@@ -370,12 +382,14 @@ function testChangeRemoteC2FQDN {
 	setIpFamily "C2" "ipv4" "false"
 	sleep 20
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count != 0)); then
 		echo "Change C2 to ipv4 only should cause existing replication connection issues to go away but replicationInfos returned $result"
 		exit 1
 	fi
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_OK")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_OK but it returned $result"

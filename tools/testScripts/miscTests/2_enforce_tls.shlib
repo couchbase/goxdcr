@@ -154,6 +154,7 @@ function testChangeTLS {
 
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 1)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
@@ -161,6 +162,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
@@ -178,12 +180,14 @@ function testChangeTLS {
 	setEncryptionLevel "C1" $level
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to not return RC_ERROR but it returned $result"
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
@@ -197,6 +201,7 @@ function testChangeTLS {
 
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 1)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
@@ -204,6 +209,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
@@ -218,6 +224,7 @@ function testChangeTLS {
 	changeRemoteClusterReferenceToSecure "C1" "C2"
 	sleep 10
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause remoteClusters to not return RC_ERROR but it returned $result"
@@ -225,6 +232,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"
@@ -257,6 +265,7 @@ function testChangeTLS {
 
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 1)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
@@ -264,6 +273,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
@@ -281,12 +291,14 @@ function testChangeTLS {
 	setEncryptionLevel "C1" $level
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to not return RC_ERROR but it returned $result"
 		exit 1
 	fi
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
@@ -300,6 +312,7 @@ function testChangeTLS {
 
 	sleep 20
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 1)); then
 		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
@@ -307,6 +320,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count == 0)); then
 		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
@@ -321,6 +335,7 @@ function testChangeTLS {
 	changeRemoteClusterReferenceToSecure "C1" "C2"
 	sleep 10
 	result=$(getRemoteClusters "C1")
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause remoteClusters to not return RC_ERROR but it returned $result"
@@ -328,6 +343,7 @@ function testChangeTLS {
 	fi
 
 	result=$(checkReplicationInfos "C1")
+	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "${REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED}")
 	if (($count != 0)); then
 		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"

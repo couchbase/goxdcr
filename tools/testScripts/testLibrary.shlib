@@ -1182,7 +1182,6 @@ function validateXDCRCheckpoints {
 	fi
 }
 
-
 # Kill all background jobs spawned by the current shell.
 #
 # This function safely terminates all background processes managed by the shell's job control.
@@ -1903,6 +1902,17 @@ function runCbCollectInfo {
 	fi
 
 	$cbcollectInfo -v --initargs=${nsServerDir}/data/n_${clusterIdx}/initargs $outputFile
+}
+
+function checkForCrash {
+	local result=$1
+	local context=$2
+	crash_count=$(echo $result | grep -c "Unexpected server error, request logged")
+	if (($crash_count > 0)); then
+		echo "Crash detected from $context: $result"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
 }
 
 function dumpDebugInfoBeforeExit {
