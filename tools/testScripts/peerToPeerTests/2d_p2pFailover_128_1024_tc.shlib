@@ -133,6 +133,7 @@ function runTestCase {
 	local -i currentHandlingInstanceDoneCnt
 	local -i currentBackfillStartCntC1
 	local -i currentBackfillStartCntC1P
+	local pauseResumeSleepSecs=90
 
 	currentBackfillStartCntC1P=$(getInternalNodeXdcrLog "C1P" | grep -c "$BACKFILL_START_MSG")
 
@@ -162,9 +163,9 @@ function runTestCase {
 
 	# Pause replication and resume to see how many ckpts backfill has
 	pauseReplication "C1" "B0" "C2" "B1"
-	sleep 15
+	sleep $pauseResumeSleepSecs
 	resumeReplication "C1" "B0" "C2" "B1"
-	sleep 15
+	sleep $pauseResumeSleepSecs
 	local node1Non0VBResumeCnt
 	node1Non0VBResumeCnt=$(getNumOfBackfillCkptTookPlaceVB "C1" "C2" "B0" "B1")
 	echo "For node C1, it had $node1Non0VBResumeCnt VBs that resumed from 0 prior to failover"
@@ -176,8 +177,8 @@ function runTestCase {
 	resumeFrom0CntOrig=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
 	echo "Failing node out and seeing if one node owns all the checkpoints"
 	failoverNode "C1P" "C1"
-	echo "Sleeping 30 seconds before checking logs for checkpoint resuming messages"
-	sleep 30
+	echo "Sleeping $pauseResumeSleepSecs seconds before checking logs for checkpoint resuming messages"
+	sleep $pauseResumeSleepSecs
 	logsC1=$(getInternalNodeXdcrLog "C1")
 	resumeFrom0CntNew=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
 
