@@ -1298,7 +1298,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	colMarshalIdxThreshold int,
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
 	disableBucketConfigManager bool,
-	timeoutWaitForOngoingCkptOps time.Duration) {
+	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1502,6 +1502,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DisableBucketConfigManager = disableBucketConfigManager
 
 	TimeoutWaitForOngoingCkptOps = timeoutWaitForOngoingCkptOps
+
+	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -2144,3 +2146,5 @@ const CngGuardrailKey = "cngGuardrail"
 
 // ExcludeEventRegexKey is a regex pattern to exclude errors from UI error events section
 const ExcludeEventRegexKey string = "excludeUIErrRegex"
+
+var MaxKeepAliveTokensForCkptMgr = 100
