@@ -1272,7 +1272,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
-	buildVersion string) {
+	buildVersion string, maxKeepAliveTokensForCkptMgr int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1461,6 +1461,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxCheckpointRecordsToKeepVariableVB = maxCheckpointRecordsToKeepVariableVB
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
+
+	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
 }
 
 // XDCR Dev hidden replication settings
@@ -2010,3 +2012,5 @@ const (
 	// FilterExpirationsWithFEKey is a toggle to enable filter expression based filtering on expirations.
 	FilterExpirationsWithFEKey string = "filterExpirationsWithExpression"
 )
+
+var MaxKeepAliveTokensForCkptMgr = 100
