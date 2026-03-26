@@ -1211,7 +1211,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
-	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration) {
+	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration,
+	maxKeepAliveTokensForCkptMgr int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1372,6 +1373,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 	PipelineReinitStreamDelaySec = pipelineReinitStreamDelaySec
+	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
 }
 
 // XDCR Dev hidden replication settings
@@ -1759,3 +1761,5 @@ const (
 	// FilterExpirationsWithFEKey is a toggle to enable filter expression based filtering on expirations.
 	FilterExpirationsWithFEKey string = "filterExpirationsWithExpression"
 )
+
+var MaxKeepAliveTokensForCkptMgr = 100

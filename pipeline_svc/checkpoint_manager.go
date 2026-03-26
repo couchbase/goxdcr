@@ -90,9 +90,8 @@ type CheckpointManager struct {
 	//the interval between checkpointing in seconds
 	ckpt_interval uint32
 
-	//the channel to communicate finish signal with statistic updater
-	finish_ch chan bool
-	wait_grp  *sync.WaitGroup
+	finish_ch       chan bool     // channel to communicate finish signal to workers
+	keepAliveTokens chan struct{} // counting-semaphore for workers to synchronise with CheckpointManager's shutdown
 
 	//chan for checkpointing tickers -- new tickers are added each time checkpoint interval is changed
 	checkpoint_ticker_ch chan *time.Ticker
@@ -471,7 +470,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		logger:                            logger,
 		cur_ckpts:                         make(map[uint16]*checkpointRecordWithLock),
 		active_vbs:                        active_vbs,
-		wait_grp:                          &sync.WaitGroup{},
+		keepAliveTokens:                   make(chan struct{}, base.MaxKeepAliveTokensForCkptMgr),
 		failoverlog_map:                   make(map[uint16]*failoverlogWithLock),
 		snapshot_history_map:              make(map[uint16]*snapshotHistoryWithLock),
 		target_cluster_ref:                target_cluster_ref,
@@ -496,6 +495,12 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 
 	// So that unit test can override this and test it
 	ckmgr.periodicMerger = ckmgr.periodicMergerImpl
+
+	// populate keep-alive tokens
+	for range base.MaxKeepAliveTokensForCkptMgr {
+		ckmgr.keepAliveTokens <- struct{}{}
+	}
+
 	return ckmgr, nil
 }
 
@@ -636,11 +641,9 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	}
 
 	//initialize connections
-	ckmgr.wait_grp.Add(1)
 	go ckmgr.initConnBg()
 
 	//start checkpointing loop
-	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
 
 	go ckmgr.periodicMerger()
@@ -648,10 +651,18 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 }
 
 func (ckmgr *CheckpointManager) initConnBg() {
+	ckmgr.AcquireKeepAliveTokens(1)      // acquire a token
+	defer ckmgr.ReturnKeepAliveTokens(1) // return the same
+
+	if ckmgr.IsStopped() {
+		ckmgr.logger.Infof("skipping InitConnections since CheckpointManager has stopped")
+		return
+	}
+
 	initInBg := func() error {
 		return ckmgr.InitConnections()
 	}
-	defer ckmgr.wait_grp.Done()
+
 	execErr := base.ExecWithTimeout(initInBg, base.TimeoutRuntimeContextStart, ckmgr.Logger())
 	if execErr != nil {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, fmt.Errorf("Ckmgr %v initConnection error %v", ckmgr.pipeline.FullTopic(), execErr)))
@@ -846,15 +857,39 @@ func (ckmgr *CheckpointManager) IsStopped() bool {
 }
 
 func (ckmgr *CheckpointManager) Stop() error {
-	//send signal to checkpoiting routine to exit
+	//send signal to workers (like the checkpointing routine) to exit
 	close(ckmgr.finish_ch)
 
 	//close the connections
 	ckmgr.CloseConnections()
 
-	ckmgr.wait_grp.Wait()
+	ckmgr.logger.Infof("waiting for ongoing operations to complete...")
+
+	// wait for workers until all tokens can be acquired
+	ckmgr.AcquireKeepAliveTokens(base.MaxKeepAliveTokensForCkptMgr)
+
+	ckmgr.logger.Infof("all ongoing operations have completed")
+
+	// to prevent leaking goroutines
+	ckmgr.ReturnKeepAliveTokens(base.MaxKeepAliveTokensForCkptMgr)
+
 	return nil
 }
+
+// Acquires 'tokenCt' tokens from the 'keepAliveTokens' counting-semaphore
+func (ckmgr *CheckpointManager) AcquireKeepAliveTokens(tokenCt int) {
+	for range tokenCt {
+		<-ckmgr.keepAliveTokens
+	}
+}
+
+// Returns 'tokenCt' tokens to the 'keepAliveTokens' counting-semaphore
+func (ckmgr *CheckpointManager) ReturnKeepAliveTokens(tokenCt int) {
+	for range tokenCt {
+		ckmgr.keepAliveTokens <- struct{}{}
+	}
+}
+
 func (ckmgr *CheckpointManager) CheckpointBeforeStopWithWait(waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	ckmgr.CheckpointBeforeStop()
@@ -1689,10 +1724,16 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
-	ckmgr.logger.Infof("checkpointing rountine started")
+	ckmgr.AcquireKeepAliveTokens(1)      // acquire a token
+	defer ckmgr.ReturnKeepAliveTokens(1) // return the same
 
+	if ckmgr.IsStopped() {
+		ckmgr.logger.Infof("skipping checkpointing routine since CheckpointManager has stopped")
+		return
+	}
+
+	ckmgr.logger.Infof("checkpointing routine started")
 	defer ckmgr.logger.Infof("Exits checkpointing routine.")
-	defer ckmgr.wait_grp.Done()
 
 	ticker := <-ckmgr.checkpoint_ticker_ch
 	defer ticker.Stop()
@@ -2325,7 +2366,6 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 			newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			ckmgr.cachedBrokenMap.lock.Unlock()
-			ckmgr.wait_grp.Add(2)
 			// Can do this in the background - manifest updates usually don't happen too often
 			// to warrant a serializer
 			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
@@ -2339,12 +2379,26 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 }
 
 func (ckmgr *CheckpointManager) preUpsertBrokenMapTask(newerMap metadata.CollectionNamespaceMapping) {
-	defer ckmgr.wait_grp.Done()
+	ckmgr.AcquireKeepAliveTokens(1)      // acquire a token
+	defer ckmgr.ReturnKeepAliveTokens(1) // return the same
+
+	if ckmgr.IsStopped() {
+		ckmgr.logger.Infof("skipping PreUpsertBrokenMapping since CheckpointManager has stopped")
+		return
+	}
+
 	ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &newerMap)
 }
 
 func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metadata.CollectionNamespaceMapping) {
-	defer ckmgr.wait_grp.Done()
+	ckmgr.AcquireKeepAliveTokens(1)      // acquire a token
+	defer ckmgr.ReturnKeepAliveTokens(1) // return the same
+
+	if ckmgr.IsStopped() {
+		ckmgr.logger.Infof("skipping broken-map update to UI since CheckpointManager has stopped")
+		return
+	}
+
 	var buffer bytes.Buffer
 	var needToRaiseUI bool
 
@@ -2657,7 +2711,6 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 	if len(diffPair.Added) > 0 {
 		// Only repaired should be logged
 		// Things that are removed due to things being removed should not be logged
-		ckmgr.wait_grp.Add(1)
 		go ckmgr.logBrokenMapUpdatesToUI(oldMap, newerMap)
 	}
 }
@@ -3581,6 +3634,14 @@ func (ckmgr *CheckpointManager) periodicBatchGetter() *MergeCkptArgs {
 }
 
 func (ckmgr *CheckpointManager) periodicMergerImpl() {
+	ckmgr.AcquireKeepAliveTokens(1)      // acquire a token
+	defer ckmgr.ReturnKeepAliveTokens(1) // return the same
+
+	if ckmgr.IsStopped() {
+		ckmgr.logger.Infof("skipping periodicMergerImpl routine since CheckpointManager has stopped")
+		return
+	}
+
 	for {
 		select {
 		case <-ckmgr.finish_ch:

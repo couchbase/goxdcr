@@ -291,6 +291,8 @@ const (
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
 
 	PipelineReinitStreamDelaySecKey = "PipelineReinitStreamDelaySec"
+
+	MaxKeepAliveTokensForCkptMgrKey = "MaxKeepAliveTokensForCkptMgr"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -422,6 +424,7 @@ var NWLatencyToleranceMilliSecConfig = &SettingsConfig{int(base.NWLatencyToleran
 var CasPoisoningPreCheckEnabledConfig = &SettingsConfig{base.CasPoisoningPreCheckEnabled, &Range{0, 1} /* 0 is disbaled, 1 is enabled */}
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
 var PipelineReinitStreamDelaySecConfig = &SettingsConfig{int(base.PipelineReinitStreamDelaySec / time.Second), &Range{0, 300}}
+var MaxKeepAliveTokensForCkptMgrConfig = &SettingsConfig{base.MaxKeepAliveTokensForCkptMgr, &Range{50, 1000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -553,6 +556,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CasPoisoningPreCheckEnabledKey:                CasPoisoningPreCheckEnabledConfig,
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
 	PipelineReinitStreamDelaySecKey:               PipelineReinitStreamDelaySecConfig,
+	MaxKeepAliveTokensForCkptMgrKey:               MaxKeepAliveTokensForCkptMgrConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
