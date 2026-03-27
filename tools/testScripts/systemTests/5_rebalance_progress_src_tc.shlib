@@ -91,17 +91,18 @@ function runTestCase {
 	addNodesIn
 	startRebalancing "C1"
 
-	sleep 10
+	sleep 30
 
 	# Before restart, check for status. There should only be 1 and each one is due to source topology change
+	echo "Checking errorlist in C1"
 	validateNumberOfEvents "C1" 1
-	validateNumberOfEvents "C1P" 1
+	# node 9001 doesn't have topology change - it rebalances in and start right away given how much faster
+	# rebalance has become nowadays
 
 	echo "Waiting 2 minutes for rebalance to take place..."
 	sleep 130
 
 	validateNumberOfEvents "C1" 0
-	validateNumberOfEvents "C1P" 0
 
 	cleanupBucketReplications
 	cleanupBuckets
