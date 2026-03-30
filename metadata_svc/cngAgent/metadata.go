@@ -181,8 +181,8 @@ func (agent *RemoteCngAgent) GetDataUsage() (int64, int64) {
 	return dataSent, dataReceived
 }
 
-// flushTrackingCtx flushes the accumulated data from the tracking context to the agent's data usage counters.
-func (agent *RemoteCngAgent) flushTrackingCtx(ctx *utilities.Context) {
+// trackDataTransfer transfers the accumulated data from the tracking context to the agent's data usage counters.
+func (agent *RemoteCngAgent) trackDataTransfer(ctx *utilities.Context) {
 	if ctx == nil || !ctx.TrackDataSentAndReceived {
 		return
 	}

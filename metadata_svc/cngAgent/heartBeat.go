@@ -264,7 +264,7 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			// send the heartbeat
 			trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
 			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts, trackingCtx)
-			agent.flushTrackingCtx(trackingCtx)
+			agent.trackDataTransfer(trackingCtx)
 			agent.heartbeatManager.heartbeatStats.update(response)
 			// delay the next heartbeat by atmost SrcHeartbeatMaxInterval
 			maxHBIntervalTicker.Reset(base.SrcHeartbeatMaxInterval())
@@ -282,7 +282,7 @@ func (agent *RemoteCngAgent) runHeartbeatSender() {
 			}
 			trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
 			response := agent.heartbeatManager.sendHeartbeat(hbMetadata, agent.GetGrpcOpts, trackingCtx)
-			agent.flushTrackingCtx(trackingCtx)
+			agent.trackDataTransfer(trackingCtx)
 			agent.heartbeatManager.heartbeatStats.update(response)
 
 			// delay the next heartbeat by atleast SrcHeartbeatMinInterval

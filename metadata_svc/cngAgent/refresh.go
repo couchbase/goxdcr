@@ -288,7 +288,7 @@ func (agent *RemoteCngAgent) Refresh() error {
 
 	ref, _ := agent.GetReferenceClone(false)
 	trackingCtx := agent.services.utils.GetDataUsageTrackingCtx()
-	defer agent.flushTrackingCtx(trackingCtx)
+	defer agent.trackDataTransfer(trackingCtx)
 
 	snapShot := newRefreshSnapShot(ref, agent.capability.Clone(), agent.services, agent.logger)
 	statusCode, opErr = snapShot.performRefreshOp(opContext, trackingCtx)
