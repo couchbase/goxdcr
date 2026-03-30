@@ -1671,12 +1671,21 @@ const (
 	// DefaultPoolReapInterval is the last used threshold for reaping unused connections
 	DefaultCLogConnPoolReapIntervalMs = 120000 // in milliseconds
 
-	// CNG TODO: change this number
-	DefaultCNGQueueSize     = 1000
+	// The default values for CNG here takes into account following factors:
+	// 1. 3 node source & remote cluster
+	// 2. Avg replication count: 3 (this makes about 500 x 3 workers)
+	// 3. HTTP2 stream limit per connection: 250
+	// 4. GOMAXPROCS=4
+	// 5. Based on perf runs documented at: https://jira.issues.couchbase.com/browse/CBPS-1705?focusedCommentId=1358079
+
+	// DefaultCNGQueueSize is less than worker count because data suggests most of the time
+	// the EnqBlocked stat of nozzle is high i.e rate of transfer << rate of ingestion.
+	// With this info, we might as well conserve memory by having less items in queue.
+	DefaultCNGQueueSize     = 300
 	DefaultCNGWorkerCount   = 500
-	DefaultCNGRetryInterval = 5000 // in milliseconds
-	DefaultCNGConnCount     = 2    // Default number of connections in pool
-	DefaultCNGRPCDeadline   = 5000 // in milliseconds
+	DefaultCNGRetryInterval = 5000  // in milliseconds
+	DefaultCNGConnCount     = 5     // Default number of connections in pool
+	DefaultCNGRPCDeadline   = 10000 // in milliseconds
 
 )
 
