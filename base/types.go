@@ -3855,6 +3855,22 @@ func (c *Credentials) IsEmpty() bool {
 	return c == nil
 }
 
+func (c *Credentials) String() string {
+	if c == nil {
+		return "nil"
+	}
+	var password string
+	if len(c.Password_) > 0 {
+		password = "xxxx"
+	}
+	var clientKey string
+	if len(c.ClientCertificate_) > 0 {
+		clientKey = "xxxx"
+	}
+	return fmt.Sprintf("userName:%v; password:%v; clientCertificate:%v; clientKey:%v",
+		c.UserName_, password, c.ClientCertificate_, clientKey)
+}
+
 func (c *Credentials) ToMap() map[string]interface{} {
 	if c.IsEmpty() {
 		return nil
