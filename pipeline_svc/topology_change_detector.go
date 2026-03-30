@@ -756,6 +756,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) initialiseTargetVbList(firstNot
 				targetVBList = append(targetVBList, vbs...)
 			}
 		}
+		base.SortUint16List(targetVBList)
 	}
 	top_detect_svc.targetVBList = targetVBList
 }

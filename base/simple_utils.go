@@ -1513,6 +1513,7 @@ func HexToBase64(h string) ([]byte, error) {
 }
 
 // construct vb->server map for the vbs in vbList using server->vbList map
+// Note: vbList must be sorted since 'ConstructVbServerMap' uses binary search to find vb in vbList
 func ConstructVbServerMap(vbList []uint16, serverVbMap map[string][]uint16) map[uint16]string {
 	vbServerMap := make(map[uint16]string)
 	for server, serverVbList := range serverVbMap {
