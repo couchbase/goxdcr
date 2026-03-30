@@ -1616,6 +1616,11 @@ const (
 	CLogConnPoolGCInterval    string = "cLogConnPoolGCIntervalMs"
 	CLogConnPoolReapInterval  string = "cLogConnPoolReapIntervalMs"
 
+	RemoteMemcachedConnPoolMaxConnsKey     string = "remoteMemcachedConnPoolMaxConns"
+	RemoteMemcachedConnPoolMinConnsKey     string = "remoteMemcachedConnPoolMinConns"
+	RemoteMemcachedConnPoolGCIntervalKey   string = "remoteMemcachedConnPoolGCIntervalMs"
+	RemoteMemcachedConnPoolValidationKey   string = "remoteMemcachedConnPoolValidation"
+
 	// CNG related settings
 	CNGWorkerCountKey string = "cngWorkerCount"
 	CNGQueueSizeKey   string = "cngQueueSize"
@@ -1673,6 +1678,13 @@ const (
 	DefaultCNGConnCount     = 2    // Default number of connections in pool
 	DefaultCNGRPCDeadline   = 5000 // in milliseconds
 
+)
+
+// Default values for RemoteMemcached connection pool settings.
+const (
+	DefaultRemoteMemcachedConnPoolMaxConns     = 5
+	DefaultRemoteMemcachedConnPoolMinConns     = 1
+	DefaultRemoteMemcachedConnPoolGCIntervalMs = 60000 // in milliseconds (60 seconds)
 )
 
 // Used for internal testing with self-signed certs.

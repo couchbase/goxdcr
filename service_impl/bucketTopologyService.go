@@ -74,25 +74,32 @@ type BucketTopologyService struct {
 	tgtBucketStatsProvidersCnt map[string]int
 	tgtBucketStatsProvidersMtx sync.RWMutex
 
+	// cachedRemoteMemcachedTunables holds the latest remote memcached connection pool tunables.
+	// Seeded from global settings at construction time and updated when
+	// UpdateAllStatsProvidersConnPoolTunables is called on a global settings change.
+	cachedRemoteMemcachedTunables base.RemoteMemcachedTunables
+	cachedTunablesMtx             sync.RWMutex
+
 	streamApiGetter streamApiWatcher.StreamApiGetterFunc
 }
 
 func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc,
-	securitySvc service_def.SecuritySvc, streamApiGetter streamApiWatcher.StreamApiGetterFunc) (*BucketTopologyService, error) {
+	securitySvc service_def.SecuritySvc, streamApiGetter streamApiWatcher.StreamApiGetterFunc, remoteMemcachedTunables base.RemoteMemcachedTunables) (*BucketTopologyService, error) {
 	b := &BucketTopologyService{
-		remClusterSvc:              remClusterSvc,
-		xdcrCompTopologySvc:        xdcrCompTopologySvc,
-		logger:                     log.NewLogger("BucketTopologySvc", loggerContext),
-		utils:                      utils,
-		srcBucketWatchers:          map[string]*BucketTopologySvcWatcher{},
-		srcBucketWatchersCnt:       map[string]int{},
-		tgtBucketWatchers:          map[string]*BucketTopologySvcWatcher{},
-		tgtBucketWatchersCnt:       map[string]int{},
-		tgtBucketStatsProviders:    map[string]service_def.BucketStatsProvider{},
-		tgtBucketStatsProvidersCnt: map[string]int{},
-		refreshInterval:            refreshInterval,
-		securitySvc:                securitySvc,
-		streamApiGetter:            streamApiGetter,
+		remClusterSvc:                 remClusterSvc,
+		xdcrCompTopologySvc:           xdcrCompTopologySvc,
+		logger:                        log.NewLogger("BucketTopologySvc", loggerContext),
+		utils:                         utils,
+		srcBucketWatchers:             map[string]*BucketTopologySvcWatcher{},
+		srcBucketWatchersCnt:          map[string]int{},
+		tgtBucketWatchers:             map[string]*BucketTopologySvcWatcher{},
+		tgtBucketWatchersCnt:          map[string]int{},
+		tgtBucketStatsProviders:       map[string]service_def.BucketStatsProvider{},
+		tgtBucketStatsProvidersCnt:    map[string]int{},
+		cachedRemoteMemcachedTunables: remoteMemcachedTunables,
+		refreshInterval:               refreshInterval,
+		securitySvc:                   securitySvc,
+		streamApiGetter:               streamApiGetter,
 	}
 	remClusterSvc.SetBucketTopologySvc(b)
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
@@ -591,7 +598,7 @@ func (b *BucketTopologyService) getOrCreateTargetStatsProvider(spec *metadata.Re
 	// Based on the remote type, create the appropriate provider
 	switch remoteRef.GetRemoteType() {
 	case metadata.RemoteTypeCbCluster:
-		provider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger, b.getTgtTopologyInfo)
+		provider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, b.getRemoteMemcachedTunables(), b.logger, b.getTgtTopologyInfo)
 	case metadata.RemoteTypeCng:
 		provider = NewCngBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.utils, b.logger, func() (*base.GrpcOptions, error) {
 			return b.getGrpcOpts(spec)
@@ -1470,7 +1477,7 @@ func (b *BucketTopologyService) switchBucketStatsProvider(spec *metadata.Replica
 	var newStatsProvider service_def.BucketStatsProvider
 	switch newRemoteType {
 	case metadata.RemoteTypeCbCluster:
-		newStatsProvider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, base.DefaultConnectionSize, b.logger, b.getTgtTopologyInfo)
+		newStatsProvider = NewClusterBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.remClusterSvc, b.utils, b, b.getRemoteMemcachedTunables(), b.logger, b.getTgtTopologyInfo)
 	case metadata.RemoteTypeCng:
 		newStatsProvider = NewCngBucketStatsProvider(spec.TargetBucketName, spec.TargetClusterUUID, b.utils, b.logger, func() (*base.GrpcOptions, error) {
 			return b.getGrpcOpts(spec)

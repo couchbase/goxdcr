@@ -914,6 +914,39 @@ func (_c *BucketTopologySvc_UnSubscribeToRemoteKVStatsFeed_Call) RunAndReturn(ru
 	return _c
 }
 
+// UpdateAllStatsProvidersConnPoolTunables provides a mock function with given fields: settings
+func (_m *BucketTopologySvc) UpdateAllStatsProvidersConnPoolTunables(settings *metadata.GlobalSettings) {
+	_m.Called(settings)
+}
+
+// BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateAllStatsProvidersConnPoolTunables'
+type BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call struct {
+	*mock.Call
+}
+
+// UpdateAllStatsProvidersConnPoolTunables is a helper method to define mock.On call
+//   - settings *metadata.GlobalSettings
+func (_e *BucketTopologySvc_Expecter) UpdateAllStatsProvidersConnPoolTunables(settings interface{}) *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call {
+	return &BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call{Call: _e.mock.On("UpdateAllStatsProvidersConnPoolTunables", settings)}
+}
+
+func (_c *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call) Run(run func(settings *metadata.GlobalSettings)) *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.GlobalSettings))
+	})
+	return _c
+}
+
+func (_c *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call) Return() *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call) RunAndReturn(run func(*metadata.GlobalSettings)) *BucketTopologySvc_UpdateAllStatsProvidersConnPoolTunables_Call {
+	_c.Run(run)
+	return _c
+}
+
 // NewBucketTopologySvc creates a new instance of BucketTopologySvc. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewBucketTopologySvc(t interface {

@@ -235,8 +235,21 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Read persisted global settings to seed the remote memcached connection pool tunables
+		// so that providers created at startup use tuned values instead of defaults.
+		remoteMemcachedTunables := base.NewRemoteMemcachedTunables()
+		if globalSettings, err := processSetting_svc.GetGlobalSettings(); err == nil && globalSettings != nil {
+			remoteMemcachedTunables = base.RemoteMemcachedTunables{
+				MaxConnsPerServer: globalSettings.GetRemoteMemcachedConnPoolMaxConns(),
+				MinConnsPerServer: globalSettings.GetRemoteMemcachedConnPoolMinConns(),
+				GCInterval:        globalSettings.GetRemoteMemcachedConnPoolGCInterval(),
+			}
+		} else {
+			fmt.Printf("Failed to load global settings for remote memcached tunables, using default consts. err=%v\n", err)
+		}
+
 		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
-			base.TopologyChangeCheckInterval, log.GetOrCreateContext(base.BucketTopologySvcKey), replication_spec_svc, securitySvc, streamApiWatcher.GetStreamApiWatcher)
+			base.TopologyChangeCheckInterval, log.GetOrCreateContext(base.BucketTopologySvcKey), replication_spec_svc, securitySvc, streamApiWatcher.GetStreamApiWatcher, remoteMemcachedTunables)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)

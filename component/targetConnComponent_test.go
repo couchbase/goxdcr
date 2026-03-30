@@ -77,7 +77,9 @@ func setupBasicRemoteMemcachedComponent(maxConns int) (*RemoteMemcachedComponent
 	finCh := make(chan bool)
 	utils := &utilsMock.UtilsIface{}
 
-	component := NewRemoteMemcachedComponent(logger, finCh, utils, testBucketName, testUserAgent, maxConns)
+	tunables := base.NewRemoteMemcachedTunables()
+	tunables.MaxConnsPerServer = maxConns
+	component := NewRemoteMemcachedComponent(logger, finCh, utils, testBucketName, testUserAgent, tunables)
 
 	// Set up basic getters
 	testRef := createTestRemoteClusterRef()
@@ -108,7 +110,7 @@ func TestRemoteMemcachedComponent_NewRemoteMemcachedComponent(t *testing.T) {
 	finCh := make(chan bool)
 	utils := &utilsMock.UtilsIface{}
 
-	component := NewRemoteMemcachedComponent(logger, finCh, utils, testBucketName, testUserAgent, testMaxConnectionsPerServer)
+	component := NewRemoteMemcachedComponent(logger, finCh, utils, testBucketName, testUserAgent, base.NewRemoteMemcachedTunables())
 
 	assert.NotNil(component)
 	assert.NotNil(component.InitConnDone)
@@ -119,45 +121,50 @@ func TestRemoteMemcachedComponent_NewRemoteMemcachedComponent(t *testing.T) {
 	assert.Equal(testBucketName, component.TargetBucketname)
 	assert.Equal(testUserAgent, component.UserAgent)
 	assert.Equal(testMaxConnectionsPerServer, component.MaxConnsPerServer)
+	assert.NotNil(component.serverInflight)
+	assert.NotNil(component.serverPeakInflight)
+	defaultTunables := base.NewRemoteMemcachedTunables()
+	assert.Equal(defaultTunables.MinConnsPerServer, component.minConnsPerServer)
+	assert.Equal(defaultTunables.GCInterval, component.gcInterval)
 }
 
-func TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_ValidValues(t *testing.T) {
-	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_ValidValues =================")
-	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_ValidValues =================")
+func TestRemoteMemcachedComponent_SetTunables_ValidValues(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetTunables_ValidValues =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetTunables_ValidValues =================")
 	assert := assert.New(t)
 
 	component, _, finCh := setupBasicRemoteMemcachedComponent(5)
 	defer close(finCh)
 
 	// Test setting to a valid value
-	component.SetMaxConnectionsPerServer(10)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 10})
 	assert.Equal(10, component.MaxConnsPerServer)
 
 	// Test setting to another valid value
-	component.SetMaxConnectionsPerServer(3)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 3})
 	assert.Equal(3, component.MaxConnsPerServer)
 }
 
-func TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_InvalidValues(t *testing.T) {
-	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_InvalidValues =================")
-	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_InvalidValues =================")
+func TestRemoteMemcachedComponent_SetTunables_InvalidValues(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetTunables_InvalidValues =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetTunables_InvalidValues =================")
 	assert := assert.New(t)
 
 	component, _, finCh := setupBasicRemoteMemcachedComponent(5)
 	defer close(finCh)
 
-	// Test setting to 0 should set to 1
-	component.SetMaxConnectionsPerServer(0)
-	assert.Equal(1, component.MaxConnsPerServer)
+	// Test setting to 0 should be a no-op (zero means "not specified" in SetTunables)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 0})
+	assert.Equal(5, component.MaxConnsPerServer)
 
-	// Test setting to negative should set to 1
-	component.SetMaxConnectionsPerServer(-5)
-	assert.Equal(1, component.MaxConnsPerServer)
+	// Test setting to negative should be a no-op
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: -5})
+	assert.Equal(5, component.MaxConnsPerServer)
 }
 
-func TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_WithExistingConnections(t *testing.T) {
-	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_WithExistingConnections =================")
-	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_WithExistingConnections =================")
+func TestRemoteMemcachedComponent_SetTunables_WithExistingConnections(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_SetTunables_WithExistingConnections =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_SetTunables_WithExistingConnections =================")
 	assert := assert.New(t)
 
 	component, _, finCh := setupBasicRemoteMemcachedComponent(5)
@@ -176,7 +183,7 @@ func TestRemoteMemcachedComponent_SetMaxConnectionsPerServer_WithExistingConnect
 	component.KvMemClients[testServerAddr] = clientChan
 
 	// Reduce max connections to 2 - should close excess connection
-	component.SetMaxConnectionsPerServer(2)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 2})
 
 	assert.Equal(2, component.MaxConnsPerServer)
 
@@ -209,7 +216,7 @@ func TestRemoteMemcachedComponent_ReconfigureConnectionPool_IncreaseSize(t *test
 	component.KvMemClients[testServerAddr] = clientChan
 
 	// Increase capacity
-	component.SetMaxConnectionsPerServer(5)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 5})
 
 	newChan := component.KvMemClients[testServerAddr]
 	assert.Equal(5, cap(newChan))
@@ -237,7 +244,7 @@ func TestRemoteMemcachedComponent_ReconfigureConnectionPool_DecreaseSize(t *test
 	component.KvMemClients[testServerAddr] = clientChan
 
 	// Decrease capacity to 2
-	component.SetMaxConnectionsPerServer(2)
+	component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: 2})
 
 	newChan := component.KvMemClients[testServerAddr]
 	assert.Equal(2, cap(newChan))
@@ -588,6 +595,53 @@ func TestRemoteMemcachedComponent_ReleaseClient_NilClient(t *testing.T) {
 	component.ReleaseClient(testServerAddr, nil)
 
 	// Should not panic or error
+}
+
+func TestRemoteMemcachedComponent_DiscardClient(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_DiscardClient =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_DiscardClient =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	component.KvMemClients[testServerAddr] = clientChan
+
+	mockClient := createMockClient()
+
+	// Simulate AcquireClient by incrementing inflight
+	component.incrementInflight(testServerAddr)
+
+	// Discard the client
+	err := component.DiscardClient(testServerAddr, mockClient)
+	assert.Nil(err)
+
+	// Client should have been closed
+	mockClient.AssertCalled(t, "Close")
+
+	// Inflight counter should be back to 0
+	component.inflightMtx.RLock()
+	counter, ok := component.serverInflight[testServerAddr]
+	component.inflightMtx.RUnlock()
+	assert.True(ok)
+	assert.Equal(int64(0), counter.Load())
+
+	// Pool should be empty - client was not returned
+	assert.Equal(0, len(clientChan))
+}
+
+func TestRemoteMemcachedComponent_DiscardClient_NilClient(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_DiscardClient_NilClient =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_DiscardClient_NilClient =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Discard nil client - should be no-op
+	err := component.DiscardClient(testServerAddr, nil)
+	assert.Nil(err)
 }
 
 func TestRemoteMemcachedComponent_AcquireRelease_Concurrent(t *testing.T) {
@@ -1058,7 +1112,7 @@ func TestRemoteMemcachedComponent_ConcurrentReconfiguration(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			newMax := 5 + (id % 10)
-			component.SetMaxConnectionsPerServer(newMax)
+			component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: newMax})
 		}(i)
 	}
 
@@ -1978,7 +2032,7 @@ func TestRemoteMemcachedComponent_RapidAcquireReleaseWithReconfiguration(t *test
 				default:
 					// Reconfigure with different pool sizes (between 5 and 20)
 					newMaxConns := 5 + (goroutineID % 16)
-					component.SetMaxConnectionsPerServer(newMaxConns)
+					component.SetTunables(base.RemoteMemcachedTunables{MaxConnsPerServer: newMaxConns})
 					localReconfigures++
 
 					// Small delay between reconfigurations
@@ -2030,4 +2084,339 @@ func TestRemoteMemcachedComponent_RapidAcquireReleaseWithReconfiguration(t *test
 	// Cleanup verification: Close all connections and verify cleanup
 	component.Close()
 	assert.Len(component.KvMemClients, 0, "All pools should be cleaned up")
+}
+
+// ============= Test Cases for Idle Connection GC =============
+
+func TestRemoteMemcachedComponent_GC_TrimsExcessConnections(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_TrimsExcessConnections =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_TrimsExcessConnections =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool with 5 connections per server (simulating post-burst state)
+	mockClients := make([]*clientMocks.ClientIface, 5)
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	for i := 0; i < 5; i++ {
+		mockClients[i] = createMockClient()
+		clientChan <- mockClients[i]
+	}
+	component.KvMemClients[testServerAddr] = clientChan
+
+	// Simulate that peak inflight was 2 during the last window
+	inflight := &atomic.Int64{}
+	peak := &atomic.Int64{}
+	peak.Store(2)
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = inflight
+	component.serverPeakInflight[testServerAddr] = peak
+	component.inflightMtx.Unlock()
+
+	// Run GC
+	component.gcIdleConnectionsOnce()
+
+	// Pool should be trimmed to 2 (peak inflight)
+	assert.Equal(2, len(component.KvMemClients[testServerAddr]))
+
+	// 3 excess connections should have been closed
+	closedCount := 0
+	for _, mc := range mockClients {
+		if mc.IsMethodCallable(t, "Close") {
+			closedCount++
+		}
+	}
+	// At least 3 should have had Close called (the excess ones)
+	totalCloseCalls := 0
+	for _, mc := range mockClients {
+		totalCloseCalls += len(mc.Calls)
+	}
+	assert.Equal(3, totalCloseCalls, "3 excess connections should be closed")
+}
+
+func TestRemoteMemcachedComponent_GC_RespectsMinConnsPerServer(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_RespectsMinConnsPerServer =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_RespectsMinConnsPerServer =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool with 3 connections
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	for i := 0; i < 3; i++ {
+		clientChan <- createMockClient()
+	}
+	component.KvMemClients[testServerAddr] = clientChan
+
+	// Peak inflight was 0 (no usage), but minConnsPerServer=1 should be respected
+	inflight := &atomic.Int64{}
+	peak := &atomic.Int64{}
+	peak.Store(0)
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = inflight
+	component.serverPeakInflight[testServerAddr] = peak
+	component.inflightMtx.Unlock()
+
+	component.gcIdleConnectionsOnce()
+
+	// Should keep minConnsPerServer=1, not trim to 0
+	assert.Equal(1, len(component.KvMemClients[testServerAddr]))
+}
+
+func TestRemoteMemcachedComponent_GC_NoTrimWhenAtOrBelowPeak(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_NoTrimWhenAtOrBelowPeak =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_NoTrimWhenAtOrBelowPeak =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool with 2 connections
+	mockClient1 := createMockClient()
+	mockClient2 := createMockClient()
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	clientChan <- mockClient1
+	clientChan <- mockClient2
+	component.KvMemClients[testServerAddr] = clientChan
+
+	// Peak inflight was 3 (higher than pool size) -- no trim should happen
+	inflight := &atomic.Int64{}
+	peak := &atomic.Int64{}
+	peak.Store(3)
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = inflight
+	component.serverPeakInflight[testServerAddr] = peak
+	component.inflightMtx.Unlock()
+
+	component.gcIdleConnectionsOnce()
+
+	// Pool should remain unchanged
+	assert.Equal(2, len(component.KvMemClients[testServerAddr]))
+	mockClient1.AssertNotCalled(t, "Close")
+	mockClient2.AssertNotCalled(t, "Close")
+}
+
+func TestRemoteMemcachedComponent_GC_NoOpOnClosedPool(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_NoOpOnClosedPool =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_NoOpOnClosedPool =================")
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	component.Close()
+
+	// Should not panic or do anything
+	component.gcIdleConnectionsOnce()
+}
+
+func TestRemoteMemcachedComponent_GC_SkipsServersWithNoInflightTracking(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_SkipsServersWithNoInflightTracking =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_SkipsServersWithNoInflightTracking =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool with connections but no inflight counters (e.g., newly added server)
+	mockClient := createMockClient()
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	clientChan <- mockClient
+	component.KvMemClients[testServerAddr] = clientChan
+
+	component.gcIdleConnectionsOnce()
+
+	// Should not touch the pool since there's no inflight tracking
+	assert.Equal(1, len(component.KvMemClients[testServerAddr]))
+	mockClient.AssertNotCalled(t, "Close")
+}
+
+func TestRemoteMemcachedComponent_GC_ResetsWindowPeak(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_ResetsWindowPeak =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_ResetsWindowPeak =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	for i := 0; i < 5; i++ {
+		clientChan <- createMockClient()
+	}
+	component.KvMemClients[testServerAddr] = clientChan
+
+	// Current inflight = 1, peak = 4
+	inflight := &atomic.Int64{}
+	inflight.Store(1)
+	peak := &atomic.Int64{}
+	peak.Store(4)
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = inflight
+	component.serverPeakInflight[testServerAddr] = peak
+	component.inflightMtx.Unlock()
+
+	// First GC: peak=4, currentPoolSize=5(channel)+1(inflight)=6, excess=6-4=2
+	// Drains 2 from channel -> channel=3, peakCounter reset to inflight(1)
+	component.gcIdleConnectionsOnce()
+	assert.Equal(3, len(component.KvMemClients[testServerAddr]))
+	assert.Equal(int64(1), component.serverPeakInflight[testServerAddr].Load())
+
+	// Second GC: peak=1, target=max(1,minConns=1)=1, currentPoolSize=3+1=4, excess=3
+	// Drains 3 from channel -> channel=0 (total=0+1 inflight=1=target)
+	component.gcIdleConnectionsOnce()
+	assert.Equal(0, len(component.KvMemClients[testServerAddr]))
+}
+
+func TestRemoteMemcachedComponent_GC_MultipleServers(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_MultipleServers =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_MultipleServers =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Server1: 5 in pool, peak inflight=2 -> trim to 2
+	ch1 := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	for i := 0; i < 5; i++ {
+		ch1 <- createMockClient()
+	}
+	component.KvMemClients[testServerAddr] = ch1
+
+	// Server2: 3 in pool, peak inflight=3 -> no trim
+	ch2 := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	for i := 0; i < 3; i++ {
+		ch2 <- createMockClient()
+	}
+	component.KvMemClients[testServerAddr2] = ch2
+
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = &atomic.Int64{}
+	component.serverPeakInflight[testServerAddr] = &atomic.Int64{}
+	component.serverPeakInflight[testServerAddr].Store(2)
+	component.serverInflight[testServerAddr2] = &atomic.Int64{}
+	component.serverPeakInflight[testServerAddr2] = &atomic.Int64{}
+	component.serverPeakInflight[testServerAddr2].Store(3)
+	component.inflightMtx.Unlock()
+
+	component.gcIdleConnectionsOnce()
+
+	assert.Equal(2, len(component.KvMemClients[testServerAddr]))
+	assert.Equal(3, len(component.KvMemClients[testServerAddr2]))
+}
+
+func TestRemoteMemcachedComponent_GC_RunIdleConnectionsGC_StopsOnFinish(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_RunIdleConnectionsGC_StopsOnFinish =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_RunIdleConnectionsGC_StopsOnFinish =================")
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// Use a short GC interval for testing
+	component.gcInterval = 50 * time.Millisecond
+
+	gcDone := make(chan struct{})
+	go func() {
+		component.RunIdleConnectionsGC()
+		close(gcDone)
+	}()
+
+	// Let GC run a few cycles
+	time.Sleep(200 * time.Millisecond)
+
+	// Close finish channel to stop GC
+	close(finCh)
+
+	select {
+	case <-gcDone:
+		// GC stopped successfully
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunIdleConnectionsGC did not stop when finish channel closed")
+	}
+}
+
+func TestRemoteMemcachedComponent_GC_AcquireReleaseTracksInflight(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_AcquireReleaseTracksInflight =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_AcquireReleaseTracksInflight =================")
+	assert := assert.New(t)
+
+	component, utils, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool with connections
+	mockClient1 := createMockClient()
+	mockClient2 := createMockClient()
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	clientChan <- mockClient1
+	clientChan <- mockClient2
+	component.KvMemClients[testServerAddr] = clientChan
+
+	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(createMockClient(), nil)
+
+	// Acquire 2 clients
+	c1, err := component.AcquireClient(testServerAddr)
+	assert.Nil(err)
+	assert.NotNil(c1)
+
+	c2, err := component.AcquireClient(testServerAddr)
+	assert.Nil(err)
+	assert.NotNil(c2)
+
+	// Inflight should be 2, peak should be 2
+	component.inflightMtx.RLock()
+	assert.Equal(int64(2), component.serverInflight[testServerAddr].Load())
+	assert.Equal(int64(2), component.serverPeakInflight[testServerAddr].Load())
+	component.inflightMtx.RUnlock()
+
+	// Release one
+	component.ReleaseClient(testServerAddr, c1)
+
+	component.inflightMtx.RLock()
+	assert.Equal(int64(1), component.serverInflight[testServerAddr].Load())
+	// Peak should still be 2
+	assert.Equal(int64(2), component.serverPeakInflight[testServerAddr].Load())
+	component.inflightMtx.RUnlock()
+
+	// Release the other
+	component.ReleaseClient(testServerAddr, c2)
+
+	component.inflightMtx.RLock()
+	assert.Equal(int64(0), component.serverInflight[testServerAddr].Load())
+	assert.Equal(int64(2), component.serverPeakInflight[testServerAddr].Load())
+	component.inflightMtx.RUnlock()
+}
+
+func TestRemoteMemcachedComponent_GC_RemoveServersCleansUpInflightTracking(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GC_RemoveServersCleansUpInflightTracking =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GC_RemoveServersCleansUpInflightTracking =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// Setup pool and inflight tracking
+	clientChan := make(chan mcc.ClientIface, testMaxConnectionsPerServer)
+	clientChan <- createMockClient()
+	component.KvMemClients[testServerAddr] = clientChan
+	component.knownServers[testServerAddr] = true
+
+	component.inflightMtx.Lock()
+	component.serverInflight[testServerAddr] = &atomic.Int64{}
+	component.serverPeakInflight[testServerAddr] = &atomic.Int64{}
+	component.inflightMtx.Unlock()
+
+	// Remove the server
+	component.poolConfigMtx.Lock()
+	component.removeServers([]string{testServerAddr})
+	component.poolConfigMtx.Unlock()
+
+	// Inflight tracking should be cleaned up
+	component.inflightMtx.RLock()
+	_, hasInflight := component.serverInflight[testServerAddr]
+	_, hasPeak := component.serverPeakInflight[testServerAddr]
+	component.inflightMtx.RUnlock()
+
+	assert.False(hasInflight)
+	assert.False(hasPeak)
 }

@@ -408,7 +408,8 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.children_waitgrp,
 		log.DefaultLoggerContext,
 		rm.utils,
-		rm.resourceMgr)
+		rm.resourceMgr,
+		rm.bucketTopologySvc)
 
 	mcm.RegisterListener(globalSettingChangeListener)
 	rm.global_setting_svc.SetMetadataChangeHandlerCallback(globalSettingChangeListener.globalSettingChangeHandlerCallback)

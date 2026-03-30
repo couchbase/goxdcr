@@ -4538,3 +4538,22 @@ const (
 	// VBStatFieldMaxCas indicates parsing of max CAS stats.
 	VBStatFieldMaxCas
 )
+
+// RemoteMemcachedTunables holds the tunable parameters for the RemoteMemcached connection pool
+type RemoteMemcachedTunables struct {
+	// MaxConnsPerServer is the maximum number of connections to keep per server
+	MaxConnsPerServer int
+	// MinConnsPerServer is the minimum number of connections to keep per server after GC trimming
+	MinConnsPerServer int
+	// GCInterval is the interval at which the idle connection GC runs
+	GCInterval time.Duration
+}
+
+// NewRemoteMemcachedTunables creates a new RemoteMemcachedTunables with default values
+func NewRemoteMemcachedTunables() RemoteMemcachedTunables {
+	return RemoteMemcachedTunables{
+		MaxConnsPerServer: DefaultRemoteMemcachedConnPoolMaxConns,
+		MinConnsPerServer: DefaultRemoteMemcachedConnPoolMinConns,
+		GCInterval:        time.Duration(DefaultRemoteMemcachedConnPoolGCIntervalMs) * time.Millisecond,
+	}
+}

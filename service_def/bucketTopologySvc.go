@@ -52,6 +52,9 @@ type BucketTopologySvc interface {
 
 	// SwitchRemoteType updates the remote type of the target cluster referenced by the replication spec.
 	SwitchRemoteType(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) error
+
+	// UpdateAllStatsProvidersConnPoolTunables updates the cached tunables and propagates them to all existing stats providers.
+	UpdateAllStatsProvidersConnPoolTunables(settings *metadata.GlobalSettings)
 }
 
 // BucketStatsOps is the interface for the bucket stats operations

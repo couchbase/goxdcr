@@ -39,7 +39,10 @@ var ErrSslConStrNotFound = errors.New("SSL connection string not found")
 //
 //  3. sslConStrMtx: Protects SslConStrMap
 //
-// Lock Ordering Rule: poolConfigMtx -> KvMemClientsMtx (*never reverse*)
+//  4. inflightMtx: Protects serverInflight and serverPeakInflight maps.
+//     Always acquire AFTER KvMemClientsMtx when both are needed.
+//
+// Lock Ordering Rule: poolConfigMtx -> KvMemClientsMtx -> inflightMtx (*never reverse*)
 type RemoteMemcachedComponent struct {
 	InitConnOnce sync.Once
 	InitConnDone chan bool
@@ -78,21 +81,37 @@ type RemoteMemcachedComponent struct {
 	closed atomic.Bool
 	// knownServers denotes the current set of servers in the target topology.
 	knownServers map[string]bool
+
+	// GC-related fields for trimming idle connections.
+	// serverInflight tracks the current number of inflight (checked-out) connections per server.
+	serverInflight map[string]*atomic.Int64
+	// serverPeakInflight tracks the peak inflight count per server within the current GC window.
+	serverPeakInflight map[string]*atomic.Int64
+	// inflightMtx protects serverInflight and serverPeakInflight maps.
+	inflightMtx sync.RWMutex
+	// minConnsPerServer is the minimum number of connections to keep per server after GC trimming.
+	minConnsPerServer int
+	// gcInterval is the interval at which the idle connection GC runs.
+	gcInterval time.Duration
 }
 
-func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string, userAgent string, maxConnsPerServer int) *RemoteMemcachedComponent {
+func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string, userAgent string, tunables base.RemoteMemcachedTunables) *RemoteMemcachedComponent {
 	return &RemoteMemcachedComponent{
-		InitConnOnce:      sync.Once{},
-		InitConnDone:      make(chan bool),
-		FinishCh:          finCh,
-		LoggerImpl:        logger,
-		KvMemClients:      make(map[string]chan mcc.ClientIface),
-		KvMemClientsMtx:   sync.RWMutex{},
-		Utils:             utils,
-		TargetBucketname:  bucketName,
-		UserAgent:         userAgent,
-		MaxConnsPerServer: maxConnsPerServer,
-		knownServers:      map[string]bool{},
+		InitConnOnce:       sync.Once{},
+		InitConnDone:       make(chan bool),
+		FinishCh:           finCh,
+		LoggerImpl:         logger,
+		KvMemClients:       make(map[string]chan mcc.ClientIface),
+		KvMemClientsMtx:    sync.RWMutex{},
+		Utils:              utils,
+		TargetBucketname:   bucketName,
+		UserAgent:          userAgent,
+		MaxConnsPerServer:  tunables.MaxConnsPerServer,
+		knownServers:       map[string]bool{},
+		serverInflight:     make(map[string]*atomic.Int64),
+		serverPeakInflight: make(map[string]*atomic.Int64),
+		minConnsPerServer:  tunables.MinConnsPerServer,
+		gcInterval:         tunables.GCInterval,
 	}
 }
 
@@ -136,31 +155,38 @@ func (r *RemoteMemcachedComponent) reconfigureConnectionPoolNoLock(newMaxConnsPe
 	}
 }
 
-// SetMaxConnectionsPerServer sets the maximum number of connections per server.
-func (r *RemoteMemcachedComponent) SetMaxConnectionsPerServer(max int) {
-	if max < 1 {
-		max = 1
-	}
-
+// SetTunables updates the tunable parameters for the connection pool.
+// It can be used to update maxConnsPerServer, minConnsPerServer, and gcInterval.
+// Only the non-zero fields in the tunables struct are applied.
+func (r *RemoteMemcachedComponent) SetTunables(tunables base.RemoteMemcachedTunables) {
 	// Acquire poolConfigMtx to serialize pool configuration changes
 	r.poolConfigMtx.Lock()
 	defer r.poolConfigMtx.Unlock()
 
-	// Only reconfigure if the value actually changed
-	if r.MaxConnsPerServer == max {
-		return
-	}
-
 	// if the pool is closed, return
 	if r.IsClosed() {
-		r.LoggerImpl.Warnf("SetMaxConnectionsPerServer called on closed pool for bucket %v", r.TargetBucketname)
+		r.LoggerImpl.Warnf("SetTunables called on closed pool for bucket %v", r.TargetBucketname)
 		return
 	}
 
-	r.MaxConnsPerServer = max
+	// Update max connections if specified
+	if tunables.MaxConnsPerServer > 0 && tunables.MaxConnsPerServer != r.MaxConnsPerServer {
+		r.MaxConnsPerServer = tunables.MaxConnsPerServer
+		r.reconfigureConnectionPoolNoLock(r.MaxConnsPerServer)
+		r.LoggerImpl.Infof("Updated max connections per server to %d for bucket %v", r.MaxConnsPerServer, r.TargetBucketname)
+	}
 
-	// Honor the new max connections per server
-	r.reconfigureConnectionPoolNoLock(max)
+	// Update min connections if specified
+	if tunables.MinConnsPerServer >= 0 && tunables.MinConnsPerServer != r.minConnsPerServer {
+		r.minConnsPerServer = tunables.MinConnsPerServer
+		r.LoggerImpl.Infof("Updated min connections per server to %d for bucket %v", r.minConnsPerServer, r.TargetBucketname)
+	}
+
+	// Update GC interval if specified
+	if tunables.GCInterval > 0 && tunables.GCInterval != r.gcInterval {
+		r.gcInterval = tunables.GCInterval
+		r.LoggerImpl.Infof("Updated GC interval to %v for bucket %v", r.gcInterval, r.TargetBucketname)
+	}
 }
 
 func (r *RemoteMemcachedComponent) SetTargetKvVbMapGetter(getter func() (base.KvVBMapType, error)) *RemoteMemcachedComponent {
@@ -405,17 +431,29 @@ func (r *RemoteMemcachedComponent) AcquireClient(serverAddr string) (mcc.ClientI
 	}
 
 	// Try to get a client from the pool (non-blocking)
+	var client mcc.ClientIface
 	select {
-	case client := <-clientChan:
-		return client, nil
+	case client = <-clientChan:
 	default:
 		// No client available in pool, create a new one
-		client, err := r.GetNewMemcachedClient(serverAddr)
+		var err error
+		client, err = r.GetNewMemcachedClient(serverAddr)
 		if err != nil {
 			return nil, err
 		}
-		return client, nil
 	}
+
+	r.incrementInflight(serverAddr)
+	return client, nil
+}
+
+// DiscardClient closes a broken client connection and decrements the inflight counter.
+func (r *RemoteMemcachedComponent) DiscardClient(serverAddr string, client mcc.ClientIface) error {
+	if client == nil {
+		return nil
+	}
+	r.decrementInflight(serverAddr)
+	return client.Close()
 }
 
 // ReleaseClient returns a client to the pool for the given server.
@@ -429,6 +467,8 @@ func (r *RemoteMemcachedComponent) ReleaseClient(serverAddr string, client mcc.C
 	// Hold poolConfigMtx.RLock to prevent pool reconfiguration during client operations
 	r.poolConfigMtx.RLock()
 	defer r.poolConfigMtx.RUnlock()
+
+	r.decrementInflight(serverAddr)
 
 	// if the pool is closed, just close the client and return
 	if r.IsClosed() {
@@ -572,11 +612,162 @@ func (r *RemoteMemcachedComponent) removeServers(servers []string) {
 		r.DeleteMemClientsNoLock(serverAddr)
 		delete(r.knownServers, serverAddr)
 	}
+
+	r.inflightMtx.Lock()
+	for _, serverAddr := range servers {
+		delete(r.serverInflight, serverAddr)
+		delete(r.serverPeakInflight, serverAddr)
+	}
+	r.inflightMtx.Unlock()
 }
 
 // addServers adds a list of servers to the known set.
 func (r *RemoteMemcachedComponent) addServers(servers []string) {
 	for _, serverAddr := range servers {
 		r.knownServers[serverAddr] = true
+	}
+}
+
+// getOrCreateInflightCounters returns the inflight and peak inflight counters for a server,
+// creating them if they don't exist.
+func (r *RemoteMemcachedComponent) getOrCreateInflightCounters(serverAddr string) (inflight, peak *atomic.Int64) {
+	r.inflightMtx.RLock()
+	inflight, ok1 := r.serverInflight[serverAddr]
+	peak, ok2 := r.serverPeakInflight[serverAddr]
+	r.inflightMtx.RUnlock()
+
+	if ok1 && ok2 {
+		return inflight, peak
+	}
+
+	r.inflightMtx.Lock()
+	defer r.inflightMtx.Unlock()
+
+	if _, ok := r.serverInflight[serverAddr]; !ok {
+		r.serverInflight[serverAddr] = &atomic.Int64{}
+	}
+	if _, ok := r.serverPeakInflight[serverAddr]; !ok {
+		r.serverPeakInflight[serverAddr] = &atomic.Int64{}
+	}
+
+	return r.serverInflight[serverAddr], r.serverPeakInflight[serverAddr]
+}
+
+// incrementInflight atomically increments the inflight count for a server
+// and updates the peak if the new count exceeds it.
+func (r *RemoteMemcachedComponent) incrementInflight(serverAddr string) {
+	inflight, peak := r.getOrCreateInflightCounters(serverAddr)
+	current := inflight.Add(1)
+	for {
+		p := peak.Load()
+		if current <= p || peak.CompareAndSwap(p, current) {
+			break
+		}
+	}
+}
+
+// decrementInflight atomically decrements the inflight count for a server.
+func (r *RemoteMemcachedComponent) decrementInflight(serverAddr string) {
+	r.inflightMtx.RLock()
+	if counter, ok := r.serverInflight[serverAddr]; ok {
+		counter.Add(-1)
+	}
+	r.inflightMtx.RUnlock()
+}
+
+// ResetPeak sets the peak inflight count for a server to the current inflight count.
+// It returns the previous peak value before the reset.
+func (r *RemoteMemcachedComponent) resetPeak(serverAddr string) int64 {
+	inflight, peak := r.getOrCreateInflightCounters(serverAddr)
+
+	var currentPeak int64
+	var currentInflight int64
+	for {
+		currentPeak = peak.Load()
+		currentInflight = inflight.Load()
+		if peak.CompareAndSwap(currentPeak, currentInflight) {
+			break
+		}
+	}
+	return currentPeak
+}
+
+// RunIdleConnectionsGC periodically trims excess idle connections from the pool.
+// It monitors the peak inflight (concurrent) connection usage per server over each GC window.
+// Connections beyond the observed peak demand (with a floor of minConnsPerServer) are closed.
+func (r *RemoteMemcachedComponent) RunIdleConnectionsGC() {
+	ticker := time.NewTicker(r.gcInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.FinishCh:
+			return
+		case <-ticker.C:
+			r.gcIdleConnectionsOnce()
+		}
+	}
+}
+
+// gcIdleConnectionsOnce performs a single GC pass. For each server, it reads the peak inflight
+// count observed during the current window, computes a target pool size, drains any excess
+// connections from the channel, and resets the peak for the next window.
+func (r *RemoteMemcachedComponent) gcIdleConnectionsOnce() {
+	r.poolConfigMtx.RLock()
+	defer r.poolConfigMtx.RUnlock()
+
+	if r.IsClosed() {
+		return
+	}
+
+	var clientsToClose []mcc.ClientIface
+
+	r.KvMemClientsMtx.RLock()
+	for serverAddr, clientChan := range r.KvMemClients {
+		r.inflightMtx.RLock()
+		currentInFlight, hasInflight := r.serverInflight[serverAddr]
+		r.inflightMtx.RUnlock()
+
+		if !hasInflight {
+			continue
+		}
+
+		trimmedPoolSize := int64(r.minConnsPerServer)
+		peak := r.resetPeak(serverAddr)
+		if peak > trimmedPoolSize {
+			trimmedPoolSize = peak
+		}
+
+		currentInUseConns := currentInFlight.Load()
+		idleConns := int64(len(clientChan))
+		totalConns := currentInUseConns + idleConns
+
+		if totalConns > int64(r.MaxConnsPerServer) {
+			totalConns = int64(r.MaxConnsPerServer)
+		}
+
+		excess := totalConns - trimmedPoolSize
+		for i := int64(0); i < excess; i++ {
+			select {
+			case client := <-clientChan:
+				clientsToClose = append(clientsToClose, client)
+			default:
+			}
+		}
+	}
+	r.KvMemClientsMtx.RUnlock()
+
+	errMap := make(base.ErrorMap)
+	for _, client := range clientsToClose {
+		if err := client.Close(); err != nil {
+			errMap[fmt.Sprintf("idle_conn_%p", client)] = err
+		}
+	}
+	if len(errMap) > 0 {
+		r.LoggerImpl.Warnf("idle connections GC: errors closing idle connections: %v", base.FlattenErrorMap(errMap))
+	}
+
+	if len(clientsToClose) > 0 {
+		r.LoggerImpl.Infof("idle connections GC: closed %d idle connection(s) for bucket %v on target cluster %s", len(clientsToClose), r.TargetBucketname, r.RefGetter().Name())
 	}
 }

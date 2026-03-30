@@ -922,7 +922,8 @@ func (rccl *RemoteClusterChangeListener) validateRemoteClusterRef(remoteClusterR
 // listener for GOXDCR Process level setting changes.
 type GlobalSettingChangeListener struct {
 	*MetakvChangeListener
-	resourceManager resource_manager.ResourceMgrIface
+	resourceManager   resource_manager.ResourceMgrIface
+	bucketTopologySvc service_def.BucketTopologySvc
 }
 
 func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettingsSvc,
@@ -930,7 +931,8 @@ func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettin
 	children_waitgrp *sync.WaitGroup,
 	logger_ctx *log.LoggerContext,
 	utilsIn utilities.UtilsIface,
-	resourceManager resource_manager.ResourceMgrIface) *GlobalSettingChangeListener {
+	resourceManager resource_manager.ResourceMgrIface,
+	bucketTopologySvc service_def.BucketTopologySvc) *GlobalSettingChangeListener {
 	pscl := &GlobalSettingChangeListener{
 		NewMetakvChangeListener(base.GlobalSettingChangeListener,
 			metadata_svc.GetCatalogPathFromCatalogKey(metadata_svc.GlobalSettingCatalogKey),
@@ -941,6 +943,7 @@ func NewGlobalSettingChangeListener(process_setting_svc service_def.GlobalSettin
 			"GlobalSettingChangeListener",
 			utilsIn),
 		resourceManager,
+		bucketTopologySvc,
 	}
 	return pscl
 }
@@ -1072,6 +1075,43 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 
 		if cLogPoolReapInterval >= 0 {
 			cLogConnPool.UpdateReapInterval(time.Duration(cLogPoolReapInterval) * time.Millisecond)
+		}
+
+		// Handle remote memcached connection pool tunables
+		var remoteMemcachedConnPoolMaxConns int = -1
+		var remoteMemcachedConnPoolMinConns int = -1
+		var remoteMemcachedConnPoolGCInterval int = -1
+
+		remoteMemcachedConnPoolMaxConnsVal, ok := newSetting.Settings.Values[metadata.RemoteMemcachedConnPoolMaxConnsKey]
+		if ok {
+			remoteMemcachedConnPoolMaxConns, ok = remoteMemcachedConnPoolMaxConnsVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of remote memcached conn pool max conns %T, remoteMemcachedConnPoolMaxConnsVal=%v", remoteMemcachedConnPoolMaxConnsVal, remoteMemcachedConnPoolMaxConnsVal)
+			}
+		}
+
+		remoteMemcachedConnPoolMinConnsVal, ok := newSetting.Settings.Values[metadata.RemoteMemcachedConnPoolMinConnsKey]
+		if ok {
+			remoteMemcachedConnPoolMinConns, ok = remoteMemcachedConnPoolMinConnsVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of remote memcached conn pool min conns %T, remoteMemcachedConnPoolMinConnsVal=%v", remoteMemcachedConnPoolMinConnsVal, remoteMemcachedConnPoolMinConnsVal)
+			}
+		}
+
+		remoteMemcachedConnPoolGCIntervalVal, ok := newSetting.Settings.Values[metadata.RemoteMemcachedConnPoolGCIntervalKey]
+		if ok {
+			remoteMemcachedConnPoolGCInterval, ok = remoteMemcachedConnPoolGCIntervalVal.(int)
+			if !ok {
+				return fmt.Errorf("wrong type of remote memcached conn pool gc interval %T, remoteMemcachedConnPoolGCIntervalVal=%v", remoteMemcachedConnPoolGCIntervalVal, remoteMemcachedConnPoolGCIntervalVal)
+			}
+		}
+
+		// Update all stats providers if any settings changed
+		if remoteMemcachedConnPoolMaxConns >= 0 || remoteMemcachedConnPoolMinConns >= 0 || remoteMemcachedConnPoolGCInterval >= 0 {
+			// Use the bucketTopologySvc stored in the listener
+			if pscl.bucketTopologySvc != nil {
+				pscl.bucketTopologySvc.UpdateAllStatsProvidersConnPoolTunables(newSetting)
+			}
 		}
 	}
 

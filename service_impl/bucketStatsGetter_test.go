@@ -65,10 +65,16 @@ func createTestGetTargetKvVbMapFunc() func(spec *metadata.ReplicationSpecificati
 	}
 }
 
+func testTunables() base.RemoteMemcachedTunables {
+	tunables := base.NewRemoteMemcachedTunables()
+	tunables.MaxConnsPerServer = testMaxConnectionsPerServer
+	return tunables
+}
+
 // setupTestRemoteMemcachedComponent properly initializes a RemoteMemcachedComponent for testing
 func setupTestRemoteMemcachedComponent(provider *ClusterBucketStatsProvider, utils *utilsMock.UtilsIface, logger *log.CommonLogger) {
 	kvVbMap := createTestKvVbMap()
-	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(logger, provider.finCh, utils, testBucketName, "test", testMaxConnectionsPerServer)
+	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(logger, provider.finCh, utils, testBucketName, "test", testTunables())
 	provider.remoteMemcachedComponent.TargetKvVbMap = func() (base.KvVBMapType, error) {
 		return kvVbMap, nil
 	}
@@ -109,7 +115,7 @@ func setupClusterBucketStatsProvider() (*ClusterBucketStatsProvider, *utilsMock.
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	return provider, utils, bucketTopologySvc, remoteClusterSvc
 }
@@ -126,7 +132,7 @@ func TestClusterBucketStatsProvider_NewClusterBucketStatsProvider(t *testing.T) 
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	assert.NotNil(provider)
 	assert.Equal(testBucketName, provider.bucketName)
@@ -145,7 +151,7 @@ func TestClusterBucketStatsProvider_Init_Success(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	// Setup mocks for Init
 	ref := createTestRemoteClusterRef()
@@ -200,7 +206,7 @@ func TestClusterBucketStatsProvider_Init_TargetBucketTopologyNotReady(t *testing
 		return nil, base.ErrorTargetBucketTopologyNotReady
 	}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, getTargetKvVbMapFunc)
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, getTargetKvVbMapFunc)
 
 	ref := createTestRemoteClusterRef()
 	remoteClusterSvc.On("RemoteClusterByUuid", testClusterUuid, false).Return(ref, nil)
@@ -355,7 +361,7 @@ func TestClusterBucketStatsProvider_Close_Success(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	err := provider.Close()
 	assert.NoError(err)
@@ -384,7 +390,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_Success(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	// Setup mocks
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
@@ -432,7 +438,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_PartialFailure(t *testing.T) 
 	mcClient := &clientMocks.ClientIface{}
 	mcClient2 := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -489,7 +495,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_NetworkError(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -529,7 +535,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_ParseErrors(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -637,7 +643,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_AllVBsFailParsing(t *testing.
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -696,7 +702,7 @@ func TestClusterBucketStatsProvider_GetFailoverLog_MixedSuccessAndParseErrors(t 
 	mcClient := &clientMocks.ClientIface{}
 	mcClient2 := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -793,7 +799,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_Success(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -848,7 +854,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_MaxCasOnly(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -900,7 +906,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_InvalidRequest(t *testing.T)
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	// Test with empty vbucket list
 	requestOpts := &base.VBucketStatsRequest{
@@ -932,7 +938,7 @@ func TestClusterBucketStatsProvider_GetVBucketStats_PartialFailure(t *testing.T)
 	mcClient := &clientMocks.ClientIface{}
 	mcClient2 := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -988,7 +994,7 @@ func TestClusterBucketStatsProvider_Concurrent_GetFailoverLog(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 
@@ -1042,7 +1048,7 @@ func TestClusterBucketStatsProvider_Idempotent_GetFailoverLog(t *testing.T) {
 	logger := createTestLogger()
 	mcClient := &clientMocks.ClientIface{}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	mcClient.On("Close").Return(nil)
@@ -1445,7 +1451,7 @@ func TestClusterBucketStatsProvider_EmptyVBList(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 
@@ -1471,7 +1477,7 @@ func TestClusterBucketStatsProvider_KvVbMapError(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	setupTestRemoteMemcachedComponent(provider, utils, logger)
 	provider.remoteMemcachedComponent.TargetKvVbMap = func() (base.KvVBMapType, error) {
@@ -1501,7 +1507,7 @@ func TestClusterBucketStatsProvider_SubscriptionCounter_Increment(t *testing.T) 
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utils, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
 
 	// Setup mocks for Init
 	ref := createTestRemoteClusterRef()

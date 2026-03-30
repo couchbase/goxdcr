@@ -37,6 +37,10 @@ const (
 	CLogConnPoolLimitKey        = base.CLogConnPoolLimit
 	CLogConnPoolGCIntervalKey   = base.CLogConnPoolGCInterval
 	CLogConnPoolReapIntervalKey = base.CLogConnPoolReapInterval
+
+	RemoteMemcachedConnPoolMaxConnsKey   = base.RemoteMemcachedConnPoolMaxConnsKey
+	RemoteMemcachedConnPoolMinConnsKey   = base.RemoteMemcachedConnPoolMinConnsKey
+	RemoteMemcachedConnPoolGCIntervalKey = base.RemoteMemcachedConnPoolGCIntervalKey
 )
 
 var genericServices = []string{base.UtilsKey, base.SecuritySvcKey, base.TopoSvcKey, base.MetadataSvcKey,
@@ -63,14 +67,20 @@ var genericServicesLogLevelConfig = &SettingsConfig{genericServicesLogLevelDefau
 var CLogConnPoolLimitConfig = &SettingsConfig{base.DefaultCLogPoolConnLimit, &Range{1, 1000}}
 var CLogConnPoolGCIntervalConfig = &SettingsConfig{base.DefaultCLogConnPoolGCIntervalMs, &Range{0, 86400000 /* 24 hours */}}
 var CLogConnPoolReapIntervalConfig = &SettingsConfig{base.DefaultCLogConnPoolReapIntervalMs, &Range{0, 86400000 /* 24 hours */}}
+var RemoteMemcachedConnPoolMaxConnsConfig = &SettingsConfig{base.DefaultRemoteMemcachedConnPoolMaxConns, &Range{1, 1000}}
+var RemoteMemcachedConnPoolMinConnsConfig = &SettingsConfig{base.DefaultRemoteMemcachedConnPoolMinConns, &Range{0, 1000}}
+var RemoteMemcachedConnPoolGCIntervalConfig = &SettingsConfig{base.DefaultRemoteMemcachedConnPoolGCIntervalMs, &Range{1000 /* 1 second */, 86400000 /* 24 hours */}}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
-	GoMaxProcsKey:               GoMaxProcsConfig,
-	GoGCKey:                     GoGCConfig,
-	GenericServicesLogLevelKey:  genericServicesLogLevelConfig,
-	CLogConnPoolLimitKey:        CLogConnPoolLimitConfig,
-	CLogConnPoolGCIntervalKey:   CLogConnPoolGCIntervalConfig,
-	CLogConnPoolReapIntervalKey: CLogConnPoolReapIntervalConfig,
+	GoMaxProcsKey:                        GoMaxProcsConfig,
+	GoGCKey:                              GoGCConfig,
+	GenericServicesLogLevelKey:           genericServicesLogLevelConfig,
+	CLogConnPoolLimitKey:                 CLogConnPoolLimitConfig,
+	CLogConnPoolGCIntervalKey:            CLogConnPoolGCIntervalConfig,
+	CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalConfig,
+	RemoteMemcachedConnPoolMaxConnsKey:   RemoteMemcachedConnPoolMaxConnsConfig,
+	RemoteMemcachedConnPoolMinConnsKey:   RemoteMemcachedConnPoolMinConnsConfig,
+	RemoteMemcachedConnPoolGCIntervalKey: RemoteMemcachedConnPoolGCIntervalConfig,
 }
 
 // Adding values in this struct is deprecated - use GlobalSettings.Settings.Values instead
@@ -133,8 +143,24 @@ func (s *GlobalSettings) UpdateSettingsFromMap(settingsMap map[string]interface{
 	if len(errorMap) > 0 {
 		return
 	}
+
+	if err := s.validateRemoteMemcachedConnPoolSettings(); err != nil {
+		errorMap[base.RemoteMemcachedConnPoolValidationKey] = err
+		return
+	}
+
 	s.populateFieldsUsingMap()
 	return
+}
+
+func (s *GlobalSettings) validateRemoteMemcachedConnPoolSettings() error {
+	maxConns := s.GetRemoteMemcachedConnPoolMaxConns()
+	minConns := s.GetRemoteMemcachedConnPoolMinConns()
+	if minConns > maxConns {
+		return fmt.Errorf("%v (%d) must be >= %v (%d)",
+			RemoteMemcachedConnPoolMaxConnsKey, maxConns, RemoteMemcachedConnPoolMinConnsKey, minConns)
+	}
+	return nil
 }
 
 // populate settings map using field values
@@ -300,5 +326,20 @@ func (s *GlobalSettings) GetCLogPoolGCInterval() time.Duration {
 
 func (s *GlobalSettings) GetCLogPoolReapInterval() time.Duration {
 	val, _ := s.GetSettingValueOrDefaultValue(CLogConnPoolReapIntervalKey)
+	return time.Duration(val.(int)) * time.Millisecond
+}
+
+func (s *GlobalSettings) GetRemoteMemcachedConnPoolMaxConns() int {
+	val, _ := s.GetSettingValueOrDefaultValue(RemoteMemcachedConnPoolMaxConnsKey)
+	return val.(int)
+}
+
+func (s *GlobalSettings) GetRemoteMemcachedConnPoolMinConns() int {
+	val, _ := s.GetSettingValueOrDefaultValue(RemoteMemcachedConnPoolMinConnsKey)
+	return val.(int)
+}
+
+func (s *GlobalSettings) GetRemoteMemcachedConnPoolGCInterval() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(RemoteMemcachedConnPoolGCIntervalKey)
 	return time.Duration(val.(int)) * time.Millisecond
 }

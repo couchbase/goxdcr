@@ -54,8 +54,6 @@ type ClusterBucketStatsProvider struct {
 	logger *log.CommonLogger
 	// subscriptionCounter is used to construct unique subscriber id for bucket topology service
 	subscriptionCounter uint64
-	// maxConnectionsPerServer is the maximum number of connections per server
-	maxConnectionsPerServer int
 	// context is used to track the lifecycle of the ClusterBucketStatsProvider
 	context context.Context
 	// cancelCtx is used to cancel all active operations
@@ -64,10 +62,16 @@ type ClusterBucketStatsProvider struct {
 	mutex sync.Mutex
 	// getTargetKvVbMap is the function to get the target kv vb map
 	getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)
+	// remoteMemcachedTunables are the connection pool tunables.
+	remoteMemcachedTunables base.RemoteMemcachedTunables
+	// remoteMemcachedTunablesMtx protects access to remoteMemcachedTunables
+	cachedTunablesMtx sync.RWMutex
 }
 
-// NewClusterBucketStatsProvider is the constructor for ClusterBucketStatsProvider
-func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remoteClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, maxConnectionsPerServer int, logger *log.CommonLogger, getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)) *ClusterBucketStatsProvider {
+// NewClusterBucketStatsProvider is the constructor for ClusterBucketStatsProvider.
+// The tunables parameter should be read from global settings to ensure persisted
+// values are used instead of defaults after a process restart.
+func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remoteClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, tunables base.RemoteMemcachedTunables, logger *log.CommonLogger, getTargetKvVbMap func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error)) *ClusterBucketStatsProvider {
 	context, cancelCtx := context.WithCancel(context.Background())
 	return &ClusterBucketStatsProvider{
 		bucketName:              bucketName,
@@ -77,11 +81,23 @@ func NewClusterBucketStatsProvider(bucketName string, clusterUuid string, remote
 		logger:                  logger,
 		finCh:                   make(chan bool),
 		bucketTopologySvc:       bucketTopologySvc,
-		maxConnectionsPerServer: maxConnectionsPerServer,
 		context:                 context,
 		cancelCtx:               cancelCtx,
 		getTargetKvVbMap:        getTargetKvVbMap,
+		remoteMemcachedTunables: tunables,
 	}
+}
+
+func (provier *ClusterBucketStatsProvider) SetRemoteMemcachedTunables(tunables base.RemoteMemcachedTunables) {
+	provier.cachedTunablesMtx.Lock()
+	defer provier.cachedTunablesMtx.Unlock()
+	provier.remoteMemcachedTunables = tunables
+}
+
+func (provier *ClusterBucketStatsProvider) GetRemoteMemcachedTunables() base.RemoteMemcachedTunables {
+	provier.cachedTunablesMtx.RLock()
+	defer provier.cachedTunablesMtx.RUnlock()
+	return provier.remoteMemcachedTunables
 }
 
 // Init the ClusterBucketStatsProvider
@@ -100,7 +116,7 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 	}
 
 	userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
-	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.maxConnectionsPerServer)
+	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.GetRemoteMemcachedTunables())
 	provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
 		ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
 		return ref
@@ -119,8 +135,9 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 		return err
 	}
 
-	// Only start MonitorTopology and mark as initialized on success
+	// Only start MonitorTopology, idle connection GC, and mark as initialized on success
 	go provider.remoteMemcachedComponent.MonitorTopology()
+	go provider.remoteMemcachedComponent.RunIdleConnectionsGC()
 	provider.initialized.Store(true)
 	return nil
 }
@@ -237,8 +254,8 @@ func (provider *ClusterBucketStatsProvider) getFailoverLogFromServer(server stri
 	if err != nil {
 		if provider.utils.IsSeriousNetError(err) {
 			// Connection is broken due to network error, close it instead of returning to pool
-			if err := client.Close(); err != nil {
-				provider.logger.Warnf("getFailoverLogFromServer: error closing connection for %v: %v", server, err)
+			if discardErr := provider.remoteMemcachedComponent.DiscardClient(server, client); discardErr != nil {
+				provider.logger.Warnf("getFailoverLogFromServer: error closing connection for %v: %v", server, discardErr)
 			}
 		} else {
 			// Non-network error, release client to pool for reuse
@@ -393,9 +410,9 @@ func (provider *ClusterBucketStatsProvider) getVBucketStatsFromServer(requestOpt
 	resp, err := provider.utils.GetVBucketStats(requestOpts, client, dataTransferCtx)
 	if err != nil {
 		if provider.utils.IsSeriousNetError(err) {
-			// Connection is broken due to network error, delete it instead of returning to pool
-			if err := client.Close(); err != nil {
-				provider.logger.Warnf("getVBucketStatsFromServer: error closing connection for %v: %v", server, err)
+			// Connection is broken due to network error, close it instead of returning to pool
+			if discardErr := provider.remoteMemcachedComponent.DiscardClient(server, client); discardErr != nil {
+				provider.logger.Warnf("getVBucketStatsFromServer: error closing connection for %v: %v", server, discardErr)
 			}
 		} else {
 			// Non-network error, release client to pool for reuse
@@ -528,6 +545,22 @@ func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VB
 	}
 
 	return bucketVBStats, errMap, nil
+}
+
+// UpdateConnPoolTunables updates the connection pool tunables based on the provided global settings.
+// This method should be called when global settings are changed.
+func (provider *ClusterBucketStatsProvider) UpdateConnPoolTunables(settings *metadata.GlobalSettings) {
+	if provider.remoteMemcachedComponent == nil {
+		return
+	}
+	tunables := base.RemoteMemcachedTunables{
+		MaxConnsPerServer: settings.GetRemoteMemcachedConnPoolMaxConns(),
+		MinConnsPerServer: settings.GetRemoteMemcachedConnPoolMinConns(),
+		GCInterval:        settings.GetRemoteMemcachedConnPoolGCInterval(),
+	}
+	provider.SetRemoteMemcachedTunables(tunables)
+	provider.remoteMemcachedComponent.SetTunables(tunables)
+	provider.logger.Infof("Updated connection pool tunables for bucket %s on cluster %s: %+v", provider.bucketName, provider.clusterUuid, tunables)
 }
 
 // IsRetryableError checks if the error is retryable
