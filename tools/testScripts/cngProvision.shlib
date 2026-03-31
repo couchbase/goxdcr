@@ -150,7 +150,6 @@ function clearCngLogs() {
 	done
 }
 
-
 function cngSetupInit {
 	rm -fR $CNG_TMP_PATH
 	mkdir -p $CNG_TMP_PATH
@@ -207,7 +206,6 @@ function cloneStellarGatewayRepo {
 		popd >/dev/null
 	fi
 
-
 	echo "Setting up CNG with mode: $cngMode, path=$cngPath"
 }
 
@@ -246,7 +244,7 @@ function generateCNGCerts {
 		return 1
 	}
 
-cat >$CNG_TMP_PATH/$clusterName/cng_node.ext <<EOF
+	cat >$CNG_TMP_PATH/$clusterName/cng_node.ext <<EOF
 basicConstraints=CA:FALSE
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid,issuer:always

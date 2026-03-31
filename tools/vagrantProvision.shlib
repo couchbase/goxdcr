@@ -700,23 +700,28 @@ function setupVagrantAltPortForwarding {
 	eval $cmd &
 	sleep 3
 
-	# mgmtSSLPort
-	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_SSLPORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:18091)'"
-	echo "==== Running $cmd ===="
-	eval $cmd &
-	sleep 3
-
 	# kv
 	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KV_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11210)'"
 	echo "==== Running $cmd ===="
 	eval $cmd &
 	sleep 3
 
-	# kvSSL
-	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KVSSL_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11207)'"
-	echo "==== Running $cmd ===="
-	eval $cmd &
-	sleep 3
+	# SSL ports are only available on Enterprise Edition nodes
+	if nodeSupportsSSL "$clusterName"; then
+		# mgmtSSLPort
+		cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_SSLPORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:18091)'"
+		echo "==== Running $cmd ===="
+		eval $cmd &
+		sleep 3
+
+		# kvSSL
+		cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KVSSL_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11207)'"
+		echo "==== Running $cmd ===="
+		eval $cmd &
+		sleep 3
+	else
+		echo "Node $clusterName does not support SSL - skipping mgmtSSL and kvSSL port forwarding"
+	fi
 }
 
 function checkAndWaitForUnattendedUpgrade {

@@ -18,7 +18,6 @@ fi
 . ./clusterRunProvision.shlib
 . ./cngProvision.shlib
 
-
 cngNodeName="$1"
 repoPath="$2"
 clusterAddr="$3"

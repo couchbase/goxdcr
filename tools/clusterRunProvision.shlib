@@ -468,6 +468,26 @@ function testForClusterRun {
 	done
 }
 
+# nodeSupportsSSL checks whether the given node supports SSL services (e.g. httpsMgmt).
+# Couchbase CE does not support SSL, so this returns 1 (false) for CE nodes.
+function nodeSupportsSSL {
+	local clusterName="$1"
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local hostIP="127.0.0.1"
+	if [[ -n "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+		hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+	fi
+
+	local sslPortsResp
+	sslPortsResp=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://$hostIP:$port/nodes/self/xdcrSSLPorts 2>/dev/null)
+
+	if echo "$sslPortsResp" | grep -q '"httpsMgmt"'; then
+		return 0 # SSL supported
+	else
+		return 1 # SSL not supported (CE)
+	fi
+}
+
 function setupVagrantAltAddress {
 	local clusterName="$1"
 	local hostname=${VAGRANT_VM_IP_MAP[$clusterName]}
@@ -484,7 +504,14 @@ function setupVagrantAltAddress {
 		hostname="$altHostName"
 	fi
 
-	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=$hostname&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+	local dataString="hostname=$hostname&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}"
+	if nodeSupportsSSL "$clusterName"; then
+		dataString="${dataString}&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}"
+	else
+		echo "Node $clusterName does not support SSL - skipping mgmtSSL and kvSSL in alternate address setup"
+	fi
+
+	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "$dataString" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
 }
 
 function getClusterIdx {
@@ -1704,7 +1731,7 @@ function startCNG {
 		echo "ERRO: CNG node key not found at $keyFile" >&2
 		return 1
 	fi
-	
+
 	echo "Starting CNG for cluster $clusterName on host $clusterHost with user $username at dataport $dataport"
 
 	nohup $CNG_EXE_PATH \
@@ -1720,14 +1747,14 @@ function startCNG {
 	local pid=$!
 	disown $pid
 
-	echo $pid > "$CNG_PATH/$clusterName/cng.pid"
+	echo $pid >"$CNG_PATH/$clusterName/cng.pid"
 
 	return $?
 }
 
 function _startCNGInstances {
 	echo "Stopping any existing CNG instances for clusters"
-	pkill -9 $CNG_EXE 
+	pkill -9 $CNG_EXE
 	echo "Starting CNG instances for clusters"
 
 	cngPortBase=18098
@@ -1742,7 +1769,7 @@ function _startCNGInstances {
 			return 1
 		fi
 
-		echo $cngPort > "$CNG_TMP_PATH/$clusterName/cng.port"
+		echo $cngPort >"$CNG_TMP_PATH/$clusterName/cng.port"
 
 		cngPort=$((cngPort + 1))
 	done
@@ -1832,10 +1859,9 @@ function createCNGRemoteClusterRef {
 
 	local caCert=$(cat $CNG_TMP_PATH/$targetCluster/ca.pem)
 
-
 	echo "Creating CNG remote cluster reference from $sourceCluster to $targetCluster"
 	echo $CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
-		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}" > $CNG_TMP_PATH/$sourceCluster/createCNGRemoteRef.cmd
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${caCert}" >$CNG_TMP_PATH/$sourceCluster/createCNGRemoteRef.cmd
 	echo ""
 
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$remoteRefName -d hostname=$hostName -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
@@ -2443,7 +2469,7 @@ function waitForBgJobs {
 
 	echo "Waiting for background jobs to finish..."
 
-	local jobsCnt=$(jobs -l | grep -c "Running" )
+	local jobsCnt=$(jobs -l | grep -c "Running")
 	echo "$jobsCnt background jobs were running initially"
 
 	local startedTime=$(date +%s)
