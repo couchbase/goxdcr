@@ -30,6 +30,9 @@ fi
 # -----------------
 declare DEFAULT_ADMIN
 declare DEFAULT_PW
+# CNG mode defaults (may be overridden by caller or commonTestRunner.shlib)
+cngMode=${cngMode:-0}
+cngPath=${cngPath:-""}
 # Run curl in silent mode to prevent progress bar
 CURL="curl -s"
 POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
