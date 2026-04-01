@@ -46,6 +46,7 @@ type BackfillRequestHandlerInjector interface {
 	InjectStartDelay(b *BackfillRequestHandler)
 	InitVbDelayInjection(b *BackfillRequestHandler)
 	InjectVbDelay(b *BackfillRequestHandler, vbno uint16)
+	InjectBeforePersistWait(b *BackfillRequestHandler, reqAndResp *ReqAndResp)
 }
 
 // Provide a running request serializer that can handle incoming requests
@@ -486,6 +487,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 				}
 				return err
 			}
+			b.BackfillRequestHandlerInjector.InjectBeforePersistWait(b, &reqAndResp)
 			return <-reqAndResp.PersistResponse
 		}
 	}

@@ -62,3 +62,8 @@ func (i *BackfillReqHandlerDevInjector) InjectVbDelay(b *BackfillRequestHandler,
 		time.Sleep(120 * time.Second)
 	}
 }
+
+func (i *BackfillReqHandlerDevInjector) InjectBeforePersistWait(*BackfillRequestHandler, *ReqAndResp) {
+	// no-op
+}
+

@@ -82,6 +82,77 @@ func completeGetter(dataToRet interface{}) func() (interface{}, error) {
 	return retFunc
 }
 
+func createRollbackDeadlockBackfillSpec(spec *metadata.ReplicationSpecification, vbs ...uint16) *metadata.BackfillReplicationSpec {
+	vbTasksMap := metadata.NewVBTasksMap()
+	srcNs := metadata.NewSourceCollectionNamespace(&base.CollectionNamespace{ScopeName: "scope", CollectionName: "source"})
+	tgtNs := &base.CollectionNamespace{ScopeName: "scope", CollectionName: "target"}
+
+	for _, vb := range vbs {
+		vbTasks := metadata.NewBackfillTasks()
+		vbTasks.List = append(vbTasks.List, metadata.NewBackfillTask(
+			&metadata.BackfillVBTimestamps{
+				StartingTimestamp: &base.VBTimestamp{Vbno: vb, Seqno: 1},
+				EndingTimestamp:   &base.VBTimestamp{Vbno: vb, Seqno: 10},
+			},
+			[]metadata.CollectionNamespaceMapping{
+				map[*metadata.SourceNamespace]metadata.CollectionNamespaceList{
+					srcNs: metadata.CollectionNamespaceList{tgtNs},
+				},
+			},
+		))
+		vbTasksMap.VBTasksMap[vb] = &vbTasks
+	}
+
+	return metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTasksMap, spec, 0)
+}
+
+type pmReplSpecSvcStub struct {
+	*service_def.ReplicationSpecSvc
+	spec       *metadata.ReplicationSpecification
+	derivedObj interface{}
+}
+
+func (s *pmReplSpecSvcStub) GetDerivedObj(specId string) (interface{}, error) {
+	return s.derivedObj, nil
+}
+
+func (s *pmReplSpecSvcStub) SetDerivedObj(specId string, derivedObj interface{}) error {
+	s.derivedObj = derivedObj
+	return nil
+}
+
+func (s *pmReplSpecSvcStub) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
+	return s.spec, nil
+}
+
+func (s *pmReplSpecSvcStub) AllReplicationSpecIds() ([]string, error) {
+	return []string{s.spec.Id}, nil
+}
+
+func (s *pmReplSpecSvcStub) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
+	return map[string]*metadata.ReplicationSpecification{}, nil
+}
+
+type rollbackDeadlockTestInjector struct {
+	beforePersistWaitEntered chan struct{}
+	releaseBeforePersistWait chan struct{}
+}
+
+func (i *rollbackDeadlockTestInjector) InjectStartDelay(*BackfillRequestHandler) {}
+
+func (i *rollbackDeadlockTestInjector) InitVbDelayInjection(*BackfillRequestHandler) {}
+
+func (i *rollbackDeadlockTestInjector) InjectVbDelay(*BackfillRequestHandler, uint16) {}
+
+func (i *rollbackDeadlockTestInjector) InjectBeforePersistWait(*BackfillRequestHandler, *ReqAndResp) {
+	select {
+	case <-i.beforePersistWaitEntered:
+	default:
+		close(i.beforePersistWaitEntered)
+	}
+	<-i.releaseBeforePersistWait
+}
+
 func createVBsGetter() MyVBsGetter {
 	var allVBs []uint16
 	var vb uint16
@@ -423,6 +494,135 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert.Equal(2, addCount)
 	assert.Equal(1, delCount)
 	fmt.Println("============== Test case end: TestBackfillReqHandlerCreateReqThenMarkDoneThenDel =================")
+}
+
+// TestBackfillReqHandlerRollbackCbDeadlock is a regression test for a deadlock where
+// BackfillRequestHandler.HandleBackfillRequest() blocks indefinitely waiting for PersistResponse
+// even after Stop() has been called (closing finCh).
+//
+// Test scenario:
+//  1. Start a BackfillRequestHandler and issue a HandleBackfillRequest() call.
+//  2. The request handler blocks inside metaKvOp, specifically at SetBackfillReplSpec (simulated to block).
+//  3. While blocked, call Stop() on the handler, which closes finCh to signal shutdown.
+//  4. The handler should detect the closed finCh and return from HandleBackfillRequest() promptly,
+//     without waiting indefinitely for the PersistResponse.
+//
+// Expected behavior:
+//  - After Stop() closes finCh, the request goroutine should unwind and return within a short
+//    time (250ms), even though metaKvOp has not yet completed.
+//
+// Deadlock symptom:
+//  - If the handler does not check finCh while waiting for PersistResponse, the request
+//    will remain blocked indefinitely until the persistence operation completes,
+//    causing the test to timeout.
+func TestBackfillReqHandlerRollbackCbDeadlock(t *testing.T) {
+	fmt.Println("============== Test case start: TestBackfillReqHandlerRollbackCbDeadlock =================")
+	defer fmt.Println("============== Test case end: TestBackfillReqHandlerRollbackCbDeadlock =================")
+	logger, backfillReplSvc, bucketTopologySvc, replSpecSvc, srcManIdGetter, getBackfillSpecUpdateStatus, setBackfillSpecUpdateStatus := setupBRHBoilerPlate()
+	setupBucketTopology(bucketTopologySvc, nil)
+	spec := createTestSpec()
+	seededBackfillSpec := createRollbackDeadlockBackfillSpec(spec, 1)
+	backfillReplSvc.On("BackfillReplSpec", spec.Id).Return(seededBackfillSpec, nil)
+
+	persistEnteredCh := make(chan struct{})
+	releasePersistCh := make(chan struct{})
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Return(func(_ *metadata.BackfillReplicationSpec) error {
+		select {
+		case <-persistEnteredCh:
+		default:
+			close(persistEnteredCh)
+		}
+		<-releasePersistCh
+		return nil
+	})
+
+	injector := &rollbackDeadlockTestInjector{
+		beforePersistWaitEntered: make(chan struct{}),
+		releaseBeforePersistWait: make(chan struct{}),
+	}
+
+	rh := NewCollectionBackfillRequestHandler(logger, spec.Id, backfillReplSvc, spec, createSeqnoGetterFunc(100),
+		500*time.Millisecond, createVBDoneFunc(), createSeqno2GetterFunc(500), nil, nil,
+		bucketTopologySvc, completeGetter(nil), replSpecSvc,
+		srcManIdGetter, getBackfillSpecUpdateStatus, setBackfillSpecUpdateStatus)
+	rh.BackfillRequestHandlerInjector = injector
+	if err := rh.Start(); err != nil {
+		t.Fatalf("BackfillRequestHandler.Start() failed: %v", err)
+	}
+
+	requestDoneCh := make(chan error, 1)
+	go func() {
+		requestDoneCh <- rh.HandleBackfillRequest(internalRollbackTo0Req{vbno: 1}, "line489Race")
+	}()
+
+	select {
+	case <-persistEnteredCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("setup: timed out waiting for run() to enter metaKvOp")
+	}
+
+	select {
+	case <-injector.beforePersistWaitEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("setup: timed out waiting for request goroutine to reach pre-line489 hook")
+	}
+
+	stopDoneCh := make(chan struct{})
+	go func() {
+		rh.Stop()
+		close(stopDoneCh)
+	}()
+
+	select {
+	case <-rh.finCh:
+		// Stop() closes finCh before waiting for run() to exit.
+	case <-time.After(3 * time.Second):
+		t.Fatal("setup: timed out waiting for Stop() to close finCh")
+	}
+
+	close(injector.releaseBeforePersistWait)
+
+	deadlockedAtPersistWait := false
+	var firstReturnErr error
+	var firstReturnSeen bool
+	select {
+	case err := <-requestDoneCh:
+		firstReturnSeen = true
+		firstReturnErr = err
+	case <-time.After(250 * time.Millisecond):
+		deadlockedAtPersistWait = true
+	}
+
+	close(releasePersistCh)
+
+	select {
+	case <-stopDoneCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cleanup: timed out waiting for Stop() to return after releasing persistence")
+	}
+
+	if deadlockedAtPersistWait {
+		select {
+		case err := <-requestDoneCh:
+			t.Fatalf("DEADLOCK DETECTED: after Stop() closed finCh, request goroutine remained blocked at backfill_request_handler.go:489 waiting on PersistResponse. It only unwound after forcing persistence release. returnedErr=%v", err)
+		case <-time.After(3 * time.Second):
+			t.Fatal("DEADLOCK DETECTED: request goroutine stayed blocked at line 489 and did not unwind even after persistence release")
+		}
+	}
+
+	if !firstReturnSeen {
+		select {
+		case err := <-requestDoneCh:
+			firstReturnSeen = true
+			firstReturnErr = err
+		case <-time.After(3 * time.Second):
+			t.Fatal("cleanup: timed out waiting for request goroutine to return")
+		}
+	}
+
+	if firstReturnErr != nil && firstReturnErr != errorStopped {
+		t.Fatalf("request returned unexpected error: %v", firstReturnErr)
+	}
 }
 
 func TestBackfillHandlerExplicitMapChange(t *testing.T) {

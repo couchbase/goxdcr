@@ -43,3 +43,8 @@ func (i *BackfillReqHandlerProdInjector) InitVbDelayInjection(b *BackfillRequest
 func (i *BackfillReqHandlerProdInjector) InjectVbDelay(*BackfillRequestHandler, uint16) {
 	// no-op
 }
+
+func (i *BackfillReqHandlerProdInjector) InjectBeforePersistWait(*BackfillRequestHandler, *ReqAndResp) {
+	// no-op
+}
+
