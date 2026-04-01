@@ -635,7 +635,7 @@ func TestSpecMetadataCache(t *testing.T) {
 func TestAddReplicationSpecWhenRefreshNotReady(t *testing.T) {
 	assert := assert.New(t)
 
-	fmt.Println("============== Test case start: TestAddReplicationSpecAndVerifyFunc =================")
+	fmt.Println("============== Test case start: TestAddReplicationSpecWhenRefreshNotReady =================")
 	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		utilitiesMock, replSpecSvc,
 		_, _, _, _, clientMock, backfillReplSvc := setupBoilerPlate()
@@ -651,16 +651,16 @@ func TestAddReplicationSpecWhenRefreshNotReady(t *testing.T) {
 		Settings:         metadata.DefaultReplicationSettings(),
 	}
 
-	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false), false)
+	_, _, _, errMap, err, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false), false)
 	assert.Len(errMap, 0)
-
+	assert.Error(err, RefreshNotEnabledYet.Error())
 	assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))
 	checkRep, checkErr := replSpecSvc.ReplicationSpec(spec.Id)
 	assert.Nil(checkErr)
 	// We created with a 0 revision, metakv returns a 1
 	assert.NotEqual(checkRep.Revision, checkRep.Settings.Revision)
 
-	fmt.Println("============== Test case end: TestAddReplicationSpecAndVerifyFunc =================")
+	fmt.Println("============== Test case end: TestAddReplicationSpecWhenRefreshNotReady =================")
 }
 
 func TestValidPrivateEndpointsSetup(t *testing.T) {

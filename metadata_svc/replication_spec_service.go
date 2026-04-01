@@ -799,11 +799,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 	}
 	targetClusterRef, errTargetClusterRef := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
 	if errTargetClusterRef != nil {
-		// In this case an error is reported only when the agent is not yet initialized.
-		// It is ok to skip the appendGoMaxProcsWarnings and unblock the function. Hence move ahead.
-		service.logger.Errorf("Failed to fetch remote cluster ref for %v - skip checking GoMaxProcs and nozzles warnings", targetCluster)
-		errorMap[base.PlaceHolderFieldKey] = errTargetClusterRef
-		return nil
+		service.logger.Errorf("Failed to fetch remote cluster ref for %v", targetCluster)
+		return errTargetClusterRef
 	}
 
 	// Guardrail for CNG Phase 1
