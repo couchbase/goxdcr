@@ -1942,6 +1942,22 @@ function dumpDebugInfoBeforeExit {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		mkdir -p "testOutput"
 		testOutputDir=$(realpath "testOutput")
+
+		# Vagrant: run cbcollect_info (captures all logs) and skip individual log gathering
+		if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+			local zipFileName="cbCollect_${clusterName}.zip"
+			local vagrantHostDir
+			vagrantHostDir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../vagrant" 2>/dev/null && pwd)"
+			vagrantRunCbCollectInfo "$clusterName" "$zipFileName"
+			if [[ -f "${vagrantHostDir}/${zipFileName}" ]]; then
+				mv "${vagrantHostDir}/${zipFileName}" "${testOutputDir}/${zipFileName}"
+				echo "Moved ${zipFileName} to ${testOutputDir}"
+			else
+				echo "WARNING: Expected cbcollect output ${vagrantHostDir}/${zipFileName} not found"
+			fi
+			continue
+		fi
+
 		getGoroutinesStack "$clusterName" >${testOutputDir}/node${clusterName}_pprof.log
 		getGoHeap "$clusterName" >${testOutputDir}/node${clusterName}_hprof.log
 		getPrometheusStats "$clusterName" >${testOutputDir}/node${clusterName}_xdcrPrometheus.log

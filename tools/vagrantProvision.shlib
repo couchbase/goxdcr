@@ -44,6 +44,7 @@ VSSH_NOHUP[3]="vagrant ssh node4 -- "
 VSSH_NOHUP[4]="vagrant ssh node5 -- "
 
 MAX_NETWORK_FAULT_PERCENTAGE=8
+VAGRANT_CBCOLLECT_TIMEOUT_SECS=600
 
 # vscp from local to a node
 function vscp {
@@ -556,6 +557,27 @@ function vagrantGrepForPanicAll {
 	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
 		vagrantGrepForPanic $i
 	done
+}
+
+# Runs cbcollect_info on a vagrant node via SSH.
+# $1 - clusterName (e.g. "C1")
+# $2 - output filename (e.g. "cbCollect_C1.zip"), written to /vagrant/ inside the VM
+function vagrantRunCbCollectInfo {
+	local clusterName=$1
+	local outputFileName=$2
+	local idx
+	local cmd
+
+	idx="$(getClusterIdx "$clusterName")"
+
+	echo "Running cbcollect_info on vagrant node ${clusterName} (idx ${idx}) -> /vagrant/${outputFileName} ..."
+	cmd="${VSSH[$idx]} \"sudo timeout ${VAGRANT_CBCOLLECT_TIMEOUT_SECS} /opt/couchbase/bin/cbcollect_info /vagrant/${outputFileName}\""
+	eval $cmd
+	if (($? != 0)); then
+		echo "WARNING: cbcollect_info failed or timed out on vagrant node ${clusterName}"
+	else
+		echo "cbcollect_info completed on vagrant node ${clusterName}"
+	fi
 }
 
 function vagrantLoadCerts {
