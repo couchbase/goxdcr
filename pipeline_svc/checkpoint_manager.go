@@ -2805,7 +2805,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			ckmgr.cachedBrokenMap.lock.RUnlock()
 			ckmgr.cachedBrokenMap.lock.Lock()
 			// Updates will occur and need to log the differences on UI
-			olderMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+			olderMapRO := ckmgr.cachedBrokenMap.brokenMap.Clone()
 			// No need to re-check because OnEvent() is serialized
 			// First, absorb any new broken mappings (case 1 and 2)
 			ckmgr.cachedBrokenMap.brokenMap.Consolidate(routingInfo.BrokenMap)
@@ -2830,7 +2830,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
 				ckmgr.cachedBrokenMap.correspondingTargetManifest = routingInfo.TargetManifestId
 				// As part of bumping, save the pre-bumped manifest - brokenMap pair
-				ckmgr.cachedBrokenMap.brokenMapHistories[oldManifestIdToRecord] = olderMap
+				ckmgr.cachedBrokenMap.brokenMapHistories[oldManifestIdToRecord] = olderMapRO.Clone()
 			} else if routingInfo.TargetManifestId == ckmgr.cachedBrokenMap.correspondingTargetManifest {
 				// remove the broken mappings
 				ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(routingInfo.BackfillMap)
@@ -2841,7 +2841,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			ckmgr.wait_grp.Add(2)
 			// Can do this in the background - manifest updates usually don't happen too often
 			// to warrant a serializer
-			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
+			go ckmgr.logBrokenMapUpdatesToUI(olderMapRO, newerMap)
 			// Just in case checkpoint operations may use this, ensure that this belongs
 			go ckmgr.preUpsertBrokenMapTask(newerMap)
 			go ckmgr.updateReplStatusBrokenMap()
@@ -3148,7 +3148,7 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 	ckmgr.cachedBrokenMap.lock.Lock()
 	defer ckmgr.cachedBrokenMap.lock.Unlock()
 
-	oldMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	oldMapRO := ckmgr.cachedBrokenMap.brokenMap.Clone()
 	oldTargetManifestId := ckmgr.cachedBrokenMap.correspondingTargetManifest
 
 	if latestTgtManifestId > oldTargetManifestId {
@@ -3159,7 +3159,7 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 		// pair.Removed means these mappings no longer exist and are obsolete, and should be cleaned up too
 		ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Removed)
 		// As part of bumping, save the pre-bumped manifest - brokenMap pair
-		ckmgr.cachedBrokenMap.brokenMapHistories[oldTargetManifestId] = oldMap
+		ckmgr.cachedBrokenMap.brokenMapHistories[oldTargetManifestId] = oldMapRO.Clone()
 	} else if oldTargetManifestId == latestTgtManifestId {
 		// This can happen in 2 cases
 		// 1. A router event updated the manifest+brokenMappings even before this function call
@@ -3198,7 +3198,7 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 		// Only repaired should be logged
 		// Things that are removed due to things being removed should not be logged
 		ckmgr.wait_grp.Add(1)
-		go ckmgr.logBrokenMapUpdatesToUI(oldMap, newerMap)
+		go ckmgr.logBrokenMapUpdatesToUI(oldMapRO, newerMap)
 	}
 }
 
