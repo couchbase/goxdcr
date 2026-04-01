@@ -62,6 +62,7 @@ declare -A BUCKET_PROPERTIES_OUTPUT_MAP
 declare -A BUCKET_REPL_PROPERTIES_MAP
 declare -A BUCKET_REPL_PROPERTIES_OUTPUT_MAP
 declare -A BUCKET_REPL_EXPORT_MAP
+declare -A BUCKET_DELETED_REPL_MAP
 declare -A CLUSTER_DEPENDENCY_MAP
 declare -A CLUSTER_ENCRYPTION_LEVEL_MAP
 declare -A NODE_CERT_MAP
@@ -313,7 +314,9 @@ function insertBucketReplIntoExportMap {
 	local replRestID=$5
 
 	BUCKET_REPL_EXPORT_MAP["${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"]=${replRestID}
+	unset BUCKET_DELETED_REPL_MAP["${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"]
 	export BUCKET_REPL_EXPORT_MAP
+	export BUCKET_DELETED_REPL_MAP
 }
 
 function getBucketReplicationRestID {
@@ -2086,6 +2089,8 @@ function deleteBucketReplication {
 			$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
 			return
 		fi
+
+		BUCKET_DELETED_REPL_MAP["$replKey"]=1
 	done
 
 	echo "Unable to find replication from exported data to delete $sourceClusterReq $sourceBucketReq to $targetClusterReq $targetBucketReq"
@@ -2093,10 +2098,12 @@ function deleteBucketReplication {
 }
 
 function cleanupBucketReplications {
-	# Certain functions only exist under test library
-	[[ $(type -t killAllBgJobs) == function ]] && killAllBgJobs
-
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local deleted=${BUCKET_DELETED_REPL_MAP["$replKey"]:-}
+		if [[ -n ${deleted} ]]; then
+			continue
+		fi
+
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
 		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
 		local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
@@ -2104,15 +2111,31 @@ function cleanupBucketReplications {
 		local sourceBucket=$(echo "$replKey" | cut -d, -f2)
 		local targetCluster=$(echo "$replKey" | cut -d, -f3)
 		local targetBucket=$(echo "$replKey" | cut -d, -f4)
+		local oldInstanceCnt
 
-		if [[ $(type -t waitForOneReplicationToBeDeleted) == function ]]; then
-			waitForOneReplicationToBeDeleted "$sourceCluster" "$sourceBucket" "$targetBucket" &
-			sleep 2
+		local logs=$(getInternalNodeXdcrLog "$sourceCluster")
+		if (($? != 0)); then
+			echo "Unable to get log for validation of bucket repl cleanup" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
 		fi
+
+		# 2021-11-03T17:44:45.353-07:00 INFO GOXDCR.PipelineMgr: Replication ebf93073d83a1951c6454753536a6eb5/B1/B2's status is finished shutting down
+		oldInstanceCnt=$(echo "$logs" | grep "$PIPELINE_SHUTDOWN_DONE_MSG" | grep -c "$sourceBucket\/$targetBucket")
+
 		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
 		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
+
+		echo "Waiting for deletion of $replKey:  There was originally $oldInstanceCnt shutting down occurances"
+		waitForInternalLogInstance "$sourceCluster" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($oldInstanceCnt + 1))" 2 "$sourceBucket\/$targetBucket"
+		if (($? != 0)); then
+			echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG with buckets "$sourceBucket/$targetBucket" to increase from $oldInstanceCnt by 1" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+
+		BUCKET_DELETED_REPL_MAP["$replKey"]=1
 	done
-	[[ $(type -t waitForBgJobs) == function ]] && waitForBgJobs
 }
 
 function findFileTraverseUp {
@@ -4147,7 +4170,7 @@ function setupXdcrAdminUser {
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X PUT http://localhost:${port}/settings/rbac/users/local/${username} -d password=${password} -d roles=replication_admin
 }
 
-# This function could be slow
+# This function could be slow. Cannot use for vagrant yet.
 function cleanupGoxdcrLogs {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"

@@ -1,0 +1,269 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C2"]=15001 ["C2P"]=15002 ["C2P2"]=15003)
+CLUSTER_NAME_SSLPORT_MAP=(["C1"]=15020 ["C2"]=15021 ["C2P"]=15022 ["C2P2"]=15023)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C2"]=15997 ["C2P"]=15998 ["C2P2"]=15999)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2" ["C2P2"]="C2")
+VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C2"]=15101 ["C2P"]=15102 ["C2P2"]=15103)
+VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C2"]=15201 ["C2P"]=15202 ["C2P2"]=15203)
+VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C2"]=15011 ["C2P"]=15012 ["C2P2"]=15013)
+VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C2"]="192.168.56.3" ["C2P"]="192.168.56.4" ["C2P2"]="192.168.56.5")
+VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C2" ["2"]="C2P" ["3"]="C2P2")
+VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.6" ["C2"]="192.168.56.7" ["C2P"]="192.168.56.8" ["C2P2"]="192.168.56.9")
+VAGRANT_LB_IP="192.168.56.10"
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1" "B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1000)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1000 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Test cases assume vagrant up has already been called
+
+function runDataLoad {
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B2"
+}
+
+# Sets up load balancer config for 18091 port such that goxdcr can bootup the connection.
+# In Capella private links LB, except the 1:1 mapped ports (i.e. alternate ports), traffic to rest of the ports
+# can land on any target cluster node.
+# SSL frontend listeners need to be in TCP mode so that the LB need not have to parse certs during
+# TLS handshake happens. TCP mode means passthrough mode directly to the backend target cluster.
+function setupLBConfigForDefaultMgmtSSLPort {
+	outFile=$1
+	version=$2
+	# This test will input remote reference hostname as LP IP. So ensure that LB:18091
+	# traffic is load-balanced in reach any target cluster node for bootstrapping.
+
+	cat <<EOF >>$outFile
+frontend ns_server_SSL_all_front
+    bind *:18091
+    mode tcp
+    default_backend ns_server_SSL_all_back
+
+backend ns_server_SSL_all_back
+    balance roundrobin
+    mode tcp
+EOF
+	# Add all hosts from VAGRANT_VM_IP_MAP, skip C1 (source cluster) and nodes dependent on C1
+	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
+		# Skip if nodeName is C1 or depends on C1
+		if [[ "$nodeName" == "C1" ]] || [[ "${CLUSTER_DEPENDENCY_MAP[$nodeName]:-}" == "C1" ]]; then
+			continue
+		fi
+		if [[ "$version" == "neo" ]] && [[ "$nodeName" == "C2P2" ]]; then
+			# neo has no fix for MB-69771. Can't setup non-KV node.
+			continue
+		fi
+		cat <<EOF >>$outFile
+    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:18091 check
+EOF
+	done
+	cat <<EOF >>$outFile
+EOF
+}
+
+function runPrivateLinksLikeSetup {
+	local versionToLoad="$1"
+	local setupNeeded=$2
+	local teardownNeeded=$3
+
+	echo "============================================================================"
+	echo "Running XDCR over NLB with SSL only ports (Eg: Capella Private Links) with version $versionToLoad"
+	echo "============================================================================"
+	local haproxyCfg="/tmp/haproxyCfg"
+	local tempCfgFile
+
+	if [[ $setupNeeded -eq 1 ]]; then
+		vagrantRemoveCbServerAll
+		vagrantInstallCBServerAll "$versionToLoad"
+
+		# Node 5 (idx 4) is to be haproxy
+		vagrantRemoveCbServer 4
+		vagrantRemoveHaproxy 4
+		vagrantInstallHaproxy 4
+
+		# Setup a LB which has 1:1 mapping for SSL ports only.
+		# 8091 traffic will land on a random target node.
+		echo "==== Configuring load balancer for alternate SSL ports ===="
+		tempCfgFile=$(mktemp)
+		vagrantCompileHaproxyCfgForSSLPorts $tempCfgFile
+		echo "==== Configuring load balancer for 18091 (default) port ===="
+		setupLBConfigForDefaultMgmtSSLPort $tempCfgFile $versionToLoad
+
+		echo "==== Restarting load balancer for configuration to take effect ===="
+		vscp 4 "$tempCfgFile" "$haproxyCfg"
+		${VSSH[4]} "cat $haproxyCfg | sudo tee -a /etc/haproxy/haproxy.cfg > /dev/null"
+		vagrantRestartHaproxy 4
+
+		echo "==== Setup topologies ===="
+		setupTopologies
+
+		echo "==== Setup multinode target cluster ===="
+		addOneNodeIn "C2P" "C2"
+		sleep 5
+		startRebalancing "C2"
+
+		echo "==== Setup and load certificates ===="
+		sleep 5
+		setupCertsForTesting
+		vagrantLoadCerts
+		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+			setEnableClientCert "$clusterName"
+		done
+
+		echo "==== Setup SSL only alternate addressing on target cluster ===="
+		# remove non-secure alternate ports mapping (only secure mapping like Capella)
+		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+			echo "=== Removing non-secure alternate port for: $clusterName ==="
+			$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=${VAGRANT_LB_IP}&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+		done
+	else
+		echo "==== Set up already done, doing rolling upgrade ===="
+		vagrantInstallCBServerAll "$versionToLoad"
+		# Node 5 (idx 4) is to be haproxy
+		vagrantRemoveCbServer 4
+		vagrantRemoveHaproxy 4
+		vagrantInstallHaproxy 4
+
+		# Setup a LB which has 1:1 mapping for SSL ports only.
+		# 8091 traffic will land on a random target node.
+		echo "==== Configuring load balancer for alternate SSL ports ===="
+		tempCfgFile=$(mktemp)
+		vagrantCompileHaproxyCfgForSSLPorts $tempCfgFile
+		echo "==== Configuring load balancer for 18091 (default) port ===="
+		setupLBConfigForDefaultMgmtSSLPort $tempCfgFile $versionToLoad
+
+		echo "==== Restarting load balancer for configuration to take effect ===="
+		vscp 4 "$tempCfgFile" "$haproxyCfg"
+		${VSSH[4]} "cat $haproxyCfg | sudo tee -a /etc/haproxy/haproxy.cfg > /dev/null"
+		vagrantRestartHaproxy 4
+
+		echo "==== Setup buckets ===="
+		setupBuckets
+	fi
+
+	sleep 20
+	echo "==== Running core part of testing ===="
+
+	echo "==== Data loading ===="
+	runDataLoad
+	sleep 5
+
+	echo "==== Setup strict SSL only firewalls ===="
+	# Set firewall rules for SSL-only ports on all nodes
+	for idx in $(echo ${!VAGRANT_VM_IDX_MAP[@]}); do
+		setupSSLOnlyFirewallSSL $idx
+	done
+	sleep 5
+
+	# Now create the remote cluster references. Use network_type=external and enter
+	# LB's IP as remote reference hostname (i.e. let goxdcr deduce the port required).
+
+	# 1. Test with TLS (no client cert/key)
+	echo "==== 1. Creating TLS remote cluster reference from C1 to C2 ===="
+	local rootCA=${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}
+	${VSSH[0]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/pools/default/remoteClusters -d name=\"C2\" -d hostname=${VAGRANT_LB_IP} -d encryptionType=full -d demandEncryption=1 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW --data-urlencode \"certificate=${rootCA}\" -d network_type=external"
+
+	# Sleep 30 seconds to let refresh take place to ensure it didn't screw up port maps
+	echo "==== Sleeping for 30s and creating replication ===="
+	sleep 30
+	vagrantCreateBucketReplication "C1" "B2" "C2" "B2" DefaultBucketReplProperties
+	echo "==== Validation after 30s ===="
+	sleep 30
+	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B2" "B2" "Main" "Running"
+	vagrantValidatePrometheusChangesLeftIs0 "C1" "B2" "B2" "Main"
+	vagrantValidatePrometheusChangesLeftIs0 "C1" "B2" "B2" "Backfill"
+	echo "==== Cleanup after test 1 ===="
+	cleanupAllFirewall
+	sleep 5
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	sleep 5
+
+	echo "==== Re-setup strict SSL only firewalls ===="
+	# Set firewall rules for SSL-only ports on all nodes
+	for idx in $(echo ${!VAGRANT_VM_IDX_MAP[@]}); do
+		setupSSLOnlyFirewallSSL $idx
+	done
+	sleep 5
+
+	# 2. Test with mTLS
+	echo "==== Creating mTLS remote cluster reference from C1 to C2 ===="
+	local clientCert=$(cat ${CLIENT_CERT_MAP["C2"]})
+	local clientKey=$(cat ${CLIENT_KEY_MAP["C2"]})
+	${VSSH[0]} "curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/pools/default/remoteClusters -d name=\"C2\" -d hostname=${VAGRANT_LB_IP} -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${rootCA}\" --data-urlencode \"clientKey=${clientKey}\" --data-urlencode \"clientCertificate=${clientCert}\" -d network_type=external"
+
+	echo "==== Sleeping for 30s and creating replication ===="
+	sleep 30
+	vagrantCreateBucketReplication "C1" "B2" "C2" "B2" DefaultBucketReplProperties
+	echo "==== Validation after 30s ===="
+	sleep 30
+	vagrantValidatePrometheusPipelineStatusIs1 "C1" "B2" "B2" "Main" "Running"
+	vagrantValidatePrometheusChangesLeftIs0 "C1" "B2" "B2" "Main"
+	vagrantValidatePrometheusChangesLeftIs0 "C1" "B2" "B2" "Backfill"
+	echo "==== Cleanup after test 2 ===="
+	cleanupAllFirewall
+	sleep 5
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	echo "============================================================================"
+	echo "$versionToLoad PASSED"
+	echo "============================================================================"
+	cleanupBuckets
+	sleep 5
+
+	if [[ $versionToLoad == "neo" ]]; then
+		# neo doesn't support non-KV nodes for the test, but rest of
+		# them do. Add C2P2 as a non-KV node for other tests.
+		echo "==== Add non-KV node for later version tests ===="
+		addOneNodeIn "C2P2" "C2" "backup"
+		sleep 5
+		startRebalancing "C2"
+		sleep 5
+	fi
+
+	if [[ $teardownNeeded -eq 1 ]]; then
+		echo "==== Final cleanup ===="
+		vagrantRemoveHaproxy 4
+		unset VAGRANT_LB_IP
+	fi
+}
+
+# If the test failed, ensure that firewalls are cleaned up in the vagrant boxes
+# to aid live and manual debugging.
+trap cleanupAllFirewall EXIT
+
+# Source cluster:
+#	1 KV node
+# Target cluster:
+#	neo: 2 KV nodes (no fix for MB-69771)
+#	rest: 2 KV nodes + 1 backup nodes
+function runTestCase {
+	runPrivateLinksLikeSetup "neo" 1 0 &&
+		runPrivateLinksLikeSetup "trinity" 0 0 &&
+		runPrivateLinksLikeSetup "morpheus" 0 0 &&
+		runPrivateLinksLikeSetup "totoro" 0 1
+}

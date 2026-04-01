@@ -101,6 +101,7 @@ function vagrantUp {
 	echo "==== Found ${#nodeNames[@]} node(s) in Vagrantfile: ${nodeNames[*]} ===="
 
 	# Bring up each node sequentially
+	local i=0
 	for nodeName in "${nodeNames[@]}"; do
 		echo "==== Bringing up $nodeName ===="
 		vagrant up "$nodeName"
@@ -109,6 +110,9 @@ function vagrantUp {
 			exit 1
 		fi
 		echo "==== Successfully brought up $nodeName ===="
+
+		cleanupFirewall $i
+		i=$((i + 1))
 	done
 
 	echo "==== All nodes are up ===="
@@ -380,6 +384,14 @@ function vagrantInstallJq {
 function vagrantInstallNtp {
 	local i=$1
 	vagrantAptInstall $i "ntp"
+
+	# Restart and ensure NTP is enabled.
+	sleep 5
+	echo "==== Restarting and enabling NTP ===="
+	${VSSH[$i]} "sudo systemctl restart ntp"
+	${VSSH[$i]} "sudo systemctl enable ntp"
+	sleep 5
+	echo "==== Done restarting and enabling NTP ===="
 }
 
 function vagrantInstallLibInfo {
@@ -434,29 +446,28 @@ function vagrantRestartHaproxy {
 	eval $cmd
 }
 
+# vagrantCompileHaproxyCfg configures LB with 1:1 mapping for both SSL and non-SSL KV and mgmt ports.
+# SSL frontend listeners need to be in TCP mode so that the LB need not have to parse certs during
+# TLS handshake. TCP mode means passthrough mode, directly to the backend target cluster, where LB
+# will not verify any certs (neither does it has a capacity to).
 function vagrantCompileHaproxyCfg {
+	local outFile=$1
+
+	vagrantCompileHaproxyCfgForNonSSLPorts $outFile
+	vagrantCompileHaproxyCfgForSSLPorts $outFile
+}
+
+# vagrantCompileHaproxyCfgForSSLPorts configures LB to have 1:1 mapping with
+# 	1. LB:alternateKvSSLPort to CBNode:11207
+# 	2. LB:alternateMgmtSSLPort to CBNode:18091
+# (i.e. SSL data server and cluster manager ports)
+function vagrantCompileHaproxyCfgForSSLPorts {
 	local outFile=$1
 	local nodeName
 	local labelName
 	local deployedPort
 
-	# First create sections for ns_server non-SSL port
-	labelName="ns_server"
-	deployedPort="8091"
-	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
-		cat <<EOF >>$outFile
-frontend ${nodeName}_${labelName}_front
-    bind *:${CLUSTER_NAME_PORT_MAP[$nodeName]}
-    default_backend ${nodeName}_${labelName}_back
-
-backend ${nodeName}_${labelName}_back
-    balance roundrobin
-    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
-
-EOF
-	done
-
-	# ns_server SSL
+	# mgmtSSL ports - 1:1 mapping
 	labelName="ns_serverTLS"
 	deployedPort="18091"
 	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
@@ -474,7 +485,52 @@ backend ${nodeName}_${labelName}_back
 EOF
 	done
 
-	# KV
+	# kvSSL ports - 1:1 mapping
+	labelName="kvSSL"
+	deployedPort="11207"
+	for nodeName in $(echo ${!VAGRANT_KV_EXTERNAL_MAP[@]}); do
+		cat <<EOF >>$outFile
+frontend ${nodeName}_${labelName}_front
+    bind *:${VAGRANT_KVSSL_EXTERNAL_MAP[$nodeName]}
+    mode tcp
+    default_backend ${nodeName}_${labelName}_back
+
+backend ${nodeName}_${labelName}_back
+    balance roundrobin
+    mode tcp
+    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
+}
+
+# vagrantCompileHaproxyCfgForNonSSLPorts configures LB to have 1:1 mapping with
+# 	1. LB:alternateKvPort to CBNode:11210
+# 	2. LB:alternateMgmtPort to CBNode:8091
+# (i.e. non-SSL data server and cluster manager ports)
+function vagrantCompileHaproxyCfgForNonSSLPorts {
+	local outFile=$1
+	local nodeName
+	local labelName
+	local deployedPort
+
+	# mgmt ports - 1:1 mapping
+	labelName="ns_server"
+	deployedPort="8091"
+	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
+		cat <<EOF >>$outFile
+frontend ${nodeName}_${labelName}_front
+	bind *:${CLUSTER_NAME_PORT_MAP[$nodeName]}
+	default_backend ${nodeName}_${labelName}_back
+
+backend ${nodeName}_${labelName}_back
+	balance roundrobin
+	server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
+
+	# kv ports - 1:1 mapping
 	labelName="kv"
 	deployedPort="11210"
 	for nodeName in $(echo ${!VAGRANT_KV_EXTERNAL_MAP[@]}); do
@@ -486,24 +542,6 @@ frontend ${nodeName}_${labelName}_front
 backend ${nodeName}_${labelName}_back
    balance roundrobin
    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
-
-EOF
-	done
-
-	# KVSSL
-	labelName="kvSSL"
-	deployedPort="11207"
-	for nodeName in $(echo ${!VAGRANT_KV_EXTERNAL_MAP[@]}); do
-		cat <<EOF >>$outFile
- frontend ${nodeName}_${labelName}_front
-    bind *:${VAGRANT_KVSSL_EXTERNAL_MAP[$nodeName]}
-    mode tcp
-    default_backend ${nodeName}_${labelName}_back
-
- backend ${nodeName}_${labelName}_back
-    balance roundrobin
-    mode tcp
-    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
 
 EOF
 	done
@@ -580,6 +618,10 @@ function vagrantRunCbCollectInfo {
 	fi
 }
 
+# If this function had an error like "CA certificate for this chain is not found in the list of trusted CA's"
+# while uploading node certs (eventhough CA cert is uploaded), check ns_server.debug.log. One reason
+# for it to happen has that vagarant node time wasn't synced by NTP and hence the cert(s) were rejected as
+# expired (ns_server.debug.log will have: Chain validation failed with root cert #1: {bad_cert,{cert_expired,...).
 function vagrantLoadCerts {
 	local idx
 	local caKey
@@ -593,49 +635,37 @@ function vagrantLoadCerts {
 		idx="$(getClusterIdx "$clusterName")"
 		vagrantLoadCertToNode "$idx" "$clusterName"
 	done
-
-	# For load balancer, ensure the load balancer itself has all the CAs too
-	if [[ -n "${VAGRANT_LB_IP:-}" ]]; then
-		idx="4" # TODO make this a variable
-		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-			vagrantLoadCertToNode "$idx" "$clusterName"
-		done
-	fi
 }
 
+# vagrantLoadCertToNode sets up CA certs and node certs accross the topology.
+# Note that the CA certs need not be loaded into the OS's (eg: Ubuntu in our case)
+# trust store for XDCR to work. This is because system's trust store is nowhere
+# used to establish secure connection in XDCR. CA certificate of the target
+# cluster is manually input when creating remote cluster reference and it is used
+# to verify target cluster's authenticity (and not the CA certs in system trust store).
 function vagrantLoadCertToNode {
 	local idx="$1"
 	local clusterName="$2"
-	local caKey
-
-	# First tell the Ubuntu to trust the certificate authority
-	for caKey in $(echo ${!NODE_CA_MAP[@]}); do
-		echo "${CLUSTER_ROOT_CERTIFICATE_MAP["$caKey"]}" >/tmp/selfSignedCA.pem
-		vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/"
-		${VSSH[$idx]} "sudo mv /tmp/selfSignedCA.pem /usr/local/share/ca-certificates/${caKey}_root.crt"
-		vscp "$idx" "${NODE_CA_MAP[$caKey]}" "/tmp/ca.pem"
-		${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/${caKey}_node.crt"
-	done
-	#vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/ca.pem"
-	#${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/selfSignedCA.crt"
-
-	${VSSH[$idx]} "sudo update-ca-certificates"
+	echo "==== Setting up certs for node(($idx + 1)) of cluster $2 ===="
 
 	# Copy chain file
+	echo "==== Copying CA certs ===="
 	${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
-	# Vagrant scp does not have root priviledge
-	# TODO - see if this helps
 	vscp "$idx" "${CLUSTER_ROOT_CERTIFICATE_LOCATION[$clusterName]}" "/tmp/ca.pem"
-	#CLUSTER_ROOT_KEY_LOCATION["$dependentNodeName"]="$(PWD)/ca.key"
-	${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
+	echo "==== Loading CA certs ===="
+	${VSSH[$idx]} "curl -v -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
 
 	# Copy the node certs and then reload it
+	echo "==== Copying node certs ===="
 	vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
 	${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
 	vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
 	${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
 	${VSSH[$idx]} "sudo chmod a+r /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
-	${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/node/controller/reloadCertificate -u $DEFAULT_ADMIN:$DEFAULT_PW"
+	echo "==== Loading node certs to vagrant node(($idx + 1)) ===="
+	${VSSH[$idx]} "curl -v -X POST http://127.0.0.1:8091/node/controller/reloadCertificate -u $DEFAULT_ADMIN:$DEFAULT_PW"
+
+	echo "==== Done setting up certs for node(($idx + 1)) of cluster $2 ===="
 }
 
 function vagrantDelAlternateAddress {
@@ -986,13 +1016,24 @@ function vagrantValidatePrometheusPipelineStatusIs1 {
 	local idx="$(getClusterIdx "$node")"
 	local output
 	local prometheusOut
-	local tmpFile="/tmp/vagrantPrometheusOut"
 
 	local idx="$(getClusterIdx "$node")"
-
 	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
 	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
 	validatePrometheusPipelineStatusIs1Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$statusType" "$prometheusOut"
+}
+
+function vagrantValidatePrometheusChangesLeftIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local pipelineType=$4
+	local idx="$(getClusterIdx "$node")"
+	local prometheusOut
+
+	prometheusOut=$(${VSSH[$idx]} "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9998/_prometheusMetrics")
+	prometheusOut=$(echo "$prometheusOut" | tr -d '\r')
+	validatePrometheusChangesLeftIs0Internal "$sourceBucket" "$targetBucket" "$pipelineType" "$prometheusOut"
 }
 
 function vagrantGetNodeIPsFromVagrantfile {
@@ -1190,4 +1231,85 @@ function vagrantUninjectNetworkFault {
 	done
 
 	echo "==== Network fault removal completed on $clusterName ($nodeName) ===="
+}
+
+# setupSSLOnlyFirewallSSL is a helper function to set firewall rules for SSL-only ports
+# Use it when a vagrant test should follow principle of least privilige.
+# Use "sudo ufw status verbose" to view the firewall status.
+function setupSSLOnlyFirewallSSL {
+	local nodeIdx=$1
+	echo "Setting up SSL only firewall for node$nodeIdx"
+	# Also allow SSH and SCP to run the tests.
+	local allowedPorts=(18091 11207 22)
+	# Enable ufw and allow only SSL ports
+	${VSSH[$nodeIdx]} "sudo ufw --force reset && sudo ufw default deny incoming && sudo ufw default allow outgoing"
+	for port in "${allowedPorts[@]}"; do
+		${VSSH[$nodeIdx]} "sudo ufw allow ${port}/tcp"
+	done
+	${VSSH[$nodeIdx]} "sudo ufw --force enable"
+	echo "Done setting up SSL only firewall for node$nodeIdx"
+}
+
+# Helper function to cleanup firewall rules to default (allow all)
+function cleanupFirewall {
+	local nodeIdx=$1
+	echo "==== Cleaning up firewall for node$(($nodeIdx + 1)) ===="
+	${VSSH[$nodeIdx]} "sudo ufw --force reset"
+	echo "==== Done cleaning up firewall for node$(($nodeIdx + 1)) ===="
+}
+
+function cleanupAllFirewall {
+	echo "==== Cleaning up all firewall rules ===="
+	for idx in $(echo ${!VAGRANT_VM_IDX_MAP[@]}); do
+		cleanupFirewall $idx
+	done
+	echo "==== Done leaning up all firewall rules ===="
+}
+
+function vagrantCreateBucketReplication {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+	local -a replProperties=$5
+	local i
+
+	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]] || [[ -z "${replProperties}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+
+	echo "==== Creating bucket replication $sourceCluster.$sourceBucket -> $targetCluster.$targetBucket on vagrant ===="
+	insertPropertyIntoBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket $replProperties
+	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
+
+	getBucketReplPropertiesRESTString
+	local idx="$(getClusterIdx "$sourceCluster")"
+
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		local props="${getBucketReplOutArr[@]}"
+		local cmd="curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket ${props}"
+		repId=$(${VSSH[$idx]} "${cmd}")
+		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)) && (($(echo "$repId" | grep -c "kv vb map is empty") == 0)) && (($(echo "$repId" | grep -c "Unable to send to the following nodes") == 0)))); then
+			if (($(checkJQ) == 0)); then
+				repIdReal=$(getKeyUsingJQ "$repId" '.id')
+				if [[ "$repIdReal" == "" ]]; then
+					echo "Captured replicationID: $repId"
+				else
+					restFriendlyReplID=$(echo $repIdReal | sed 's|/|%2F|g')
+					echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
+					insertBucketReplIntoExportMap "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "$restFriendlyReplID"
+				fi
+			else
+				echo "Captured replicationID: $repId"
+			fi
+			return 0
+		elif (($i != 2)); then
+			echo "Replication creation returned error code. Will retry in 10 seconds..."
+			sleep 10
+		fi
+	done
+	echo "Error - unable to create replication from $sourceCluster $sourceBucket to $targetCluster $targetBucket"
+	dumpDebugInfoBeforeExit
+	exit 1
 }

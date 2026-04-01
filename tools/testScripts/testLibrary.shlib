@@ -123,9 +123,8 @@ function runDifferFindDifference {
 	local targetCluster=$3
 	local targetBucket=$4
 
-	local retVal
 	runXdcrDiffer "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket"
-	if (($retVal != 0)); then
+	if (($? != 0)); then
 		echo "Differ returned non-0 exit code"
 		dumpDebugInfoBeforeExit
 		exit 1
@@ -136,6 +135,11 @@ function runDifferFindDifference {
 
 # Assumes running test script from this directory
 function getNsServerDir {
+	if [[ "${#VAGRANT_VM_IP_MAP[@]}" -ne 0 ]]; then
+		echo "/opt/couchbase/var/lib/couchbase"
+		return $?
+	fi
+
 	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
 	local couchbaseDir="../../../../../../../"
 	echo "${couchbaseDir}ns_server"
@@ -757,8 +761,12 @@ function getInternalNodeMemcachedLog {
 		return 1
 	fi
 
-	# TODO - memcached log rotates and the filename changes
-	# Vagrant may be harder
+	# memcached log rotates and the filename changes
+	if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		vagrantGetInternalNodeMemcachedLog "$clusterName"
+		return $?
+	fi
+
 	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
 
 	local memcachedLog
@@ -983,7 +991,8 @@ function getInternalNodeHttpAccessLog {
 	cat $httpAccess
 }
 
-# Used only if the log needs to be clean for parsing purposes
+# Used only if the log needs to be clean for parsing purposes.
+# Cannot use for vagrant yet.
 function clearInternalNodeXdcrLog {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
@@ -1025,29 +1034,6 @@ function clearInternalNodeXdcrLog {
 			logValidated=1
 		fi
 	done
-}
-
-function waitForOneReplicationToBeDeleted {
-	local clusterName=$1
-	local srcBucketName=$2
-	local tgtBucketName=$3
-	local currentInstanceCnt=0
-
-	logs=$(getInternalNodeXdcrLog "$clusterName")
-	if ((!$? == 0)); then
-		echo "Unable to get log for validation" >&2
-		exit 1
-	fi
-
-	#	2021-11-03T17:44:45.353-07:00 INFO GOXDCR.PipelineMgr: Replication ebf93073d83a1951c6454753536a6eb5/B1/B2's status is finished shutting down
-	currentInstanceCnt=$(echo "$logs" | grep "$PIPELINE_SHUTDOWN_DONE_MSG" | grep -c "$srcBucketName\/$tgtBucketName")
-	waitForInternalLogInstance "$clusterName" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($currentInstanceCnt + 1))" 2 "$srcBucketName\/$tgtBucketName"
-
-	if ((!$? == 0)); then
-		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG with buckets "$srcBucketName/$tgtBucketName" to increase from $currentInstanceCnt by 1" >&2
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
 }
 
 # 1 - cluster name
@@ -2196,7 +2182,6 @@ EOF
 
 		NODE_CERT_MAP["$clusterName"]="$PWD/public/$chainFileName"
 		NODE_KEY_MAP["$clusterName"]="$PWD/private/$pKeyFileName"
-		# TODO: figure out nodeCA map and see what's happening for vagrant
 		NODE_CA_MAP["$clusterName"]="$PWD/ca.pem"
 
 		if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
@@ -3247,6 +3232,31 @@ function validatePrometheusPipelineStatusIs1Internal {
 	fi
 }
 
+function validatePrometheusChangesLeftIs0Internal {
+	local sourceBucket=$1
+	local targetBucket=$2
+	local pipelineType=$3
+	local prometheusOut="$4"
+
+	local count
+	count=$(echo "$prometheusOut" | grep "xdcr_changes_left_total" | grep "pipelineType=\"$pipelineType\"" |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if [[ -z "$count" ]]; then
+		echo "Could not find xdcr_changes_left_total metric for $sourceBucket -> $targetBucket ($pipelineType)"
+		echo "Full prometheus output:"
+		echo "$prometheusOut"
+		exit 1
+	fi
+
+	if (($count != 0)); then
+		echo "Changes left for $sourceBucket -> $targetBucket ($pipelineType) shows $count, expected 0"
+		echo "Full prometheus output:"
+		echo "$prometheusOut"
+		exit 1
+	fi
+}
+
 function validatePrometheusPipelineStatusIs1 {
 	local node=$1
 	local sourceBucket=$2
@@ -3357,6 +3367,17 @@ function vagrantGetInternalNodeLog {
 
 	idx="$(getClusterIdx "$clusterName")"
 	${VSSH[$idx]} "sudo cat $logFile"
+}
+
+# There can be many (rolled over) memcached logs.
+function vagrantGetInternalNodeMemcachedLog {
+	local clusterName=$1
+	local idx
+
+	idx="$(getClusterIdx "$clusterName")"
+	for memcachedLog in $(${VSSH[$idx]} "sudo ls ${VAGRANT_LOG_DIR} | grep memcached"); do
+		${VSSH[$idx]} "sudo cat ${VAGRANT_LOG_DIR}/${memcachedLog}"
+	done
 }
 
 function vagrantGetPprof {
