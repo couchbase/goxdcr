@@ -488,7 +488,12 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 				return err
 			}
 			b.BackfillRequestHandlerInjector.InjectBeforePersistWait(b, &reqAndResp)
-			return <-reqAndResp.PersistResponse
+			select {
+			case <-b.finCh:
+				return errorStopped
+			case persistErr := <-reqAndResp.PersistResponse:
+				return persistErr
+			}
 		}
 	}
 }
