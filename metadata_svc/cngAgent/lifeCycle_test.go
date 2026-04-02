@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
 	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 	"github.com/couchbase/goxdcr/v8/utils"
@@ -760,8 +761,8 @@ func TestRemoteCngAgent_ReadAfterWrite_KeyNotFound(t *testing.T) {
 	agent, _, metakvMock, _ := createTestRemoteCngAgent()
 	ref := createTestRemoteClusterReference()
 
-	// Setup mock for key not found (nil value)
-	metakvMock.On("Get", ref.Id()).Return([]byte(nil), interface{}(nil), nil)
+	// Setup mock for key not found
+	metakvMock.On("Get", ref.Id()).Return([]byte(nil), interface{}(nil), service_def_real.MetadataNotFoundErr)
 
 	err := agent.readAfterWrite(ref.Id(), ref)
 	assert.Equal(metadata_svc.DeleteAlreadyIssued, err)

@@ -1976,6 +1976,47 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKV() error {
 	return nil
 }
 
+// shouldRefreshCacheOnFailure returns true if the error indicates that the local cache may be
+// stale due to a concurrent modification and should be refreshed from metakv.
+func shouldRefreshCacheOnFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), base.ErrorResourceDoesNotMatch.Error()) ||
+		strings.Contains(err.Error(), service_def.ErrorRevisionMismatch.Error())
+}
+
+// refreshCacheFromMetakv fetches the latest reference from metakv and updates the local cache.
+// This simulates the behaviour of a metakv callback to bring the cache up-to-date when a user-induced
+// operation fails due to a concurrent modification (rev mismatch, key conflict, etc.).
+func (agent *RemoteClusterAgent) RefreshCacheFromMetakv() {
+	agent.refMtx.RLock()
+	key := agent.reference.Id()
+	agent.refMtx.RUnlock()
+
+	value, rev, err := agent.metakvSvc.Get(key)
+	if err != nil {
+		if err == service_def.MetadataNotFoundErr {
+			agent.logger.Warnf("RefreshCacheFromMetakv: reference %s not found in metakv", key)
+			return
+		}
+		agent.logger.Warnf("RefreshCacheFromMetakv: failed to fetch reference %s: %v", key, err)
+		return
+	}
+	ref, err := ConstructRemoteClusterReference(value, rev, false)
+	if err != nil {
+		agent.logger.Warnf("RefreshCacheFromMetakv: failed to construct reference %s: %v", key, err)
+		return
+	}
+
+	agent.refMtx.Lock()
+	agent.oldRef = agent.reference.Clone()
+	agent.reference.LoadFrom(ref)
+	agent.refMtx.Unlock()
+	agent.logger.Infof("RefreshCacheFromMetakv: updated cache for reference %s from metakv", key)
+	agent.callMetadataChangeCb()
+}
+
 func (agent *RemoteClusterAgent) shouldSkipAddressPrefNoLock(rctx *refreshContext) bool {
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
@@ -2428,6 +2469,11 @@ func (agent *RemoteClusterAgent) InitDone() bool {
 	return atomic.LoadUint32(&agent.initDone) > 0
 }
 
+// RemoteClusterSvcInjector provides dev-only injection points for the remote cluster service.
+type RemoteClusterSvcInjector interface {
+	InjectPreSetDelay(logger *log.CommonLogger)
+}
+
 type RemoteClusterService struct {
 	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
@@ -2464,6 +2510,8 @@ type RemoteClusterService struct {
 
 	specsReaderMtx sync.RWMutex
 	specsReader    service_def.ReplicationSpecReader
+
+	devInjector RemoteClusterSvcInjector
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
@@ -2483,6 +2531,7 @@ func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_
 		metakvCbAddMap:       make(map[string]bool),
 		metakvCbSetMap:       make(map[string]bool),
 		metakvCbDelMap:       make(map[string]bool),
+		devInjector:          NewRemoteClusterSvcInjector(),
 	}
 
 	return svc, svc.loadFromMetaKV()
@@ -2722,6 +2771,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 			oldRef, _ := agent.GetReferenceClone(false)
 
 			service.registerSet(newRef.Name())
+			service.devInjector.InjectPreSetDelay(service.logger)
 			*errPtr = agent.UpdateReferenceFrom(newRef, true)
 
 			if *errPtr == nil {
@@ -2746,6 +2796,12 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 					service.uilog_svc.Write(fmt.Sprintf("Unable to SetRemoteCluster given %v to %v, due to %v", refName, newRef.CloneAndRedact(), *errPtr))
 				}
 				service.deregisterSet(newRef.Name())
+
+				// Refresh the agent's cache from metakv since the registerSet suppressed
+				// the metakv callback that would have updated it.
+				if shouldRefreshCacheOnFailure(*errPtr) {
+					agent.RefreshCacheFromMetakv()
+				}
 			}
 		}
 	}
@@ -2779,6 +2835,13 @@ func (service *RemoteClusterService) SetStagedCredentials(refName string, staged
 	if err != nil {
 		service.logger.Errorf("failed to set staging info on remote cluster \"%s\". err=%v", refName, err)
 		service.deregisterSet(refName)
+
+		// Refresh the agent's cache from metakv since the registerSet suppressed
+		// the metakv callback that would have updated it.
+		if shouldRefreshCacheOnFailure(err) {
+			agent.RefreshCacheFromMetakv()
+		}
+
 		if service.uilog_svc != nil {
 			service.uilog_svc.Write(fmt.Sprintf("failed to stage credentials on remote cluster \"%s\" due to %v", refName, err))
 		}

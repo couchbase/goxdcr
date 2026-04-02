@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
 // update updates the local reference cache with the new reference.
@@ -172,9 +173,6 @@ func (agent *RemoteCngAgent) setInitDone() {
 	atomic.StoreUint32(&agent.initDone, 1)
 }
 
-// Darshan TODO: Fix MB-69094
-// To allow the cache to be updated in case a user induced ADD/SET/DEL fails due to rev mismatch or key not found.
-
 // AddOp adds the remote cluster reference to metakv.
 // If successful, it also updates the local reference cache and triggers metadata change callbacks.
 // It returns an error if the add operation fails.
@@ -251,6 +249,34 @@ func (agent *RemoteCngAgent) persistReference(ctx context.Context, op MetakvOp, 
 	return nil
 }
 
+// RefreshCacheFromMetakv fetches the latest reference from metakv and updates the local cache.
+// This simulates the behaviour of a metakv callback to bring the cache up-to-date when a user-induced
+// operation fails due to a concurrent modification (rev mismatch, key conflict, etc.).
+func (agent *RemoteCngAgent) RefreshCacheFromMetakv() {
+	agent.refCache.mutex.RLock()
+	key := agent.refCache.reference.Id()
+	agent.refCache.mutex.RUnlock()
+
+	value, rev, err := agent.services.metakv.Get(key)
+	if err != nil {
+		if err == service_def.MetadataNotFoundErr {
+			agent.logger.Warnf("RefreshCacheFromMetakv: reference %s not found in metakv", key)
+			return
+		}
+		agent.logger.Warnf("RefreshCacheFromMetakv: failed to fetch reference %s: %v", key, err)
+		return
+	}
+	ref, err := metadata_svc.ConstructRemoteClusterReference(value, rev, false)
+	if err != nil {
+		agent.logger.Warnf("RefreshCacheFromMetakv: failed to construct reference %s: %v", key, err)
+		return
+	}
+
+	agent.logger.Infof("RefreshCacheFromMetakv: updated cache for reference %s from metakv", key)
+	agent.refCache.update(ref)
+	agent.callMetadataChangeCb()
+}
+
 // runMetakvOp executes the specified metakv operation (add, set, delete) for the remote cluster reference.
 func (agent *RemoteCngAgent) runMetakvOp(ctx context.Context, op MetakvOp, key string, value []byte, incomingRef *metadata.RemoteClusterReference) error {
 	var err error
@@ -299,24 +325,20 @@ func (agent *RemoteCngAgent) runMetakvOp(ctx context.Context, op MetakvOp, key s
 func (agent *RemoteCngAgent) readAfterWrite(key string, incomingRef *metadata.RemoteClusterReference) error {
 	value, rev, err := agent.services.metakv.Get(key)
 	if err != nil {
-		// Receiving an error from a metakv GET is highly unusual.
-		// ns_server may return a non-200 response in two main cases:
-		// 1. The requested key does not exist i.e. ns_server returns a 404. In this case, the underlying metakv library
-		//    returns "nil" error with value and rev set to nil.
-		// 2. The underlying metakv library sees a 500 status code from ns_server. Given that we do a exponential backoff
-		//    retry, the chances of seeing a persistent 500 after all the retries is extremely rare. In this extremely unlikely case,
-		//    set the revision value on the incomingRef to nil hoping that the revision will be updated in a future metakv callback.
+		// MetadataNotFoundErr indicates that the key does not exist (404 from ns_server).
+		// This can happen when "this" node's metakv sees a delete operation that happened on a peer node
+		// after the previously performed add/set operation.
+		if err == service_def.MetadataNotFoundErr {
+			agent.logger.Warnf("remoteCngAgent.readAfterWrite: reference %s not found in metakv after write", incomingRef.Name())
+			return metadata_svc.DeleteAlreadyIssued
+		}
+		// Receiving a non MetadataNotFoundErr error from a metakv GET is highly unusual.
+		// The underlying metakv library sees a 500 status code from ns_server. Given that we do a exponential backoff
+		// retry, the chances of seeing a persistent 500 after all the retries is extremely rare. In this extremely unlikely case,
+		// set the revision value on the incomingRef to nil hoping that the revision will be updated in a future metakv callback.
 		agent.logger.Warnf("setting revision to nil on reference %s due to metakv GET error: %v", incomingRef.Name(), err)
 		incomingRef.SetRevision(nil)
 		return nil
-	}
-	// A nil value indicates that the key does not exist (404 from ns_server).
-	// This can happen when "this" node's metakv sees a delete operation that happened on a peer node after the previously performed
-	// add/set operation.
-	// In this case we log the incident and return an error to the caller.
-	if value == nil {
-		agent.logger.Warnf("remoteCngAgent.readAfterWrite: reference %s not found in metakv after write", incomingRef.Name())
-		return metadata_svc.DeleteAlreadyIssued
 	}
 
 	// Reconstruct the reference object from the metakv value.

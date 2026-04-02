@@ -12,6 +12,9 @@ package metadata_svc
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +76,29 @@ func (b *BackfillReplServiceDevInjector) InjectRaiseCompleteBackfillDelaySleep(r
 			time.Sleep(90 * time.Second)
 		}
 	}
+}
+
+type RemoteClusterSvcDevInjector struct{}
+
+func NewRemoteClusterSvcInjector() *RemoteClusterSvcDevInjector {
+	return &RemoteClusterSvcDevInjector{}
+}
+
+const remoteClusterRefSetDelayFile = "/tmp/xdcrDevRemoteClusterRefSetDelaySec"
+
+func (r *RemoteClusterSvcDevInjector) InjectPreSetDelay(logger *log.CommonLogger) {
+	data, err := os.ReadFile(remoteClusterRefSetDelayFile)
+	if err != nil {
+		return
+	}
+	delaySec, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || delaySec <= 0 {
+		return
+	}
+	os.Remove(remoteClusterRefSetDelayFile)
+	logger.Warnf("Dev injection: sleeping %d seconds before remote cluster ref SET", delaySec)
+	time.Sleep(time.Duration(delaySec) * time.Second)
+	logger.Warnf("Dev injection: done sleeping, proceeding with SET")
 }
 
 type CollectionsManifestSvcDevInjector struct {

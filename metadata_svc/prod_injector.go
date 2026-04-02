@@ -33,6 +33,17 @@ func (b *BackfillReplServiceProdInjector) InjectRaiseCompleteBackfillDelay(replS
 func (b *BackfillReplServiceProdInjector) InjectRaiseCompleteBackfillDelaySleep(replSpecSvc service_def.ReplicationSpecSvc, logger *log.CommonLogger) {
 }
 
+type RemoteClusterSvcProdInjector struct {
+}
+
+func NewRemoteClusterSvcInjector() *RemoteClusterSvcProdInjector {
+	return &RemoteClusterSvcProdInjector{}
+}
+
+func (r *RemoteClusterSvcProdInjector) InjectPreSetDelay(logger *log.CommonLogger) {
+	// no op
+}
+
 type CollectionsManifestSvcProdInjector struct {
 }
 

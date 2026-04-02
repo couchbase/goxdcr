@@ -23,6 +23,10 @@ type RemoteAgentLifeCycle interface {
 	// DeleteReference clears the reference from the remote agent
 	// If delFromMetaKv is true, the reference is also deleted from metaKV
 	DeleteReference(delFromMetaKv bool) (*metadata.RemoteClusterReference, error)
+	// RefreshCacheFromMetakv fetches the latest reference from metakv and updates the local cache.
+	// This simulates the behaviour of a metakv callback to bring the cache up-to-date when a user-induced
+	// operation fails due to a concurrent modification (rev mismatch, key conflict, etc.).
+	RefreshCacheFromMetakv()
 }
 
 // AgentRefresh defines the refresh related methods of a remote agent

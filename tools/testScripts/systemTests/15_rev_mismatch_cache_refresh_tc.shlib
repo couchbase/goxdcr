@@ -1,0 +1,260 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+# Dev injection: xdcrDevRemoteClusterRefSetDelaySec
+# This test uses a file-based dev injection to introduce a delay in the remote cluster ref SET
+# operation inside RemoteClusterService.SetRemoteCluster (between registerSet and the actual
+# metakv SET). During the delay, the test modifies the remote cluster ref directly in metakv
+# to bump its revision. This causes the subsequent SET to fail with a revision mismatch.
+# The fix (MB-69094) should trigger RefreshCacheFromMetakv to bring the cache back in sync.
+
+DELAY_SEC=15
+DELAY_FILE="/tmp/xdcrDevRemoteClusterRefSetDelaySec"
+
+function getRemoteClusterRefUUID {
+	local source=$1
+	local target=$2
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	$CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW "http://$host:$port/pools/default/remoteClusters" | jq -r ".[] | select(.name == \"$target\") | .uuid"
+}
+
+# Discovers the actual metakv path and base64-encoded value for a remote cluster reference
+# by listing /_metakv/remoteCluster/ and matching on the target cluster UUID.
+# The ns_server _metakv directory listing returns chunked JSON objects, each with:
+#   {"rev":"<b64>","path":"<path>","value":"<b64>","sensitive":<bool>}
+# Sets global variables: DISCOVERED_METAKV_PATH and DISCOVERED_METAKV_B64VALUE
+function discoverRemoteClusterRefMetakv {
+	local clusterName=$1
+	local targetUUID=$2
+	local host=${CLUSTER_NAME_HOST_MAP[$clusterName]:-"127.0.0.1"}
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	DISCOVERED_METAKV_PATH=""
+	DISCOVERED_METAKV_B64VALUE=""
+
+	local entries
+	entries=$($CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW "http://$host:$port/_metakv/remoteCluster/")
+
+	# The chunked response has one JSON object per line.
+	# Find the entry whose base64-decoded value contains the target UUID.
+	while IFS= read -r line; do
+		if [[ -z "$line" ]]; then
+			continue
+		fi
+		local b64val
+		b64val=$(echo "$line" | jq -r '.value // empty' 2>/dev/null)
+		if [[ -z "$b64val" ]] || [[ "$b64val" == "null" ]]; then
+			continue
+		fi
+		local decoded
+		decoded=$(echo "$b64val" | base64 -d 2>/dev/null)
+		if echo "$decoded" | grep -q "$targetUUID"; then
+			DISCOVERED_METAKV_PATH=$(echo "$line" | jq -r '.path // empty' 2>/dev/null)
+			DISCOVERED_METAKV_B64VALUE="$b64val"
+			return 0
+		fi
+	done <<<"$entries"
+
+	return 1
+}
+
+# Bumps the metakv revision by writing a modified value.
+# Writing the SAME value is a no-op in ns_config (update_key_inner compares old
+# and new values), so we append a byte to force a real write and vclock bump.
+# Uses a temp file to avoid shell variable corruption of binary data.
+# The _metakv PUT API takes raw (non-base64) value; responses use base64.
+function bumpMetakvRevision {
+	local clusterName=$1
+	local metakvPath=$2
+	local b64value=$3
+	local host=${CLUSTER_NAME_HOST_MAP[$clusterName]:-"127.0.0.1"}
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	local tmpFile="/tmp/xdcr_test_metakv_value.bin"
+
+	# Decode base64 value to a temp file, then append a byte to make it different.
+	# ns_config:update_key_inner is a no-op when Fun(OldValue) == OldValue, so the
+	# value MUST differ to trigger a vclock bump.
+	echo "$b64value" | base64 -d >"$tmpFile"
+	printf 'x' >>"$tmpFile"
+
+	# PUT the modified value. --data-urlencode value@file reads from the file and URL-encodes it.
+	local httpCode
+	httpCode=$($CURL -s -o /dev/null -w "%{http_code}" -u $DEFAULT_ADMIN:$DEFAULT_PW \
+		"http://$host:$port/_metakv${metakvPath}" \
+		-X PUT --data-urlencode "value@${tmpFile}" -d "sensitive=true")
+
+	rm -f "$tmpFile"
+	echo "metakv PUT returned HTTP $httpCode"
+
+	if [[ "$httpCode" != "200" ]]; then
+		echo "ERROR: metakv PUT failed with HTTP $httpCode"
+		return 1
+	fi
+	return 0
+}
+
+function editRemoteClusterReference {
+	local source=$1
+	local target=$2
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local targetHost=${CLUSTER_NAME_HOST_MAP[$target]:-"127.0.0.1"}
+	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+	$CURL -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW "http://$host:$sourcePort/pools/default/remoteClusters/$target" \
+		-d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running revision mismatch cache refresh test case (MB-69094)"
+	echo "============================================================================"
+
+	trap killAllBgJobs EXIT
+
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+
+	local refUUID
+	refUUID=$(getRemoteClusterRefUUID "C1" "C2")
+	if [[ -z "$refUUID" ]]; then
+		echo "Failed to get remote cluster reference UUID"
+		exit 1
+	fi
+	echo "Remote cluster reference UUID: $refUUID"
+
+	# Discover the actual metakv path and value for the remote cluster reference.
+	# The internal key uses a random ID (e.g. remoteCluster/<randomId>), NOT the cluster UUID.
+	discoverRemoteClusterRefMetakv "C1" "$refUUID"
+	if [[ -z "$DISCOVERED_METAKV_PATH" ]]; then
+		echo "Failed to discover metakv path for remote cluster reference"
+		exit 1
+	fi
+	echo "Discovered metakv path: $DISCOVERED_METAKV_PATH"
+	echo "Discovered metakv b64 value length: ${#DISCOVERED_METAKV_B64VALUE}"
+
+	# Clear XDCR logs before the test so we can check for specific log messages
+	clearInternalNodeXdcrLog "C1"
+	sleep 2
+
+	# Create the dev injection signal file to introduce a delay in the SET operation.
+	echo "$DELAY_SEC" >$DELAY_FILE
+	echo "Created dev injection signal file: $DELAY_FILE with delay ${DELAY_SEC}s"
+
+	# Start the edit operation in the background. This will hit the delay.
+	echo "Starting background edit of remote cluster reference..."
+	editRemoteClusterReference "C1" "C2" &
+	local editPid=$!
+	echo "Edit started in background (PID: $editPid)"
+
+	# Wait for the delay injection to be picked up (the file should be deleted by GOXDCR)
+	local waited=0
+	while [[ -f "$DELAY_FILE" ]] && ((waited < 10)); do
+		sleep 1
+		waited=$((waited + 1))
+	done
+
+	if [[ -f "$DELAY_FILE" ]]; then
+		echo "WARN: Dev injection signal file was not consumed within 10 seconds"
+		rm -f $DELAY_FILE
+	else
+		echo "Dev injection signal file consumed, GOXDCR is now in the delay window"
+	fi
+
+	# During the delay window, modify the remote cluster reference directly in metakv.
+	# Writing the same value back bumps the revision, so when GOXDCR resumes the SET
+	# with the old (cached) revision, metakv will reject it with a revision mismatch.
+	# The metakv callback for this write is suppressed because registerSet is active.
+	echo "Bumping metakv revision by writing a modified value at path: $DISCOVERED_METAKV_PATH ..."
+	bumpMetakvRevision "C1" "$DISCOVERED_METAKV_PATH" "$DISCOVERED_METAKV_B64VALUE"
+	if (($? != 0)); then
+		echo "Failed to bump metakv revision"
+		rm -f $DELAY_FILE
+		wait $editPid 2>/dev/null
+		exit 1
+	fi
+	echo "Metakv write complete, revision should be bumped"
+
+	# Wait for the background edit to complete
+	echo "Waiting for background edit to finish..."
+	wait $editPid
+	local editExitCode=$?
+	echo "Background edit finished with exit code: $editExitCode"
+
+	# Give GOXDCR a moment to process the error and refresh the cache
+	sleep 5
+
+	# Verify: check that RefreshCacheFromMetakv was called (log message present)
+	echo "Checking for RefreshCacheFromMetakv log message..."
+	logs=$(getInternalNodeXdcrLog "C1")
+	refreshCount=$(echo "$logs" | grep -c "RefreshCacheFromMetakv")
+	echo "Found $refreshCount occurrences of RefreshCacheFromMetakv in logs"
+
+	if (($refreshCount == 0)); then
+		echo "ERROR: RefreshCacheFromMetakv was not called after revision mismatch"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+	# Verify: check that the remote cluster reference is still readable and correct
+	echo "Verifying remote cluster reference is still accessible..."
+	local refCount
+	refCount=$(getRemoteCluster "C1" "C2")
+	if (($refCount != 1)); then
+		echo "ERROR: Remote cluster reference C1->C2 is not accessible after revision mismatch (count=$refCount)"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	echo "Remote cluster reference C1->C2 is accessible"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
