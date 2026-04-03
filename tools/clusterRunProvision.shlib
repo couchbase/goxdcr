@@ -340,6 +340,17 @@ function getBucketReplicationRestID {
 	return 1
 }
 
+function resetBucketReplicationTracking {
+	BUCKET_REPL_EXPORT_MAP=()
+	declare -gA BUCKET_REPL_EXPORT_MAP
+
+	BUCKET_DELETED_REPL_MAP=()
+	declare -gA BUCKET_DELETED_REPL_MAP
+
+	export BUCKET_REPL_EXPORT_MAP
+	export BUCKET_DELETED_REPL_MAP
+}
+
 # Input:
 # 1. Source Cluster name
 # 2. Source Bucket name
@@ -2073,6 +2084,7 @@ function deleteBucketReplication {
 	local sourceBucketReq=$2
 	local targetClusterReq=$3
 	local targetBucketReq=$4
+	local found=0
 
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
@@ -2087,11 +2099,15 @@ function deleteBucketReplication {
 			[[ "$targetCluster" == "$targetClusterReq" ]] && [[ "$targetBucket" == "$targetBucketReq" ]]; then
 			echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
 			$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
-			return
+			BUCKET_DELETED_REPL_MAP["$replKey"]=1
+			found=1
+			break
 		fi
-
-		BUCKET_DELETED_REPL_MAP["$replKey"]=1
 	done
+
+	if ((found == 1)); then
+		return 0
+	fi
 
 	echo "Unable to find replication from exported data to delete $sourceClusterReq $sourceBucketReq to $targetClusterReq $targetBucketReq"
 	exit 1
