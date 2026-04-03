@@ -59,7 +59,26 @@ function cleanupTestCaseInternalSettings {
 
 function checkChangesLeftBackup {
 	local ongoingThreshold=60000
-	changesLeft=$(getChangesLeft "C1" "B1" "C2" "B2")
+	local changesLeft
+	local maxRetries=5
+	local retryCount=0
+
+	# Retry loop to handle transient failures in getting stats
+	while (($retryCount < $maxRetries)); do
+		changesLeft=$(getChangesLeft "C1" "B1" "C2" "B2")
+		if [[ -n "${changesLeft:-}" && "$changesLeft" != "null" && "$changesLeft" =~ ^[0-9]+$ ]]; then
+			# Successfully got a valid number
+			break
+		fi
+		retryCount=$(($retryCount + 1))
+		if (($retryCount >= $maxRetries)); then
+			echo "ERROR: Failed to get valid changes_left after $maxRetries retries"
+			return 1
+		fi
+		echo "Retry $retryCount/$maxRetries: Invalid changes_left value '$changesLeft', retrying in 5 seconds..."
+		sleep 5
+	done
+
 	if (($changesLeft > $ongoingThreshold)); then
 		echo "Changes left is $changesLeft above threshold $ongoingThreshold"
 		dumpDebugInfoBeforeExit
