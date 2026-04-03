@@ -136,7 +136,7 @@ function runDifferFindDifference {
 
 # Assumes running test script from this directory
 function getNsServerDir {
-	if [[ "${#VAGRANT_VM_IP_MAP[@]}" -ne 0 ]]; then
+	if [[ -v VAGRANT_VM_IP_MAP && "${#VAGRANT_VM_IP_MAP[@]}" -ne 0 ]]; then
 		echo "/opt/couchbase/var/lib/couchbase"
 		return $?
 	fi
