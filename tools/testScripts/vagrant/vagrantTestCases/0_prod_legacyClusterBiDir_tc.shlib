@@ -124,7 +124,7 @@ function runLegacyCurrentBidir {
 	local maxChangeCnt=3
 	local maxStableCnt=3
 	local coolDownPeriod=1
-	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	setInternalSettingsWithoutImport "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
