@@ -735,6 +735,10 @@ function resetCustomManifestRefreshInterval {
 	local cluster="$1"
 	echo "Cleaning up internal settings"
 	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL"
+	# When re-setting internal settings, XDCR process will restart
+	# Often times tests will delete replication post resetting internal settings
+	# Let goxdcr stablize before continue
+	sleep 15
 }
 
 function getInternalNsServerLogDir {
