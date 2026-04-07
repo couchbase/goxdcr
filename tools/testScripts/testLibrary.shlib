@@ -3233,6 +3233,7 @@ function validatePrometheusPipelineStatusIs1Internal {
 		echo "Pipeline status $sourceBucket $targetBucket $pipelineType $statusType shows 0"
 		echo "Full prometheus output:"
 		echo "$prometheusOut"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -3251,6 +3252,7 @@ function validatePrometheusChangesLeftIs0Internal {
 		echo "Could not find xdcr_changes_left_total metric for $sourceBucket -> $targetBucket ($pipelineType)"
 		echo "Full prometheus output:"
 		echo "$prometheusOut"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -3258,6 +3260,7 @@ function validatePrometheusChangesLeftIs0Internal {
 		echo "Changes left for $sourceBucket -> $targetBucket ($pipelineType) shows $count, expected 0"
 		echo "Full prometheus output:"
 		echo "$prometheusOut"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
