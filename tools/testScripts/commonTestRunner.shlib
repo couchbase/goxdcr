@@ -268,10 +268,6 @@ if ((cngMode == 1)); then
 		echo "ERRO: Failed to build Stellar Gateway" >&2
 		exit 1
 	fi
-
-	generateCNGCerts "C1"
-	generateCNGCerts "C2"
-	generateCNGCerts "C1P0"
 fi
 
 if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestcases" ] && [ "${testCasesDirectory:-}" != "vagrantTestCases" ]; then
@@ -406,6 +402,10 @@ if [[ -z "$testCaseNumber" ]]; then
 
 		. ${testCasesDirectory:-}/$testcase
 
+		if ((cngMode == 1)); then
+			generateCNGCertsBasedOnTestInput
+		fi
+
 		if (($overrideMode == 0)); then
 			echo ""
 			echo "INFO: Running test - ${testCasesDirectory:-}/$testcase"
@@ -453,6 +453,10 @@ else
 
 	echo "INFO: Running test - $testCase"
 	. $testCase
+
+	if ((cngMode == 1)); then
+		generateCNGCertsBasedOnTestInput
+	fi
 
 	if (($overrideMode == 0)); then
 		date

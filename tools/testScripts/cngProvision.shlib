@@ -264,3 +264,15 @@ EOF
 		return 1
 	}
 }
+
+function generateCNGCertsBasedOnTestInput {
+	# Regenerate CNG cert for every one of CLUSTER_NAME_PORT_MAP as well as CLUSTER_DEPENDENCY_MAP
+	for clusterName in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
+		echo "INFO: Generating CNG certs for $clusterName"
+		generateCNGCerts "$clusterName"
+	done
+	for clusterName in "${!CLUSTER_DEPENDENCY_MAP[@]}"; do
+		echo "INFO: Generating CNG certs for $clusterName"
+		generateCNGCerts "$clusterName"
+	done
+}
