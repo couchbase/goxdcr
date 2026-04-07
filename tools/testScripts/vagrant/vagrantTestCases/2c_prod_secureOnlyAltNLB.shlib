@@ -84,6 +84,15 @@ EOF
 EOF
 }
 
+function setupSSLOnlyAlternateAddressing {
+	echo "==== Setup SSL only alternate addressing on target cluster ===="
+	# remove non-secure alternate ports mapping (only secure mapping like Capella)
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		echo "=== Removing non-secure alternate port for: $clusterName ==="
+		$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=${VAGRANT_LB_IP}&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+	done
+}
+
 function runPrivateLinksLikeSetup {
 	local versionToLoad="$1"
 	local setupNeeded=$2
@@ -133,12 +142,7 @@ function runPrivateLinksLikeSetup {
 			setEnableClientCert "$clusterName"
 		done
 
-		echo "==== Setup SSL only alternate addressing on target cluster ===="
-		# remove non-secure alternate ports mapping (only secure mapping like Capella)
-		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-			echo "=== Removing non-secure alternate port for: $clusterName ==="
-			$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=${VAGRANT_LB_IP}&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
-		done
+		setupSSLOnlyAlternateAddressing
 	else
 		echo "==== Set up already done, doing rolling upgrade ===="
 		vagrantInstallCBServerAll "$versionToLoad"
@@ -162,6 +166,8 @@ function runPrivateLinksLikeSetup {
 
 		echo "==== Setup buckets ===="
 		setupBuckets
+
+		setupSSLOnlyAlternateAddressing
 	fi
 
 	sleep 20
@@ -243,6 +249,7 @@ function runPrivateLinksLikeSetup {
 		sleep 5
 		startRebalancing "C2"
 		sleep 5
+		setupSSLOnlyAlternateAddressing
 	fi
 
 	if [[ $teardownNeeded -eq 1 ]]; then
