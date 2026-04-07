@@ -55,6 +55,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running simple collection unidirectional test case"
 	echo "============================================================================"
+	hardResetNodes
 	setupTopologies
 	if (($? != 0)); then
 		exit 1
