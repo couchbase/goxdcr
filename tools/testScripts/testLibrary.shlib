@@ -2150,18 +2150,34 @@ EOF
 				sanIPs[${#sanIPs[@]}]="$VAGRANT_LB_IP"
 			fi
 		else
-			sanIPs[${#sanIPs[@]}]="$(ipconfig getifaddr en0)"
+			local ifName ifAddr alreadyAdded
+			for ifName in $(ifconfig -l | tr ' ' '\n' | grep -E '^en[0-9]+$' | sort -V); do
+				ifAddr="$(ipconfig getifaddr "$ifName" 2>/dev/null || true)"
+				if [[ -z "$ifAddr" ]]; then
+					continue
+				fi
+
+				alreadyAdded=0
+				for sanIP in "${sanIPs[@]}"; do
+					if [[ "$sanIP" == "$ifAddr" ]]; then
+						alreadyAdded=1
+						break
+					fi
+				done
+
+				if ((alreadyAdded == 0)); then
+					sanIPs[${#sanIPs[@]}]="$ifAddr"
+				fi
+			done
 		fi
 
-		local counter=0
-		for sanIP in $(echo ${sanIPs[@]}); do
-			if (($counter == 0)); then
-				echo -n "subjectAltName = IP:${sanIP}" \
-					>>./server.ext.tmp
-			else
-				echo -n ", IP:${sanIP}" >>./server.ext.tmp
-			fi
-			counter=$(($counter + 1))
+		echo "subjectAltName = @alt_names" >>./server.ext.tmp
+		echo "[alt_names]" >>./server.ext.tmp
+
+		local counter=1
+		for sanIP in "${sanIPs[@]}"; do
+			echo "IP.${counter} = ${sanIP}" >>./server.ext.tmp
+			counter=$((counter + 1))
 		done
 		echo "" >>./server.ext.tmp
 
