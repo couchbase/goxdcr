@@ -1602,7 +1602,7 @@ func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defa
 
 // get bucket info
 // a specialized case of GetClusterInfo
-func (u *Utilities) GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (map[string]interface{}, error) {
+func (u *Utilities) GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq, ctx ...*Context) (map[string]interface{}, error) {
 	if req == nil {
 		err := fmt.Errorf("GetBucketInfoReq cannot be nil")
 		return nil, err
@@ -1622,7 +1622,7 @@ func (u *Utilities) GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoRe
 
 	bucketInfo := make(map[string]interface{})
 	bucketInfo[BucketInfoSourceKey] = base.Xmem
-	err, statusCode := u.QueryRestApiWithAuth(req.HostAddr, base.DefaultPoolBucketsPath+req.BucketName, false, req.Username, req.Password, req.HTTPAuthMech, req.Certificate, req.SanInCertificate, req.ClientCertificate, req.ClientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil)
+	err, statusCode := u.QueryRestApiWithAuth(req.HostAddr, base.DefaultPoolBucketsPath+req.BucketName, false, req.Username, req.Password, req.HTTPAuthMech, req.Certificate, req.SanInCertificate, req.ClientCertificate, req.ClientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil, ctx...)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}
@@ -4294,7 +4294,7 @@ func (u *Utilities) ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, 
 }
 
 // GetTerseBucketInfo returns the response of the pools/default/b/<bucketName> endpoint
-func (u *Utilities) GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (u *Utilities) GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, error) {
 	if len(bucketName) == 0 {
 		return nil, fmt.Errorf("bucket name cannot be empty")
 	}
@@ -4302,7 +4302,7 @@ func (u *Utilities) GetTerseBucketInfo(hostAddr, bucketName, username, password 
 
 	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetTerseBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
 	defer stopFunc()
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.BPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.BPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger, nil, ctx...)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
 	}

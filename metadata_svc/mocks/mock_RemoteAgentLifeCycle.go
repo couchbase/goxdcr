@@ -124,6 +124,38 @@ func (_c *RemoteAgentLifeCycle_InitDone_Call) RunAndReturn(run func() bool) *Rem
 	return _c
 }
 
+// RefreshCacheFromMetakv provides a mock function with no fields
+func (_m *RemoteAgentLifeCycle) RefreshCacheFromMetakv() {
+	_m.Called()
+}
+
+// RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshCacheFromMetakv'
+type RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call struct {
+	*mock.Call
+}
+
+// RefreshCacheFromMetakv is a helper method to define mock.On call
+func (_e *RemoteAgentLifeCycle_Expecter) RefreshCacheFromMetakv() *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call {
+	return &RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call{Call: _e.mock.On("RefreshCacheFromMetakv")}
+}
+
+func (_c *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call) Run(run func()) *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call) Return() *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call) RunAndReturn(run func()) *RemoteAgentLifeCycle_RefreshCacheFromMetakv_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Start provides a mock function with given fields: newRef, userInitiated
 func (_m *RemoteAgentLifeCycle) Start(newRef *metadata.RemoteClusterReference, userInitiated bool) error {
 	ret := _m.Called(newRef, userInitiated)

@@ -181,7 +181,7 @@ type UtilsIface interface {
 	BucketUUID(logger *log.CommonLogger, req *GetBucketInfoReq) (string, error)
 	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error)
 	// GetBucketInfo is a wrapper that calls either CNG or non-CNG GetBucketInfo based on the request param FromCNG
-	GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq) (map[string]interface{}, error)
+	GetBucketInfo(logger *log.CommonLogger, req *GetBucketInfoReq, ctx ...*Context) (map[string]interface{}, error)
 	GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error)
 	GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error)
 	RemoteBucketValidationInfo(logger *log.CommonLogger, req *GetBucketInfoReq, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
@@ -216,7 +216,7 @@ type UtilsIface interface {
 	GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger, useExternal bool) (base.StringPairList, error)
 	GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (map[string][]uint16, error)
 	GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger, ctx ...*Context) (base.HttpAuthMech, map[string]interface{}, int, error)
-	GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
+	GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, ctx ...*Context) (map[string]interface{}, error)
 	IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error)
 	ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, hostAddr, bucketName string, useExternal bool, isHttps bool) (bool, error)
 	GetIsRemoteClusterEnterprise(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (bool, error)

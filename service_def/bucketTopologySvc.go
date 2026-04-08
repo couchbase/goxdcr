@@ -55,6 +55,10 @@ type BucketTopologySvc interface {
 
 	// UpdateAllStatsProvidersConnPoolTunables updates the cached tunables and propagates them to all existing stats providers.
 	UpdateAllStatsProvidersConnPoolTunables(settings *metadata.GlobalSettings)
+
+	// GetRemoteDataUsage returns a map of target cluster UUID -> [dataSent, dataReceived]
+	// representing the metadata bytes transferred by bucket watchers for each remote cluster.
+	GetRemoteDataUsage() map[string][]int64
 }
 
 // BucketStatsOps is the interface for the bucket stats operations

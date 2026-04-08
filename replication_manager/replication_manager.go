@@ -980,6 +980,15 @@ func GetAllStatistics() (*expvar.Map, []string, []string, map[string][]int64, er
 		return nil, nil, nil, nil, err
 	}
 
+	// Combine watcher-level data usage into the agent-level data
+	watcherUsages := replication_mgr.bucketTopologySvc.GetRemoteDataUsage()
+	for uuid, usage := range watcherUsages {
+		if existing, ok := dataUsages[uuid]; ok {
+			existing[0] += usage[0]
+			existing[1] += usage[1]
+		}
+	}
+
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
 		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId, replication_mgr.pipelineMgr.ReplicationStatus)

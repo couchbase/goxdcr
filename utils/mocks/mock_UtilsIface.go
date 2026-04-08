@@ -1487,9 +1487,16 @@ func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, str
 	return _c
 }
 
-// GetBucketInfo provides a mock function with given fields: logger, req
-func (_m *UtilsIface) GetBucketInfo(logger *log.CommonLogger, req *utils.GetBucketInfoReq) (map[string]interface{}, error) {
-	ret := _m.Called(logger, req)
+// GetBucketInfo provides a mock function with given fields: logger, req, ctx
+func (_m *UtilsIface) GetBucketInfo(logger *log.CommonLogger, req *utils.GetBucketInfoReq, ctx ...*utils.Context) (map[string]interface{}, error) {
+	_va := make([]interface{}, len(ctx))
+	for _i := range ctx {
+		_va[_i] = ctx[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, logger, req)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetBucketInfo")
@@ -1497,19 +1504,19 @@ func (_m *UtilsIface) GetBucketInfo(logger *log.CommonLogger, req *utils.GetBuck
 
 	var r0 map[string]interface{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, error)); ok {
-		return rf(logger, req)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq, ...*utils.Context) (map[string]interface{}, error)); ok {
+		return rf(logger, req, ctx...)
 	}
-	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq) map[string]interface{}); ok {
-		r0 = rf(logger, req)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *utils.GetBucketInfoReq, ...*utils.Context) map[string]interface{}); ok {
+		r0 = rf(logger, req, ctx...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq) error); ok {
-		r1 = rf(logger, req)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, *utils.GetBucketInfoReq, ...*utils.Context) error); ok {
+		r1 = rf(logger, req, ctx...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1525,13 +1532,21 @@ type UtilsIface_GetBucketInfo_Call struct {
 // GetBucketInfo is a helper method to define mock.On call
 //   - logger *log.CommonLogger
 //   - req *utils.GetBucketInfoReq
-func (_e *UtilsIface_Expecter) GetBucketInfo(logger interface{}, req interface{}) *UtilsIface_GetBucketInfo_Call {
-	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo", logger, req)}
+//   - ctx ...*utils.Context
+func (_e *UtilsIface_Expecter) GetBucketInfo(logger interface{}, req interface{}, ctx ...interface{}) *UtilsIface_GetBucketInfo_Call {
+	return &UtilsIface_GetBucketInfo_Call{Call: _e.mock.On("GetBucketInfo",
+		append([]interface{}{logger, req}, ctx...)...)}
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) Run(run func(logger *log.CommonLogger, req *utils.GetBucketInfoReq, ctx ...*utils.Context)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq))
+		variadicArgs := make([]*utils.Context, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(*utils.Context)
+			}
+		}
+		run(args[0].(*log.CommonLogger), args[1].(*utils.GetBucketInfoReq), variadicArgs...)
 	})
 	return _c
 }
@@ -1541,7 +1556,7 @@ func (_c *UtilsIface_GetBucketInfo_Call) Return(_a0 map[string]interface{}, _a1 
 	return _c
 }
 
-func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
+func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(*log.CommonLogger, *utils.GetBucketInfoReq, ...*utils.Context) (map[string]interface{}, error)) *UtilsIface_GetBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5529,9 +5544,16 @@ func (_c *UtilsIface_GetTLSTrackedTransport_Call) RunAndReturn(run func(*http.Tr
 	return _c
 }
 
-// GetTerseBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger
-func (_m *UtilsIface) GetTerseBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+// GetTerseBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger, ctx
+func (_m *UtilsIface) GetTerseBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, ctx ...*utils.Context) (map[string]interface{}, error) {
+	_va := make([]interface{}, len(ctx))
+	for _i := range ctx {
+		_va[_i] = ctx[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTerseBucketInfo")
@@ -5539,19 +5561,19 @@ func (_m *UtilsIface) GetTerseBucketInfo(hostAddr string, bucketName string, use
 
 	var r0 map[string]interface{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
-		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, ...*utils.Context) (map[string]interface{}, error)); ok {
+		return rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger, ctx...)
 	}
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, ...*utils.Context) map[string]interface{}); ok {
+		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger, ctx...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]interface{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)
+	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, ...*utils.Context) error); ok {
+		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger, ctx...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -5575,13 +5597,21 @@ type UtilsIface_GetTerseBucketInfo_Call struct {
 //   - clientCert []byte
 //   - clientKey []byte
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetTerseBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCert interface{}, clientKey interface{}, logger interface{}) *UtilsIface_GetTerseBucketInfo_Call {
-	return &UtilsIface_GetTerseBucketInfo_Call{Call: _e.mock.On("GetTerseBucketInfo", hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger)}
+//   - ctx ...*utils.Context
+func (_e *UtilsIface_Expecter) GetTerseBucketInfo(hostAddr interface{}, bucketName interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCert interface{}, clientKey interface{}, logger interface{}, ctx ...interface{}) *UtilsIface_GetTerseBucketInfo_Call {
+	return &UtilsIface_GetTerseBucketInfo_Call{Call: _e.mock.On("GetTerseBucketInfo",
+		append([]interface{}{hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCert, clientKey, logger}, ctx...)...)}
 }
 
-func (_c *UtilsIface_GetTerseBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_GetTerseBucketInfo_Call {
+func (_c *UtilsIface_GetTerseBucketInfo_Call) Run(run func(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger, ctx ...*utils.Context)) *UtilsIface_GetTerseBucketInfo_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger))
+		variadicArgs := make([]*utils.Context, len(args)-10)
+		for i, a := range args[10:] {
+			if a != nil {
+				variadicArgs[i] = a.(*utils.Context)
+			}
+		}
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(string), args[4].(base.HttpAuthMech), args[5].([]byte), args[6].(bool), args[7].([]byte), args[8].([]byte), args[9].(*log.CommonLogger), variadicArgs...)
 	})
 	return _c
 }
@@ -5591,7 +5621,7 @@ func (_c *UtilsIface_GetTerseBucketInfo_Call) Return(_a0 map[string]interface{},
 	return _c
 }
 
-func (_c *UtilsIface_GetTerseBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)) *UtilsIface_GetTerseBucketInfo_Call {
+func (_c *UtilsIface_GetTerseBucketInfo_Call) RunAndReturn(run func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger, ...*utils.Context) (map[string]interface{}, error)) *UtilsIface_GetTerseBucketInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

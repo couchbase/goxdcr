@@ -507,6 +507,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if !exists {
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
+		watcher.remClusterUUID = spec.TargetClusterUUID
 
 		// Initialize the stats provider for the watcher
 		statsProvider, err := b.GetRemoteBucketStatsProvider(getTargetWatcherKey(spec))
@@ -636,8 +637,10 @@ func (b *BucketTopologyService) getRemoteVBStatsUpdater(spec *metadata.Replicati
 			FinCh:       reqFinCh,
 		}
 
-		// Darshan TODO: MB-70804 - Track data transfer
-		vbStatsMap, errMap, err := watcher.statsProvider.GetVBucketStats(requestOpts, nil)
+		trackingCtx := b.utils.GetDataUsageTrackingCtx()
+		vbStatsMap, errMap, err := watcher.statsProvider.GetVBucketStats(requestOpts, trackingCtx)
+		watcher.dataSentBytes.Add(trackingCtx.DataSent)
+		watcher.dataReceivedBytes.Add(trackingCtx.DataReceived)
 		if err != nil {
 			return err
 		}
@@ -665,7 +668,10 @@ func (b *BucketTopologyService) getRemoteVBStatsUpdater(spec *metadata.Replicati
 
 func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	topologyUpdateFunc := func() error {
-		targetBucketInfo, shouldUseExternal, connStr, err := b.getTgtBucketInfoGetter(spec)
+		trackingCtx := b.utils.GetDataUsageTrackingCtx()
+		targetBucketInfo, shouldUseExternal, connStr, err := b.getTgtBucketInfoGetter(spec, trackingCtx)
+		watcher.dataSentBytes.Add(trackingCtx.DataSent)
+		watcher.dataReceivedBytes.Add(trackingCtx.DataReceived)
 		if err != nil {
 			return err
 		}
@@ -701,7 +707,10 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 
 			bucketInfoForKvVBMap := targetBucketInfo
 			if shouldUseTerseInfo {
-				terseTargetBucketInfo, err := b.getTgtTerseBucketInfoGetter(spec)
+				terseTrackingCtx := b.utils.GetDataUsageTrackingCtx()
+				terseTargetBucketInfo, err := b.getTgtTerseBucketInfoGetter(spec, terseTrackingCtx)
+				watcher.dataSentBytes.Add(terseTrackingCtx.DataSent)
+				watcher.dataReceivedBytes.Add(terseTrackingCtx.DataReceived)
 				if err != nil {
 					return err
 				}
@@ -1271,7 +1280,7 @@ func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpeci
 	return updateFunc
 }
 
-func (b *BucketTopologyService) getTgtBucketInfoGetter(spec *metadata.ReplicationSpecification) (map[string]interface{}, bool, string, error) {
+func (b *BucketTopologyService) getTgtBucketInfoGetter(spec *metadata.ReplicationSpecification, ctx ...*utilities.Context) (map[string]interface{}, bool, string, error) {
 	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		return nil, false, "", fmt.Errorf("unable to fetch remote cluster reference for spec %v: %w", spec.Id, err)
@@ -1292,7 +1301,7 @@ func (b *BucketTopologyService) getTgtBucketInfoGetter(spec *metadata.Replicatio
 		ClientCertificate: ref.ClientCertificate(),
 		ClientKey:         ref.ClientKey(),
 	}
-	bucketInfo, err := b.utils.GetBucketInfo(b.logger, req)
+	bucketInfo, err := b.utils.GetBucketInfo(b.logger, req, ctx...)
 	if err != nil {
 		return nil, false, "", err
 	}
@@ -1304,7 +1313,7 @@ func (b *BucketTopologyService) getTgtBucketInfoGetter(spec *metadata.Replicatio
 }
 
 // getTgtTerseBucketInfoGetter returns terse bucket info from pools/default/b/<bucketName> endpoint.
-func (b *BucketTopologyService) getTgtTerseBucketInfoGetter(spec *metadata.ReplicationSpecification) (map[string]interface{}, error) {
+func (b *BucketTopologyService) getTgtTerseBucketInfoGetter(spec *metadata.ReplicationSpecification, ctx ...*utilities.Context) (map[string]interface{}, error) {
 	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		return nil, fmt.Errorf("unable to fetch remote cluster reference for spec %v before terse info: %w", spec.Id, err)
@@ -1316,7 +1325,7 @@ func (b *BucketTopologyService) getTgtTerseBucketInfoGetter(spec *metadata.Repli
 	}
 
 	terseTargetBucketInfo, err := b.utils.GetTerseBucketInfo(connStr, spec.TargetBucketName, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(),
-		ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), b.logger)
+		ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), b.logger, ctx...)
 	if err != nil {
 		b.logger.Errorf("Error getting terse bucket info from reference for terse info, id=%s, bucket=%s, err=%v", ref.Uuid(), spec.TargetBucketName, err)
 		return nil, err
@@ -1465,6 +1474,29 @@ func (b *BucketTopologyService) GetRemoteBucketStatsProvider(key string) (servic
 	return provider, nil
 }
 
+func (b *BucketTopologyService) GetRemoteDataUsage() map[string][]int64 {
+	result := make(map[string][]int64)
+
+	b.tgtBucketWatchersMtx.RLock()
+	defer b.tgtBucketWatchersMtx.RUnlock()
+
+	for _, watcher := range b.tgtBucketWatchers {
+		if watcher.remClusterUUID == "" {
+			continue
+		}
+		sent := watcher.dataSentBytes.Load()
+		received := watcher.dataReceivedBytes.Load()
+		if existing, ok := result[watcher.remClusterUUID]; ok {
+			existing[0] += sent
+			existing[1] += received
+		} else {
+			result[watcher.remClusterUUID] = []int64{sent, received}
+		}
+	}
+
+	return result
+}
+
 // switchBucketStatsProvider switches the bucket stats provider for the given spec
 // It closes the current provider and creates a new one of the appropriate type.
 func (b *BucketTopologyService) switchBucketStatsProvider(spec *metadata.ReplicationSpecification, newRemoteType metadata.RemoteType) (service_def.BucketStatsProvider, error) {
@@ -1611,7 +1643,9 @@ type clusterContext struct {
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
-	source     bool
+	// remClusterUUID is only set for target watchers (source == false).
+	remClusterUUID string
+	source         bool
 
 	finCh     chan bool
 	startOnce sync.Once
@@ -1703,6 +1737,12 @@ type BucketTopologySvcWatcher struct {
 
 	// clusterContext holds context specific to the cluster hosting the bucket being monitored.
 	*clusterContext
+
+	// Tracks metadata bytes transferred by this watcher.
+	// Currently only populated for target watchers, but could be extended
+	// to track local bucket traffic for source watchers in the future.
+	dataSentBytes     atomic.Int64
+	dataReceivedBytes atomic.Int64
 }
 
 type GcMapType map[string]VbnoReqMapType

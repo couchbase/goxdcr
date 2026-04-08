@@ -983,6 +983,38 @@ func (_c *RemoteAgentIface_Refresh_Call) RunAndReturn(run func() error) *RemoteA
 	return _c
 }
 
+// RefreshCacheFromMetakv provides a mock function with no fields
+func (_m *RemoteAgentIface) RefreshCacheFromMetakv() {
+	_m.Called()
+}
+
+// RemoteAgentIface_RefreshCacheFromMetakv_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshCacheFromMetakv'
+type RemoteAgentIface_RefreshCacheFromMetakv_Call struct {
+	*mock.Call
+}
+
+// RefreshCacheFromMetakv is a helper method to define mock.On call
+func (_e *RemoteAgentIface_Expecter) RefreshCacheFromMetakv() *RemoteAgentIface_RefreshCacheFromMetakv_Call {
+	return &RemoteAgentIface_RefreshCacheFromMetakv_Call{Call: _e.mock.On("RefreshCacheFromMetakv")}
+}
+
+func (_c *RemoteAgentIface_RefreshCacheFromMetakv_Call) Run(run func()) *RemoteAgentIface_RefreshCacheFromMetakv_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteAgentIface_RefreshCacheFromMetakv_Call) Return() *RemoteAgentIface_RefreshCacheFromMetakv_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RemoteAgentIface_RefreshCacheFromMetakv_Call) RunAndReturn(run func()) *RemoteAgentIface_RefreshCacheFromMetakv_Call {
+	_c.Run(run)
+	return _c
+}
+
 // RegisterBucketRequest provides a mock function with given fields: bucketName
 func (_m *RemoteAgentIface) RegisterBucketRequest(bucketName string) error {
 	ret := _m.Called(bucketName)

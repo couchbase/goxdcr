@@ -181,6 +181,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	}
 	utils.On("GetHostNamesFromBucketInfo", mock.Anything).Return(getHostNameFromBucketInfo1, getHostNameFromBucketInfo2)
 	utils.On("BucketStorageBackend", mock.Anything).Return("CouchStore", nil)
+	utils.On("GetDataUsageTrackingCtx").Return(utilities.NewDataTrackingCtx())
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
@@ -582,4 +583,93 @@ func TestBucketTopologyService_VbUuidMonitoring_CNG(t *testing.T) {
 	assert.NotNil(uuidMap)
 	assert.Equal(uint64(111), uuidMap[0])
 	assert.Equal(uint64(222), uuidMap[1])
+}
+
+func TestBucketTopologyService_GetRemoteDataUsage(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketTopologyService_GetRemoteDataUsage =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyService_GetRemoteDataUsage =================")
+	assert := assert.New(t)
+
+	remClusterSvc, utils, xdcrCompTopologySvc, _, replSpecSvc, _, securitySvc := setupBTSBoilerPlate()
+	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
+	replSpecSvc.On("AllReplicationSpecs").Return(map[string]*metadata.ReplicationSpecification{}, nil)
+
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 50*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc, getMockStreamApiWatcher, base.NewRemoteMemcachedTunables())
+	assert.NotNil(bts)
+	assert.Nil(err)
+
+	// Empty case
+	result := bts.GetRemoteDataUsage()
+	assert.Empty(result)
+
+	// Create two target watchers for the same cluster UUID
+	cluster1 := "cluster-uuid-1"
+	watcher1 := NewBucketTopologySvcWatcher("bucket1", "uuid1", bts.logger, false, bts.xdcrCompTopologySvc)
+	watcher1.remClusterUUID = cluster1
+	watcher1.dataSentBytes.Store(100)
+	watcher1.dataReceivedBytes.Store(200)
+
+	watcher2 := NewBucketTopologySvcWatcher("bucket2", "uuid2", bts.logger, false, bts.xdcrCompTopologySvc)
+	watcher2.remClusterUUID = cluster1
+	watcher2.dataSentBytes.Store(50)
+	watcher2.dataReceivedBytes.Store(75)
+
+	// Create one watcher for a different cluster UUID
+	cluster2 := "cluster-uuid-2"
+	watcher3 := NewBucketTopologySvcWatcher("bucket3", "uuid3", bts.logger, false, bts.xdcrCompTopologySvc)
+	watcher3.remClusterUUID = cluster2
+	watcher3.dataSentBytes.Store(300)
+	watcher3.dataReceivedBytes.Store(400)
+
+	bts.tgtBucketWatchersMtx.Lock()
+	bts.tgtBucketWatchers[cluster1+"_bucket1"] = watcher1
+	bts.tgtBucketWatchers[cluster1+"_bucket2"] = watcher2
+	bts.tgtBucketWatchers[cluster2+"_bucket3"] = watcher3
+	bts.tgtBucketWatchersMtx.Unlock()
+
+	result = bts.GetRemoteDataUsage()
+	assert.Len(result, 2)
+
+	// cluster1 should aggregate: sent=100+50=150, received=200+75=275
+	assert.Equal(int64(150), result[cluster1][0])
+	assert.Equal(int64(275), result[cluster1][1])
+
+	// cluster2 should be: sent=300, received=400
+	assert.Equal(int64(300), result[cluster2][0])
+	assert.Equal(int64(400), result[cluster2][1])
+}
+
+func TestBucketTopologyService_VBStatsUpdater_TracksDataUsage(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketTopologyService_VBStatsUpdater_TracksDataUsage =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyService_VBStatsUpdater_TracksDataUsage =================")
+	assert := assert.New(t)
+
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
+	bucketMap, kvNames := getBucketMap()
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
+
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 50*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc, getMockStreamApiWatcher, base.NewRemoteMemcachedTunables())
+	assert.NotNil(bts)
+	assert.Nil(err)
+
+	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
+
+	watcher := NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, bts.logger, false, bts.xdcrCompTopologySvc)
+	watcher.remClusterUUID = spec.TargetClusterUUID
+
+	// Mock stats provider
+	mockProvider := &mocks.BucketStatsOps{}
+	vbStats := make(base.VBucketStatsMap)
+	vbStats[0] = &base.VBucketStats{Uuid: 111}
+	mockProvider.On("GetVBucketStats", mock.Anything, mock.Anything).Return(&base.BucketVBStats{VBStatsMap: vbStats}, nil, nil)
+	watcher.setStatsProvider(mockProvider)
+
+	opts := &VBStatsOpts{IncludeVbUuid: true}
+	updater := bts.getRemoteVBStatsUpdater(spec, watcher, opts)
+	err = updater()
+	assert.NoError(err)
+
+	// The tracking context was created and passed. Even though the mock doesn't
+	// populate DataSent/DataReceived, verify that GetDataUsageTrackingCtx was called
+	utils.AssertCalled(t, "GetDataUsageTrackingCtx")
 }
