@@ -396,8 +396,21 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.CollectionsManifestUidKey, err.Error())
 		}
 
-		// In mixed mode, this will return false with an error, which is OK
-		crossClusterVer, _ := b.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+		crossClusterVer, eccvErr := b.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+		if eccvErr != nil {
+			clusterCompat, compatErr := b.xdcrCompTopologySvc.MyClusterCompatibility()
+			if compatErr != nil {
+				watcher.logger.Errorf("can't ignore error in fetching ECCV status for %v, as failed to get Source cluster compatibility due to err=%v", spec.SourceBucketName, compatErr.Error())
+				return eccvErr
+			}
+
+			if base.IsClusterCompatible(clusterCompat, base.VersionForMobileSupport) {
+				// Cluster version is compatible with ECCV, so it is not expected to fail at fetching ECCV status
+				return eccvErr
+			} else {
+				watcher.logger.Debugf("ignoring error in fetching ECCV status for %v, as the Source cluster version (%v) is not compatible with ECCV", spec.SourceBucketName, clusterCompat)
+			}
+		}
 
 		// In mixed mode, this will return 0 with an error, which is OK
 		pruningWindownHrs, _ := b.utils.GetVersionPruningWindowHrs(bucketInfo)
@@ -731,8 +744,25 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 			}
 		}
 
-		// In mixed mode, this will return false with an error, which is OK
-		targetCrossClusterVer, _ := b.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+		targetCrossClusterVer, eccvErr := b.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+		if eccvErr != nil {
+			clusterCompat, compatErr := b.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, watcher.logger)
+			if compatErr != nil {
+				watcher.logger.Errorf("can't ignore error in fetching ECCV status for %v, as failed to get Target cluster compatibility due to err=%v", spec.TargetBucketName, compatErr.Error())
+				return eccvErr
+			}
+
+			// Not using VersionForMobileSupport (7.6.6) here to preserve compatibility with older 7.6 versions,
+			// since cluster-compat only considers the major & minor version (while ignoring the patch version).
+			// This comes at the cost of excusing the eccvErr on 7.6.x versions which are >= 7.6.6.
+			if base.IsClusterCompatible(clusterCompat, base.VersionForRaisingECCVMissingError) {
+				// Cluster version is compatible with ECCV, so it is not expected to fail at fetching ECCV status
+				return eccvErr
+			} else {
+				watcher.logger.Debugf("ignoring error in fetching ECCV status for %v, as the Target cluster version (%v) is possibly not compatible with ECCV", spec.TargetBucketName, clusterCompat)
+			}
+		}
+
 		var targetVbMaxCas []interface{}
 		if targetCrossClusterVer {
 			targetVbMaxCas, err = b.utils.GetVbucketsMaxCas(targetBucketInfo)

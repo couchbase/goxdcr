@@ -569,13 +569,36 @@ func (u *Utilities) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string
 func (u *Utilities) GetCrossClusterVersioningFromBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
 	ccvObj, ok := bucketInfo[base.EnableCrossClusterVersioningKey]
 	if !ok {
+		if clusterIsEE, err := checkIfClusterIsEnterpriseFromBucketInfo(bucketInfo); err != nil {
+			return false, fmt.Errorf("failed to determine if %v is missing from bucket-info because it is on a CE cluster, due to error: %v", base.EnableCrossClusterVersioningKey, err)
+		} else if !clusterIsEE {
+			// ECCV is not populated in the bucket-info map on CE clusters. As such,
+			// it cannot be enabled for CE buckets and should be treated as false.
+			return false, nil
+		}
+
 		return false, fmt.Errorf("Error looking up %v from bucketInfo %v", base.EnableCrossClusterVersioningKey, bucketInfo)
 	}
+
 	ccv, ok := ccvObj.(bool)
 	if !ok {
 		return false, fmt.Errorf("%v is of wrong type. Expect bool but got %v.", base.EnableCrossClusterVersioningKey, reflect.TypeOf(ccvObj))
 	}
+
 	return ccv, nil
+}
+
+// Treats mixed (CE & EE nodes) clusters (Source or Target) as CE
+func checkIfClusterIsEnterpriseFromBucketInfo(bucketInfo map[string]any) (bool, error) {
+	nodes, ok := bucketInfo[base.NodesKey].([]any)
+	if !ok {
+		return false, fmt.Errorf("failed to parse '%v' array from bucket-info=%v", base.NodesKey, bucketInfo)
+	}
+
+	// While the "mixed (CE & EE nodes) cluster is CE" classification is meant for Remote/Target clusters,
+	// here we apply the same logic to Source clusters as well for simplicity. Hence using the same
+	// nodes-list parsing method for both Source and Target:
+	return base.IsRemoteClusterFullyEnterprise(nodes)
 }
 
 func (u *Utilities) GetVersionPruningWindowHrs(bucketInfo map[string]interface{}) (int, error) {

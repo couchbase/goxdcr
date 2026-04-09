@@ -1855,6 +1855,47 @@ func TestGetServerVBucketsMapWithTerseInfo(t *testing.T) {
 	fmt.Println("============== Test case end: TestGetServerVBucketsMapWithTerseInfo =================")
 }
 
+func TestGetCrossClusterVersioningFromBucketInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetCrossClusterVersioningFromBucketInfo =================")
+	defer fmt.Println("============== Test case end: TestGetCrossClusterVersioningFromBucketInfo =================")
+	assert := assert.New(t)
+
+	eeNode := map[string]interface{}{base.VersionKey: "8.1.0-1234"}
+	ceNode := map[string]interface{}{base.VersionKey: "8.1.0-1234" + base.CommunityVersionSuffix}
+
+	// Scenario 1: ECCV key absent, cluster is CE -> expect (false, nil)
+	bucketInfoCE := map[string]interface{}{
+		base.NodesKey: []interface{}{ceNode},
+	}
+	ccv, err := testUtils.GetCrossClusterVersioningFromBucketInfo(bucketInfoCE)
+	assert.Nil(err)
+	assert.False(ccv)
+
+	// Scenario 2: ECCV key absent, cluster is EE -> expect (false, non-nil error)
+	bucketInfoEE := map[string]interface{}{
+		base.NodesKey: []interface{}{eeNode},
+	}
+	ccv, err = testUtils.GetCrossClusterVersioningFromBucketInfo(bucketInfoEE)
+	assert.NotNil(err)
+	assert.False(ccv)
+
+	// Scenario 3: ECCV key absent, cluster is Mixed -> expect (false, nil)
+	bucketInfoMixed := map[string]interface{}{
+		base.NodesKey: []interface{}{eeNode, ceNode},
+	}
+	ccv, err = testUtils.GetCrossClusterVersioningFromBucketInfo(bucketInfoMixed)
+	assert.Nil(err)
+	assert.False(ccv)
+
+	// Scenario 4: ECCV key absent, nodes-list in bucket-info is empty -> expect (false, non-nil error)
+	bucketInfoEmptyNodes := map[string]interface{}{
+		base.NodesKey: []interface{}{},
+	}
+	ccv, err = testUtils.GetCrossClusterVersioningFromBucketInfo(bucketInfoEmptyNodes)
+	assert.NotNil(err)
+	assert.False(ccv)
+}
+
 func TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked =================")
 	defer fmt.Println("============== Test case end: TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked =================")

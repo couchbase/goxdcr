@@ -671,6 +671,7 @@ var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 var VersionForCLoggerSupport = ServerVersion{8, 0, 0}
 var VersionForVariableVBSupport = ServerVersion{8, 0, 0}
 var VersionForPipelineReinitHashSupport = ServerVersion{8, 0, 0}
+var VersionForRaisingECCVMissingError = ServerVersion{8, 0, 0}
 var VersionForSeamlessCredsChangeSupport = ServerVersion{8, 1, 0}
 var VersionForCngSupportPhase1 = ServerVersion{8, 1, 0}
 var VersionForMetadataStatsSupport = ServerVersion{8, 1, 0}

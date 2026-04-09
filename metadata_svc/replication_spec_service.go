@@ -732,18 +732,40 @@ func (service *ReplicationSpecService) getSourceBucketInfo(sourceBucket string) 
 	return bucketInfo, nil
 }
 func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, newSettings bool, warnings service_def.UIWarnings) error {
-	var clusterCompatVer *int
+	clusterCompatVer, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+	if err != nil {
+		service.logger.Errorf("unable to get local cluster compatibility as part of replSpec validation: %v", err)
+		return err
+	}
+
+	bucketInfo, err := service.getSourceBucketInfo(sourceBucket)
+	if err != nil {
+		return err
+	}
+	crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+	if err != nil {
+		return err
+	}
+
+	targetClusterRef, errTargetClusterRef := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if errTargetClusterRef != nil {
+		service.logger.Errorf("failed to fetch remote cluster ref for %v", targetCluster)
+		return errTargetClusterRef
+	}
+
+	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
+
+	// Guardrail for CNG Phase 1
+	if targetClusterRef.IsCNG() && crossClusterVer {
+		errorMap[base.CngGuardrailKey] = fmt.Errorf("Bucket with cross cluster versioning enabled cannot be replicated to a CNG cluster")
+		return nil
+	}
+
 	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
 		// Validate filter if it's a new setting OR it's an existing adv filter
 		if version, ok := settings[metadata.FilterVersionKey]; newSettings || (ok && (version.(base.FilterVersionType) == base.FilterVersionAdvanced)) {
 			// Ensure that all nodes in the source cluster can handle the advanced filter
-			clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
-			if err != nil {
-				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
-				return err
-			}
-			clusterCompatVer = &clusterCompat
-			if !base.IsClusterCompatible(*clusterCompatVer, base.VersionForAdvFilteringSupport) {
+			if !base.IsClusterCompatible(clusterCompatVer, base.VersionForAdvFilteringSupport) {
 				return base.ErrorAdvFilterMixedModeUnsupported
 			}
 
@@ -770,16 +792,6 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 		}
 	}
 
-	bucketInfo, err := service.getSourceBucketInfo(sourceBucket)
-	if err != nil {
-		return err
-	}
-
-	crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
-	if err != nil {
-		return err
-	}
-
 	if mobile, ok := settings[metadata.MobileCompatibleKey].(int); ok {
 		if mobile != base.MobileCompatibilityOff {
 			if !crossClusterVer {
@@ -788,29 +800,11 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 			}
 		}
 	}
-	targetClusterRef, errTargetClusterRef := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
-	if errTargetClusterRef != nil {
-		service.logger.Errorf("Failed to fetch remote cluster ref for %v", targetCluster)
-		return errTargetClusterRef
-	}
-
-	// Guardrail for CNG Phase 1
-	if targetClusterRef.IsCNG() && crossClusterVer {
-		errorMap[base.CngGuardrailKey] = fmt.Errorf("Bucket with cross cluster versioning enabled cannot be replicated to a CNG cluster")
-		return nil
-	}
-
-	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
 
 	conflictLoggingMap, conflictLoggingMapExists := base.ParseConflictLoggingInputType(settings[metadata.CLogKey])
 	if conflictLoggingMapExists && !conflictLoggingMap.Disabled() {
 		// Ensure that all nodes in the source cluster can handle the conflict logging feature
-		clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
-		if err != nil {
-			service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation for CLogging: %v", err)
-			return err
-		}
-		if !base.IsClusterCompatible(clusterCompat, base.VersionForCLoggerSupport) {
+		if !base.IsClusterCompatible(clusterCompatVer, base.VersionForCLoggerSupport) {
 			errorMap[metadata.CLogKey] = base.ErrorCLoggingMixedModeUnsupported
 			return nil
 		}
@@ -824,16 +818,9 @@ func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap
 
 	if forwardLocalOnly, ok := settings[metadata.ForwardLocalOnlyKey].(bool); ok && forwardLocalOnly {
 		// Ensure that all nodes in the Source cluster support the 'forwardLocalOnly' setting
-		if clusterCompatVer == nil {
-			clusterCompat, err := service.utils.GetClusterCompatibilityFromBucketInfo(bucketInfo, service.logger)
-			if err != nil {
-				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
-				return err
-			}
-			clusterCompatVer = &clusterCompat
-		}
-		if !base.IsClusterCompatible(*clusterCompatVer, base.VersionForForwardLocalOnly) {
-			return base.ErrorForwardLocalOnlyUnsupported
+		if !base.IsClusterCompatible(clusterCompatVer, base.VersionForForwardLocalOnly) {
+			errorMap[base.ForwardLocalOnlyKey] = base.ErrorForwardLocalOnlyUnsupported
+			return nil
 		}
 
 		// Source bucket enableCrossClusterVersioning needs to be enabled as a prerequisite
