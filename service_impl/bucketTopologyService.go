@@ -201,7 +201,7 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v. XDCR must restart to try again.", specCpy.Id, retryErr))
+				b.logger.Errorf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v", specCpy.Id, retryErr)
 			}
 		}()
 	}
@@ -1005,7 +1005,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v. XDCR must restart to try again.", newSpec.Id, retryErr))
+				b.logger.Errorf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v", newSpec.Id, retryErr)
 			}
 		}()
 

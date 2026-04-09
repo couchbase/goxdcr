@@ -160,16 +160,18 @@ func (provider *ClusterBucketStatsProvider) isClosed() bool {
 	}
 }
 
-// canStartOp checks if an operation can be started
+// canStartOp checks if an operation can be started.
+// If the provider is not yet initialized, it attempts a lazy Init().
 func (provider *ClusterBucketStatsProvider) canStartOp() error {
-	// check if the provider is initialized
-	if !provider.InitDone() {
-		return errors.New("ClusterBucketStatsProvider is not initialized")
-	}
-
-	// check if the provider is already closed
 	if provider.isClosed() {
 		return errors.New("ClusterBucketStatsProvider is closed")
+	}
+
+	if !provider.InitDone() {
+		if err := provider.Init(); err != nil {
+			return fmt.Errorf("ClusterBucketStatsProvider lazy init failed: %w", err)
+		}
+		provider.logger.Infof("ClusterBucketStatsProvider lazy init completed successfully")
 	}
 	return nil
 }
@@ -727,16 +729,18 @@ func (provider *CngBucketStatsProvider) isClosed() bool {
 	}
 }
 
-// canStartOp checks if an operation can be started
+// canStartOp checks if an operation can be started.
+// If the provider is not yet initialized, it attempts a lazy Init().
 func (provider *CngBucketStatsProvider) canStartOp() error {
-	// check if the provider is initialized
-	if !provider.InitDone() {
-		return errors.New("CngBucketStatsProvider is not initialized")
-	}
-
-	// check if the provider is already closed
 	if provider.isClosed() {
 		return errors.New("CngBucketStatsProvider is closed")
+	}
+
+	if !provider.InitDone() {
+		if err := provider.Init(); err != nil {
+			return fmt.Errorf("CngBucketStatsProvider lazy init failed: %w", err)
+		}
+		provider.logger.Infof("CngBucketStatsProvider lazy init completed successfully")
 	}
 	return nil
 }

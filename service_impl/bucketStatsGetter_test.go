@@ -224,6 +224,127 @@ func TestClusterBucketStatsProvider_Init_TargetBucketTopologyNotReady(t *testing
 	provider.Close()
 }
 
+func TestClusterBucketStatsProvider_canStartOp_LazyInit(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_canStartOp_LazyInit =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_canStartOp_LazyInit =================")
+	assert := assert.New(t)
+
+	remoteClusterSvc := &service_defMock.RemoteClusterSvc{}
+	utilsMockObj := &utilsMock.UtilsIface{}
+	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
+	logger := createTestLogger()
+
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
+
+	// Provider is not initialized, canStartOp should attempt lazy init
+	assert.False(provider.InitDone())
+
+	ref := createTestRemoteClusterRef()
+	remoteClusterSvc.On("RemoteClusterByUuid", testClusterUuid, false).Return(ref, nil)
+	remoteClusterSvc.On("ShouldUseAlternateAddress", ref).Return(false, nil)
+
+	targetNotificationCh := make(chan service_def.TargetNotification, 1)
+	targetNotification := &service_defMock.TargetNotification{}
+	kvVbMap := createTestKvVbMap()
+	targetNotification.On("GetTargetServerVBMap").Return(kvVbMap)
+	targetNotification.On("Recycle").Return()
+	targetNotificationCh <- targetNotification
+
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, make(chan error, 1), nil)
+	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(nil)
+
+	mcClient := &clientMocks.ClientIface{}
+	mcClient.On("Close").Return(nil)
+	utilsMockObj.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
+	utilsMockObj.On("ExecWithTimeout", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		fn := args.Get(0).(func() error)
+		fn()
+	}).Return(nil)
+
+	// canStartOp should trigger lazy init and succeed
+	err := provider.canStartOp()
+	assert.NoError(err)
+	assert.True(provider.InitDone())
+
+	// Subsequent calls should use fast path
+	err = provider.canStartOp()
+	assert.NoError(err)
+
+	provider.Close()
+}
+
+func TestClusterBucketStatsProvider_canStartOp_LazyInitFailsThenRecovers(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_canStartOp_LazyInitFailsThenRecovers =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_canStartOp_LazyInitFailsThenRecovers =================")
+	assert := assert.New(t)
+
+	remoteClusterSvc := &service_defMock.RemoteClusterSvc{}
+	utilsMockObj := &utilsMock.UtilsIface{}
+	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
+	logger := createTestLogger()
+
+	// Use a controllable getTargetKvVbMap that fails initially then succeeds
+	var shouldFail atomic.Bool
+	shouldFail.Store(true)
+	getTargetKvVbMapFunc := func(spec *metadata.ReplicationSpecification) (base.KvVBMapType, error) {
+		if shouldFail.Load() {
+			return nil, base.ErrorTargetBucketTopologyNotReady
+		}
+		return createTestKvVbMap(), nil
+	}
+
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testTunables(), logger, getTargetKvVbMapFunc)
+
+	ref := createTestRemoteClusterRef()
+	remoteClusterSvc.On("RemoteClusterByUuid", testClusterUuid, false).Return(ref, nil)
+	remoteClusterSvc.On("ShouldUseAlternateAddress", ref).Return(false, nil)
+
+	targetNotification := &service_defMock.TargetNotification{}
+	kvVbMap := createTestKvVbMap()
+	targetNotification.On("GetTargetServerVBMap").Return(kvVbMap)
+	targetNotification.On("Recycle").Return()
+
+	targetNotificationCh := make(chan service_def.TargetNotification, 1)
+	bucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(targetNotificationCh, make(chan error, 1), nil)
+	bucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.AnythingOfType("*metadata.ReplicationSpecification"), mock.AnythingOfType("string")).Return(nil)
+
+	mcClient := &clientMocks.ClientIface{}
+	mcClient.On("Close").Return(nil)
+	utilsMockObj.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
+
+	// First attempt: canStartOp should fail because getTargetKvVbMap fails
+	err := provider.canStartOp()
+	assert.Error(err)
+	assert.Contains(err.Error(), "lazy init failed")
+	assert.False(provider.InitDone())
+
+	// Fix the failure condition
+	shouldFail.Store(false)
+
+	// Second attempt: canStartOp should succeed via lazy init
+	err = provider.canStartOp()
+	assert.NoError(err)
+	assert.True(provider.InitDone())
+
+	provider.Close()
+}
+
+func TestClusterBucketStatsProvider_canStartOp_ClosedProvider(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_canStartOp_ClosedProvider =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_canStartOp_ClosedProvider =================")
+	assert := assert.New(t)
+
+	provider, _, _, _ := setupClusterBucketStatsProvider()
+
+	provider.Close()
+
+	// canStartOp on a closed provider should return error without attempting init
+	err := provider.canStartOp()
+	assert.Error(err)
+	assert.Contains(err.Error(), "closed")
+	assert.False(provider.InitDone())
+}
+
 func TestClusterBucketStatsProvider_Close_Success(t *testing.T) {
 	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_Close_Success =================")
 	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_Close_Success =================")
@@ -983,6 +1104,54 @@ func TestCngBucketStatsProvider_Init_Success(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_Init_Success =================")
 	// Skip creating a cngConn
 	t.Skip("Skip creating a cngConn")
+}
+
+func TestCngBucketStatsProvider_canStartOp_LazyInitFails(t *testing.T) {
+	fmt.Println("============== Test case start: TestCngBucketStatsProvider_canStartOp_LazyInitFails =================")
+	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_canStartOp_LazyInitFails =================")
+	assert := assert.New(t)
+
+	utilsMockObj := &utilsMock.UtilsIface{}
+	logger := createTestLogger()
+
+	// getGrpcOpts fails (simulating remote cluster not contacted yet)
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
+		return nil, base.ErrorRemoteClusterUninit
+	}
+
+	provider := NewCngBucketStatsProvider(testBucketName, testClusterUuid, utilsMockObj, logger, getGrpcOpts, createTestGetTargetKvVbMapFunc())
+
+	assert.False(provider.InitDone())
+
+	// canStartOp should attempt lazy init and fail
+	err := provider.canStartOp()
+	assert.Error(err)
+	assert.Contains(err.Error(), "lazy init failed")
+	assert.False(provider.InitDone())
+
+	provider.Close()
+}
+
+func TestCngBucketStatsProvider_canStartOp_ClosedProvider(t *testing.T) {
+	fmt.Println("============== Test case start: TestCngBucketStatsProvider_canStartOp_ClosedProvider =================")
+	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_canStartOp_ClosedProvider =================")
+	assert := assert.New(t)
+
+	utilsMockObj := &utilsMock.UtilsIface{}
+	logger := createTestLogger()
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
+		return nil, nil
+	}
+
+	provider := NewCngBucketStatsProvider(testBucketName, testClusterUuid, utilsMockObj, logger, getGrpcOpts, createTestGetTargetKvVbMapFunc())
+
+	provider.Close()
+
+	// canStartOp on a closed provider should return error without attempting init
+	err := provider.canStartOp()
+	assert.Error(err)
+	assert.Contains(err.Error(), "closed")
+	assert.False(provider.InitDone())
 }
 
 func TestCngBucketStatsProvider_Close_Success(t *testing.T) {
