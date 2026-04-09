@@ -38,6 +38,10 @@ POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
 CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
 CB_CLI_BIN="../../../../../../../install/bin/couchbase-cli"
 RR_REST="settings/resourceManagement/bucket/residentRatio"
+HARD_RESET_MAX_ATTEMPTS=5
+HARD_RESET_BACKOFF_INITIAL_SECS=1
+HARD_RESET_BACKOFF_MULTIPLIER=2
+HARD_RESET_BACKOFF_MAX_SECS=16
 
 # topological globals
 # -----------------
@@ -540,6 +544,10 @@ function hardResetNodes {
 	local port
 	local hostIP
 	local clusterName
+	local -a hardResetPids=()
+	local -a hardResetNodes=()
+	local idx
+	local hardResetFailure=0
 
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 
@@ -557,10 +565,22 @@ function hardResetNodes {
 		fi
 
 		echo "RESETTING cluster name $clusterName on port $initPort with hostIP $hostIP"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode >/dev/null 2>&1 &
+		hardResetNodeWithRetry "$clusterName" "$initPort" &
+		hardResetPids+=("$!")
+		hardResetNodes+=("$clusterName:$initPort")
 	done
 
-	waitForBgJobs
+	for ((idx = 0; idx < ${#hardResetPids[@]}; idx = idx + 1)); do
+		wait "${hardResetPids[$idx]}"
+		if (($? != 0)); then
+			echo "ERROR: Hard reset failed for ${hardResetNodes[$idx]}"
+			hardResetFailure=1
+		fi
+	done
+
+	if (($hardResetFailure != 0)); then
+		return 1
+	fi
 
 	# give it 5 seconds before other "setupTopologies" may be called
 	sleep 5
@@ -591,7 +611,10 @@ function hardResetNodesSynchronously {
 		fi
 
 		echo "RESETTING cluster name $clusterName on port $initPort with hostIP $hostIP"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$initPort/controller/hardResetNode
+		hardResetNodeWithRetry "$clusterName" "$initPort"
+		if (($? != 0)); then
+			return 1
+		fi
 	done
 
 	echo "sleeping 10 seconds before other 'setupTopologies' may be called"
@@ -4297,10 +4320,66 @@ function resetNode {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "Hard resetting node for $clusterName..."
-	$CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${port}/controller/hardResetNode
+	hardResetNodeWithRetry "$clusterName" "$port"
 	if (($? != 0)); then
 		echo "WARN: Node $port failed to hard reset"
+		return 1
 	fi
+}
+
+function hardResetNodeWithRetry {
+	local clusterName=$1
+	local port=$2
+	local endpoint="http://localhost:${port}/controller/hardResetNode"
+	local attempt=1
+	local backoffSecs=$HARD_RESET_BACKOFF_INITIAL_SECS
+
+	while ((attempt <= HARD_RESET_MAX_ATTEMPTS)); do
+		local bodyFile=$(mktemp)
+		local errFile=$(mktemp)
+		local httpCode
+		local curlError
+		local responseBody
+		local timeoutBodyHint=""
+
+		httpCode=$($CURL -u "$DEFAULT_ADMIN:$DEFAULT_PW" -X POST "$endpoint" -o "$bodyFile" -w "%{http_code}" 2>"$errFile")
+		local ret=$?
+		responseBody=$(cat "$bodyFile")
+		curlError=$(cat "$errFile")
+		rm -f "$bodyFile" "$errFile"
+
+		if ((ret != 0)); then
+			echo "ERROR: hard reset curl failed for $clusterName on port $port (attempt $attempt/$HARD_RESET_MAX_ATTEMPTS): $curlError"
+			return 1
+		fi
+
+		if [[ "$httpCode" == "200" ]]; then
+			return 0
+		fi
+
+		if [[ "$responseBody" == *"Request timed out"* ]]; then
+			timeoutBodyHint=" (Request timed out)"
+		fi
+
+		if [[ "$httpCode" == "500" ]] && ((attempt < HARD_RESET_MAX_ATTEMPTS)); then
+			echo "Hard reset for $clusterName on port $port returned HTTP 500${timeoutBodyHint} (attempt $attempt/$HARD_RESET_MAX_ATTEMPTS)."
+			echo "Response body: $responseBody"
+			echo "Retrying hard reset in ${backoffSecs}s"
+			sleep $backoffSecs
+			backoffSecs=$((backoffSecs * HARD_RESET_BACKOFF_MULTIPLIER))
+			if ((backoffSecs > HARD_RESET_BACKOFF_MAX_SECS)); then
+				backoffSecs=$HARD_RESET_BACKOFF_MAX_SECS
+			fi
+			attempt=$((attempt + 1))
+			continue
+		fi
+
+		echo "ERROR: hard reset failed for $clusterName on port $port with HTTP $httpCode${timeoutBodyHint} (attempt $attempt/$HARD_RESET_MAX_ATTEMPTS)."
+		echo "Response body: $responseBody"
+		return 1
+	done
+
+	return 1
 }
 
 function runConnectionPreCheckUsernamePassword {
