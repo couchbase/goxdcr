@@ -1308,7 +1308,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	colMarshalIdxThreshold int,
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
 	disableBucketConfigManager bool,
-	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int, disableMutateWithMeta bool) {
+	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int, disableMutateWithMeta bool,
+	bucketWatcherWarmupTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1515,6 +1516,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 
 	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
 	DisableMutateWithMeta = disableMutateWithMeta
+
+	BucketWatcherWarmupTimeout = bucketWatcherWarmupTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -1616,10 +1619,10 @@ const (
 	CLogConnPoolGCInterval    string = "cLogConnPoolGCIntervalMs"
 	CLogConnPoolReapInterval  string = "cLogConnPoolReapIntervalMs"
 
-	RemoteMemcachedConnPoolMaxConnsKey     string = "remoteMemcachedConnPoolMaxConns"
-	RemoteMemcachedConnPoolMinConnsKey     string = "remoteMemcachedConnPoolMinConns"
-	RemoteMemcachedConnPoolGCIntervalKey   string = "remoteMemcachedConnPoolGCIntervalMs"
-	RemoteMemcachedConnPoolValidationKey   string = "remoteMemcachedConnPoolValidation"
+	RemoteMemcachedConnPoolMaxConnsKey   string = "remoteMemcachedConnPoolMaxConns"
+	RemoteMemcachedConnPoolMinConnsKey   string = "remoteMemcachedConnPoolMinConns"
+	RemoteMemcachedConnPoolGCIntervalKey string = "remoteMemcachedConnPoolGCIntervalMs"
+	RemoteMemcachedConnPoolValidationKey string = "remoteMemcachedConnPoolValidation"
 
 	// CNG related settings
 	CNGWorkerCountKey string = "cngWorkerCount"

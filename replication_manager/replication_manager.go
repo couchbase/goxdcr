@@ -394,6 +394,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.TimeoutWaitForOngoingCkptOpsKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxKeepAliveTokensForCkptMgrKey].(int),
 		internal_settings.Values[metadata.DisableMutateWithMetaKey].(bool),
+		time.Duration(internal_settings.Values[metadata.BucketWatcherWarmupTimeoutKey].(int))*time.Second,
 	)
 }
 
