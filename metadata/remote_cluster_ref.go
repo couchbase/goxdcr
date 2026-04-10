@@ -643,6 +643,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 		outputMap[base.StageCredentials] = ref.StagedCredentials.ToMap()
 	}
 	outputMap[base.ConnectivityErrors] = ref.CloneConnErrsNoLock()
+	outputMap[base.RemoteClusterInternalGenID] = ref.Id_
 
 	return outputMap
 }
