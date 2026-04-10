@@ -2342,6 +2342,19 @@ func TestCkptMgrNoPanicOnMissingTargetOpaque(t *testing.T) {
 
 		assert.NotNil(err)
 		assert.Contains(err.Error(), "not populated properly")
+
+		// Verify the RLock was properly released by acquiring it again
+		acquired := make(chan bool, 1)
+		go func() {
+			ckpt_obj.lock.Lock()
+			ckpt_obj.lock.Unlock()
+			acquired <- true
+		}()
+		select {
+		case <-acquired:
+		case <-time.After(time.Second):
+			t.Fatal("ckpt_obj.lock deadlocked - RUnlock was missing on error path")
+		}
 	})
 
 	// Test scenario 2: Variable VB mode - GlobalTimestamp with nil target_vb_opaque
@@ -2407,6 +2420,19 @@ func TestCkptMgrNoPanicOnMissingTargetOpaque(t *testing.T) {
 
 		assert.NotNil(err)
 		assert.Contains(err.Error(), " is not populated properly. err=target timestamp for vb")
+
+		// Verify the RLock was properly released
+		acquired := make(chan bool, 1)
+		go func() {
+			ckpt_obj2.lock.Lock()
+			ckpt_obj2.lock.Unlock()
+			acquired <- true
+		}()
+		select {
+		case <-acquired:
+		case <-time.After(time.Second):
+			t.Fatal("ckpt_obj2.lock deadlocked - RUnlock was missing on error path")
+		}
 	})
 
 	// Test scenario 3: Variable VB mode - GlobalTimestamp is empty

@@ -2434,12 +2434,14 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, throughSeqno uint64, t
 	case true:
 		err = ckpt_obj.ckpt.GlobalTimestamp.ValidateTargetOpaque()
 		if err != nil {
+			ckpt_obj.lock.RUnlock()
 			err = fmt.Errorf("global timestamp for vb %v is not populated properly. err=%v", vbno, err)
 			return
 		}
 		curCkptTargetVBOpaque = ckpt_obj.ckpt.GlobalTimestamp.GetTargetOpaque()
 	case false:
 		if ckpt_obj.ckpt.TargetVBTimestamp.Target_vb_opaque == nil {
+			ckpt_obj.lock.RUnlock()
 			err = fmt.Errorf("target timestamp for vb %v is not populated properly", vbno)
 			return
 		}

@@ -1665,3 +1665,36 @@ func TestCollectionRouterInit_OneRouterTwoNozzles(t *testing.T) {
 	assert.Equal(int(numVBs), len(nozzle1.upstreamErrReporterMap))
 	assert.Equal(1, len(router.collectionsRouting))
 }
+
+func TestRouterExplicitModeInitError_MutexUnlocked(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterExplicitModeInitError_MutexUnlocked =================")
+	defer fmt.Println("============== Test case end: TestRouterExplicitModeInitError_MutexUnlocked =================")
+	assert := assert.New(t)
+
+	cr := &CollectionsRouter{}
+
+	// Pass a nil Source manifest to trigger an error from NewCollectionNamespaceMappingFromRules
+	pair := metadata.CollectionsManifestPair{Source: nil, Target: nil}
+	var modes base.CollectionsMgtType
+	modes.SetExplicitMapping(true)
+	rules := make(metadata.CollectionsMappingRulesType)
+
+	err := cr.initializeInternalsForExplicitOrMigration(pair, modes, rules)
+	assert.Error(err)
+
+	// Verify the mutex was properly released by acquiring it again.
+	// If the unlock was missing, this would deadlock.
+	acquired := make(chan bool, 1)
+	go func() {
+		cr.mappingMtx.Lock()
+		cr.mappingMtx.Unlock()
+		acquired <- true
+	}()
+
+	select {
+	case <-acquired:
+		// Success - mutex was properly unlocked
+	case <-time.After(time.Second):
+		t.Fatal("mappingMtx deadlocked - unlock was missing on error path")
+	}
+}

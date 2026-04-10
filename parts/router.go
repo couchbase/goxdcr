@@ -399,6 +399,7 @@ func (c *CollectionsRouter) initializeInternalsForExplicitOrMigration(pair metad
 
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules, false, false)
 	if err != nil {
+		c.mappingMtx.Unlock()
 		return err
 	}
 	c.explicitMappingIdx = c.explicitMappings.CreateLookupIndex()

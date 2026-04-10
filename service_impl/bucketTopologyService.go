@@ -1573,6 +1573,7 @@ func (b *BucketTopologyService) SwitchRemoteType(spec *metadata.ReplicationSpeci
 		UpdateIntervalFunc: func() { b.updateIntervalFuncMap(spec, watcher, newRemoteType) },
 	}
 	if err := watcher.Reconfigure(opts); err != nil {
+		b.tgtBucketWatchersMtx.Unlock()
 		return fmt.Errorf("SwitchRemoteType: error restarting watcher for spec %v: %w", spec.Id, err)
 	}
 	b.tgtBucketWatchersMtx.Unlock()
