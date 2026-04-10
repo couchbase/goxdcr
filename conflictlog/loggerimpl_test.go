@@ -13,6 +13,7 @@ package conflictlog
 import (
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -582,4 +583,55 @@ func TestLoggerImpl_HibernateUnhibernateRace(t *testing.T) {
 	assert.Equal(t, baseclog.ErrLoggerHibernated, err)
 
 	assert.Nil(t, l.Stop())
+}
+
+func TestLoggerImpl_LogCloseRaceCondition(t *testing.T) {
+	topo, security, utils, producer := setupMocks()
+	rules := &baseclog.Rules{Target: baseclog.NewTarget("B1", "S1", "C1")}
+
+	pool := iopool.NewConnPool(nil, 10,
+		time.Duration(base.DefaultCLogConnPoolGCIntervalMs)*time.Millisecond,
+		time.Duration(base.DefaultCLogConnPoolReapIntervalMs)*time.Millisecond,
+		newFakeConnection, nil)
+
+	mcache := NewManifestCache()
+
+	// Create logger with very short durations for fast testing
+	l, err := newLoggerImpl(
+		log.NewLogger("test", log.DefaultLoggerContext),
+		"1234",
+		utils,
+		security,
+		nil,
+		topo,
+		pool,
+		producer,
+		mcache,
+		baseclog.WithCapacity(20),
+		baseclog.WithRules(rules),
+		baseclog.WithMaxErrorCount(2),
+		baseclog.WithErrorTimeWindow(100*time.Millisecond),
+		baseclog.WithReattemptDuration(50*time.Millisecond),
+		baseclog.WithAutopauseReplThreshold(0),       // hibernation QoS
+		baseclog.WithAutopauseReplMonitorDuration(0), // hibernation QoS
+	)
+	require.Nil(t, err)
+	assert.Nil(t, l.Start(nil))
+
+	var wg sync.WaitGroup
+	numLoggingGoroutines := 10
+	logsPerGoroutine := 10
+
+	l.Stop()
+	for i := 0; i < numLoggingGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < logsPerGoroutine; j++ {
+				l.log(&ConflictRecord{})
+			}
+		}()
+	}
+
+	wg.Wait()
 }

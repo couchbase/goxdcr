@@ -296,9 +296,12 @@ func (l *LoggerImpl) log(c *ConflictRecord) (err error) {
 	l.lock.RLock()
 	defer l.lock.RUnlock()
 
-	select {
-	case <-l.finch:
+	if l.isClosed() {
 		err = baseclog.ErrLoggerClosed
+		return
+	}
+
+	select {
 	case l.logReqCh <- req:
 	default:
 		err = baseclog.ErrQueueFull
