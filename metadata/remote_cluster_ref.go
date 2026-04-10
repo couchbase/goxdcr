@@ -492,6 +492,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 		outputMap[base.RemoteBucketManifest] = ref.TargetBucketManifest
 	}
 	outputMap[base.ConnectivityErrors] = ref.CloneConnErrsNoLock()
+	outputMap[base.RemoteClusterInternalGenID] = ref.Id_
 
 	return outputMap
 }
