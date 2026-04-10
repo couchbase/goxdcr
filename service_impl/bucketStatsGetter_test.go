@@ -20,6 +20,7 @@ import (
 	clientMocks "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	Component "github.com/couchbase/goxdcr/v8/component"
+	cngWatcher "github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -1866,4 +1867,197 @@ func setupBasicMocksForProvider(provider *ClusterBucketStatsProvider, mockUtils 
 
 	// Initialize provider
 	provider.Init()
+}
+
+// ============= Data Transfer Tracking Tests =============
+
+func TestTrackCngDataTransfer_PopulatesContext(t *testing.T) {
+	fmt.Println("============== Test case start: TestTrackCngDataTransfer_PopulatesContext =================")
+	defer fmt.Println("============== Test case end: TestTrackCngDataTransfer_PopulatesContext =================")
+	assert := assert.New(t)
+
+	ctx := utils.NewDataTrackingCtx()
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{
+		BucketName: "testBucket",
+		VbucketIds: []uint32{0, 1, 2},
+	}
+	result := make(cngWatcher.VBucketInfoResponse)
+	result[0] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{VbucketId: 0, Uuid: 100, HighSeqno: 500}
+	result[1] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{VbucketId: 1, Uuid: 101, HighSeqno: 600}
+	result[2] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{VbucketId: 2, Uuid: 102, HighSeqno: 700}
+
+	trackCngDataTransfer(ctx, grpcReq, result)
+
+	assert.Greater(ctx.GetDataSent(), int64(0), "DataSent should be non-zero after tracking request")
+	assert.Greater(ctx.GetDataReceived(), int64(0), "DataReceived should be non-zero after tracking response")
+}
+
+func TestTrackCngDataTransfer_NilContext(t *testing.T) {
+	fmt.Println("============== Test case start: TestTrackCngDataTransfer_NilContext =================")
+	defer fmt.Println("============== Test case end: TestTrackCngDataTransfer_NilContext =================")
+
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{BucketName: "b"}
+	// Should not panic
+	trackCngDataTransfer(nil, grpcReq, nil)
+}
+
+func TestTrackCngDataTransfer_TrackingDisabled(t *testing.T) {
+	fmt.Println("============== Test case start: TestTrackCngDataTransfer_TrackingDisabled =================")
+	defer fmt.Println("============== Test case end: TestTrackCngDataTransfer_TrackingDisabled =================")
+	assert := assert.New(t)
+
+	ctx := utils.NewDefaultContext()
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{BucketName: "b", VbucketIds: []uint32{0}}
+	result := make(cngWatcher.VBucketInfoResponse)
+	result[0] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{VbucketId: 0, Uuid: 1}
+
+	trackCngDataTransfer(ctx, grpcReq, result)
+
+	assert.Equal(int64(0), ctx.GetDataSent())
+	assert.Equal(int64(0), ctx.GetDataReceived())
+}
+
+func TestTrackCngDataTransfer_NilResult(t *testing.T) {
+	fmt.Println("============== Test case start: TestTrackCngDataTransfer_NilResult =================")
+	defer fmt.Println("============== Test case end: TestTrackCngDataTransfer_NilResult =================")
+	assert := assert.New(t)
+
+	ctx := utils.NewDataTrackingCtx()
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{BucketName: "b", VbucketIds: []uint32{0}}
+
+	// result is nil (error scenario), should only track request size
+	trackCngDataTransfer(ctx, grpcReq, nil)
+
+	assert.Greater(ctx.GetDataSent(), int64(0), "DataSent should track request even when result is nil")
+	assert.Equal(int64(0), ctx.GetDataReceived(), "DataReceived should be zero when result is nil")
+}
+
+func TestCngBucketStatsProvider_GetFailoverLog_TracksDataTransfer(t *testing.T) {
+	fmt.Println("============== Test case start: TestCngBucketStatsProvider_GetFailoverLog_TracksDataTransfer =================")
+	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_GetFailoverLog_TracksDataTransfer =================")
+	assert := assert.New(t)
+
+	utilsMockObj := &utilsMock.UtilsIface{}
+	logger := createTestLogger()
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
+		return &base.GrpcOptions{ConnStr: "localhost:18098"}, nil
+	}
+
+	provider := NewCngBucketStatsProvider(testBucketName, testClusterUuid, utilsMockObj, logger, getGrpcOpts, createTestGetTargetKvVbMapFunc())
+	provider.cngConn = &base.CngConn{}
+	provider.initialized.Store(true)
+
+	vblist := []uint16{0, 1}
+
+	utilsMockObj.On("CngGetVbucketInfo", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		handler := args.Get(2).(utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])
+		vbInfoList := make([]*internal_xdcr_v1.GetVbucketInfoResponse_VbucketState, len(vblist))
+		for i, vb := range vblist {
+			vbInfoList[i] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{
+				VbucketId: uint32(vb),
+				Uuid:      123456,
+				History: []*internal_xdcr_v1.GetVbucketInfoResponse_HistoryEntry{
+					{Uuid: 123456, Seqno: 1000 + uint64(vb)},
+				},
+			}
+		}
+		handler.OnMessage(&internal_xdcr_v1.GetVbucketInfoResponse{Vbuckets: vbInfoList})
+		handler.OnComplete()
+	}).Return()
+
+	dataTransferCtx := utils.NewDataTrackingCtx()
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	result, _, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, dataTransferCtx)
+
+	assert.NoError(err)
+	assert.NotNil(result)
+	assert.Greater(dataTransferCtx.GetDataSent(), int64(0), "GetFailoverLog should track request bytes")
+	assert.Greater(dataTransferCtx.GetDataReceived(), int64(0), "GetFailoverLog should track response bytes")
+
+	utilsMockObj.AssertExpectations(t)
+	provider.Close()
+}
+
+func TestCngBucketStatsProvider_GetVBucketStats_TracksDataTransfer(t *testing.T) {
+	fmt.Println("============== Test case start: TestCngBucketStatsProvider_GetVBucketStats_TracksDataTransfer =================")
+	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_GetVBucketStats_TracksDataTransfer =================")
+	assert := assert.New(t)
+
+	utilsMockObj := &utilsMock.UtilsIface{}
+	logger := createTestLogger()
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
+		return &base.GrpcOptions{ConnStr: "localhost:18098"}, nil
+	}
+
+	provider := NewCngBucketStatsProvider(testBucketName, testClusterUuid, utilsMockObj, logger, getGrpcOpts, createTestGetTargetKvVbMapFunc())
+	provider.cngConn = &base.CngConn{}
+	provider.initialized.Store(true)
+
+	vblist := []uint16{0, 1}
+
+	utilsMockObj.On("CngGetVbucketInfo", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		handler := args.Get(2).(utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])
+		vbInfoList := make([]*internal_xdcr_v1.GetVbucketInfoResponse_VbucketState, len(vblist))
+		for i, vb := range vblist {
+			vbInfoList[i] = &internal_xdcr_v1.GetVbucketInfoResponse_VbucketState{
+				VbucketId: uint32(vb),
+				Uuid:      uint64(100 + vb),
+				HighSeqno: uint64(500 + vb),
+			}
+		}
+		handler.OnMessage(&internal_xdcr_v1.GetVbucketInfoResponse{Vbuckets: vbInfoList})
+		handler.OnComplete()
+	}).Return()
+
+	dataTransferCtx := utils.NewDataTrackingCtx()
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	requestOpts := &base.VBucketStatsRequest{VBuckets: vblist, MaxCasOnly: false, FinCh: finCh}
+	result, _, err := provider.GetVBucketStats(requestOpts, dataTransferCtx)
+
+	assert.NoError(err)
+	assert.NotNil(result)
+	assert.Greater(dataTransferCtx.GetDataSent(), int64(0), "GetVBucketStats should track request bytes")
+	assert.Greater(dataTransferCtx.GetDataReceived(), int64(0), "GetVBucketStats should track response bytes")
+
+	utilsMockObj.AssertExpectations(t)
+	provider.Close()
+}
+
+func TestCngBucketStatsProvider_GetFailoverLog_TracksDataOnError(t *testing.T) {
+	fmt.Println("============== Test case start: TestCngBucketStatsProvider_GetFailoverLog_TracksDataOnError =================")
+	defer fmt.Println("============== Test case end: TestCngBucketStatsProvider_GetFailoverLog_TracksDataOnError =================")
+	assert := assert.New(t)
+
+	utilsMockObj := &utilsMock.UtilsIface{}
+	logger := createTestLogger()
+	getGrpcOpts := func() (*base.GrpcOptions, error) {
+		return &base.GrpcOptions{ConnStr: "localhost:18098"}, nil
+	}
+
+	provider := NewCngBucketStatsProvider(testBucketName, testClusterUuid, utilsMockObj, logger, getGrpcOpts, createTestGetTargetKvVbMapFunc())
+	provider.cngConn = &base.CngConn{}
+	provider.initialized.Store(true)
+
+	vblist := []uint16{0, 1}
+
+	utilsMockObj.On("CngGetVbucketInfo", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		handler := args.Get(2).(utils.GrpcStreamHandler[*internal_xdcr_v1.GetVbucketInfoResponse])
+		handler.OnError(fmt.Errorf("gRPC connection error"))
+	}).Return()
+
+	dataTransferCtx := utils.NewDataTrackingCtx()
+	finCh := make(chan bool, 1)
+	defer close(finCh)
+	_, _, err := provider.GetFailoverLog(&base.FailoverLogRequest{VBuckets: vblist, FinCh: finCh}, dataTransferCtx)
+
+	assert.Error(err)
+	// Request bytes should still be tracked even on error
+	assert.Greater(dataTransferCtx.GetDataSent(), int64(0), "DataSent should be tracked even when RPC fails")
+	// Response bytes should be 0 since error returned nil result
+	assert.Equal(int64(0), dataTransferCtx.GetDataReceived(), "DataReceived should be zero on error")
+
+	utilsMockObj.AssertExpectations(t)
+	provider.Close()
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	Component "github.com/couchbase/goxdcr/v8/component"
 	"github.com/couchbase/goxdcr/v8/streamApiWatcher/cngWatcher"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -808,17 +809,21 @@ func (provider *CngBucketStatsProvider) GetFailoverLog(requestOpts *base.Failove
 	ctx, cancel := context.WithTimeout(provider.context, base.ShortHttpTimeout)
 	defer cancel()
 
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{
+		BucketName:     provider.bucketName,
+		VbucketIds:     vbucketIds,
+		IncludeHistory: &includeHistory,
+		IncludeMaxCas:  &includeMaxCas,
+	}
+
 	provider.utils.CngGetVbucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]{
 		Context: ctx,
-		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
-			BucketName:     provider.bucketName,
-			VbucketIds:     vbucketIds,
-			IncludeHistory: &includeHistory,
-			IncludeMaxCas:  &includeMaxCas,
-		},
+		Request: grpcReq,
 	}, streamHandler)
 
 	result, err := streamHandler.GetResult()
+	// Track data transfer for the failover log request and response
+	trackCngDataTransfer(dataTransferCtx, grpcReq, result)
 	if err != nil {
 		// Darshan TODO: Add retry logic here
 		// Need a discussion with Brett to see if CNG should retry or not
@@ -857,17 +862,21 @@ func (provider *CngBucketStatsProvider) GetVBucketStats(requestOpts *base.VBucke
 	ctx, cancel := context.WithTimeout(provider.context, base.ShortHttpTimeout)
 	defer cancel()
 
+	grpcReq := &internal_xdcr_v1.GetVbucketInfoRequest{
+		BucketName:     provider.bucketName,
+		VbucketIds:     vbucketIds,
+		IncludeHistory: &includeHistory,
+		IncludeMaxCas:  &includeMaxCas,
+	}
+
 	provider.utils.CngGetVbucketInfo(provider.cngConn.Client(), &base.GrpcRequest[*internal_xdcr_v1.GetVbucketInfoRequest]{
 		Context: ctx,
-		Request: &internal_xdcr_v1.GetVbucketInfoRequest{
-			BucketName:     provider.bucketName,
-			VbucketIds:     vbucketIds,
-			IncludeHistory: &includeHistory,
-			IncludeMaxCas:  &includeMaxCas,
-		},
+		Request: grpcReq,
 	}, streamHandler)
 
 	result, err := streamHandler.GetResult()
+	// Track data transfer for the vbucket stats request and response
+	trackCngDataTransfer(dataTransferCtx, grpcReq, result)
 	if err != nil {
 		// Darshan TODO: Add retry logic here
 		// Need a discussion with Brett to see if CNG should retry or not
@@ -911,4 +920,16 @@ func (provider *CngBucketStatsProvider) getVBucketList() ([]uint32, error) {
 	provider.vbucketIdsMu.Unlock()
 
 	return cached, nil
+}
+
+// trackCngDataTransfer tracks the gRPC request and response sizes into the data transfer context.
+func trackCngDataTransfer(dataTransferCtx *utils.Context, grpcReq *internal_xdcr_v1.GetVbucketInfoRequest, result cngWatcher.VBucketInfoResponse) {
+	if dataTransferCtx == nil || !dataTransferCtx.TrackDataSentAndReceived {
+		return
+	}
+
+	atomic.AddInt64(&dataTransferCtx.DataSent, int64(proto.Size(grpcReq)))
+	for _, vbState := range result {
+		atomic.AddInt64(&dataTransferCtx.DataReceived, int64(proto.Size(vbState)))
+	}
 }

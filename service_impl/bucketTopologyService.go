@@ -639,8 +639,8 @@ func (b *BucketTopologyService) getRemoteVBStatsUpdater(spec *metadata.Replicati
 
 		trackingCtx := b.utils.GetDataUsageTrackingCtx()
 		vbStatsMap, errMap, err := watcher.statsProvider.GetVBucketStats(requestOpts, trackingCtx)
-		watcher.dataSentBytes.Add(trackingCtx.DataSent)
-		watcher.dataReceivedBytes.Add(trackingCtx.DataReceived)
+		watcher.dataSentBytes.Add(trackingCtx.GetDataSent())
+		watcher.dataReceivedBytes.Add(trackingCtx.GetDataReceived())
 		if err != nil {
 			return err
 		}
@@ -670,8 +670,8 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 	topologyUpdateFunc := func() error {
 		trackingCtx := b.utils.GetDataUsageTrackingCtx()
 		targetBucketInfo, shouldUseExternal, connStr, err := b.getTgtBucketInfoGetter(spec, trackingCtx)
-		watcher.dataSentBytes.Add(trackingCtx.DataSent)
-		watcher.dataReceivedBytes.Add(trackingCtx.DataReceived)
+		watcher.dataSentBytes.Add(trackingCtx.GetDataSent())
+		watcher.dataReceivedBytes.Add(trackingCtx.GetDataReceived())
 		if err != nil {
 			return err
 		}
@@ -709,8 +709,8 @@ func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.Repli
 			if shouldUseTerseInfo {
 				terseTrackingCtx := b.utils.GetDataUsageTrackingCtx()
 				terseTargetBucketInfo, err := b.getTgtTerseBucketInfoGetter(spec, terseTrackingCtx)
-				watcher.dataSentBytes.Add(terseTrackingCtx.DataSent)
-				watcher.dataReceivedBytes.Add(terseTrackingCtx.DataReceived)
+				watcher.dataSentBytes.Add(terseTrackingCtx.GetDataSent())
+				watcher.dataReceivedBytes.Add(terseTrackingCtx.GetDataReceived())
 				if err != nil {
 					return err
 				}

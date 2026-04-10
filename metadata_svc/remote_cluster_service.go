@@ -1535,11 +1535,11 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReference(rctx *refreshC
 		ctx = agent.utils.GetDataUsageTrackingCtx()
 		defer func() {
 			if ctx != nil {
-				if ctx.DataReceived > 0 {
-					agent.dataReceivedBytes.Add(uint64(ctx.DataReceived))
+				if sent := ctx.GetDataSent(); sent > 0 {
+					agent.dataSentBytes.Add(uint64(sent))
 				}
-				if ctx.DataSent > 0 {
-					agent.dataSentBytes.Add(uint64(ctx.DataSent))
+				if received := ctx.GetDataReceived(); received > 0 {
+					agent.dataReceivedBytes.Add(uint64(received))
 				}
 			}
 		}()
@@ -4642,11 +4642,11 @@ func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMet
 
 	// Track data usage from heartbeat
 	if ctx != nil {
-		if ctx.DataSent > 0 {
-			agent.dataSentBytes.Add(uint64(ctx.DataSent))
+		if sent := ctx.GetDataSent(); sent > 0 {
+			agent.dataSentBytes.Add(uint64(sent))
 		}
-		if ctx.DataReceived > 0 {
-			agent.dataReceivedBytes.Add(uint64(ctx.DataReceived))
+		if received := ctx.GetDataReceived(); received > 0 {
+			agent.dataReceivedBytes.Add(uint64(received))
 		}
 	}
 
