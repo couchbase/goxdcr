@@ -40,9 +40,11 @@ import (
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/v8/base"
 	baseclog "github.com/couchbase/goxdcr/v8/base/conflictlog"
+	baseclogmocks "github.com/couchbase/goxdcr/v8/base/conflictlog/mocks"
 	"github.com/couchbase/goxdcr/v8/base/generator"
 	"github.com/couchbase/goxdcr/v8/common"
 	"github.com/couchbase/goxdcr/v8/common/mocks"
+	"github.com/couchbase/goxdcr/v8/conflictlog"
 	"github.com/couchbase/goxdcr/v8/crMeta"
 	"github.com/couchbase/goxdcr/v8/hlv"
 	"github.com/couchbase/goxdcr/v8/log"
@@ -2574,4 +2576,234 @@ func TestPVPruning(t *testing.T) {
 	testWithMobileOff(5)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
+}
+
+// eventCounter counts ConflictsDetected and CLogWriteStatus events
+type eventCounter struct {
+	mu                sync.Mutex
+	conflictsDetected int
+	cLogWriteStatus   int
+}
+
+func (ec *eventCounter) countEvent(event *common.Event) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	switch event.EventType {
+	case common.ConflictsDetected:
+		ec.conflictsDetected++
+	case common.CLogWriteStatus:
+		ec.cLogWriteStatus++
+	}
+}
+
+// countingXmemNozzle wraps XmemNozzle to count events and handle sync channel
+type countingXmemNozzle struct {
+	*XmemNozzle
+	ec *eventCounter
+}
+
+func (c *countingXmemNozzle) RaiseEvent(event *common.Event) {
+	c.ec.countEvent(event)
+	c.XmemNozzle.RaiseEvent(event)
+
+	// When a ConflictsDetected event is raised, signal the sync channel
+	// to allow logConflict to proceed
+	if event.EventType == common.ConflictsDetected {
+		if syncCh, ok := event.OtherInfos.(chan bool); ok && syncCh != nil {
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				syncCh <- true
+			}()
+		}
+	}
+}
+
+// Override logConflict to use our RaiseEvent
+func (c *countingXmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) error {
+	// This is a simplified version that uses our RaiseEvent
+	// The real implementation is in xmem_nozzle.go
+
+	// Compose the conflict record first
+	conflictRecord, err := c.XmemNozzle.composeConflictRecord(req, resp)
+	if err != nil {
+		return fmt.Errorf("error composing conflict record, err=%v", err)
+	}
+
+	// Raise the conflict logging request
+	syncCh := c.cLogReqSyncCh
+	info := conflictlog.CLogReqT{
+		Vbno:  req.GetSourceVB(),
+		Seqno: req.Seqno,
+	}
+	c.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, c, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, syncCh))
+	select {
+	case <-syncCh:
+	case <-c.finish_ch:
+		return nil
+	}
+
+	// Call the conflict logger
+	conflictLogger := c.conflictLogger
+	if conflictLogger != nil {
+		err := conflictLogger.Log(conflictRecord)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Override handleConflict to use our logConflict
+func (c *countingXmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) {
+	err := c.logConflict(req, resp)
+	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated || err == baseclog.ErrLoggerClosed {
+		c.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
+			c.Id(),
+			base.UdTagBegin, req.Req.Key, base.UdTagEnd,
+			err,
+		)
+	} else if err != nil {
+		c.Logger().Errorf("%v Error when logging conflict for key=%v%s%v, req=%v%s%v, reqBody=%v%v%v, resp=%v, respBody=%v%v%v, err=%v",
+			c.Id(),
+			base.UdTagBegin, req.Req.Key, base.UdTagEnd,
+			base.UdTagBegin, req.Req, base.UdTagEnd,
+			base.UdTagBegin, req.Req.Body, base.UdTagEnd,
+			resp.Resp.Opcode,
+			base.UdTagBegin, resp.Resp.Body, base.UdTagEnd,
+			err,
+		)
+	}
+}
+
+func TestHandleConflict(t *testing.T) {
+	// TestHandleConflict tests various scenarios for handleConflict function.
+	// It verifies that conflict logging response event count equals conflict logging request count.
+	fmt.Printf("============== Test case start: TestHandleConflict =================\n")
+	defer fmt.Printf("============== Test case end: TestHandleConflict =================\n")
+
+	assert := assert.New(t)
+
+	// Setup xmem
+	_, _, xmem, _, throttler, remoteClusterSvc, colManSvc, _ := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
+	setupMocksXmem(xmem, &utilsMock.UtilsIface{}, throttler, remoteClusterSvc, colManSvc, nil)
+
+	// Create event counter and wrap xmem
+	ec := &eventCounter{}
+	countingXmem := &countingXmemNozzle{XmemNozzle: xmem, ec: ec}
+
+	col := &base.CollectionNamespace{
+		ScopeName:      "_default",
+		CollectionName: "_default",
+	}
+	req := &base.WrappedMCRequest{
+		Req: &mc.MCRequest{
+			Extras: make([]byte, 24),
+		},
+		SrcColNamespace: col,
+		TgtColNamespace: col,
+	}
+
+	resp := &base.WrappedMCResponse{
+		Resp: &mc.MCResponse{},
+	}
+
+	testCases := []struct {
+		name            string
+		loggerReturnErr error
+		cLogOptsEnabled bool
+	}{
+		{
+			name:            "ErrQueueFull",
+			loggerReturnErr: baseclog.ErrQueueFull,
+			cLogOptsEnabled: true,
+		},
+		{
+			name:            "ComposeError",
+			loggerReturnErr: nil, // Log won't be called
+			cLogOptsEnabled: false,
+		},
+		{
+			name:            "HappyPath",
+			loggerReturnErr: nil,
+			cLogOptsEnabled: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Override cLogReqSyncCh to be a buffered channel we can control
+			countingXmem.cLogReqSyncCh = make(chan bool, 1)
+
+			// Create mock conflict logger
+			mockLogger := baseclogmocks.NewLogger(t)
+			if tc.loggerReturnErr != nil {
+				// error path - need to raise CLogWriteStatus event synchronously.
+				mockLogger.On("Log", mock.Anything).Run(func(args mock.Arguments) {
+					go func() {
+						time.Sleep(20 * time.Millisecond)
+						info := conflictlog.CLogRespT{
+							ThroughSeqnoRelated: true,
+							Vbno:                0,
+							Seqno:               1,
+						}
+						countingXmem.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, countingXmem, nil, nil))
+					}()
+				}).Return(tc.loggerReturnErr).Maybe()
+			} else {
+				// happy path - raise CLogWriteStatus event asynchronously
+				mockLogger.On("Log", mock.Anything).Run(func(args mock.Arguments) {
+					go func() {
+						time.Sleep(20 * time.Millisecond)
+						info := conflictlog.CLogRespT{
+							ThroughSeqnoRelated: true,
+							Vbno:                0,
+							Seqno:               1,
+						}
+						countingXmem.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, countingXmem, nil, nil))
+					}()
+				}).Return(nil).Maybe()
+			}
+
+			countingXmem.conflictLogger = mockLogger
+
+			if tc.cLogOptsEnabled {
+				req.ConflictLoggerOptions = &base.CLoggerOptions{
+					Enabled: true,
+				}
+			} else {
+				// Setting it to nil will cause an error in composing conflict record.
+				req.ConflictLoggerOptions = nil
+			}
+
+			// Call handleConflict
+			countingXmem.handleConflict(req, resp)
+
+			// Wait for async events if cLogOpts is enabled (need to wait for CLogWriteStatus)
+			if tc.cLogOptsEnabled {
+				// Check every 100ms for up to 10 iterations
+				for i := 0; i < 10; i++ {
+					time.Sleep(100 * time.Millisecond)
+					ec.mu.Lock()
+					reqCount := ec.conflictsDetected
+					resCount := ec.cLogWriteStatus
+					ec.mu.Unlock()
+
+					fmt.Printf("Iteration %d: clog req count=%d, clog res count=%d\n", i+1, reqCount, resCount)
+
+					if reqCount == resCount && reqCount > 0 {
+						break
+					}
+				}
+			}
+
+			// Verify
+			ec.mu.Lock()
+			reqCount := ec.conflictsDetected
+			resCount := ec.cLogWriteStatus
+			ec.mu.Unlock()
+
+			assert.Equal(reqCount, resCount, "conflict logging response event count should equal conflict logging request count")
+		})
+	}
 }

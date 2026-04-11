@@ -2156,24 +2156,6 @@ func parseHlvMouAndSyncXattrsFromBody(body []byte, datatype uint8, sendHlv, pres
 
 // wrapper function to handle conflict (i.e. log conflict) between source (req) and target (resp) docs
 func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) {
-	// It is assumed that if err != nil, the logging request
-	// has successfully reached the conflict logger and the conflict writing will be attempted.
-	// The conflict logging request event needs to be synchronous to ensure that the event raising
-	// doesn't race and lose with the concurrent pipeline events like failed CR events, to ensure correctness
-	// in throughSeqNo calculation.
-	syncCh := xmem.cLogReqSyncCh
-	info := conflictlog.CLogReqT{
-		Vbno:  req.GetSourceVB(),
-		Seqno: req.Seqno,
-	}
-	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, syncCh))
-	select {
-	case <-syncCh:
-	case <-xmem.finish_ch:
-		// pipeline services should have shut down too.
-		return
-	}
-
 	err := xmem.logConflict(req, resp)
 	if err == baseclog.ErrQueueFull || err == baseclog.ErrLoggerHibernated || err == baseclog.ErrLoggerClosed {
 		xmem.Logger().Debugf("%v Conflict logger could not log for key=%v%s%v, err=%v",
@@ -2195,21 +2177,24 @@ func (xmem *XmemNozzle) handleConflict(req *base.WrappedMCRequest, resp *base.Wr
 	}
 }
 
-// logs the source (req) and target (resp) document (and their metadata) involved in the conflict to a conflict bucket.
-func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) error {
+// composeConflictRecord creates a ConflictRecord from the source and target document information.
+func (xmem *XmemNozzle) composeConflictRecord(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) (*conflictlog.ConflictRecord, error) {
 	var err error
+
 	cLogOpts := req.ConflictLoggerOptions
 	if cLogOpts == nil {
 		// shouldn't happen ideally
 		// because we have checked it before calling this function.
-		return fmt.Errorf("cLogOpts is nil, but shouldn't be")
+		err = fmt.Errorf("cLogOpts is nil, but shouldn't be")
+		return nil, err
 	}
 
 	/* source document body and xattrs. */
 
 	// make sure source doc is uncompressed
-	if err := xmem.uncompressBody(req); err != nil {
-		return fmt.Errorf("error decompressing source body, err=%v", err)
+	if err = xmem.uncompressBody(req); err != nil {
+		err = fmt.Errorf("error decompressing source body, err=%v", err)
+		return nil, err
 	}
 
 	// parse the source metadata for dcp mutation
@@ -2217,14 +2202,16 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 
 	sourceHlvClone, sourceMouClone, sourceSyncClone, err := parseHlvMouAndSyncXattrsFromBody(req.Req.Body, req.Req.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync)
 	if err != nil {
-		return err
+		err = fmt.Errorf("error parsing source body, err=%v", err)
+		return nil, err
 	}
 
 	// source mutation from dcp already has all the xattrs.
 	// just need to add conflict record xattr. The routine will create a clone of the body.
 	sourceBodyClone, sourceDocDatatype, err := conflictlog.InsertConflictXattrToBody(req.Req.Body, req.Req.DataType)
 	if err != nil {
-		return fmt.Errorf("error inserting conflict xattr to source body, err=%v", err)
+		err = fmt.Errorf("error inserting conflict xattr to source body, err=%v", err)
+		return nil, err
 	}
 
 	/* target document body and xattrs. */
@@ -2255,7 +2242,8 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 		// the response body should be already uncompressed in getMeta handler.
 		targetHlvClone, targetMouClone, targetSyncClone, err = parseHlvMouAndSyncXattrsFromBody(resp.Resp.Body, resp.Resp.DataType, req.HLVModeOptions.SendHlv, req.HLVModeOptions.PreserveSync)
 		if err != nil {
-			return err
+			err = fmt.Errorf("error parsing target body, err=%v", err)
+			return nil, err
 		}
 	}
 
@@ -2264,7 +2252,8 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 	// create a clone of the response body.
 	targetBodyClone, targetDocDatatype, err := conflictlog.InsertConflictXattrToBody(resp.Resp.Body, resp.Resp.DataType)
 	if err != nil {
-		return fmt.Errorf("error inserting conflict xattr to target body, err=%v", err)
+		err = fmt.Errorf("error inserting conflict xattr to target body, err=%v", err)
+		return nil, err
 	}
 
 	/* miscellaneous metadata. */
@@ -2281,14 +2270,15 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 
 	_, startIdx, err := base.DecodeULEB128PrefixedKey(req.Req.Key)
 	if err != nil {
-		return fmt.Errorf("invalid prefixed key, key=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, err)
+		err = fmt.Errorf("invalid prefixed key, key=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, err)
+		return nil, err
 	}
 	docKey := req.Req.Key[startIdx:]
 
 	timestamp := time.Now()
 
 	// Generate a conflict record from above information.
-	conflictRecord := conflictlog.ConflictRecord{
+	conflictRecord := &conflictlog.ConflictRecord{
 		Timestamp: timestamp.Format(conflictlog.TimestampFormat),
 		DocId:     string(docKey),
 		Source: conflictlog.DocInfo{
@@ -2340,9 +2330,47 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 		OriginatingPipeline: xmem.pipelineType,
 	}
 
+	return conflictRecord, nil
+}
+
+// logConflict logs the source (req) and target (resp) document (and their metadata) involved in the conflict to a conflict bucket.
+func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.WrappedMCResponse) error {
+	// Compose the conflict record first before raising the conflict logging request to ensure that if there was any
+	// error in the function execution, we wouldn't end up having an orphaned conflict logging request, with no conflict
+	// logging response.
+	conflictRecord, err := xmem.composeConflictRecord(req, resp)
+	if err != nil {
+		// So haven't raised a conflict logging request yet, so return immediately.
+		return fmt.Errorf("error composing conflict record, err=%v", err)
+	}
+
+	// Raise the conflict logging request for throughSeqnoSvc to register the presence of a detected conflict.
+	// The conflict logging request event needs to be synchronous to ensure that the event raising
+	// doesn't race and lose with the concurrent pipeline events like failed CR events, to ensure correctness
+	// in throughSeqNo calculation.
+	syncCh := xmem.cLogReqSyncCh
+	info := conflictlog.CLogReqT{
+		Vbno:  req.GetSourceVB(),
+		Seqno: req.Seqno,
+	}
+	xmem.RaiseEvent(common.NewEvent(common.ConflictsDetected, info, xmem, []interface{}{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, syncCh))
+	select {
+	case <-syncCh:
+	case <-xmem.finish_ch:
+		// Pipeline services should have shut down too,
+		// including the throughSeqnoSvc and conflict logger.
+		return nil
+	}
+
+	// Immediately invoke the conflict logger. It is mandatory to not return between raising a conflict logging
+	// request above and invoking the conflict logger below because:
+	// There should always be exactly one conflict logging response raised for every conflict logging request raised.
+	// Any violation will cause throughSeqno to be stuck and therefore also cause stuck changes_left.
+	// The conflict logger will always raise the corresponding conflict logging response to the above conflict
+	// logging request (immediately or eventually).
 	conflictLogger := xmem.conflictLogger
 	if conflictLogger != nil {
-		err := conflictLogger.Log(&conflictRecord)
+		err := conflictLogger.Log(conflictRecord)
 		if err != nil {
 			return err
 		}
