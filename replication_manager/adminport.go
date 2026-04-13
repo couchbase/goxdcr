@@ -484,15 +484,18 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	switch {
 	case err == nil:
 	case metadata_svc.RemoteClusterRefNotFoundErr(err):
+		logger_ap.Errorf("Error deleting remote cluster. err=%v\n", err)
 		// Return 404 Not Found if the remote cluster doesn't exist
 		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
 	default:
+		logger_ap.Errorf("Error looking up existing remote cluster. err=%v\n", err)
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 
 	// TODO get spec from replication status cache after the caching issue is fixed
 	specs, err := ReplicationSpecService().AllReplicationSpecs()
 	if err != nil {
+		logger_ap.Errorf("Error getting replication specs. err=%v\n", err)
 		return nil, err
 	}
 	replIds := make([]string, 0)
@@ -503,11 +506,14 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	}
 	if len(replIds) > 0 {
 		err = fmt.Errorf("Cannot delete remote cluster `%v` since it is referenced by replications %v", ref.Name(), replIds)
+		// err is already self explanatory
+		logger_ap.Errorf("%v\n", err)
 		return EncodeRemoteClusterValidationErrorIntoResponse(err)
 	}
 
 	ref, err = remoteClusterService.DelRemoteCluster(remoteClusterName)
 	if err != nil {
+		logger_ap.Errorf("Error deleting remote cluster. err=%v\n", err)
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	}
 
