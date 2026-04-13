@@ -2807,3 +2807,111 @@ func TestHandleConflict(t *testing.T) {
 		})
 	}
 }
+
+// sentinelDataPool is a test DataPool that overwrites recycled slices with 0xFF.
+// This allows deterministic detection of use-after-free / premature-recycling bugs.
+type sentinelDataPool struct{}
+
+func (p *sentinelDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
+	return make([]byte, sizeRequested), nil
+}
+
+func (p *sentinelDataPool) PutByteSlice(s []byte) {
+	for i := range s {
+		s[i] = 0xFF
+	}
+}
+
+func (p *sentinelDataPool) SetOptions(_ base.DataPoolOptions) {}
+
+func TestGetExSharedResponseExtraSlicePrematureRecycling(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestGetExSharedResponseExtraSlicePrematureRecycling =================")
+	defer fmt.Println("============== Test case end: TestGetExSharedResponseExtraSlicePrematureRecycling =================")
+
+	utilsNotUsed, _, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem("B1", base.CRMode_LWW)
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
+
+	mockCLogger := &baseclogmocks.Logger{}
+	mockCLogger.On("Log", mock.Anything).Return(nil)
+
+	xmem.dataPool = &sentinelDataPool{}
+	xmem.dataChan = make(chan *base.WrappedMCRequest, 10)
+	xmem.dataChan_control = make(chan bool, 1)
+	xmem.dataChan_control <- true
+	xmem.conflictLogger = mockCLogger
+	xmem.cLogReqSyncCh = make(chan bool, 2)
+	xmem.cLogReqSyncCh <- true
+	xmem.cLogReqSyncCh <- true
+
+	// Construct a valid GetEx body with 1 xattr, which triggers GetXattrSize during composing conflict record.
+	// But to the sentinel datapool, with the bug that 2 goroutines have access (one reads, one modifies) to the
+	// same byte slice, the error "xattrs size 4294967295 exceeds max doc size" would have been returned.
+	targetDocBody := []byte(`{}`)
+	decompressedBody, err := xmem.dataPool.GetByteSlice(uint64(4 + 4 + 2 + 8 + len(targetDocBody)))
+	assert.Nil(err)
+	copy(decompressedBody, targetDocBody)
+	c := base.NewXattrComposer(decompressedBody)
+	c.WriteKV([]byte("foo"), []byte(`"bar"`))
+	decompressedBody, _ = c.FinishAndAppendDocValue(targetDocBody, nil, nil, nil)
+	resp := &base.WrappedMCResponse{
+		Resp: &mc.MCResponse{
+			Body:     decompressedBody,
+			DataType: base.XattrDataType | base.JSONDataType,
+		},
+		ExtraSlice: decompressedBody,
+	}
+
+	// The buggy code had these calls in batchGet function. Uncommenting this
+	// used to reproduce the bug:
+	// resp.RecyleExtraSlice(item1.AddByteSliceForXmemToRecycle)
+	// resp.RecyleExtraSlice(item2.AddByteSliceForXmemToRecycle)
+
+	// Construct 2 WrappedMCRequests with the same key.
+	// Both items below share this single WrappedMCResponse because they have the same doc key;
+	// sendBatchGetRequest de-duplicates by doc key and issues only one GetEx fetch.
+	// Both items are fully set up for logConflict. The only failure mode is a corrupted body.
+	sharedReqFields := func(uniqueKey string) *base.WrappedMCRequest {
+		return &base.WrappedMCRequest{
+			Req: &mc.MCRequest{
+				Key:      []byte("sameDocKey"),
+				Body:     []byte(`{}`),
+				Extras:   make([]byte, 24),
+				DataType: base.JSONDataType,
+			},
+			UniqueKey:             uniqueKey,
+			ConflictLoggerOptions: &base.CLoggerOptions{Enabled: true},
+			SrcColNamespace:       &base.CollectionNamespace{},
+			TgtColNamespace:       &base.CollectionNamespace{},
+		}
+	}
+	item1 := sharedReqFields("sameDocKey-1")
+	item2 := sharedReqFields("sameDocKey-2")
+
+	// Both items in the batch: both lose CR (NotSendFailedCR) and both have conflict logging
+	// enabled. batchSetMetaWithRetry will call handleConflict -> logConflict for each item.
+	batch := newBatch(10, 1024, xmem.Logger())
+	batch.curCount = 2
+	batch.noRepMap = map[string]NeedSendStatus{
+		item1.UniqueKey: NotSendFailedCR,
+		item2.UniqueKey: NotSendFailedCR,
+	}
+	batch.conflictLookupMap = NewResponseLookup()
+	batch.conflictLookupMap.registerLookup(item1.UniqueKey, resp)
+	batch.conflictLookupMap.registerLookup(item2.UniqueKey, resp)
+	xmem.dataChan <- item1
+	xmem.dataChan <- item2
+
+	// batchSetMetaWithRetry processes the batch in order:
+	//   item1: handleConflict -> logConflict(item1, valid body) -> Log() called (1st)
+	//          NotSendFailedCR -> recycleDataObj(item1) -> body corrupted with 0xFF
+	//   item2: (during the bug) handleConflict -> logConflict(item2, corrupted body) ->
+	//          GetXattrSize reads 0xFFFFFFFF -> "xattrs size 4294967295 exceeds max doc size"
+	//          handleConflict logs this error via xmem.Logger().Errorf(...) (visible in output)
+	//          Log() is never called for item2
+	assert.Nil(xmem.batchSetMetaWithRetry(batch, 1))
+
+	// Log() must have been called for both items. With the bug it was called only once
+	// because logConflict for item2 returns early with the xattrs size error.
+	mockCLogger.AssertNumberOfCalls(t, "Log", 2)
+}

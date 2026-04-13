@@ -370,6 +370,23 @@ function grepForFaultyCLogTrackers {
 	return 0
 }
 
+function grepForConflictLoggingErrors {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "Error when logging conflict for key" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'Error when logging conflict for key' in ${logsDir}/${dir}"
+				dumpDebugInfoBeforeExit
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
 function getDataReplicated {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -3027,6 +3044,11 @@ function grepForAbnormalities {
 	fi
 
 	grepForUnusualOSOSessionEnds
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForConflictLoggingErrors
 	if (($? != 0)); then
 		exit 1
 	fi

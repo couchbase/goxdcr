@@ -304,13 +304,13 @@ type responseLookup struct {
 	responses map[string]*base.WrappedMCResponse
 	// There may be multiple unique-keys that are refering to the same response of a given document key
 	// Therefore, GC or recycle the response only when refCnt is zero
-	refCnter map[*mc.MCResponse]int
+	refCnter map[*base.WrappedMCResponse]int
 }
 
 func NewResponseLookup() *responseLookup {
 	return &responseLookup{
 		responses: make(map[string]*base.WrappedMCResponse),
-		refCnter:  make(map[*mc.MCResponse]int),
+		refCnter:  make(map[*base.WrappedMCResponse]int),
 	}
 }
 
@@ -324,7 +324,7 @@ func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.Wrappe
 	}
 
 	lookup.responses[uniqueKey] = resp
-	lookup.refCnter[resp.Resp]++
+	lookup.refCnter[resp]++
 	return nil
 }
 
@@ -342,7 +342,7 @@ func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.WrappedM
 		return nil, base.ErrorNilPtr
 	}
 
-	lookup.refCnter[response.Resp]--
+	lookup.refCnter[response]--
 	return response, nil
 }
 
@@ -364,7 +364,7 @@ func (lookup *responseLookup) getLookup(uniqueKey string) (*base.WrappedMCRespon
 }
 
 // only recycle if the response referenced by noone responseLookup
-func (lookup *responseLookup) canRecycle(resp *mc.MCResponse) bool {
+func (lookup *responseLookup) canRecycle(resp *base.WrappedMCResponse) bool {
 	if lookup == nil {
 		return true
 	}

@@ -1427,11 +1427,13 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	// The responses can only be GC'ed after the actual bytes have been sent over the wire
 	// to prevent zeroing out data prior to send
 	// This is a list that stores such these responses
-	respToGc := make(map[*mc.MCResponse]bool)
+	// We track WrappedMCResponse to also recycle ExtraSlice when the response is no longer needed.
+	respToGc := make(map[*base.WrappedMCResponse]bool)
 	defer func() {
 		// make sure at the end, everything left is recycled
-		for oneResp := range respToGc {
-			oneResp.Recycle()
+		for wrappedResp := range respToGc {
+			// Recycle both ExtraSlice (if any) and MCResponse
+			wrappedResp.Recycle(xmem.dataPool.PutByteSlice)
 		}
 	}()
 
@@ -1461,7 +1463,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 					// The log function performs a clone of necessary information to log,
 					// safe to recycle.
-					respToGc[resp.Resp] = true
+					respToGc[resp] = true
 				}
 			}
 
@@ -1484,7 +1486,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 
 				if lookupResp != nil && lookupResp.Resp != nil {
-					respToGc[lookupResp.Resp] = true
+					respToGc[lookupResp] = true
 				}
 
 				err = xmem.preprocessMCRequest(item, lookupResp)
@@ -2340,7 +2342,7 @@ func (xmem *XmemNozzle) logConflict(req *base.WrappedMCRequest, resp *base.Wrapp
 	// logging response.
 	conflictRecord, err := xmem.composeConflictRecord(req, resp)
 	if err != nil {
-		// So haven't raised a conflict logging request yet, so return immediately.
+		// We haven't raised a conflict logging request yet, so return immediately.
 		return fmt.Errorf("error composing conflict record, err=%v", err)
 	}
 
@@ -2416,7 +2418,7 @@ func (xmem *XmemNozzle) canLogConflict(source *base.WrappedMCRequest, target *ba
 // and also deletes the key from getMap to indicate that the lookup is done processing.
 // The routine also adjusts respToGc incase the currLookup can be GC'ed.
 func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLookupMap *responseLookup, noRepMap map[string]NeedSendStatus, prevLookup, currLookup *base.WrappedMCResponse,
-	key, uniqueKey string, respToGc map[*mc.MCResponse]bool) bool {
+	key, uniqueKey string, respToGc map[*base.WrappedMCResponse]bool) bool {
 
 	hasTmpErr := false
 	casEarlier := prevLookup.Resp.Cas
@@ -2440,7 +2442,7 @@ func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLooku
 			}
 			noRepMap[uniqueKey] = RetryTargetCasChanged
 			delete(getMap, uniqueKey)
-			respToGc[currLookup.Resp] = true
+			respToGc[currLookup] = true
 		}
 	} else if base.IsDocLocked(currLookup.Resp) {
 		if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -2449,7 +2451,7 @@ func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLooku
 		}
 		noRepMap[uniqueKey] = RetryTargetLocked
 		delete(getMap, uniqueKey)
-		respToGc[currLookup.Resp] = true
+		respToGc[currLookup] = true
 	} else if base.IsSuccessGetResponse(currLookup.Resp) {
 		if casNow == casEarlier {
 			err := getLookupMap.registerLookup(uniqueKey, currLookup)
@@ -2466,7 +2468,7 @@ func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLooku
 			}
 			noRepMap[uniqueKey] = RetryTargetCasChanged
 			delete(getMap, uniqueKey)
-			respToGc[currLookup.Resp] = true
+			respToGc[currLookup] = true
 		}
 	} else if currLookup != nil {
 		if base.IsTemporaryMCError(statusNow) {
@@ -2478,7 +2480,7 @@ func (xmem *XmemNozzle) compareWithPrevLookup(getMap base.McRequestMap, getLooku
 		} else {
 			xmem.Logger().Debugf("Received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
 		}
-		respToGc[currLookup.Resp] = true
+		respToGc[currLookup] = true
 	}
 
 	return hasTmpErr
@@ -2517,12 +2519,14 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 
 	// Some responses (eg. of those who are skipped to send) could have been refered by some other unique-keys (other mutations with the same doc key)
 	// Store such responses here and take the call to recycle or not before the routine exits based on the refCnter
-	respToGc := make(map[*mc.MCResponse]bool)
+	// We track WrappedMCResponse to also recycle ExtraSlice when the response is no longer needed.
+	respToGc := make(map[*base.WrappedMCResponse]bool)
 	defer func() {
-		for resp := range respToGc {
-			if getLookupMap.canRecycle(resp) &&
-				conflictLookupMap.canRecycle(resp) {
-				resp.Recycle()
+		for wrappedResp := range respToGc {
+			if wrappedResp.Resp != nil &&
+				getLookupMap.canRecycle(wrappedResp) &&
+				conflictLookupMap.canRecycle(wrappedResp) {
+				wrappedResp.Recycle(xmem.dataPool.PutByteSlice)
 			}
 		}
 	}()
@@ -2556,11 +2560,6 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 				}
 				continue
 			}
-
-			// if response was compressed and it is now uncompressed,
-			// make sure we mark the new slice allocated for xmem to be recycled at the end
-			// of the req's processing.
-			resp.RecyleExtraSlice(wrappedReq.AddByteSliceForXmemToRecycle)
 
 			/*
 				Possiblity #1: When compareWithPrevLookup is true, this is the second time we are performing lookup
@@ -2603,7 +2602,7 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 				}
 				noRepMap[uniqueKey] = RetryTargetLocked
 				delete(getMap, uniqueKey)
-				respToGc[resp.Resp] = true
+				respToGc[resp] = true
 			} else if base.IsSuccessGetResponse(resp.Resp) {
 				conflictLoggingIsOn := xmem.canLogConflict(wrappedReq, resp)
 
@@ -2636,7 +2635,7 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 					noRepMap[uniqueKey] = NotSendFailedCR
 					if !logConflict {
 						// can only recycle if the response is not used for conflict logging
-						respToGc[resp.Resp] = true
+						respToGc[resp] = true
 					}
 				case crMeta.CRMerge:
 					noRepMap[uniqueKey] = NotSendMerge
@@ -2675,7 +2674,7 @@ func (xmem *XmemNozzle) batchGet(getMap base.McRequestMap, prevGetLookup *respon
 				} else {
 					xmem.Logger().Debugf("Received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
 				}
-				respToGc[resp.Resp] = true
+				respToGc[resp] = true
 			}
 		}
 	}
@@ -2831,9 +2830,6 @@ func (xmem *XmemNozzle) uncompressResponseBody(resp *base.WrappedMCResponse) err
 	if err != nil {
 		return err
 	}
-
-	// recyle the original response body before reassigning.
-	resp.Resp.Recycle()
 
 	resp.Resp.Body = body
 	resp.Resp.DataType = resp.Resp.DataType &^ mcc.SnappyDataType

@@ -2182,24 +2182,22 @@ type WrappedMCResponse struct {
 	Resp  *mc.MCResponse
 
 	// If a new slice is allocated while uncompressing the
-	// response body, it will be stored here. It is the user's responsibility
-	// to handle this safely as the access is not protected.
+	// response body, it will be stored here. Use the Recycle method
+	// to safely recycle both this slice and the underlying MCResponse.
 	ExtraSlice []byte
 }
 
-// This routine is not thread-safe and lookupResp should be non-nil.
-// This routine will call the recycleFunc on WrappedMCResponse.ExtraSlice.
-// Note that this is different from MCResponse.Recycle(), which GCs the underlying response body
-// of a MCResponse.
-func (lookupResp *WrappedMCResponse) RecyleExtraSlice(recycleFunc func([]byte)) {
-	if lookupResp.ExtraSlice == nil {
-		return
-	}
+// Recycle recycles both the underlying MCResponse and ExtraSlice (if any).
+// The byteSliceRecycler callback is used to recycle ExtraSlice back to the data pool.
+// This should be called when the response is no longer needed by anyone.
+// It is not thread-safe as currently there are no concurrent calls to this function.
+func (lookupResp *WrappedMCResponse) Recycle(byteSliceRecycler func([]byte)) {
+	lookupResp.Resp.Recycle()
 
-	recycleFunc(lookupResp.ExtraSlice)
-	// set it to nil to make sure this routine calls recycleFunc on
-	// the RecyclableSlice only once.
-	lookupResp.ExtraSlice = nil
+	if lookupResp.ExtraSlice != nil {
+		byteSliceRecycler(lookupResp.ExtraSlice)
+		lookupResp.ExtraSlice = nil
+	}
 }
 
 // This routine loop through lookup spec, find the path in the spec and return its lookup value.
