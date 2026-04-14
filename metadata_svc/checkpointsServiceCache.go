@@ -232,7 +232,7 @@ func (c *CheckpointsServiceCacheImpl) requestInvalidateCache() {
 }
 
 func (c *CheckpointsServiceCacheImpl) cacheIsInvalid() bool {
-	if len(c.invalidateCh) > 0 || len(c.latestCompressedCache) == 0 || len(c.latestCompressedCache) == 0 ||
+	if len(c.invalidateCh) > 0 || len(c.latestCompressedCache) == 0 ||
 		len(c.setCh) > 0 || len(c.setOneCh) > 0 || !c.cacheEnabled {
 		return true
 	}
