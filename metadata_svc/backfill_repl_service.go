@@ -313,8 +313,10 @@ func (b *BackfillReplicationService) backfillSpec(replicationId string) (*metada
 	}
 	backfillReplSpec, ok := replSpecVal.spec.(*metadata.BackfillReplicationSpec)
 	if !ok || backfillReplSpec == nil {
-		b.logger.Errorf("%v wrong type of object in replication spec, ok=%v, backfillReplSpec=%v (%T)",
-			replicationId, ok, backfillReplSpec, replSpecVal.spec)
+		if replSpecVal.spec != nil {
+			b.logger.Errorf("%v wrong type of object in replication spec, ok=%v, backfillReplSpec=%v (%T)",
+				replicationId, ok, backfillReplSpec, replSpecVal.spec)
+		}
 		return nil, base.ReplNotFoundErr
 	}
 
