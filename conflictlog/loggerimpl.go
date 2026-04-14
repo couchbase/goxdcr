@@ -1431,9 +1431,9 @@ func (l *LoggerImpl) unhibernate() {
 	}
 	l.RaiseEvent(common.NewEvent(common.CLogWriteStatus, info, l, nil, nil))
 
-	l.hibernated.Store(false)
 	l.errorCnt = 0
 	l.errorStartTime = nil
+	l.hibernated.Store(false)
 
 	uiEventId := l.hibernationEventId
 	defer l.logger.Infof("Conflict logger unhibernated rid=%s lid=%s event=%v", l.replId, l.id, uiEventId)

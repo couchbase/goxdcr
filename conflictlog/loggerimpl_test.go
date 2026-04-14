@@ -498,9 +498,12 @@ func TestLoggerImpl_HibernateIfNeeded(t *testing.T) {
 				assert.Equal(t, baseclog.ErrLoggerHibernated, err)
 
 				if tt.testUnhibernate {
-					// Wait for automatic unhibernation
-					time.Sleep(tt.reattemptDuration + 50*time.Millisecond)
-					assert.False(t, l.hibernated.Load(), "logger should be unhibernated after reattempt duration")
+					// Poll for automatic unhibernation instead of a fixed sleep to avoid
+					// flakiness.
+					require.Eventually(t, func() bool {
+						return !l.hibernated.Load()
+					}, tt.reattemptDuration*5+3*time.Second, 50*time.Millisecond,
+						"logger should be unhibernated after reattempt duration")
 					assert.Equal(t, uint64(0), l.errorCnt)
 					assert.Nil(t, l.errorStartTime)
 
