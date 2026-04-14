@@ -88,6 +88,8 @@ function checkItemCnt {
 	local expectedCnt=$3
 	local i
 
+	echo "checking Item Count on cluster=$cluster, bucket=$bucket, expectedCnt=$expectedCnt"
+
 	local previousItemCnt=0
 	local maxCnt=8
 	for ((i = 0; $i < $maxCnt; i = $(($i + 1)))); do
@@ -105,7 +107,7 @@ function checkItemCnt {
 				echo "WARN: Cluster $cluster bucket $bucket only has $itemCount items"
 			fi
 		fi
-		echo "Sleeping 10 seconds and retrying..."
+		echo "Sleeping 10 seconds and retrying... itemCount=$itemCount, expectedCnt=$expectedCnt"
 		sleep 10
 	done
 	echo "ERROR: Cluster $cluster bucket $bucket has $itemCount items - failed to match expected items count of $expectedCnt"

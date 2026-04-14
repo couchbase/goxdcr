@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 func (n *Nozzle) worker(ctx context.Context) {
@@ -49,15 +50,16 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 			err = n.processReq(childCtx, req)
 
 			if err != nil {
-				// It is possible that the log below may spam. But at the moment (being new nozzle) the advantages
-				// outweigh the disadvantages. So far this log has been very helpful in
-				// troubleshooting and will be revisited in future.
-				n.Logger().Errorf("error processing req, attempt=%[1]d, key=%[2]s%[3]s%[4]s, opcode=%[5]s, cas=%[6]d err=%[7]s",
-					attemptNo,
-					base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
-					req.Req.Opcode,
-					req.Req.Cas,
-					err.Error())
+				// Note: the error is intentionally Debug and Error
+				// This is to prevent log spamming
+				if n.Logger().GetLogLevel() >= log.LogLevelDebug {
+					n.Logger().Debugf("error processing req, attempt=%[1]d, key=%[2]s%[3]s%[4]s, opcode=%[5]s, cas=%[6]d err=%[7]s",
+						attemptNo,
+						base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
+						req.Req.Opcode,
+						req.Req.Cas,
+						err.Error())
+				}
 			}
 			trace.commitTime = time.Since(req.Start_time)
 
@@ -74,10 +76,16 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 			}
 
 			if !isMutationRetryable(err) {
-				n.Logger().Errorf("req failed due non-retryable error key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
-					base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
-					err,
-					req.Req.Opcode, req.Req.Cas)
+				n.stats.IncNonRetryableErrorCount(1)
+
+				// Note: the error is intentionally Debug and Error
+				// This is to prevent log spamming
+				if n.Logger().GetLogLevel() >= log.LogLevelDebug {
+					n.Logger().Debugf("req failed due non-retryable error key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
+						base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
+						err,
+						req.Req.Opcode, req.Req.Cas)
+				}
 				return
 			}
 
@@ -105,7 +113,7 @@ func (n *Nozzle) raiseUpstreamErr(req *base.WrappedMCRequest, err error) (raised
 	}
 
 	raised = true
-	n.Logger().Errorf("setting error to upstream, err=%v", err)
+	n.Logger().Debugf("setting error to upstream, err=%v", err)
 	reportFn(req)
 	return
 }

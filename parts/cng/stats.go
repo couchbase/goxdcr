@@ -2,6 +2,7 @@ package cng
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 )
 
@@ -33,6 +34,9 @@ type Stats struct {
 
 	// Number of WrappedMCRequest recycled in the nozzle.
 	requestsRecycled uint64
+
+	// Number of non-retryable errors encountered during processing of requests
+	nonRetryableErrorCount uint64
 }
 
 func NewStats() *Stats {
@@ -75,6 +79,10 @@ func (s *Stats) IncRequestsRecycled(count uint64) {
 	atomic.AddUint64(&s.requestsRecycled, count)
 }
 
+func (s *Stats) IncNonRetryableErrorCount(count uint64) {
+	atomic.AddUint64(&s.nonRetryableErrorCount, count)
+}
+
 func (s *Stats) String() string {
 	docsReceived := atomic.LoadUint64(&s.docsReceived)
 	docsSent := atomic.LoadUint64(&s.docsSent)
@@ -85,9 +93,22 @@ func (s *Stats) String() string {
 	enqueuedBlocked := atomic.LoadUint64(&s.enqueueBlocked)
 	errUpstreamReporterMissingCount := atomic.LoadUint64(&s.errUpstreamReporterMissingCount)
 	requestsRecycled := atomic.LoadUint64(&s.requestsRecycled)
+	nonRetryableErrorCount := atomic.LoadUint64(&s.nonRetryableErrorCount)
 
-	return fmt.Sprintf("DocsReceived: %v, DocsSent: %v, BytesSent: %v, DocsFailed: %v, ConnRetryCount: %v, ItemsInQueue: %v, EnqueueBlocked: %v, ErrUpRptMissCount: %v, RequestsRecycled: %d",
-		docsReceived, docsSent, bytesSent, docsFailed, connRetryCount, itemsInQueue, enqueuedBlocked, errUpstreamReporterMissingCount, requestsRecycled)
+	w := strings.Builder{}
+
+	fmt.Fprintf(&w, "DocsReceived: %d", docsReceived)
+	fmt.Fprintf(&w, ",DocsSent: %d", docsSent)
+	fmt.Fprintf(&w, ",BytesSent: %d", bytesSent)
+	fmt.Fprintf(&w, ",DocsFailed: %d", docsFailed)
+	fmt.Fprintf(&w, ",ConnRetryCount: %d", connRetryCount)
+	fmt.Fprintf(&w, ",ItemsInQueue: %d", itemsInQueue)
+	fmt.Fprintf(&w, ",EnqueueBlocked: %d", enqueuedBlocked)
+	fmt.Fprintf(&w, ",ErrUpRptMissCount: %d", errUpstreamReporterMissingCount)
+	fmt.Fprintf(&w, ",RequestsRecycled: %d", requestsRecycled)
+	fmt.Fprintf(&w, ",NonRetryableErrorCount: %d", nonRetryableErrorCount)
+
+	return w.String()
 }
 
 // handleNozzleStats updates the nozzle stats based on the transfer result
