@@ -108,8 +108,6 @@ function runLegacyCurrentBidir {
 	echo "Running legacy and current bidir between $c1Ver and $c2Ver"
 	echo "============================================================================"
 
-	resetBucketReplicationTracking
-
 	vagrantRemoveCbServerAll
 
 	vagrantInstallCBServer 0 "$c1Ver"

@@ -193,6 +193,9 @@ function runTestCase {
 	echo "Running multiple versions compatibility matrix differ test with secure or nonsecure replication"
 	echo "============================================================================"
 
+	# Reset everything before test run
+	vagrantRemoveCbServerAll
+
 	local srcVersionToTest
 	local tgtVersionToTest
 

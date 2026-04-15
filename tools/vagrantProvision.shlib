@@ -160,6 +160,9 @@ function vagrantRemoveCbServerAll {
 	CLUSTER_NAME_BUCKET_DONE_MAP=()
 	BUCKET_NAME_SCOPE_DONE_MAP=()
 	SCOPE_NAME_COLLECTION_DONE_MAP=()
+
+	# When all the cbServer packages are removed, all replications are deleted. Reset tracking
+	resetBucketReplicationTracking
 }
 
 function vagrantRemoveSGWAll {
