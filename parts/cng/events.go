@@ -102,6 +102,10 @@ func (n *Nozzle) raiseSuccessEvent(req *base.WrappedMCRequest, t *Trace, err err
 		CloneSyncCh:          req.ClonedSyncCh,
 	}
 
+	if req.OrigSrcVB != nil {
+		additionalInfo.SetOrigSrcVB(*req.OrigSrcVB)
+	}
+
 	if t.pushed {
 		additionalInfo.Commit_time = t.pushRsp.latency
 	}
