@@ -502,7 +502,7 @@ func getChangesLeftFromOverviewStats(overviewStats *expvar.Map) int64 {
 
 func setupPausedStatsMocks(backfillSvc *service_def.BackfillReplSvc, remoteSvc *service_def.RemoteClusterSvc, ckptSvc *service_def.CheckpointsService, ref *metadata.RemoteClusterReference, targetKVVbMap map[string][]uint16,
 	replSpec *metadata.ReplicationSpecification, assert *assert.Assertions, mainIsNil, backfillIsNil bool) (*service_def.BucketTopologySvc, func() map[string]pipeline.ReplicationStatusIface) {
-	cap := metadata.UnitTestGetCollectionsCapability()
+	cap := metadata.UnitTestGetInitialisedCapability()
 	remoteSvc.On("GetCapability", mock.Anything).Return(cap, nil)
 	remoteSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(ref, nil)
 

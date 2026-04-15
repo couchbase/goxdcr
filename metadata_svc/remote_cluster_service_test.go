@@ -61,7 +61,8 @@ func testCallbackIncrementCount(string, interface{}, interface{}) error {
 	return nil
 }
 
-func setupBoilerPlateRCS() (*service_def.UILogSvc,
+// extras, if passed, follow the format: extras = {targetIsEE bool}
+func setupBoilerPlateRCS(extras ...any) (*service_def.UILogSvc,
 	*service_def.MetadataSvc,
 	*service_def.XDCRCompTopologySvc,
 	*utilsMock.UtilsIface,
@@ -75,6 +76,13 @@ func setupBoilerPlateRCS() (*service_def.UILogSvc,
 		mock.Anything, mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyClusterUUID").Return("myUUID", nil)
 	xdcrTopologyMock.On("IsMyClusterEncryptionLevelAll").Return(false)
+
+	targetIsEE := true
+	if len(extras) >= 1 {
+		targetIsEE, _ = extras[0].(bool)
+	}
+	utilitiesMock.On("GetIsRemoteClusterEnterprise", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(targetIsEE, nil)
 
 	remoteClusterSvc, _ := NewRemoteClusterService(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		log.DefaultLoggerContext, utilitiesMock)
@@ -3159,7 +3167,7 @@ func TestCEEnforcement(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCEEnforcement =================")
 
 	test := func(sourceIsEE, targetIsEE, disableCERestrictions, shouldFail bool) {
-		_, _, xdcrTopologyMock, utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+		_, _, xdcrTopologyMock, utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS(targetIsEE)
 		utilitiesMock.On("GetClusterInfoWStatusCode",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(map[string]interface{}{

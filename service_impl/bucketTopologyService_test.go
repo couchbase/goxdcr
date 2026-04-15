@@ -64,7 +64,7 @@ func getTestRemRef() *metadata.RemoteClusterReference {
 }
 
 func getCapability() metadata.Capability {
-	return metadata.UnitTestGetCollectionsCapability()
+	return metadata.UnitTestGetInitialisedCapability()
 }
 
 func getMockStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utilities.UtilsIface, callback func(), logger *log.CommonLogger) streamApiWatcher.StreamApiWatcher {

@@ -89,6 +89,41 @@ func (_c *ConnectionPreCheck_RetrieveConnectionPreCheckResult_Call) RunAndReturn
 	return _c
 }
 
+// SendCngConnectionPreCheckRequest provides a mock function with given fields: _a0, _a1, _a2
+func (_m *ConnectionPreCheck) SendCngConnectionPreCheckRequest(_a0 *metadata.RemoteClusterReference, _a1 peerToPeer.InitRemoteClusterRefFunc, _a2 string) {
+	_m.Called(_a0, _a1, _a2)
+}
+
+// ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendCngConnectionPreCheckRequest'
+type ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call struct {
+	*mock.Call
+}
+
+// SendCngConnectionPreCheckRequest is a helper method to define mock.On call
+//   - _a0 *metadata.RemoteClusterReference
+//   - _a1 peerToPeer.InitRemoteClusterRefFunc
+//   - _a2 string
+func (_e *ConnectionPreCheck_Expecter) SendCngConnectionPreCheckRequest(_a0 interface{}, _a1 interface{}, _a2 interface{}) *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call {
+	return &ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call{Call: _e.mock.On("SendCngConnectionPreCheckRequest", _a0, _a1, _a2)}
+}
+
+func (_c *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call) Run(run func(_a0 *metadata.RemoteClusterReference, _a1 peerToPeer.InitRemoteClusterRefFunc, _a2 string)) *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.RemoteClusterReference), args[1].(peerToPeer.InitRemoteClusterRefFunc), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call) Return() *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, peerToPeer.InitRemoteClusterRefFunc, string)) *ConnectionPreCheck_SendCngConnectionPreCheckRequest_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SendConnectionPreCheckRequest provides a mock function with given fields: _a0, _a1, _a2
 func (_m *ConnectionPreCheck) SendConnectionPreCheckRequest(_a0 *metadata.RemoteClusterReference, _a1 peerToPeer.InitRemoteClusterRefFunc, _a2 string) {
 	_m.Called(_a0, _a1, _a2)

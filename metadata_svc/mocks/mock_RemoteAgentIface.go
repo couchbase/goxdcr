@@ -359,6 +359,61 @@ func (_c *RemoteAgentIface_GetConnectivityStatus_Call) RunAndReturn(run func() m
 	return _c
 }
 
+// GetDataUsage provides a mock function with no fields
+func (_m *RemoteAgentIface) GetDataUsage() (int64, int64) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataUsage")
+	}
+
+	var r0 int64
+	var r1 int64
+	if rf, ok := ret.Get(0).(func() (int64, int64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func() int64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+
+	return r0, r1
+}
+
+// RemoteAgentIface_GetDataUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataUsage'
+type RemoteAgentIface_GetDataUsage_Call struct {
+	*mock.Call
+}
+
+// GetDataUsage is a helper method to define mock.On call
+func (_e *RemoteAgentIface_Expecter) GetDataUsage() *RemoteAgentIface_GetDataUsage_Call {
+	return &RemoteAgentIface_GetDataUsage_Call{Call: _e.mock.On("GetDataUsage")}
+}
+
+func (_c *RemoteAgentIface_GetDataUsage_Call) Run(run func()) *RemoteAgentIface_GetDataUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *RemoteAgentIface_GetDataUsage_Call) Return(_a0 int64, _a1 int64) *RemoteAgentIface_GetDataUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteAgentIface_GetDataUsage_Call) RunAndReturn(run func() (int64, int64)) *RemoteAgentIface_GetDataUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetManifest provides a mock function with given fields: opts
 func (_m *RemoteAgentIface) GetManifest(opts *base.GetManifestOpts) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(opts)

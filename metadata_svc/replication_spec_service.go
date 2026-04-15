@@ -546,20 +546,9 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 						service.logger.Errorf("%v, useExternal=%v", base.ErrUnsupportedAlternateAddressing, useExternal)
 						validateTargetBucketErrMap[base.ExternalAddressSetup] = base.ErrUnsupportedAlternateAddressing
 					}
-
-					clusterInfo, err := fetchRemoteClusterInfo(service.logger, service.utils, targetClusterRef)
-					if err != nil {
-						const msg = "error fetching /pools information from target to check if it's running EE"
-						service.logger.Errorf("%s: %v", msg, err)
-						validateTargetBucketErrMap[base.PoolsPath] = fmt.Errorf("%s: %w", msg, err)
-					}
-
-					targetIsEE = parseIsEnterpriseFromClusterInfo(clusterInfo)
-				} else {
-					// TODO: MB-70748 - should CNG targets be always considered as EE?
-					targetIsEE = true
 				}
 			}
+
 			if len(validateTargetBucketErrMap) > 0 {
 				errMapMtx.Lock()
 				base.ConcatenateErrors(errMap, validateTargetBucketErrMap, math.MaxInt32, nil)
@@ -624,6 +613,8 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		errMap["DisableCERestrictions"] = disableCEErr
 		return "", "", nil, errMap, nil, nil, nil
 	}
+
+	targetIsEE = rcCapability.IsClusterEnterprise()
 
 	if !disableCERestrictions && !sourceIsEE && !targetIsEE {
 		errMap[base.IsEnterprise] = base.ErrCERestrictionsBreached

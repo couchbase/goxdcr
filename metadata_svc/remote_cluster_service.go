@@ -3070,15 +3070,18 @@ func fetchRemoteClusterInfo(logger *log.CommonLogger, utils utilities.UtilsIface
 	return clusterInfo, nil
 }
 
-// parseIsEnterpriseFromClusterInfo returns whether remote cluster represented by clusterInfo is running
-// enterprise edition.
-func parseIsEnterpriseFromClusterInfo(clusterInfo map[string]interface{}) bool {
-	isEnterprise, ok := clusterInfo[base.IsEnterprise].(bool)
-	if !ok {
-		isEnterprise = false
+// Returns whether the remote-cluster should be treated as 'Enterprise' wrt CE-restrictions
+func fetchIsRemoteClusterEnterprise(logger *log.CommonLogger, utils utilities.UtilsIface, ref *metadata.RemoteClusterReference) (bool, error) {
+	startTime := time.Now()
+	hostAddr, err := ref.MyConnectionStr()
+	if err != nil {
+		return false, err
 	}
 
-	return isEnterprise
+	clusterEnterprise, err := utils.GetIsRemoteClusterEnterprise(hostAddr, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), logger)
+	logger.Infof("result from GetIsRemoteClusterEnterprise() call: err=%v, isClusterEnterprise=%v, time taken=%v", err, clusterEnterprise, time.Since(startTime))
+
+	return clusterEnterprise, err
 }
 
 // validate remote cluster info
@@ -3152,8 +3155,16 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		return wrapAsInvalidRemoteClusterError("Remote node is not initialized.")
 	}
 
-	// get isEnterprise from the map
-	targetIsEE := parseIsEnterpriseFromClusterInfo(clusterInfo)
+	var targetIsEE bool
+	if cachedCap, capErr := service.GetCapability(ref); capErr == nil {
+		targetIsEE = cachedCap.IsClusterEnterprise()
+	} else {
+		// fallback to on-demand '/pools/default' call
+		targetIsEE, err = fetchIsRemoteClusterEnterprise(service.logger, service.utils, ref)
+		if err != nil {
+			return err
+		}
+	}
 
 	if ref.IsEncryptionEnabled() && !targetIsEE {
 		// check if target cluster supports SSL when SSL is specified

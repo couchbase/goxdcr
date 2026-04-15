@@ -128,6 +128,8 @@ var OtpNodeKey = "otpNode"
 var NumVBucketsKey = "numVBuckets"
 
 const OrchestratorAddressUndefined = "undefined"
+const VersionKey = "version"
+const CommunityVersionSuffix = "-community"
 
 // Value for StorageBackendKey
 var Magma = "magma"

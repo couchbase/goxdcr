@@ -29,20 +29,21 @@ type Capability struct {
 
 	// Remote cluster to accept heartbeat from sources
 	heartbeatSupport uint32
+
+	// Remote cluster is Enterprise only if ALL nodes are running EE.
+	// It's assumed to only roll-forward (i.e. an EE cluster should not be downgraded to CE).
+	isClusterEnterprise uint32 // 0 = CE, 1 = EE
 }
 
 // CNG TODO: temparily return all enabled capability
 func AllEnabledCapability() *Capability {
 	return &Capability{
-		initialized:        1,
-		collection:         1,
-		advErrorMapSupport: 1,
-		heartbeatSupport:   1,
+		initialized:         1,
+		collection:          1,
+		advErrorMapSupport:  1,
+		heartbeatSupport:    1,
+		isClusterEnterprise: 1,
 	}
-}
-
-func (c *Capability) Reset() {
-	atomic.StoreUint32(&c.collection, 0)
 }
 
 func (c Capability) Clone() (newCap Capability) {
@@ -66,11 +67,17 @@ func (c Capability) HasHeartbeatSupport() bool {
 	return atomic.LoadUint32(&c.heartbeatSupport) > 0
 }
 
+// Remote cluster is Enterprise only if ALL nodes are running EE
+func (c Capability) IsClusterEnterprise() bool {
+	return atomic.LoadUint32(&c.isClusterEnterprise) > 0
+}
+
 func (c Capability) IsSameAs(otherCap Capability) bool {
 	// No slices or other reference types so simple comparison
 	return c.HasCollectionSupport() == otherCap.HasCollectionSupport() &&
 		c.HasAdvErrorMapSupport() == otherCap.HasAdvErrorMapSupport() &&
-		c.HasHeartbeatSupport() == otherCap.HasHeartbeatSupport()
+		c.HasHeartbeatSupport() == otherCap.HasHeartbeatSupport() &&
+		c.IsClusterEnterprise() == otherCap.IsClusterEnterprise()
 }
 
 func (c *Capability) LoadFromOther(otherCap Capability) {
@@ -83,6 +90,9 @@ func (c *Capability) LoadFromOther(otherCap Capability) {
 	}
 	if otherCap.HasHeartbeatSupport() {
 		atomic.StoreUint32(&c.heartbeatSupport, 1)
+	}
+	if otherCap.IsClusterEnterprise() {
+		atomic.StoreUint32(&c.isClusterEnterprise, 1)
 	}
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 }
@@ -108,6 +118,14 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 	if !c.HasHeartbeatSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForHeartbeatSupport) {
 		atomic.StoreUint32(&c.heartbeatSupport, 1)
 	}
+	if !c.IsClusterEnterprise() {
+		if clusterEnterprise, err := base.IsRemoteClusterFullyEnterprise(nodeList); err != nil {
+			logger.Errorf("unable to determine remote cluster's EE status from node list, leaving unchanged: %v", err)
+			return err
+		} else if clusterEnterprise {
+			atomic.StoreUint32(&c.isClusterEnterprise, 1)
+		}
+	}
 
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 	return nil
@@ -115,9 +133,21 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 
 // Unit Test Only
 func UnitTestGetDefaultCapability() Capability {
-	return Capability{1, 0, 0, 0}
+	return Capability{initialized: 1}
 }
 
-func UnitTestGetCollectionsCapability() Capability {
-	return Capability{1, 1, 0, 1}
+func UnitTestGetInitialisedCapability() Capability {
+	return Capability{initialized: 1, collection: 1, heartbeatSupport: 1, isClusterEnterprise: 1}
+}
+
+func UnitTestGetInitialisedCapabilityForCE() Capability {
+	cap := UnitTestGetInitialisedCapability()
+	atomic.StoreUint32(&cap.isClusterEnterprise, 0)
+	return cap
+}
+
+func UnitTestGetInitialisedCapabilityForEE() Capability {
+	cap := UnitTestGetInitialisedCapability()
+	atomic.StoreUint32(&cap.isClusterEnterprise, 1)
+	return cap
 }

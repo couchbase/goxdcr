@@ -107,7 +107,7 @@ func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService, xdcrTopologyM
 	utilsNew := utilities.NewUtilities()
 	checkPointsSvc := &service_def.CheckpointsService{}
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
-	capability := metadata.UnitTestGetCollectionsCapability()
+	capability := metadata.UnitTestGetInitialisedCapability()
 
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
@@ -129,7 +129,7 @@ func generateFakeListOfVBs(capacity int) []uint16 {
 	return listOfVBs
 }
 
-var collectionsCapability = metadata.UnitTestGetCollectionsCapability()
+var collectionsCapability = metadata.UnitTestGetInitialisedCapability()
 var emptyCapability = metadata.Capability{}
 
 func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopologyMock *service_def.XDCRCompTopologySvc, metadataSvcMock *service_def.MetadataSvc, uiLogSvcMock *service_def.UILogSvc, remoteClusterMock *service_def.RemoteClusterSvc, utilitiesMock *utilsMock.UtilsIface, replSpecSvc *ReplicationSpecService, clientMock *mcMock.ClientIface, isEnterprise bool, isElasticSearch bool, compressionPass bool, backfillReplSvc *service_def.BackfillReplSvc, remoteClusterRefreshBusy bool, clusterCompatVersion int, rcCapability metadata.Capability, targetBucketInfoFile string) {
@@ -928,27 +928,17 @@ func TestCERestrictions(t *testing.T) {
 		xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 			utilitiesMock, replSpecSvc, sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 		tgtBucketInfofileName := fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
-		setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, sourceIsEE, true, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability, tgtBucketInfofileName)
+		var capability metadata.Capability
+		if targetIsEE {
+			capability = metadata.UnitTestGetInitialisedCapabilityForEE()
+		} else {
+			capability = metadata.UnitTestGetInitialisedCapabilityForCE()
+		}
+		setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, sourceIsEE, true, false, backfillReplSvc, false, colAndAdvSupportCompat, capability, tgtBucketInfofileName)
 
 		// Create a custom GetClusterInfoWStatusCode & DisableCERestrictions mock instead of what setupMocks provided.
-		calls := utilitiesMock.ExpectedCalls
+		calls := xdcrTopologyMock.ExpectedCalls
 		newCalls := make([]*mock.Call, 0, len(calls))
-		for _, call := range calls {
-			if call.Method == "GetClusterInfoWStatusCode" {
-				continue
-			}
-
-			newCalls = append(newCalls, call)
-		}
-		utilitiesMock.ExpectedCalls = newCalls
-		utilitiesMock.On("GetClusterInfoWStatusCode",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return(map[string]interface{}{
-				base.IsEnterprise: targetIsEE,
-			}, nil, http.StatusOK)
-
-		calls = xdcrTopologyMock.ExpectedCalls
-		newCalls = make([]*mock.Call, 0, len(calls))
 		for _, call := range calls {
 			if call.Method == "DisableCERestrictions" {
 				continue

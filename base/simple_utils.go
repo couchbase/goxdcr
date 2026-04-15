@@ -1973,7 +1973,8 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 		return nil, errors.New(errMsg)
 	}
 
-	// only return the nodes that are active and has KV service
+	// Only return the nodes that are active and have the 'data' (KV) service enabled. This automatically includes
+	// any CE nodes in the cluster, since it is not possible to have a CE node setup without the 'data' service.
 	activeNodeList := make([]interface{}, 0)
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
@@ -2012,6 +2013,31 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 	}
 
 	return activeNodeList, nil
+}
+
+// Remote-cluster is considered Enterprise only if ALL nodes in the cluster are running EE. Input 'nodesList' is
+// the 'nodes' array present in 'GET /pools/default' or 'GET /pools/default/buckets/<bucketName>' response payloads.
+func IsRemoteClusterFullyEnterprise(nodesList []any) (bool, error) {
+	if len(nodesList) == 0 {
+		return false, fmt.Errorf("received empty nodes-list, cannot determine edition")
+	}
+
+	for _, node := range nodesList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			return false, fmt.Errorf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
+		}
+		version, ok := nodeInfoMap[VersionKey].(string)
+		if !ok {
+			return false, fmt.Errorf("expected 'version' of type string, received type %T", nodeInfoMap[VersionKey])
+		}
+
+		// As per the CE-restrictions PRD, a mixed Remote cluster (i.e. with both EE and CE nodes) is to be treated as CE
+		if strings.HasSuffix(version, CommunityVersionSuffix) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func NodeHasKVService(nodeInfoMap map[string]interface{}) (bool, error) {

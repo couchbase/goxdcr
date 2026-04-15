@@ -3712,6 +3712,70 @@ func (_c *UtilsIface_GetIntSettingFromSettings_Call) RunAndReturn(run func(metad
 	return _c
 }
 
+// GetIsRemoteClusterEnterprise provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
+func (_m *UtilsIface) GetIsRemoteClusterEnterprise(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (bool, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIsRemoteClusterEnterprise")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (bool, error)); ok {
+		return rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) bool); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetIsRemoteClusterEnterprise_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIsRemoteClusterEnterprise'
+type UtilsIface_GetIsRemoteClusterEnterprise_Call struct {
+	*mock.Call
+}
+
+// GetIsRemoteClusterEnterprise is a helper method to define mock.On call
+//   - hostAddr string
+//   - username string
+//   - password string
+//   - authMech base.HttpAuthMech
+//   - certificate []byte
+//   - sanInCertificate bool
+//   - clientCertificate []byte
+//   - clientKey []byte
+//   - logger *log.CommonLogger
+func (_e *UtilsIface_Expecter) GetIsRemoteClusterEnterprise(hostAddr interface{}, username interface{}, password interface{}, authMech interface{}, certificate interface{}, sanInCertificate interface{}, clientCertificate interface{}, clientKey interface{}, logger interface{}) *UtilsIface_GetIsRemoteClusterEnterprise_Call {
+	return &UtilsIface_GetIsRemoteClusterEnterprise_Call{Call: _e.mock.On("GetIsRemoteClusterEnterprise", hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)}
+}
+
+func (_c *UtilsIface_GetIsRemoteClusterEnterprise_Call) Run(run func(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger)) *UtilsIface_GetIsRemoteClusterEnterprise_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(string), args[3].(base.HttpAuthMech), args[4].([]byte), args[5].(bool), args[6].([]byte), args[7].([]byte), args[8].(*log.CommonLogger))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetIsRemoteClusterEnterprise_Call) Return(_a0 bool, _a1 error) *UtilsIface_GetIsRemoteClusterEnterprise_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetIsRemoteClusterEnterprise_Call) RunAndReturn(run func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (bool, error)) *UtilsIface_GetIsRemoteClusterEnterprise_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLocalBuckets provides a mock function with given fields: hostAddr, logger
 func (_m *UtilsIface) GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error) {
 	ret := _m.Called(hostAddr, logger)

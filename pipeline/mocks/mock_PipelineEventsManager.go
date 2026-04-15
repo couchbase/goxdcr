@@ -421,6 +421,52 @@ func (_c *PipelineEventsManager_ResetDismissedHistory_Call) RunAndReturn(run fun
 	return _c
 }
 
+// SetExcludeRegex provides a mock function with given fields: regex
+func (_m *PipelineEventsManager) SetExcludeRegex(regex string) error {
+	ret := _m.Called(regex)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetExcludeRegex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(regex)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PipelineEventsManager_SetExcludeRegex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetExcludeRegex'
+type PipelineEventsManager_SetExcludeRegex_Call struct {
+	*mock.Call
+}
+
+// SetExcludeRegex is a helper method to define mock.On call
+//   - regex string
+func (_e *PipelineEventsManager_Expecter) SetExcludeRegex(regex interface{}) *PipelineEventsManager_SetExcludeRegex_Call {
+	return &PipelineEventsManager_SetExcludeRegex_Call{Call: _e.mock.On("SetExcludeRegex", regex)}
+}
+
+func (_c *PipelineEventsManager_SetExcludeRegex_Call) Run(run func(regex string)) *PipelineEventsManager_SetExcludeRegex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *PipelineEventsManager_SetExcludeRegex_Call) Return(_a0 error) *PipelineEventsManager_SetExcludeRegex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PipelineEventsManager_SetExcludeRegex_Call) RunAndReturn(run func(string) error) *PipelineEventsManager_SetExcludeRegex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateEvent provides a mock function with given fields: oldEventId, newEventDesc, newEventExtras
 func (_m *PipelineEventsManager) UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
 	ret := _m.Called(oldEventId, newEventDesc, newEventExtras)

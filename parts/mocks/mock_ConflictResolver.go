@@ -28,9 +28,9 @@ func (_m *ConflictResolver) EXPECT() *ConflictResolver_Expecter {
 	return &ConflictResolver_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields: req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger
-func (_m *ConflictResolver) Execute(req *base.WrappedMCRequest, resp *gomemcached.MCResponse, specs []base.SubdocLookupPathSpec, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error) {
-	ret := _m.Called(req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)
+// Execute provides a mock function with given fields: logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta
+func (_m *ConflictResolver) Execute(logger *log.CommonLogger, uncompressFunc base.UncompressFunc, req *base.WrappedMCRequest, resp *gomemcached.MCResponse, specs []base.SubdocLookupPathSpec, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, targetCanMutateWithMeta bool) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error) {
+	ret := _m.Called(logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Execute")
@@ -39,23 +39,23 @@ func (_m *ConflictResolver) Execute(req *base.WrappedMCRequest, resp *gomemcache
 	var r0 crMeta.ConflictDetectionResult
 	var r1 crMeta.ConflictResolutionResult
 	var r2 error
-	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, base.UncompressFunc, *log.CommonLogger) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)); ok {
-		return rf(req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, base.UncompressFunc, *base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, bool) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)); ok {
+		return rf(logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)
 	}
-	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, base.UncompressFunc, *log.CommonLogger) crMeta.ConflictDetectionResult); ok {
-		r0 = rf(req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, base.UncompressFunc, *base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, bool) crMeta.ConflictDetectionResult); ok {
+		r0 = rf(logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)
 	} else {
 		r0 = ret.Get(0).(crMeta.ConflictDetectionResult)
 	}
 
-	if rf, ok := ret.Get(1).(func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, base.UncompressFunc, *log.CommonLogger) crMeta.ConflictResolutionResult); ok {
-		r1 = rf(req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, base.UncompressFunc, *base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, bool) crMeta.ConflictResolutionResult); ok {
+		r1 = rf(logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)
 	} else {
 		r1 = ret.Get(1).(crMeta.ConflictResolutionResult)
 	}
 
-	if rf, ok := ret.Get(2).(func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, base.UncompressFunc, *log.CommonLogger) error); ok {
-		r2 = rf(req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)
+	if rf, ok := ret.Get(2).(func(*log.CommonLogger, base.UncompressFunc, *base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, bool) error); ok {
+		r2 = rf(logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -69,6 +69,8 @@ type ConflictResolver_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
+//   - logger *log.CommonLogger
+//   - uncompressFunc base.UncompressFunc
 //   - req *base.WrappedMCRequest
 //   - resp *gomemcached.MCResponse
 //   - specs []base.SubdocLookupPathSpec
@@ -76,15 +78,14 @@ type ConflictResolver_Execute_Call struct {
 //   - targetId hlv.DocumentSourceId
 //   - logConflict bool
 //   - xattrEnabled bool
-//   - uncompressFunc base.UncompressFunc
-//   - logger *log.CommonLogger
-func (_e *ConflictResolver_Expecter) Execute(req interface{}, resp interface{}, specs interface{}, sourceId interface{}, targetId interface{}, logConflict interface{}, xattrEnabled interface{}, uncompressFunc interface{}, logger interface{}) *ConflictResolver_Execute_Call {
-	return &ConflictResolver_Execute_Call{Call: _e.mock.On("Execute", req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, uncompressFunc, logger)}
+//   - targetCanMutateWithMeta bool
+func (_e *ConflictResolver_Expecter) Execute(logger interface{}, uncompressFunc interface{}, req interface{}, resp interface{}, specs interface{}, sourceId interface{}, targetId interface{}, logConflict interface{}, xattrEnabled interface{}, targetCanMutateWithMeta interface{}) *ConflictResolver_Execute_Call {
+	return &ConflictResolver_Execute_Call{Call: _e.mock.On("Execute", logger, uncompressFunc, req, resp, specs, sourceId, targetId, logConflict, xattrEnabled, targetCanMutateWithMeta)}
 }
 
-func (_c *ConflictResolver_Execute_Call) Run(run func(req *base.WrappedMCRequest, resp *gomemcached.MCResponse, specs []base.SubdocLookupPathSpec, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger)) *ConflictResolver_Execute_Call {
+func (_c *ConflictResolver_Execute_Call) Run(run func(logger *log.CommonLogger, uncompressFunc base.UncompressFunc, req *base.WrappedMCRequest, resp *gomemcached.MCResponse, specs []base.SubdocLookupPathSpec, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, logConflict bool, xattrEnabled bool, targetCanMutateWithMeta bool)) *ConflictResolver_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.WrappedMCRequest), args[1].(*gomemcached.MCResponse), args[2].([]base.SubdocLookupPathSpec), args[3].(hlv.DocumentSourceId), args[4].(hlv.DocumentSourceId), args[5].(bool), args[6].(bool), args[7].(base.UncompressFunc), args[8].(*log.CommonLogger))
+		run(args[0].(*log.CommonLogger), args[1].(base.UncompressFunc), args[2].(*base.WrappedMCRequest), args[3].(*gomemcached.MCResponse), args[4].([]base.SubdocLookupPathSpec), args[5].(hlv.DocumentSourceId), args[6].(hlv.DocumentSourceId), args[7].(bool), args[8].(bool), args[9].(bool))
 	})
 	return _c
 }
@@ -94,7 +95,7 @@ func (_c *ConflictResolver_Execute_Call) Return(_a0 crMeta.ConflictDetectionResu
 	return _c
 }
 
-func (_c *ConflictResolver_Execute_Call) RunAndReturn(run func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, base.UncompressFunc, *log.CommonLogger) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)) *ConflictResolver_Execute_Call {
+func (_c *ConflictResolver_Execute_Call) RunAndReturn(run func(*log.CommonLogger, base.UncompressFunc, *base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, bool, bool) (crMeta.ConflictDetectionResult, crMeta.ConflictResolutionResult, error)) *ConflictResolver_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -44,7 +44,7 @@ import (
 
 var dummyDownStream string = "dummy"
 
-var collectionsCap = metadata.UnitTestGetCollectionsCapability()
+var collectionsCap = metadata.UnitTestGetInitialisedCapability()
 var nonCollectionsCap = metadata.UnitTestGetDefaultCapability()
 
 // func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock utilities.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {

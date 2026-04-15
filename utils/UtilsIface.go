@@ -219,6 +219,7 @@ type UtilsIface interface {
 	GetTerseBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCert []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
 	IsTerseBucketInfo(bucketInfo map[string]interface{}) (bool, error)
 	ShouldUseTerseBucketInfo(bucketInfo map[string]interface{}, hostAddr, bucketName string, useExternal bool, isHttps bool) (bool, error)
+	GetIsRemoteClusterEnterprise(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (bool, error)
 
 	// Network related utilities
 	GetDataUsageTrackingCtx() *Context

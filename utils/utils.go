@@ -4325,3 +4325,13 @@ func (u *Utilities) GetTLSTrackedTransport(tr *http.Transport, ctx ...*Context) 
 	}
 	return tr
 }
+
+// Returns whether the remote-cluster is EE as per the CE-restrictions PRD
+func (u *Utilities) GetIsRemoteClusterEnterprise(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (bool, error) {
+	nodesList, err := u.GetNodeListWithMinInfo(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	if err != nil {
+		return false, err
+	}
+
+	return base.IsRemoteClusterFullyEnterprise(nodesList)
+}
