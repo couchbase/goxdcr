@@ -63,6 +63,10 @@ function runTestCase {
 
 	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
 	sleep 10
+
+	echo "Enabling CasPoisoningPreCheckEnabled setting"
+	setInternalSettings "C1" "CasPoisoningPreCheckEnabled=1"
+
 	testIdleXdcrCPU
 	if (($? != 0)); then
 		exit 1
@@ -91,4 +95,9 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	echo "Disabling CasPoisoningPreCheckEnabled setting"
+	setInternalSettings "C1" "CasPoisoningPreCheckEnabled=0"
+	# after internall settings change, goxdcr will restart
+	sleep 10
 }
