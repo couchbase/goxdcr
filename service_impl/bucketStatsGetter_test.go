@@ -234,7 +234,7 @@ func TestClusterBucketStatsProvider_canStartOp_LazyInit(t *testing.T) {
 	bucketTopologySvc := &service_defMock.BucketTopologySvc{}
 	logger := createTestLogger()
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testTunables(), logger, createTestGetTargetKvVbMapFunc())
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testMaxConnectionsPerServer, logger, createTestGetTargetKvVbMapFunc())
 
 	// Provider is not initialized, canStartOp should attempt lazy init
 	assert.False(provider.InitDone())
@@ -293,7 +293,7 @@ func TestClusterBucketStatsProvider_canStartOp_LazyInitFailsThenRecovers(t *test
 		return createTestKvVbMap(), nil
 	}
 
-	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testTunables(), logger, getTargetKvVbMapFunc)
+	provider := NewClusterBucketStatsProvider(testBucketName, testClusterUuid, remoteClusterSvc, utilsMockObj, bucketTopologySvc, testMaxConnectionsPerServer, logger, getTargetKvVbMapFunc)
 
 	ref := createTestRemoteClusterRef()
 	remoteClusterSvc.On("RemoteClusterByUuid", testClusterUuid, false).Return(ref, nil)
