@@ -1,0 +1,235 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# Test: forwardLocalOnly bandwidth measurement using metadata_transferred metric
+# Topology: 5-cluster full mesh (C1-C5), bidirectional replication (20 links)
+# Phase 1: forwardLocalOnly=false (baseline)
+# Phase 2: forwardLocalOnly=true
+# Asserts that forwardLocalOnly=true results in strictly less metadata_transferred_bytes
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002 ["C4"]=9003 ["C5"]=9004)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002 ["C4"]=13003 ["C5"]=13004)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2" ["C3"]="B3" ["C4"]="B4" ["C5"]="B5")
+CLUSTER_SETUP_DONE_MAP=()
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+declare -A BucketProperties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperties
+insertPropertyIntoBucketNamePropertyMap "B5" BucketProperties
+
+declare -A BucketReplPropertiesFLOFalse=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["forwardLocalOnly"]=false)
+declare -A BucketReplPropertiesFLOTrue=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["forwardLocalOnly"]=true)
+
+CLUSTERS=("C1" "C2" "C3" "C4" "C5")
+BUCKETS=("B1" "B2" "B3" "B4" "B5")
+NUM_DOCS=5000
+SAMPLE_DOC='{"type":"test","padding":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+
+function loadFixedDocs {
+	local cluster=$1
+	local bucket=$2
+	local i
+	for ((i = 0; i < NUM_DOCS; i++)); do
+		writeJSONDocument "$cluster" "$bucket" "testDoc_${i}" "$SAMPLE_DOC"
+	done
+}
+
+function createAllRemoteClusterRefs {
+	local i j
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		for ((j = 0; j < ${#CLUSTERS[@]}; j++)); do
+			if ((i != j)); then
+				createRemoteClusterReference "${CLUSTERS[$i]}" "${CLUSTERS[$j]}"
+			fi
+		done
+	done
+	sleep 1
+}
+
+function enableECCVOnAllClusters {
+	local i
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		setCrossClusterVersioningForBucket "${CLUSTERS[$i]}" "${BUCKETS[$i]}"
+	done
+}
+
+function createFullMeshReplications {
+	local -n replProps=$1
+	local i j
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		for ((j = 0; j < ${#CLUSTERS[@]}; j++)); do
+			if ((i != j)); then
+				createBucketReplication "${CLUSTERS[$i]}" "${BUCKETS[$i]}" "${CLUSTERS[$j]}" "${BUCKETS[$j]}" replProps
+			fi
+		done
+	done
+}
+
+function waitForAllMeshChangesLeft0 {
+	local i j
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		for ((j = 0; j < ${#CLUSTERS[@]}; j++)); do
+			if ((i != j)); then
+				waitForChangesLeft0 "${CLUSTERS[$i]}" "${BUCKETS[$i]}" "${CLUSTERS[$j]}" "${BUCKETS[$j]}"
+			fi
+		done
+	done
+}
+
+# Collects the sum of xdcr_metadata_transferred_bytes across all 20 replication paths
+function collectAllMetadataTransferred {
+	local total=0
+	local i j stat
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		for ((j = 0; j < ${#CLUSTERS[@]}; j++)); do
+			if ((i != j)); then
+				stat=$(getPrometheusStat "${CLUSTERS[$i]}" "${BUCKETS[$i]}" "${BUCKETS[$j]}" "xdcr_metadata_transferred_bytes")
+				stat=${stat:-0}
+				total=$((total + stat))
+			fi
+		done
+	done
+	echo $total
+}
+
+function validateAllPromStats {
+	local i j
+	for ((i = 0; i < ${#CLUSTERS[@]}; i++)); do
+		for ((j = 0; j < ${#CLUSTERS[@]}; j++)); do
+			if ((i != j)); then
+				validateBinaryFilteredIs0 "${CLUSTERS[$i]}" "${BUCKETS[$i]}" "${BUCKETS[$j]}"
+				validateDatapoolFailIs0 "${CLUSTERS[$i]}" "${BUCKETS[$i]}" "${BUCKETS[$j]}"
+			fi
+		done
+	done
+}
+
+PHASE_RESULT=0
+
+function runPhase {
+	local phaseName=$1
+	local -n phaseReplProps=$2
+
+	echo ">>> Phase: $phaseName"
+
+	echo "Enabling ECCV on all clusters"
+	enableECCVOnAllClusters
+
+	echo "Creating full mesh replications with $phaseName"
+	createFullMeshReplications phaseReplProps
+
+	echo "Sleeping 10 seconds for replications to start"
+	sleep 10
+	waitForAllMeshChangesLeft0
+
+	echo "Capturing initial metadata_transferred stats"
+	local initialMetadata
+	initialMetadata=$(collectAllMetadataTransferred)
+	echo "Initial total metadata_transferred: $initialMetadata bytes"
+
+	echo "Loading $NUM_DOCS fixed-size documents on C1/B1"
+	loadFixedDocs "C1" "B1"
+
+	echo "Sleeping 20 seconds for all changes_left to reach 0..."
+	sleep 20
+	waitForAllMeshChangesLeft0
+
+	echo "Capturing final metadata_transferred stats"
+	local finalMetadata
+	finalMetadata=$(collectAllMetadataTransferred)
+	echo "Final total metadata_transferred: $finalMetadata bytes"
+
+	PHASE_RESULT=$((finalMetadata - initialMetadata))
+	echo ">>> $phaseName: metadata_transferred delta = $PHASE_RESULT bytes"
+
+	validateAllPromStats
+
+	echo "Cleaning up replications"
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running 'forwardLocalOnly' Bandwidth Measurement Test"
+	echo "============================================================================"
+
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# --- Phase 1: forwardLocalOnly=false ---
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createAllRemoteClusterRefs
+
+	runPhase "forwardLocalOnly=false" BucketReplPropertiesFLOFalse
+	local totalMetadataFalse=$PHASE_RESULT
+	echo "============================================================================"
+	echo "Phase 1 (forwardLocalOnly=false): metadata_transferred = $totalMetadataFalse bytes"
+	echo "============================================================================"
+
+	# --- Phase 2: forwardLocalOnly=true ---
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createAllRemoteClusterRefs
+
+	runPhase "forwardLocalOnly=true" BucketReplPropertiesFLOTrue
+	local totalMetadataTrue=$PHASE_RESULT
+	echo "============================================================================"
+	echo "Phase 2 (forwardLocalOnly=true): metadata_transferred = $totalMetadataTrue bytes"
+	echo "============================================================================"
+
+	# --- Comparison ---
+	echo "Results:"
+	echo "  forwardLocalOnly=false: $totalMetadataFalse bytes"
+	echo "  forwardLocalOnly=true:  $totalMetadataTrue bytes"
+
+	if ((totalMetadataFalse == 0)); then
+		echo "FAILED: Phase 1 metadata_transferred is 0 - no data was transferred"
+		exit 1
+	fi
+
+	if ((totalMetadataTrue >= totalMetadataFalse)); then
+		echo "FAILED: forwardLocalOnly=true ($totalMetadataTrue bytes) should be strictly less than forwardLocalOnly=false ($totalMetadataFalse bytes)"
+		exit 1
+	fi
+
+	local pctDecrease=$(((totalMetadataFalse - totalMetadataTrue) * 100 / totalMetadataFalse))
+	echo "  Percentage decrease: ${pctDecrease}%"
+
+	if ((pctDecrease < 50)); then
+		echo "FAILED: forwardLocalOnly=true ($totalMetadataTrue bytes) should be at least 50% less than forwardLocalOnly=false ($totalMetadataFalse bytes)"
+		exit 1
+	fi
+
+	grepForAbnormalities
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+}
