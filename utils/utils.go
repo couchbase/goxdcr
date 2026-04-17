@@ -959,7 +959,14 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 		if err != nil {
 			return nil, err
 		}
-		ret := base.KvVBMapType(tmp)
+
+		// IMPORTANT: do not alias bucketInfo's underlying map/slices.
+		// targetServerVBMap is cached inside BucketTopologySvcWatcher notifications and the map/slices
+		// may later be recycled/cleared via KvVbMapPool, which would otherwise mutate bucketInfo.
+		ret := make(base.KvVBMapType, len(tmp))
+		for node, vbnos := range tmp {
+			ret[node] = base.CloneUint16List(vbnos)
+		}
 		return &ret, nil
 	}
 
