@@ -23,6 +23,8 @@ type Nozzle struct {
 	cfg   *Config
 	stats *Stats
 
+	netFaultInjector cngNetFaultInjector
+
 	upstreamObjRecycler    func(any)
 	upstreamErrReporterMap map[uint16]utils.ErrReportFunc
 	connPool               *ConnPool

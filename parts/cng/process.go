@@ -22,6 +22,8 @@ func (n *Nozzle) processReq(ctx context.Context, req *base.WrappedMCRequest) (er
 		return
 	}
 
+	ctx = n.withSendDelayOnce(ctx)
+
 	callStat, err := n.connPool.WithConn(func(client base.CngClient) (err error) {
 		return n.transfer(ctx, client, req)
 	})
@@ -91,6 +93,8 @@ func (n *Nozzle) transfer(ctx context.Context, client base.CngClient, req *base.
 			return nil
 		}
 	}
+
+	n.checkSendDelayInjection(ctx)
 
 	trace.pushed = true
 	trace.pushRsp, err = n.PushDocument(ctx, client, req)

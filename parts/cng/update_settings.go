@@ -49,6 +49,8 @@ func (n *Nozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error 
 		}
 	}
 
+	n.updateDevInjections(settings)
+
 	return nil
 }
 

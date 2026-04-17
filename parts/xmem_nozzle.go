@@ -1448,7 +1448,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		}
 		xmem.checkAndUpdateSentStats(item)
 		if item != nil {
-			xmem.checkSendDelayInjection()
+			xmem.checkSendDelayInjection() // No-op in production
 
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 
@@ -5346,19 +5346,6 @@ func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{}), respo
 // Should only be done during pipeline construction
 func (xmem *XmemNozzle) SetConflictManager(conflictMgr service_def.ConflictManagerIface) {
 	xmem.conflictMgr = conflictMgr
-}
-
-func (xmem *XmemNozzle) checkSendDelayInjection() {
-	if atomic.LoadUint32(&xmem.config.devBackfillSendDelay) > 0 {
-		if _, pipelineType := common.DecomposeFullTopic(xmem.topic); pipelineType == common.BackfillPipeline {
-			time.Sleep(time.Duration(atomic.LoadUint32(&xmem.config.devBackfillSendDelay)) * time.Millisecond)
-		}
-	}
-	if atomic.LoadUint32(&xmem.config.devMainSendDelay) > 0 {
-		if _, pipelineType := common.DecomposeFullTopic(xmem.topic); pipelineType == common.MainPipeline {
-			time.Sleep(time.Duration(atomic.LoadUint32(&xmem.config.devMainSendDelay)) * time.Millisecond)
-		}
-	}
 }
 
 func (xmem *XmemNozzle) getMobileCompatible() int {

@@ -2,6 +2,7 @@ package cng
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -19,7 +20,10 @@ type Config struct {
 }
 
 type ReplicationConfig struct {
-	CRMode            base.ConflictResolutionMode
+	CRMode base.ConflictResolutionMode
+	// Topic is the pipeline topic (full topic) used for pipeline-type inference (main vs backfill).
+	// Optional.
+	Topic             string
 	SourceClusterUUID string
 	SourceBucketName  string
 	SourceBucketUUID  string
@@ -84,6 +88,10 @@ type Tunables struct {
 	ConnCount    int
 	Deadline     time.Duration
 
+	// (dev-only) Per-mutation send delay injection, applied on the write path.
+	devMainSendDelayMs     atomic.Int64
+	devBackfillSendDelayMs atomic.Int64
+
 	// (live updatable) optimisticThresholdSize is the document size (in bytes) below which we can do optimistic replication.
 	optimisticThresholdSize atomic.Int64
 
@@ -108,8 +116,16 @@ func (t *Tunables) SetOptimisticThresholdSize(v int) {
 }
 
 func (t *Tunables) String() string {
-	return fmt.Sprintf("DataChanSize=%d, WorkerCount=%d, ConnCount=%d, Deadline=%dms, OptimisticThresholdSize=%d",
-		t.DataChanSize, t.WorkerCount, t.ConnCount, t.Deadline.Milliseconds(), t.GetOptimisticThresholdSize())
+	s := strings.Builder{}
+	fmt.Fprintf(&s, "DataChanSize=%d, ", t.DataChanSize)
+	fmt.Fprintf(&s, "WorkerCount=%d, ", t.WorkerCount)
+	fmt.Fprintf(&s, "ConnCount=%d, ", t.ConnCount)
+	fmt.Fprintf(&s, "Deadline=%dms, ", t.Deadline.Milliseconds())
+	fmt.Fprintf(&s, "OptimisticThresholdSize=%d", t.GetOptimisticThresholdSize())
+
+	t.devParamsString(&s) // No-op for prod
+
+	return s.String()
 }
 
 func (t *Tunables) Validate() (err error) {

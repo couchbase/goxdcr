@@ -47,7 +47,7 @@ func (n *Nozzle) newCNGClient() (conn cngConn, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return cngConn, nil
+	return n.wrapConn(cngConn), nil
 }
 
 func (n *Nozzle) getRemoteRef() (ref *metadata.RemoteClusterReference, err error) {

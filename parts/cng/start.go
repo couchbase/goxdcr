@@ -89,6 +89,8 @@ func (n *Nozzle) initConfig(settings metadata.ReplicationSettingsMap) (err error
 		}
 	}
 
+	n.initDevInjections(settings)
+
 	return
 }
 

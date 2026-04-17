@@ -41,6 +41,7 @@ func (x *XDCRFactory) constructCNGNozzle(topic string, // Replication topic
 	cfg := &cng.Config{
 		Replication: cng.ReplicationConfig{
 			CRMode:            sourceCRMode,
+			Topic:             topic,
 			SourceBucketName:  spec.SourceBucketName,
 			SourceClusterUUID: sourceClusterUUID,
 			SourceBucketUUID:  spec.SourceBucketUUID,
