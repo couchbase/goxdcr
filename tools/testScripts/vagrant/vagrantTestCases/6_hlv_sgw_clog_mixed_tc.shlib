@@ -19,6 +19,10 @@ VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C2"]=15201 ["C3"]=15202 ["C4"]=15203)
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C2"]=15011 ["C3"]=15012 ["C4"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C2"]="192.168.56.3" ["C3"]="192.168.56.4" ["C4"]="192.168.56.5")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C2" ["2"]="C3" ["3"]="C4")
+# Ensure prev test vars don't leak here
+unset VAGRANT_IP_EXTERNAL_MAP VAGRANT_LB_IP
+declare -A VAGRANT_IP_EXTERNAL_MAP=()
+declare -A VAGRANT_LB_IP=()
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
