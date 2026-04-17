@@ -117,7 +117,10 @@ function runTestCase {
 	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S2.col2":"S3.col2"}'
 
 	# Because this is backfill pipeline, the backfill pipeline is not delayed
-	sleepSecs=10
+	sleepSecs=$(calculateTimeToSleepWithMainDelay $targetCheckCount $SEED_INJ_MAX_MAIN_DELAY_MS)
+	if ((sleepSecs < 10)); then
+		sleepSecs=10
+	fi
 	echo "Waiting $sleepSecs seconds before checking item count for backfill"
 	sleep $sleepSecs
 	checkItemCnt "C2" "B2" $checkCount
