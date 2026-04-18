@@ -366,11 +366,17 @@ else
 fi
 
 if [[ -z "$testCaseNumber" ]]; then
+	reachedFrom=0
+	reachedUntil=0
 	for testcase in $testsToRun; do
-		if [[ "${testCasesDirectory:-}/$testcase" < "$fromTestCaseNumber" ]]; then
-			echo ""
-			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
-			continue
+		if [[ -n "$fromTestCaseNumber" && $reachedFrom -eq 0 ]]; then
+			if [[ "${testCasesDirectory:-}/$testcase" == "$fromTestCaseNumber" ]]; then
+				reachedFrom=1
+			else
+				echo ""
+				echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
+				continue
+			fi
 		fi
 
 		if [[ -d "$testcase" ]]; then
@@ -388,7 +394,11 @@ if [[ -z "$testCaseNumber" ]]; then
 			continue
 		fi
 
-		if [ "$untilTestCaseNumber" != "" ] && [[ "${testCasesDirectory:-}/$testcase" > "$untilTestCaseNumber" ]]; then
+		if [[ -n "$untilTestCaseNumber" && $reachedUntil -eq 0 ]]; then
+			if [[ "${testCasesDirectory:-}/$testcase" == "$untilTestCaseNumber" ]]; then
+				reachedUntil=1
+			fi
+		elif [[ -n "$untilTestCaseNumber" && $reachedUntil -eq 1 ]]; then
 			echo ""
 			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
 			continue
