@@ -2041,7 +2041,7 @@ func validateDeletionFilterExprForTombstones(settings *metadata.ReplicationSetti
 	case base.IsClusterCompatible(clusterCompat, base.VersionForKeyOnlyDeletionFilterExpr):
 		// Filter expression must be key only
 		if !base.FilterOnlyContainsKeyExpression(filterExpression) {
-			errorMap[errKey] = fmt.Errorf("filterExpression should be referencing only the document key when either %s or %s is true",
+			errorMap[errKey] = fmt.Errorf("When either %s or %s is true, only key-filter expression is allowed. Supported syntax: META().id comparisons (=, <, <=, >, >=), REGEXP_CONTAINS(META().id, \"pattern\"), NOT variants, and AND/OR combinations. Parenthesized expressions are not supported.",
 				metadata.FilterDeletionsWithFEKey, metadata.FilterExpirationsWithFEKey)
 			return
 		}
