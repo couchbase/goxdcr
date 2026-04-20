@@ -56,6 +56,8 @@ function runTestCase {
 	echo "Running simple collection unidirectional test case"
 	echo "============================================================================"
 	hardResetNodes
+	# Reset logs since revision grepping requires a clean log
+	cleanupGoxdcrLogs
 	setupTopologies
 	if (($? != 0)); then
 		exit 1
