@@ -67,6 +67,7 @@ function pauseAndResumeMultiples {
 			pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Running" | awk '{print $NF}')
 			if (($pauseResumeStatus == 0)); then
 				echo "Pipeline running should have status 1. Got $pauseResumeStatus"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		fi
@@ -86,6 +87,7 @@ function pauseAndResumeMultiples {
 			pauseResumeStatus=$(getPrometheusStats "C1" | grep xdcr_pipeline_status | grep Main | grep "Paused" | awk '{print $NF}')
 			if (($pauseResumeStatus == 0)); then
 				echo "Pipeline paused should have status 1. Got $pauseResumeStatus"
+				dumpDebugInfoBeforeExit
 				exit 1
 			fi
 		fi
