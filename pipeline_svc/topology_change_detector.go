@@ -795,8 +795,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
 
 				newEnableCrossClusterVersioning := notification.GetTargetEnableCrossClusterVersioning()
-				if top_detect_svc.targetEnableCrossClusterVersioning != newEnableCrossClusterVersioning {
-					// Once enabled, ECCV cannot be disabled. Hence this change can only mean it went from 'false' to 'true'.
+				if top_detect_svc.targetEnableCrossClusterVersioning != newEnableCrossClusterVersioning && newEnableCrossClusterVersioning {
+					// Considering only roll-forward changes for ECCV (since once it's enabled, it cannot be disabled)
 					top_detect_svc.logger.Infof("enableCrossClusterVersioning for target bucket has changed from %v to %v", top_detect_svc.targetEnableCrossClusterVersioning, newEnableCrossClusterVersioning)
 					top_detect_svc.targetEnableCrossClusterVersioning = newEnableCrossClusterVersioning
 
