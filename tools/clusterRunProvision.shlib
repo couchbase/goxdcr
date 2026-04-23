@@ -892,6 +892,10 @@ function addNodesIn {
 function populateKnownNodesString {
 	local nodeName=$1
 	local poolsDefault=$(getNsServerPoolsDefault $nodeName)
+	if (($? != 0)) || [[ -z "${poolsDefault:-}" ]]; then
+		# Return empty string on error - caller will detect and retry
+		return 1
+	fi
 	local membership=$(echo $poolsDefault | jq | grep otpNode | awk '{print $NF}' | sed 's/"//g' | sed 's/,//g')
 	# n_0@192.168.1.113
 	# n_2@127.0.0.1
@@ -955,6 +959,9 @@ function startEjectNode {
 	local motherPort=${CLUSTER_NAME_PORT_MAP[$motherNode]:-}
 	local otpNodeName
 	local hostNameToLookFor
+	local retryCnt=0
+	local maxRetries=5
+	local errRetrySleep=5
 
 	if [[ ! -z "${VAGRANT_VM_IP_MAP[$nodeName]:-}" ]]; then
 		hostNameToLookFor="${VAGRANT_VM_IP_MAP[$nodeName]}:8091"
@@ -988,20 +995,68 @@ function startEjectNode {
 			# "n_0@192.168.1.113"
 			otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
 			failoverNodeString="ejectedNodes=$otpNodeNameStripped"
-			knownNodesString=$(populateKnownNodesString $motherNode)
-			local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
-			$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$failoverNodeString" -d "$knownNodesString"
-			if (($? != 0)); then
-				echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
-			fi
-			sleep 10
-			waitForRebalanceToFinish $motherNode
-			local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
-			if (($postEjectCnt != $(($preEjectCnt - 1)))); then
-				echo "Error - ejecting a node resulted going from $preEjectCnt to $postEjectCnt"
-				dumpDebugInfoBeforeExit
-				exit 1
-			fi
+
+			# Retry loop for eject operation (following pattern from addOneNodeIn)
+			for ((retryCnt = 0; $retryCnt < $maxRetries; retryCnt = $(($retryCnt + 1)))); do
+				# Get knownNodesString with retry
+				knownNodesString=$(populateKnownNodesString $motherNode)
+				if (($? != 0)) || [[ "$knownNodesString" == "knownNodes=" ]]; then
+					echo "Warning: Failed to get knownNodesString on attempt $((retryCnt + 1))/$maxRetries"
+					sleep $errRetrySleep
+					continue
+				fi
+
+				# Get preEjectCnt with validation
+				local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				if [[ -z "$preEjectCnt" ]] || ! [[ "$preEjectCnt" =~ ^[0-9]+$ ]]; then
+					echo "Warning: Failed to get valid preEjectCnt on attempt $((retryCnt + 1))/$maxRetries"
+					sleep $errRetrySleep
+					continue
+				fi
+
+				# Attempt the rebalance POST
+				local curlOutput=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$failoverNodeString" -d "$knownNodesString" 2>&1)
+				local curlExitCode=$?
+				if (($curlExitCode != 0)) || [[ -z "$curlOutput" ]]; then
+					echo "Warning: Rebalance POST failed on attempt $((retryCnt + 1))/$maxRetries with exit code $curlExitCode"
+					echo "Error details: $failoverNodeString and $knownNodesString"
+					sleep $errRetrySleep
+					continue
+				fi
+
+				sleep 10
+				waitForRebalanceToFinish $motherNode
+
+				# Validate post-eject count with proper integer check
+				local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				if [[ -z "$postEjectCnt" ]] || ! [[ "$postEjectCnt" =~ ^[0-9]+$ ]]; then
+					echo "Warning: Failed to get valid postEjectCnt on attempt $((retryCnt + 1))/$maxRetries"
+					sleep $errRetrySleep
+					continue
+				fi
+
+				if (($postEjectCnt != $(($preEjectCnt - 1)))); then
+					echo "Warning: Eject validation failed on attempt $((retryCnt + 1))/$maxRetries: expected $((preEjectCnt - 1)), got $postEjectCnt"
+					sleep $errRetrySleep
+					continue
+				fi
+
+				# Success - all checks passed
+				return 0
+			done
+
+			# All retries exhausted - dump detailed debug info
+			echo "Error - ejecting a node resulted going from $preEjectCnt to $postEjectCnt after $maxRetries attempts"
+			echo ""
+			echo "======== Mother node ($motherNode) ns_server status ========"
+			echo "Attempting to fetch /pools/default from $motherNode:$motherPort..."
+			getNsServerPoolsDefault "$motherNode" || echo "ERROR: Could not fetch /pools/default"
+			echo ""
+			echo "======== Last 50 lines of ns_server error log ========"
+			getInternalNodeNsServerErrorLog "$motherNode" | tail -50 || echo "ERROR: Could not fetch ns_server error log"
+			echo ""
+			dumpDebugInfoBeforeExit
+			exit 1
 		fi
 		IFS=$'\n'
 	done
