@@ -117,19 +117,21 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 	}
 
 	userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
-	provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.GetRemoteMemcachedTunables())
-	provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
-		ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
-		return ref
-	}).SetAlternateAddressChecker(func(ref *metadata.RemoteClusterReference) (bool, error) {
-		return provider.remoteClusterSvc.ShouldUseAlternateAddress(ref)
-	}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
-		remoteOnlySpec := &metadata.ReplicationSpecification{
-			TargetClusterUUID: provider.clusterUuid,
-			TargetBucketName:  provider.bucketName,
-		}
-		return provider.getTargetKvVbMap(remoteOnlySpec)
-	})
+	if provider.remoteMemcachedComponent == nil {
+		provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.GetRemoteMemcachedTunables())
+		provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
+			ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
+			return ref
+		}).SetAlternateAddressChecker(func(ref *metadata.RemoteClusterReference) (bool, error) {
+			return provider.remoteClusterSvc.ShouldUseAlternateAddress(ref)
+		}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+			remoteOnlySpec := &metadata.ReplicationSpecification{
+				TargetClusterUUID: provider.clusterUuid,
+				TargetBucketName:  provider.bucketName,
+			}
+			return provider.getTargetKvVbMap(remoteOnlySpec)
+		})
+	}
 
 	err := base.ExecWithTimeout(provider.remoteMemcachedComponent.InitConnections, base.ShortHttpTimeout, provider.logger)
 	if err != nil {

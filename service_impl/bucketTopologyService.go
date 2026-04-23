@@ -186,9 +186,10 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 			retryStatsOp := func() error {
 				err = statsProvider.Init()
 				if err != nil {
-					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
-						// IPv4 or IPv6 family only error means retrying is fruitless
-						// Let it pass and remote cluster will mark it as RC_ERROR
+					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) || errors.Is(err, base.ErrorIpFamilyMismatch) {
+						// IP-family mismatch is a configuration error — retrying is fruitless.
+						// Let it pass; the remote cluster service will mark the ref as RC_ERROR.
+						b.logger.Warnf("statsProvider.Init for spec %v: non-retryable IP family error: %v", specCpy.Id, err)
 						return nil
 					}
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
@@ -1029,9 +1030,10 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 			retryStatsOp := func() error {
 				err = statsProvider.Init()
 				if err != nil {
-					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
-						// IPv4 or IPv6 family only error means retrying is fruitless
-						// Let it pass and remote cluster will mark it as RC_ERROR
+					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) || errors.Is(err, base.ErrorIpFamilyMismatch) {
+						// IP-family mismatch is a configuration error — retrying is fruitless.
+						// Let it pass; the remote cluster service will mark the ref as RC_ERROR.
+						b.logger.Warnf("statsProvider.Init for spec %v: non-retryable IP family error: %v", newSpec.Id, err)
 						return nil
 					}
 					b.logger.Errorf("statsProvider.Init has error: %v", err)
@@ -1049,7 +1051,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 
 			// init the stats provider
 			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
+				base.RemoteBucketMonitorWaitTime, base.RemoteBucketMonitorMaxRetry, base.RemoteBucketMonitorRetryFactor, retryStatsOp)
 			if retryErr != nil {
 				b.logger.Errorf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v", newSpec.Id, retryErr)
 			}
@@ -1625,7 +1627,14 @@ func (b *BucketTopologyService) getTgtTopologyInfo(spec *metadata.ReplicationSpe
 				watcher.latestCacheMtx.RUnlock()
 				return kvVBMap, nil
 			}
+			cachedErr := watcher.latestErrMap[TOPOLOGY]
 			watcher.latestCacheMtx.RUnlock()
+			if cachedErr != nil {
+				// an error from latestErrMap is removed only after the watcher's next retry succeeds.
+				// so there could be a window where in the user updated the reference but the watcher is yet to see
+				// until its next tick
+				return nil, fmt.Errorf("target bucket topology unavailable for spec %v: %w", spec.Id, cachedErr)
+			}
 			time.Sleep(100 * time.Millisecond)
 		}
 	}

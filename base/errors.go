@@ -86,6 +86,10 @@ var (
 	BrokenMappingUIString                        = "Found following destination collection(s) missing (and will not get replicated to):\n"
 	ErrorSourceBucketTopologyNotReady            = errors.New("Local bucket topology does not have any cached data yet")
 	ErrorTargetBucketTopologyNotReady            = errors.New("Target bucket topology does not have any cached data yet")
+	// ErrorIpFamilyMismatch is a sentinel for IP-family enforcement errors (IPv4-only or IPv6-only cluster
+	// rejecting an address of the wrong family). It is non-retryable: the address will continue to fail
+	// until a user corrects the remote cluster reference.
+	ErrorIpFamilyMismatch                        = errors.New("IP family mismatch")
 	ErrorNoBackfillNeeded                        = errors.New("No backfill needed")
 	ErrorNilCertificate                          = errors.New("Nil certificate")
 	ErrorNilCertificateStrictMode                = errors.New("cluster encryption is set to strict mode and unable to retrieve a valid certificate")

@@ -2,6 +2,8 @@ package Component
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -10,14 +12,23 @@ import (
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-
-	"fmt"
-	"sync"
 )
 
 var ErrClientNotFound = errors.New("client not found")
 var ErrPoolClosed = errors.New("pool is closed")
 var ErrSslConStrNotFound = errors.New("SSL connection string not found")
+
+// initConnStatusType tracks the state of the InitConnections lifecycle.
+type initConnStatusType int
+
+const (
+	// initConnIdle means no initialization is in progress (never started, or last attempt failed).
+	initConnIdle initConnStatusType = iota
+	// initConnRunning means initialization is currently in progress.
+	initConnRunning
+	// initConnSucceeded means initialization has completed successfully and need not be retried.
+	initConnSucceeded
+)
 
 // RemoteMemcachedComponent is an object to be composed with another object to provide the ability
 // to contact target memcached servers.
@@ -44,10 +55,13 @@ var ErrSslConStrNotFound = errors.New("SSL connection string not found")
 //
 // Lock Ordering Rule: poolConfigMtx -> KvMemClientsMtx -> inflightMtx (*never reverse*)
 type RemoteMemcachedComponent struct {
-	InitConnOnce sync.Once
-	InitConnDone chan bool
-	InitConnErr  error
-	FinishCh     chan bool
+	FinishCh chan bool
+
+	// initConnMu protects initConnStatus and initConnCond.
+	// initConnCond is used to wake goroutines waiting for a running init to complete.
+	initConnMu     sync.Mutex
+	initConnCond   *sync.Cond
+	initConnStatus initConnStatusType
 
 	// key = kv host name, value = ssl connection str
 	SslConStrMap  map[string]string
@@ -96,9 +110,7 @@ type RemoteMemcachedComponent struct {
 }
 
 func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, utils utilities.UtilsIface, bucketName string, userAgent string, tunables base.RemoteMemcachedTunables) *RemoteMemcachedComponent {
-	return &RemoteMemcachedComponent{
-		InitConnOnce:       sync.Once{},
-		InitConnDone:       make(chan bool),
+	rc := &RemoteMemcachedComponent{
 		FinishCh:           finCh,
 		LoggerImpl:         logger,
 		KvMemClients:       make(map[string]chan mcc.ClientIface),
@@ -113,6 +125,8 @@ func NewRemoteMemcachedComponent(logger *log.CommonLogger, finCh chan bool, util
 		minConnsPerServer:  tunables.MinConnsPerServer,
 		gcInterval:         tunables.GCInterval,
 	}
+	rc.initConnCond = sync.NewCond(&rc.initConnMu)
+	return rc
 }
 
 // reconfigureConnectionPoolNoLock updates the pool to use the new maximum number of connections per server.
@@ -205,29 +219,80 @@ func (r *RemoteMemcachedComponent) SetAlternateAddressChecker(checker func(ref *
 }
 
 // Since this is remote target related connection, it is quite possible that the method here
-// may fail and return a non-nil error
+// may fail and return a non-nil error.
 // It is not a guarantee that the memcached clients in kv_mem_clients map is usable or valid
-// and thus callers should manually check and re-initate if necessary
+// and thus callers should manually check and re-initiate if necessary.
+//
+// InitConnections may be called more than once:
+//   - If a previous call succeeded, subsequent calls return nil immediately.
+//   - If a previous call is still in progress, the caller blocks until it completes.
+//   - If a previous call failed, a new initialization attempt is started.
 func (r *RemoteMemcachedComponent) InitConnections() error {
 	// CNG TODO: remove this RemoteMemcachedComponent
 	if r.RefGetter().IsCNG() {
 		return nil
 	}
 
-	r.InitConnOnce.Do(func() {
-		defer close(r.InitConnDone)
+	r.initConnMu.Lock()
+
+	// Already succeeded — no need to re-run.
+	if r.initConnStatus == initConnSucceeded {
+		r.initConnMu.Unlock()
+		return nil
+	}
+
+	// Another goroutine is currently initializing — wait for it to finish.
+	for r.initConnStatus == initConnRunning {
+		r.initConnCond.Wait()
+	}
+
+	// Re-check after waking: the other goroutine may have succeeded.
+	if r.initConnStatus == initConnSucceeded {
+		r.initConnMu.Unlock()
+		return nil
+	}
+
+	// Status is initConnIdle (never run, or last attempt failed). Start a new attempt.
+	r.initConnStatus = initConnRunning
+	// Create a per-run result channel to communicate the error back to the caller.
+	// Buffered with capacity 1 so the goroutine can send without blocking even if
+	// the caller exits early (e.g., FinishCh closes).
+	resultCh := make(chan error, 1)
+
+	r.initConnMu.Unlock()
+
+	go func() {
+		var resultErr error
+		defer func() {
+			// Update status and wake any waiters.
+			r.initConnMu.Lock()
+			if resultErr == nil {
+				r.initConnStatus = initConnSucceeded
+			} else {
+				r.initConnStatus = initConnIdle
+			}
+			r.initConnCond.Broadcast()
+			r.initConnMu.Unlock()
+
+			// Send the result on the buffered channel so the caller will receive it.
+			resultCh <- resultErr
+
+			close(resultCh)
+		}()
+
 		if r.RefGetter().IsFullEncryption() {
 			err := r.InitSSLConStrMap()
 			if err != nil {
 				r.LoggerImpl.Errorf("failed to initialize ssl connection string map, err=%v", err)
-				r.InitConnErr = err
+				resultErr = err
 				return
 			}
 		}
 
 		targetKvVbMap, err := r.TargetKvVbMap()
 		if err != nil {
-			r.InitConnErr = err
+			r.LoggerImpl.Errorf("failed to fetch target kvVbMap during connection initialization, err=%v", err)
+			resultErr = err
 			return
 		}
 
@@ -253,10 +318,15 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 			// Put the initial client into the channel pool
 			clientChan <- client
 		}
-	})
+	}()
 
-	r.WaitForInitConnDone()
-	return r.InitConnErr
+	// Wait for the result and return it directly.
+	select {
+	case <-r.FinishCh:
+		return nil
+	case err := <-resultCh:
+		return err
+	}
 }
 
 func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
@@ -342,15 +412,6 @@ func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string) (mc
 	return r.Utils.GetRemoteMemcachedConnection(server_addr, username, password,
 		r.TargetBucketname, r.UserAgent, !ref.IsEncryptionEnabled(), /*plain_auth*/
 		base.KeepAlivePeriod, r.LoggerImpl)
-}
-
-func (r *RemoteMemcachedComponent) WaitForInitConnDone() {
-	select {
-	case <-r.FinishCh:
-		return
-	case <-r.InitConnDone:
-		return
-	}
 }
 
 func (r *RemoteMemcachedComponent) Close() {

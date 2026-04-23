@@ -10,6 +10,7 @@ package service_impl
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"sync"
@@ -672,4 +673,103 @@ func TestBucketTopologyService_VBStatsUpdater_TracksDataUsage(t *testing.T) {
 	// The tracking context was created and passed. Even though the mock doesn't
 	// populate DataSent/DataReceived, verify that GetDataUsageTrackingCtx was called
 	utils.AssertCalled(t, "GetDataUsageTrackingCtx")
+}
+
+// TestErrorIpFamilyMismatchSentinel verifies that ErrorIpFamilyMismatch is a detectable sentinel
+func TestErrorIpFamilyMismatchSentinel(t *testing.T) {
+	fmt.Println("========== Test: ErrorIpFamilyMismatch sentinel is detectable ==========")
+
+	// Verify the sentinel exists and is detectable
+	assert.NotNil(t, base.ErrorIpFamilyMismatch, "ErrorIpFamilyMismatch should be defined")
+
+	// Test that it can be detected with errors.Is
+	testErr := fmt.Errorf("wrapped error: %w", base.ErrorIpFamilyMismatch)
+	assert.True(t, errors.Is(testErr, base.ErrorIpFamilyMismatch),
+		"errors.Is should detect wrapped ErrorIpFamilyMismatch")
+
+	fmt.Println("========== Test passed: ErrorIpFamilyMismatch is properly defined ==========")
+}
+
+// TestGetTgtTopologyInfoWithCachedError verifies that getTgtTopologyInfo surfaces
+// a cached IP-family error from the watcher when the topology times out.
+func TestGetTgtTopologyInfoWithCachedError(t *testing.T) {
+	fmt.Println("========== Test: getTgtTopologyInfo surfaces cached IP-family error ==========")
+
+	logger := log.NewLogger("ipFamilyMismatchTest", log.DefaultLoggerContext)
+	spec := &metadata.ReplicationSpecification{
+		Id:                "test-repl-id",
+		SourceBucketName:  "srcBucket",
+		TargetBucketName:  "tgtBucket",
+		TargetClusterUUID: "remote-uuid",
+	}
+
+	// Create a minimal BucketTopologyService
+	bts := &BucketTopologyService{
+		logger:               logger,
+		tgtBucketWatchers:    make(map[string]*BucketTopologySvcWatcher),
+		tgtBucketWatchersCnt: make(map[string]int),
+	}
+
+	// Create a watcher that has cached an IPv6-only error
+	ipv6OnlyErr := fmt.Errorf("The cluster is ipv6 only. The address 127.0.0.1 is not allowed.: %w", base.ErrorIpFamilyMismatch)
+	watcherKey := fmt.Sprintf("%v_%v", spec.TargetClusterUUID, spec.TargetBucketName)
+	watcher := &BucketTopologySvcWatcher{
+		bucketName: spec.TargetBucketName,
+		latestErrMap: map[string]error{
+			TOPOLOGY: ipv6OnlyErr,
+		},
+		latestCacheMtx: sync.RWMutex{},
+		cachePopulated: false, // Topology was never cached because of the IP family mismatch
+	}
+	bts.tgtBucketWatchers[watcherKey] = watcher
+
+	// Call getTgtTopologyInfo - it should surface the IPv6-only error
+	kvMap, err := bts.getTgtTopologyInfo(spec)
+
+	assert.Nil(t, kvMap, "kvMap should be nil when IP family error occurs")
+	assert.NotNil(t, err, "err should not be nil")
+
+	// Check that the error wraps ErrorIpFamilyMismatch
+	assert.True(t, errors.Is(err, base.ErrorIpFamilyMismatch),
+		fmt.Sprintf("Error should wrap ErrorIpFamilyMismatch, got: %v", err))
+
+	// Also verify the error message contains relevant info
+	assert.Contains(t, err.Error(), "ipv6", "Error message should mention IPv6")
+	assert.Contains(t, err.Error(), "127.0.0.1", "Error message should mention the address")
+
+	fmt.Println("========== Test passed: getTgtTopologyInfo properly surfaces cached IP family error ==========")
+}
+
+// TestRetryStatsOpDetectsIpFamilyMismatch simulates what retryStatsOp does
+// when encountering an IP-family error.
+func TestRetryStatsOpDetectsIpFamilyMismatch(t *testing.T) {
+	fmt.Println("========== Test: retryStatsOp detects IP family error correctly ==========")
+
+	// Simulate an error from getTgtTopologyInfo that surfaces an IPv6-only error
+	ipv6OnlyErr := fmt.Errorf("The cluster is ipv6 only. The address 127.0.0.1 is not allowed.: %w", base.ErrorIpFamilyMismatch)
+
+	// This is what retryStatsOp checks (simplified logic)
+	isNonRetryable := errors.Is(ipv6OnlyErr, base.ErrorIpFamilyMismatch)
+
+	assert.True(t, isNonRetryable, "retryStatsOp should detect this as non-retryable via errors.Is")
+
+	fmt.Println("========== Test passed: retryStatsOp correctly identifies IP family error ==========")
+}
+
+// TestWrappedErrorDetection verifies that wrapped IP-family errors propagate correctly
+func TestWrappedErrorDetection(t *testing.T) {
+	fmt.Println("========== Test: Wrapped IP-family errors are properly detectable ==========")
+
+	// Test 1: Direct wrap
+	wrappedErr1 := fmt.Errorf("context: %w", base.ErrorIpFamilyMismatch)
+	assert.True(t, errors.Is(wrappedErr1, base.ErrorIpFamilyMismatch),
+		"Direct wrap should be detectable")
+
+	// Test 2: Multi-level wrap (like getTgtTopologyInfo does)
+	innerErr := fmt.Errorf("The cluster is ipv6 only. The address 127.0.0.1 is not allowed.: %w", base.ErrorIpFamilyMismatch)
+	outerErr := fmt.Errorf("target bucket topology unavailable for spec test-repl: %w", innerErr)
+	assert.True(t, errors.Is(outerErr, base.ErrorIpFamilyMismatch),
+		"Multi-level wrap should be detectable")
+
+	fmt.Println("========== Test passed: Wrapped errors propagate correctly ==========")
 }

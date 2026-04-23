@@ -987,7 +987,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 	// If it is in bracket, it is ipv6 address
 	if IsIpAddressEnclosedInBrackets(hostname) {
 		if IsIpV6Blocked() == true {
-			return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+			return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname), ErrorIpFamilyMismatch)
 		} else {
 			return connStr, nil
 		}
@@ -999,13 +999,13 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 			if !IsIpV4Blocked() {
 				return connStr, nil
 			} else {
-				return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+				return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname), ErrorIpFamilyMismatch)
 			}
 		} else { // IPV6
 			if !IsIpV6Blocked() {
 				return connStr, nil
 			} else {
-				return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+				return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname), ErrorIpFamilyMismatch)
 			}
 		}
 	}
@@ -1014,8 +1014,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Lookup failed for %v: %v", hostname, err)
 	}
-	switch isTLS {
-	case true:
+	if isTLS {
 		// If using TLS, then the connection string should be returned as is because the server's TLS certificate
 		// most likely has a SAN section with DNS name, but not IP specific. If returned IP, it'll cause a TLS handshake
 		// failure
@@ -1029,13 +1028,13 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 				ipv6FoundExample = addr.String()
 			}
 			if IsIpV4Blocked() && ipv4FoundExample != "" {
-				return "", fmt.Errorf("IPv6 only mode specified but given hostname %v found IPv4 address %v", hostname, ipv4FoundExample)
+				return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf("IPv6 only mode specified but given hostname %v found IPv4 address %v", hostname, ipv4FoundExample), ErrorIpFamilyMismatch)
 			} else if IsIpV6Blocked() && ipv6FoundExample != "" {
-				return "", fmt.Errorf("IPv4 only mode specified but given hostname %v found IPv6 address %v", hostname, ipv6FoundExample)
+				return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf("IPv4 only mode specified but given hostname %v found IPv6 address %v", hostname, ipv6FoundExample), ErrorIpFamilyMismatch)
 			}
 		}
 		return connStr, nil
-	case false:
+	} else {
 		for _, addr := range addrs {
 			if addr.To4() != nil && !IsIpV4Blocked() { // IPV4 address
 				port, portErr := GetPortNumber(connStr)
@@ -1054,7 +1053,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 			}
 		}
 	}
-	return "", errors.New(IpFamilyOnlyErrorMessage + fmt.Sprintf(IpFamilyAddressNotFoundMessageFmt, hostname))
+	return "", fmt.Errorf("%v%v: %w", IpFamilyOnlyErrorMessage, fmt.Sprintf(IpFamilyAddressNotFoundMessageFmt, hostname), ErrorIpFamilyMismatch)
 }
 
 func ShuffleStringsList(list []string) {

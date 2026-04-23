@@ -113,7 +113,6 @@ func TestRemoteMemcachedComponent_NewRemoteMemcachedComponent(t *testing.T) {
 	component := NewRemoteMemcachedComponent(logger, finCh, utils, testBucketName, testUserAgent, base.NewRemoteMemcachedTunables())
 
 	assert.NotNil(component)
-	assert.NotNil(component.InitConnDone)
 	assert.Equal(finCh, component.FinishCh)
 	assert.Equal(logger, component.LoggerImpl)
 	assert.NotNil(component.KvMemClients)
@@ -413,31 +412,6 @@ func TestRemoteMemcachedComponent_InitConnections_ConcurrentCalls(t *testing.T) 
 	assert.Equal(1, len(component.KvMemClients[testServerAddr2]))
 }
 
-func TestRemoteMemcachedComponent_WaitForInitConnDone_FinishChannelClosed(t *testing.T) {
-	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_WaitForInitConnDone_FinishChannelClosed =================")
-	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_WaitForInitConnDone_FinishChannelClosed =================")
-	assert := assert.New(t)
-
-	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
-
-	// Close finish channel before waiting
-	close(finCh)
-
-	// Should return immediately
-	done := make(chan bool)
-	go func() {
-		component.WaitForInitConnDone()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(1 * time.Second):
-		assert.Fail("WaitForInitConnDone did not return when finish channel closed")
-	}
-}
-
 func TestRemoteMemcachedComponent_WaitForInitConnDone_InitCompletes(t *testing.T) {
 	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_WaitForInitConnDone_InitCompletes =================")
 	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_WaitForInitConnDone_InitCompletes =================")
@@ -449,23 +423,17 @@ func TestRemoteMemcachedComponent_WaitForInitConnDone_InitCompletes(t *testing.T
 	mockClient := createMockClient()
 	utils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockClient, nil)
 
-	// Start InitConnections in goroutine
+	// InitConnections should complete within the timeout.
+	done := make(chan error, 1)
 	go func() {
-		component.InitConnections()
-	}()
-
-	// Should return when init completes
-	done := make(chan bool)
-	go func() {
-		component.WaitForInitConnDone()
-		close(done)
+		done <- component.InitConnections()
 	}()
 
 	select {
-	case <-done:
-		// Success
+	case err := <-done:
+		assert.NoError(err)
 	case <-time.After(2 * time.Second):
-		assert.Fail("WaitForInitConnDone did not return when init completed")
+		assert.Fail("InitConnections did not complete within timeout")
 	}
 }
 
