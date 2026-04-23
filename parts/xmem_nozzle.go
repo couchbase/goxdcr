@@ -1448,7 +1448,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		}
 		xmem.checkAndUpdateSentStats(item)
 		if item != nil {
-			xmem.checkSendDelayInjection() // No-op in production
+			xmem.checkSendDelayInjection()
 
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 
@@ -1518,7 +1518,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					return err
 				}
 
-				//blocking
+				xmem.injectColErr(item)
 				index, reserv_num, item_bytes, err := xmem.buf.enSlot(item)
 				if err != nil {
 					return err

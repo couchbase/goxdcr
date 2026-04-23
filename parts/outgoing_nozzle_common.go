@@ -112,6 +112,7 @@ type baseConfig struct {
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
+	devColErrPercent     uint32
 
 	DisableHlvBasedShortCircuit atomic.Bool // disables optimisation to skip Target mutations for XMEM batching (origin verified using HLV)
 

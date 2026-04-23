@@ -420,6 +420,7 @@ type replicationSettingsInjections interface {
 	GetDevPreCheckMaxCasErrorInjection(settings *ReplicationSettings) bool
 	GetCasDriftInjectDocKey(settings *ReplicationSettings) string
 	GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int
+	GetXmemColErrorPercent(settings *ReplicationSettings) int
 }
 
 func NewEmptyReplicationSettings() *ReplicationSettings {

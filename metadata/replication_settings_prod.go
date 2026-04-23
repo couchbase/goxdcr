@@ -51,3 +51,7 @@ func (s *ReplicationSettingsProdInjections) GetCasDriftInjectDocKey(settings *Re
 func (s *ReplicationSettingsProdInjections) GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int {
 	return 0
 }
+
+func (s *ReplicationSettingsProdInjections) GetXmemColErrorPercent(settings *ReplicationSettings) int {
+	return 0
+}

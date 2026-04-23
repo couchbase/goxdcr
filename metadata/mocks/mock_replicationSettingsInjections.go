@@ -296,6 +296,52 @@ func (_c *replicationSettingsInjections_GetXmemNozzleNetworkIOFaultPercent_Call)
 	return _c
 }
 
+// GetXmemColErrorPercent provides a mock function with given fields: settings
+func (_m *replicationSettingsInjections) GetXmemColErrorPercent(settings *metadata.ReplicationSettings) int {
+	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetXmemColErrorPercent")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSettings) int); ok {
+		r0 = rf(settings)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// replicationSettingsInjections_GetXmemColErrorPercent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetXmemColErrorPercent'
+type replicationSettingsInjections_GetXmemColErrorPercent_Call struct {
+	*mock.Call
+}
+
+// GetXmemColErrorPercent is a helper method to define mock.On call
+//   - settings *metadata.ReplicationSettings
+func (_e *replicationSettingsInjections_Expecter) GetXmemColErrorPercent(settings interface{}) *replicationSettingsInjections_GetXmemColErrorPercent_Call {
+	return &replicationSettingsInjections_GetXmemColErrorPercent_Call{Call: _e.mock.On("GetXmemColErrorPercent", settings)}
+}
+
+func (_c *replicationSettingsInjections_GetXmemColErrorPercent_Call) Run(run func(settings *metadata.ReplicationSettings)) *replicationSettingsInjections_GetXmemColErrorPercent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSettings))
+	})
+	return _c
+}
+
+func (_c *replicationSettingsInjections_GetXmemColErrorPercent_Call) Return(_a0 int) *replicationSettingsInjections_GetXmemColErrorPercent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *replicationSettingsInjections_GetXmemColErrorPercent_Call) RunAndReturn(run func(*metadata.ReplicationSettings) int) *replicationSettingsInjections_GetXmemColErrorPercent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newReplicationSettingsInjections creates a new instance of replicationSettingsInjections. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newReplicationSettingsInjections(t interface {

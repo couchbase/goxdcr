@@ -38,6 +38,9 @@ func (b *BaseConfigDevInjector) InitInjector(cfg *baseConfig, settings metadata.
 	if val, ok := settings[XMEM_DEV_BACKFILL_SLEEP_DELAY]; ok {
 		cfg.devBackfillSendDelay = uint32(val.(int))
 	}
+	if val, ok := settings[XMEM_DEV_COL_ERROR_PERCENT]; ok {
+		cfg.devColErrPercent = uint32(val.(int))
+	}
 }
 
 func (b *BaseConfigDevInjector) Update(cfg *baseConfig, settings metadata.ReplicationSettingsMap, logger *log.CommonLogger, id string) {
@@ -57,6 +60,15 @@ func (b *BaseConfigDevInjector) Update(cfg *baseConfig, settings metadata.Replic
 		atomic.StoreUint32(&cfg.devBackfillSendDelay, uint32(devBackfillDelayInt))
 		if oldBackfillDelayInt != devBackfillDelayInt {
 			logger.Infof("%v updated backfill pipeline delay to %v millisecond(s)\n", id, devBackfillDelay)
+		}
+	}
+	devColErrPercent, ok := settings[XMEM_DEV_COL_ERROR_PERCENT]
+	if ok {
+		devColErrPercentInt := devColErrPercent.(int)
+		oldColErrPercent := int(atomic.LoadUint32(&cfg.devColErrPercent))
+		atomic.StoreUint32(&cfg.devColErrPercent, uint32(devColErrPercentInt))
+		if oldColErrPercent != devColErrPercentInt {
+			logger.Infof("%v updated collection error injection percent to %v%%\n", id, devColErrPercentInt)
 		}
 	}
 }

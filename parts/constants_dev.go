@@ -25,6 +25,7 @@ const (
 	XMEM_DEV_MAIN_SLEEP_DELAY             = base.DevMainPipelineSendDelay
 	XMEM_DEV_BACKFILL_SLEEP_DELAY         = base.DevBackfillPipelineSendDelay
 	XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY = base.DevXmemNozzleNetworkIOFaultProbability
+	XMEM_DEV_COL_ERROR_PERCENT            = base.DevXmemColErrorPercent
 )
 
 func init() {
@@ -32,4 +33,5 @@ func init() {
 	xmem_setting_defs[XMEM_DEV_MAIN_SLEEP_DELAY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
 	xmem_setting_defs[XMEM_DEV_BACKFILL_SLEEP_DELAY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
 	xmem_setting_defs[XMEM_DEV_NETWORK_IO_FAULT_PROBABILITY] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
+	xmem_setting_defs[XMEM_DEV_COL_ERROR_PERCENT] = base.NewSettingDef(reflect.TypeOf((*int)(nil)), false)
 }

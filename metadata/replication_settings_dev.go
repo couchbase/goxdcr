@@ -31,6 +31,7 @@ const (
 	DevBackfillUnrecoverableErrorInj          = base.DevBackfillUnrecoverableErrorInj
 	DevBackfillMgrVbsTasksDoneNotifierDelay   = base.DevBackfillMgrVbsTasksDoneNotifierDelay
 	DevXmemNozzleNetworkIOFaultProbability    = base.DevXmemNozzleNetworkIOFaultProbability
+	DevXmemColErrorPercent                    = base.DevXmemColErrorPercent
 )
 
 var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
@@ -49,6 +50,7 @@ var XDCRDevBackfillReqHandlerHandleVBTaskDoneHangConfig = &SettingsConfig{false,
 var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
 var XDCRDevXmemNozzleNetworkIOFaultProbabilityConfig = &SettingsConfig{0 /*percent*/, &Range{0, 100}}
+var XDCRDevXmemColErrorPercentConfig = &SettingsConfig{0 /*percent*/, &Range{0, 100}}
 
 // This file contains development-only settings that will only be included
 // when the code is compiled with the "dev" build tag
@@ -110,6 +112,10 @@ func init() {
 
 		// DevXmemNozzleNetworkIOFaultProbability is used to inject network I/O faults in xmem nozzle for testing purposes
 		DevXmemNozzleNetworkIOFaultProbability: XDCRDevXmemNozzleNetworkIOFaultProbabilityConfig,
+
+		// DevXmemColErrorPercent is used to inject UNKNOWN_COLLECTION responses in xmem nozzle for testing purposes.
+		// Overrides a percentage of SUCCESS responses to UNKNOWN_COLLECTION to simulate the manifest-vs-KV race.
+		DevXmemColErrorPercent: XDCRDevXmemColErrorPercentConfig,
 	}
 
 	// Merge the dev settings into the main configuration map
@@ -154,4 +160,8 @@ func (s *ReplicationSettingsDevInjections) GetCasDriftInjectDocKey(settings *Rep
 
 func (s *ReplicationSettingsDevInjections) GetXmemNozzleNetworkIOFaultPercent(settings *ReplicationSettings) int {
 	return settings.GetIntSettingValue(DevXmemNozzleNetworkIOFaultProbability)
+}
+
+func (s *ReplicationSettingsDevInjections) GetXmemColErrorPercent(settings *ReplicationSettings) int {
+	return settings.GetIntSettingValue(DevXmemColErrorPercent)
 }
