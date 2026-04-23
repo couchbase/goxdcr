@@ -10,6 +10,7 @@
 
 git submodule update --init
 ln -sf .agent-context/AGENTS.md AGENTS.md
+ln -sf .agent-context/AGENTS.md CLAUDE.md
 
 # Copilot instructions for legacy JetBrains IDEs
 mkdir -p .github
