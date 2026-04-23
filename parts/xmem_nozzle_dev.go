@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/v8/common"
 )
 
 func (xmem *XmemNozzle) checkSendDelayInjection() {
