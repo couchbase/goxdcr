@@ -4224,32 +4224,32 @@ func (cLogCollector *cLogCollector) ProcessEvent(event *common.Event) error {
 			return nil
 		}
 
-		switch info.Err {
-		case baseclog.ErrTMPFAIL:
+		switch {
+		case errors.Is(info.Err, baseclog.ErrTMPFAIL):
 			metricMap[service_def.CLOG_TMPFAIL_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrGuardrail:
+		case errors.Is(info.Err, baseclog.ErrGuardrail):
 			metricMap[service_def.CLOG_GUARDRAIL_HIT_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrEACCESS:
+		case errors.Is(info.Err, baseclog.ErrEACCESS):
 			metricMap[service_def.CLOG_EACCESS_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrImpossibleResp:
+		case errors.Is(info.Err, baseclog.ErrImpossibleResp):
 			metricMap[service_def.CLOG_IMPOSSIBLE_RESP_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrUnknownResp:
+		case errors.Is(info.Err, baseclog.ErrUnknownResp):
 			metricMap[service_def.CLOG_UNKNOWN_RESP_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrFatalResp:
+		case errors.Is(info.Err, baseclog.ErrFatalResp):
 			metricMap[service_def.CLOG_FATAL_RESP_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrNotMyVBucket:
+		case errors.Is(info.Err, baseclog.ErrNotMyVBucket):
 			metricMap[service_def.CLOG_NOT_MY_VB_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrUnknownCollection:
+		case errors.Is(info.Err, baseclog.ErrUnknownCollection):
 			metricMap[service_def.CLOG_UNKNOWN_COLLECTION_COUNT].(metrics.Counter).Inc(1)
-		case baseclog.ErrTimeout:
+		case errors.Is(info.Err, baseclog.ErrTimeout):
 			metricMap[service_def.CLOG_WRITE_TIMEDOUT].(metrics.Counter).Inc(1)
-		case baseclog.ErrThrottle:
+		case errors.Is(info.Err, baseclog.ErrThrottle):
 			metricMap[service_def.CLOG_THROTTLED].(metrics.Counter).Inc(1)
-		case iopool.ErrConnPoolGetTimeout:
+		case errors.Is(info.Err, iopool.ErrConnPoolGetTimeout):
 			metricMap[service_def.CLOG_POOL_GET_TIMEDOUT].(metrics.Counter).Inc(1)
-		case baseclog.ErrQueueFull:
+		case errors.Is(info.Err, baseclog.ErrQueueFull):
 			metricMap[service_def.CLOG_QUEUE_FULL].(metrics.Counter).Inc(1)
-		case baseclog.ErrLoggerHibernated:
+		case errors.Is(info.Err, baseclog.ErrLoggerHibernated):
 			metricMap[service_def.CLOG_HIBERNATED_COUNT].(metrics.Counter).Inc(1)
 			err := cLogCollector.handleVBEvent(event, service_def.CLOG_HIBERNATED_COUNT)
 			if err != nil {

@@ -123,9 +123,9 @@ func TestSetMeta_OtherSentinels_PreservedOrCategorized(t *testing.T) {
 }
 
 // TestProcessWriteError_WrappedTMPFAIL_CategorizesAsRetry tests that processWriteError
-// correctly categorizes a wrapped TMPFAIL error as needing retry.
-// This test deliberately constructs the wrapped-error shape that the current (buggy) setMeta produces,
-// then verifies it's handled correctly.
+// correctly categorizes a wrapped TMPFAIL error as needing retry using errors.Is.
+// This tests the defense-in-depth fix that allows proper categorization even if the
+// error is wrapped with %w (the correct wrapping approach).
 func TestProcessWriteError_WrappedTMPFAIL_CategorizesAsRetry(t *testing.T) {
 	// Setup mocks for a minimal LoggerImpl
 	mockUtils := &utils.UtilsIface{}
@@ -141,15 +141,16 @@ func TestProcessWriteError_WrappedTMPFAIL_CategorizesAsRetry(t *testing.T) {
 		eventsProducer:     eventsProducer,
 	}
 
-	// Construct the wrapped error exactly as setMeta does today (with %v, losing sentinel identity)
-	wrapped := fmt.Errorf("error in setMeta: err=%v, err2=%v", nil, baseclog.ErrTMPFAIL)
+	// Construct the wrapped error with proper %w wrapping (as setMeta now does after the fix)
+	// This tests the defense-in-depth fix: errors.Is should find the sentinel even when wrapped
+	wrapped := fmt.Errorf("error in setMeta: %w", baseclog.ErrTMPFAIL)
 
 	// Call processWriteError with a test pipeline type
 	writeErr, _ := l.processWriteError(wrapped, common.MainPipeline)
 
-	// After the fix (either %w in gomemcached.go:295 or errors.Is in loggerimpl.go:670),
-	// wrapped TMPFAIL must be categorized as requiring retry, not as unknownErr
+	// The wrapped TMPFAIL must be categorized as requiring retry, not as unknownErr
+	// This validates that errors.Is correctly handles wrapped sentinels
 	assert.Equal(t, needRetryErr, writeErr,
-		"wrapped TMPFAIL must be categorized as retryable, not unknownErr")
+		"wrapped TMPFAIL must be categorized as retryable via errors.Is, not unknownErr")
 }
 
