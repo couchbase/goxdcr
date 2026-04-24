@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package conflictlog
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -641,15 +642,21 @@ func (l *LoggerImpl) processWriteError(err error, originatingPipelineType common
 		refreshBucketInfo = true
 	}
 
-	switch err {
-	case baseclog.ErrTMPFAIL, baseclog.ErrNotMyVBucket,
-		baseclog.ErrUnknownCollection, baseclog.ErrTimeout,
-		baseclog.ErrThrottle, iopool.ErrConnPoolGetTimeout,
-		baseclog.ErrQueueFull, baseclog.ErrLoggerHibernated:
+	switch {
+	case errors.Is(err, baseclog.ErrTMPFAIL),
+		errors.Is(err, baseclog.ErrNotMyVBucket),
+		errors.Is(err, baseclog.ErrUnknownCollection),
+		errors.Is(err, baseclog.ErrTimeout),
+		errors.Is(err, baseclog.ErrThrottle),
+		errors.Is(err, iopool.ErrConnPoolGetTimeout),
+		errors.Is(err, baseclog.ErrQueueFull),
+		errors.Is(err, baseclog.ErrLoggerHibernated):
 		return needRetryErr, refreshBucketInfo
-	case baseclog.ErrImpossibleResp, baseclog.ErrFatalResp,
-		baseclog.ErrEACCESS, baseclog.ErrGuardrail,
-		baseclog.ErrUnknownResp:
+	case errors.Is(err, baseclog.ErrImpossibleResp),
+		errors.Is(err, baseclog.ErrFatalResp),
+		errors.Is(err, baseclog.ErrEACCESS),
+		errors.Is(err, baseclog.ErrGuardrail),
+		errors.Is(err, baseclog.ErrUnknownResp):
 		return noRetryErr, refreshBucketInfo
 	default:
 		// Note that unknownErr category errors will be logged.

@@ -291,9 +291,15 @@ func (m *MemcachedConn) setMeta(conn mcc.ClientIface, key string, vbNo uint16, b
 
 	rsp, err := conn.Send(req)
 	err2 := m.handleResponse(key, rsp, opaque)
-	if err != nil || err2 != nil {
-		newErr := fmt.Errorf("error in setMeta: err=%v, err2=%v", err, err2)
-		return newErr
+	// err2 carries categorized sentinel errors from handleResponse
+	// (ErrTMPFAIL, ErrNotMyVBucket, ErrUnknownCollection, ErrEACCESS,
+	// ErrGuardrail, ErrImpossibleResp, ErrUnknownResp). Return it directly so
+	// processWriteError can identify the category via errors.Is.
+	if err2 != nil {
+		return err2
+	}
+	if err != nil {
+		return fmt.Errorf("error in setMeta: %w", err)
 	}
 	return
 }
