@@ -968,6 +968,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedMainPipe
 
 	changes_left := total_changes - docs_processed
 	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
+	stats_mgr.logDebugChangesLeftMain(highSeqnosMap, curKvVbMap, throughSeqnoMap, total_changes, docs_processed, changes_left)
 	return changes_left, docs_processed, vbsList, nil
 }
 
@@ -985,6 +986,72 @@ func (stats_mgr *StatisticsManager) logChangesLeft(total_changes, docs_processed
 	stats_mgr.logger.Infof("total_docs=%v, docs_processed=%v, changes_left=%v\n", total_changes, docs_processed, changes_left)
 }
 
+func (stats_mgr *StatisticsManager) logDebugChangesLeftMain(
+	highSeqnosMap base.HighSeqnosMapType,
+	curKvVbMap base.KvVBMapType,
+	throughSeqnoMap map[uint16]uint64,
+	total_changes, docs_processed, changes_left int64,
+) {
+	if stats_mgr.logger.GetLogLevel() < log.LogLevelDebug {
+		return
+	}
+
+	// Build a flat vb -> highSeqno map from curKvVbMap and highSeqnosMap
+	vbToHighSeqno := make(map[uint16]uint64)
+	for serverAddr, vbnos := range curKvVbMap {
+		highseqno_map, found := highSeqnosMap[serverAddr]
+		if !found || highseqno_map == nil {
+			continue
+		}
+		for _, vbno := range vbnos {
+			vbToHighSeqno[vbno] = (*highseqno_map)[vbno]
+		}
+	}
+
+	// Sort VBs for deterministic output
+	sortedVbs := make([]uint16, 0, len(vbToHighSeqno))
+	for vb := range vbToHighSeqno {
+		sortedVbs = append(sortedVbs, vb)
+	}
+	sortedVbs = base.SortUint16List(sortedVbs)
+
+	// Build per-VB tokens
+	tokens := make([]string, 0, len(sortedVbs))
+	for _, vb := range sortedVbs {
+		highSeqno := vbToHighSeqno[vb]
+		throughSeqno := throughSeqnoMap[vb]
+		vbChangesLeft := int64(highSeqno) - int64(throughSeqno)
+		token := fmt.Sprintf("{vb:%v hi:%v ts:%v left:%v}", vb, highSeqno, throughSeqno, vbChangesLeft)
+		tokens = append(tokens, token)
+	}
+
+	stats_mgr.logger.Debugf("StatsMgr changes_left detail (main): pipeline=%v total_changes=%v docs_processed=%v changes_left=%v vbs=[%v]",
+		stats_mgr.pipeline.InstanceId(), total_changes, docs_processed, changes_left, strings.Join(tokens, " "))
+}
+
+func (stats_mgr *StatisticsManager) logDebugChangesLeftBackfill(
+	vbsList []uint16,
+	throughSeqnoMap map[uint16]uint64,
+	total_changes, docs_processed, changes_left int64,
+) {
+	if stats_mgr.logger.GetLogLevel() < log.LogLevelDebug {
+		return
+	}
+
+	// Build per-VB tokens (vbsList is already sorted)
+	tokens := make([]string, 0, len(vbsList))
+	for _, vb := range vbsList {
+		endSeqno := stats_mgr.endSeqnos[vb]
+		throughSeqno := throughSeqnoMap[vb]
+		vbChangesLeft := int64(endSeqno) - int64(throughSeqno)
+		token := fmt.Sprintf("{vb:%v end:%v ts:%v left:%v}", vb, endSeqno, throughSeqno, vbChangesLeft)
+		tokens = append(tokens, token)
+	}
+
+	stats_mgr.logger.Debugf("StatsMgr changes_left detail (backfill): pipeline=%v total_changes=%v docs_processed=%v changes_left=%v vbs=[%v]",
+		stats_mgr.pipeline.InstanceId(), total_changes, docs_processed, changes_left, strings.Join(tokens, " "))
+}
+
 func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedBackfillPipeline() (int64, int64, []uint16, error) {
 	total_changes := int64(stats_mgr.totalBackfillChanges)
 	vbsList := base.SortUint16List(stats_mgr.backfillUnsortedVBs)
@@ -997,6 +1064,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedBackfill
 		changes_left = 0
 	}
 	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
+	stats_mgr.logDebugChangesLeftBackfill(vbsList, throughSeqnoMap, total_changes, docs_processed, changes_left)
 	return changes_left, docs_processed, vbsList, nil
 }
 
