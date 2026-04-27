@@ -31,6 +31,8 @@ type Nozzle struct {
 	dataCh                 chan *base.WrappedMCRequest
 	stopCh                 chan struct{}
 
+	dataPool base.DataPool
+
 	// used to make sure Start() is only called once
 	startOnce sync.Once
 }
@@ -70,6 +72,7 @@ func New(id string, loggerContext *log.LoggerContext, cfg *Config) (n *Nozzle, e
 		stopCh:                 make(chan struct{}),
 		stats:                  NewStats(),
 		upstreamErrReporterMap: map[uint16]utils.ErrReportFunc{},
+		dataPool:               base.NewNoDataPool(),
 	}
 
 	return

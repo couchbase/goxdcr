@@ -470,11 +470,15 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	// CNG worker count changes require pipeline restart
 	cngWorkerCountChanged := oldSettings.GetCNGWorkerCount() != newSettings.GetCNGWorkerCount()
 
+	// Toggling devReplOpts.cngDataPoolEnabled swaps the data pool implementation,
+	// which is only consulted at Start — restart the pipeline to pick it up.
+	cngDataPoolEnabledChanged := oldSettings.GetCNGDataPoolEnabled() != newSettings.GetCNGDataPoolEnabled()
+
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
 		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
 		modesChanged || rulesChanged || mobileModeChanged || conflictLoggingChanged ||
 		dcpFlowControlThrottleChanged || componentEventsChanLengthChanged ||
-		cngWorkerCountChanged || excludeEventRegexChanged
+		cngWorkerCountChanged || excludeEventRegexChanged || cngDataPoolEnabledChanged
 }
 
 // tightly coupled with the behaviour of pipelineReinitCausingChange()

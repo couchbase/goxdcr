@@ -89,9 +89,33 @@ func (n *Nozzle) initConfig(settings metadata.ReplicationSettingsMap) (err error
 		}
 	}
 
+	n.initDataPool(settings)
+
 	n.initDevInjections(settings)
 
 	return
+}
+
+// initDataPool selects the data pool implementation based on devReplOpts.
+// Real pool is used only when devReplOpts.cngDataPoolEnabled is true; otherwise no-op.
+// Not live-updatable — only consulted at Start.
+func (n *Nozzle) initDataPool(settings metadata.ReplicationSettingsMap) {
+	val, ok := settings[base.DevReplOptsKey]
+	if !ok {
+		return
+	}
+	valStr, ok := val.(string)
+	if !ok {
+		return
+	}
+	opts, err := base.ParseDevReplOpts(valStr)
+	if err != nil {
+		n.Logger().Errorf("failed to parse devReplOpts %q, err=%v; using no-op data pool", valStr, err)
+		return
+	}
+	if opts.CNGDataPoolEnabled {
+		n.dataPool = base.NewDataPool()
+	}
 }
 
 func (n *Nozzle) initConnPool() (err error) {

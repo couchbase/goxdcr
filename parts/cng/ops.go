@@ -162,10 +162,11 @@ func (n *Nozzle) PushDocument(ctx context.Context, client base.CngClient, req *b
 
 	var content content
 	if req.Req.Opcode == mc.UPR_MUTATION {
-		content, err = getContent(n.Logger(), req)
+		content, err = getContent(n.Logger(), n.dataPool, req)
 		if err != nil {
 			return rsp, err
 		}
+		defer content.recycle(n.dataPool)
 
 		if content.IsJson {
 			pushDocReq.ContentType = internal_xdcr_v1.ContentType_CONTENT_TYPE_JSON

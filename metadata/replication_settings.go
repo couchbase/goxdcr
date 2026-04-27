@@ -1651,6 +1651,24 @@ func (s *ReplicationSettings) GetCNGConnCount() int {
 	return val.(int)
 }
 
+// GetCNGDataPoolEnabled returns the cngDataPoolEnabled sub-field of devReplOpts.
+// Returns false when devReplOpts is unset, not a string, malformed, or has the field absent/false.
+func (s *ReplicationSettings) GetCNGDataPoolEnabled() bool {
+	val, ok := s.Values[base.DevReplOptsKey]
+	if !ok {
+		return false
+	}
+	str, ok := val.(string)
+	if !ok {
+		return false
+	}
+	opts, err := base.ParseDevReplOpts(str)
+	if err != nil {
+		return false
+	}
+	return opts.CNGDataPoolEnabled
+}
+
 func (s *ReplicationSettings) GetHlvBasedShortCircuitToggle() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(DisableHlvBasedShortCircuitKey)
 	toggle := val.(bool)

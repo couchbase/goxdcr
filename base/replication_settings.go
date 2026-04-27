@@ -31,16 +31,21 @@ type DevReplOpts struct {
 
 	// EnableXmemProtocolCheck enables the XMEM protocol
 	EnableXmemProtocolCheck bool `json:"enableXmemProtocolCheck"`
+
+	// CNGDataPoolEnabled enables the real (sync.Pool-backed) data pool in the CNG nozzle.
+	// When false (default), the CNG nozzle uses the no-op data pool.
+	// Not live-updatable: a replication restart is required for the change to take effect.
+	CNGDataPoolEnabled bool `json:"cngDataPoolEnabled"`
 }
 
 // Returns false if any of the options is set
 func (opts DevReplOpts) IsDefault() bool {
-	return !opts.DisableDataPool && !opts.StrictDataPoolUse && !opts.EnableXmemProtocolCheck
+	return !opts.DisableDataPool && !opts.StrictDataPoolUse && !opts.EnableXmemProtocolCheck && !opts.CNGDataPoolEnabled
 }
 
 func (opts DevReplOpts) String() string {
-	return fmt.Sprintf("disableDataPool:%v, strictDataPoolUse:%v, enableXmemProtocolCheck:%v",
-		opts.DisableDataPool, opts.StrictDataPoolUse, opts.EnableXmemProtocolCheck)
+	return fmt.Sprintf("disableDataPool:%v, strictDataPoolUse:%v, enableXmemProtocolCheck:%v, cngDataPoolEnabled:%v",
+		opts.DisableDataPool, opts.StrictDataPoolUse, opts.EnableXmemProtocolCheck, opts.CNGDataPoolEnabled)
 }
 
 // ParseDevReplOpts parses the dev replication options from a string

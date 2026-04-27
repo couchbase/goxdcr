@@ -17,6 +17,32 @@ type content struct {
 
 	// Indicates whether the Body is a JSON document
 	IsJson bool
+
+	// pooledBody, if non-nil, is the original full-cap slice obtained from the
+	// data pool that backs Body. It must be returned to the same pool via recycle.
+	pooledBody []byte
+}
+
+// recycle returns the pooled buffer (if any) backing Body to pool.
+// Safe to call multiple times and on a zero-value content.
+func (c *content) recycle(pool base.DataPool) {
+	if c == nil || c.pooledBody == nil {
+		return
+	}
+	pool.PutByteSlice(c.pooledBody)
+	c.pooledBody = nil
+}
+
+// getEncodeBuf gets a buffer suitable as the destination for snappy.Encode.
+// Falls back to make() on pool errors so replication is never blocked by pool failures.
+// The returned slice is the original full-cap buffer; pooled is true iff it came from pool.
+func getEncodeBuf(pool base.DataPool, srcLen int) (buf []byte, pooled bool) {
+	size := snappy.MaxEncodedLen(srcLen)
+	buf, err := pool.GetByteSlice(uint64(size))
+	if err != nil {
+		return make([]byte, size), false
+	}
+	return buf, true
 }
 
 // getContent extracts the body and xattr key-values into a map
@@ -24,7 +50,7 @@ type content struct {
 // If body is not compressed, it will be compressed before returning
 // If body is compressed and xattr is present, xattr will be extracted and body will be recompressed
 // If body is compressed and xattr is not present, body will be returned as is
-func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content, err error) {
+func getContent(logger *log.CommonLogger, pool base.DataPool, req *base.WrappedMCRequest) (c content, err error) {
 	c.IsJson = req.Req.DataType&base.JSONDataType > 0
 
 	if base.HasXattr(req.Req.DataType) {
@@ -60,13 +86,19 @@ func getContent(logger *log.CommonLogger, req *base.WrappedMCRequest) (c content
 			return c, err
 		}
 
-		cbuf := make([]byte, snappy.MaxEncodedLen(len(bodyWithoutXattr)))
+		cbuf, pooled := getEncodeBuf(pool, len(bodyWithoutXattr))
+		if pooled {
+			c.pooledBody = cbuf
+		}
 		c.Body = snappy.Encode(cbuf, bodyWithoutXattr)
 		return c, nil
 	}
 
 	if req.Req.DataType&base.SnappyDataType == 0 {
-		cbuf := make([]byte, snappy.MaxEncodedLen(len(req.Req.Body)))
+		cbuf, pooled := getEncodeBuf(pool, len(req.Req.Body))
+		if pooled {
+			c.pooledBody = cbuf
+		}
 		c.Body = snappy.Encode(cbuf, req.Req.Body)
 	} else {
 		c.Body = req.Req.Body
