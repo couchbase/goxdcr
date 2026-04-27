@@ -598,6 +598,7 @@ function checkDataReplicatedIsZero {
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -747,6 +748,7 @@ function setCustomManifestRefreshInterval {
 			echo "Error - unable to update pull interval - stuck at $chkTargetManifestPullInterval. Trying again..."
 		fi
 	done
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -1118,6 +1120,7 @@ function validateInternalLogWithInstance {
 	logs=$(getInternalNodeXdcrLog "$clusterName")
 	if ! (($? == 0)); then
 		echo "Unable to get log for validation"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1193,6 +1196,7 @@ function validateXDCRCheckpoints {
 	if ! (($? == 0)); then
 		echo "$checkpointOutput" >/tmp/checkpoint.error
 		echo "Erroneous checkpoint output to /tmp/checkpoint.error"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1344,6 +1348,7 @@ function runXdcrDifferValidateNoDiff {
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Differ returned non-0 exit code"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1351,6 +1356,7 @@ function runXdcrDifferValidateNoDiff {
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1368,6 +1374,7 @@ function runXdcrDifferValidateNoDiffEnc {
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Running Differ encrypted mode returned non-0 exit code"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1375,6 +1382,7 @@ function runXdcrDifferValidateNoDiffEnc {
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed to validate encrypted differ results with no diff"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1584,6 +1592,7 @@ function checkInternalSetting {
 	checkInt=$(getInternalSetting "$clusterName" "$settingKey")
 	if (($checkInt != $expectedVal)); then
 		echo "$settingKey is not set to $expectedVal. It is $checkInt"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1596,11 +1605,13 @@ function validateBrokenMapExists {
 	errList=$(getErrorListForMainPipeline $cluster)
 	if ((!$? == 0)); then
 		echo "Issue getting error list"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
 	if (($(echo "$errList" | jq 'length') == 0)); then
 		echo "See no error list"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1617,6 +1628,7 @@ function validateNumberOfEvents {
 
 	waitForNumberOfEvents "$cluster" "$count" 0
 	if (($? > 0)); then
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -1630,6 +1642,7 @@ function waitForNumberOfEvents {
 	errList=$(getErrorListForMainPipeline $cluster)
 	if ((!$? == 0)); then
 		echo "Issue getting error list"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -1663,6 +1676,7 @@ function validateBrokenMapEntry {
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
 	local entryId=$?
 	if (($entryId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	echo "Got entry ID: $entryId"
@@ -1678,6 +1692,7 @@ function validateBrokenMapEntryDNE {
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
 	if ((!$? == $GET_BROKEN_MAP_NOT_FOUND)); then
 		echo "Found entry when not supposed to"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 }
@@ -3064,6 +3079,7 @@ function grepForLastMappingDocUpdateInMetaKvLogs {
 	logs=$(getInternalNodeMetaKvLog "$clusterName")
 	if ((!$? == 0)); then
 		echo "Unable to get metakv log for validation"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -3073,6 +3089,7 @@ function grepForLastMappingDocUpdateInMetaKvLogs {
 	if (($cnt == 0)); then
 		now=$(date)
 		echo "0 occurrences found of $pattern in lastUpdate of metakv.log at $now"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -3094,6 +3111,7 @@ function updateNsServerSimpleStore {
 	fi
 
 	echo "simple store update failed"
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
