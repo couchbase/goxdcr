@@ -164,6 +164,11 @@ function runTestCase {
 	echo "Wait for 15sec before grepping for errors"
 	sleep 15
 
+	# Clear the log after the credential switch should have completed so we only count
+	# errors that occur after XDCR has switched to the staged credentials, not during
+	# the transition window between old CA deletion and staged credential activation.
+	clearInternalNodeXdcrLog "C1"
+
 	# original client cert should fail now
 	runConnectionPreCheckClientCerts "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}" "$DEFAULT_XDCR_INBOUND"
 	if (($? == 0)); then

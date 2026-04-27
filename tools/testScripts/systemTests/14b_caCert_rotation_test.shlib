@@ -127,6 +127,11 @@ function runTestCase {
 	editSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
 	sleep 1
 
+	# Clear the log after XDCR has received the new CA cert so that transient TLS errors
+	# from the brief window between cert upload (setupCertsForTesting) and XDCR update
+	# (editSecureRemoteClusterReference) are not counted.
+	clearInternalNodeXdcrLog "C1"
+
 	#run data load again to ensure that we have some changes after the cert rotation
 	runDataLoad
 	sleep 2
