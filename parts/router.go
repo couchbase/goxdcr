@@ -1009,6 +1009,16 @@ func (c *CollectionsRouter) doubleCheckBrokenMapAndClearDblChkTicker(latestManif
 	// If manifest is not changing, then the backfill should be raised regardless of target health
 	remoteClusterHealth, err := c.connectivityStatusGetter()
 	if err != nil {
+		if service_def.RemoteClusterRefNotFoundErr(err) {
+			// No need to retry if remote cluster is no longer there
+			return err
+		}
+		// Connectivity check failed. Restart the kicker so we retry instead of giving up permanently.
+		c.brokenDenyMtx.Lock()
+		if c.brokenMapDblChkTicker == nil {
+			c.startDoubleCheckTickerAndKicker()
+		}
+		c.brokenDenyMtx.Unlock()
 		return err
 	}
 
@@ -1236,9 +1246,21 @@ func (c *CollectionsRouter) brokenMapIdleDoubleCheck() {
 		return
 	}
 
-	c.brokenDenyMtx.RLock()
-	latestManifestClone := c.lastKnownTgtManifest.Clone()
-	c.brokenDenyMtx.RUnlock()
+	// Try to fetch the latest manifest from the manifest service so we don't use a stale
+	// lastKnownTgtManifest. If the manifest-vs-KV race has resolved, the fresh manifest will
+	// still contain the collection and we will raise the backfill. Fall back to lastKnownTgtManifest
+	// on error.
+	var latestManifestClone metadata.CollectionsManifest
+	freshManifest, fetchErr := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
+	if fetchErr == nil && freshManifest != nil {
+		latestManifestClone = freshManifest.Clone()
+		c.logger.Infof("%v brokenMapIdleDoubleCheck: fetched fresh target manifest uid=%v", c.parentRouterId, latestManifestClone.Uid())
+	} else {
+		c.logger.Warnf("%v brokenMapIdleDoubleCheck: failed to fetch fresh target manifest (err=%v), falling back to cached", c.parentRouterId, fetchErr)
+		c.brokenDenyMtx.RLock()
+		latestManifestClone = c.lastKnownTgtManifest.Clone()
+		c.brokenDenyMtx.RUnlock()
+	}
 
 	added := make(metadata.ScopesMap)
 	err := c.doubleCheckBrokenMapAndClearDblChkTicker(&latestManifestClone, added)
@@ -1421,9 +1443,24 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 		// or
 		// 2. The target manifest actually gets updated
 		// Then we'll revisit the brokenmap and see if every entry in it are actually still valid
+		//
+		// Use a short recheck interval (CollectionKVRecheckInterval) because the manifest-vs-KV race
+		// typically resolves within seconds. The standard 5*targetManifestRefresh (300s) is far too slow.
+		// Use the minimum of CollectionKVRecheckInterval and 5*targetManifestRefresh so that unit tests
+		// using a short targetManifestRefresh still fire the kicker quickly.
+		// If a ticker/kicker already exists with a longer interval, replace it with the shorter one so that
+		// the faster recovery takes precedence.
+		recheckInterval := min(
+			time.Duration(base.CollectionKVRecheckInterval)*time.Second,
+			5*c.targetManifestRefresh,
+		)
 		if c.brokenMapDblChkTicker == nil {
 			c.brokenMapDblChkTicker = time.NewTicker(c.targetManifestRefresh)
-			c.brokenMapDblChkKicker = time.AfterFunc(5*c.targetManifestRefresh, c.brokenMapIdleDoubleCheck)
+			c.brokenMapDblChkKicker = time.AfterFunc(recheckInterval, c.brokenMapIdleDoubleCheck)
+		} else {
+			// A ticker/kicker already exists (possibly with the slow 5*targetManifestRefresh interval).
+			// Reset the kicker to the shorter interval so the faster recheck takes precedence.
+			c.brokenMapDblChkKicker.Reset(recheckInterval)
 		}
 	}
 

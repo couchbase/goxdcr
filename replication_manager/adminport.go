@@ -514,7 +514,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), remoteClusterName)
 		go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
 		return NewCreateRemoteClusterResponse(remoteClusterRef)
-	case metadata_svc.RemoteClusterRefNotFoundErr(setErr):
+	case service_def.RemoteClusterRefNotFoundErr(setErr):
 		// Return 404 Not Found if the remote cluster doesn't exist
 		return EncodeErrorMessageIntoResponse(setErr, http.StatusNotFound)
 	default:
@@ -545,7 +545,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	ref, err := remoteClusterService.RemoteClusterByRefName(remoteClusterName, false)
 	switch {
 	case err == nil:
-	case metadata_svc.RemoteClusterRefNotFoundErr(err):
+	case service_def.RemoteClusterRefNotFoundErr(err):
 		logger_ap.Errorf("Error deleting remote cluster. err=%v\n", err)
 		// Return 404 Not Found if the remote cluster doesn't exist
 		return EncodeErrorMessageIntoResponse(err, http.StatusNotFound)
