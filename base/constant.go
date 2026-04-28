@@ -1166,6 +1166,12 @@ var RemoteClusterAlternateAddrChangeCnt = 5
 var ManifestRefreshSrcInterval = 2
 var ManifestRefreshTgtInterval = 60
 
+// CollectionKVRecheckInterval is the short recheck interval used when XMEM reports
+// UNKNOWN_COLLECTION for a collection that exists in the target manifest, indicating a
+// transient manifest-vs-KV race. The kicker fires after this interval to trigger recovery
+// via brokenMapIdleDoubleCheck.
+var CollectionKVRecheckInterval = 10
+
 // Amount of time between each backfill metakv persist operation
 // Be careful when changing the unit - need corresponding base.InitConstants to change
 var BackfillPersistInterval = 1000 * time.Millisecond

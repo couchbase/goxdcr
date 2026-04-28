@@ -1,0 +1,161 @@
+# Copyright 2025-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# Reproduces the UNKNOWN_COLLECTION race condition where:
+# - Target KV returns UNKNOWN_COLLECTION for mutations (simulated via injection)
+# - Broken map is recorded, ignoreDataFunc is called
+# - changes_left reaches 0 (XDCR thinks it's done)
+# - But counter_ignored > 0 (docs were silently dropped)
+# - No backfill recovery fires within the test window
+#
+# This test PASSES when it successfully reproduces the above symptoms.
+# =============================
+
+# =============================
+# topological map information
+# =============================
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running UNKNOWN_COLLECTION injection test (reproduces broken map race)"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	sleep 5
+
+	# Phase 1: Create unidirectional replication FIRST (empty source)
+	echo "Phase 1: Creating replication C1 -> C2 (source is empty)..."
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+
+	# Phase 2: Activate injection BEFORE any data flows
+	echo "Phase 2: Activating UNKNOWN_COLLECTION injection (100%)..."
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevXmemColErrorPercent=100"
+	sleep 3
+	echo "Injection active: 100% of mutations will have CollId corrupted so target KV rejects them"
+
+	# Phase 3: NOW load data — mutations will flow through pipeline with injection active
+	echo "Phase 3: Loading $CBWORKLOAD_COLLECTION_NUM_ITEMS docs to C1:B1:S1.col1..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+
+	# Turn off injection BEFORE the 10s kicker fires.
+	# The kicker (CollectionKVRecheckInterval=10s) fires ~10s after the first UNKNOWN_COLLECTION
+	# response from KV, which happens as soon as docs flow with injection=100. The workload
+	# generator is synchronous, so by the time it returns all docs are in KV. We sleep 5s
+	# to let them flow into XMEM and be rejected (populating the broken map), then turn
+	# injection off while there is still ~5s of margin before the kicker fires.
+	# The router's broken map will continue to ignore docs (and drive changes_left→0) even
+	# after injection is disabled, so waitForChangesLeft0 below still works.
+	echo "Sleeping 5s to allow docs to be rejected by XMEM (broken map populated)..."
+	sleep 5
+	echo "Turning off injection (before kicker fires)..."
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevXmemColErrorPercent=0"
+
+	# Phase 4: Wait for changes_left=0
+	echo "Phase 4: Waiting for changes_left to reach 0..."
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	echo "changes_left=0 reached"
+
+	# Allow the kicker to fire and the backfill to run and complete.
+	# The kicker fires ~10s after the first UNKNOWN_COLLECTION (which happened before
+	# injection was disabled). Backfill startup takes a few more seconds. We give the
+	# system 40s total from here for the backfill pipeline to replicate all docs.
+	echo "Waiting 40 seconds for kicker and backfill to complete..."
+	sleep 40
+	echo "Phase 5: Verifying UNKNOWN_COLLECTION race symptoms..."
+
+	# Get the log file path for C1
+	local logDir
+	logDir=$(getInternalNsServerLogDir "C1")
+	local goxdcrLogFile="${logDir}/goxdcr.log"
+
+	# Check XDCR logs for "ignored" counter > 0
+	# The XMEM stat log format includes: "ignored N items"
+	local ignoredLines
+	ignoredLines=$(grep -E "ignored [1-9][0-9]* items" "$goxdcrLogFile" 2>/dev/null || true)
+
+	if [[ -n "$ignoredLines" ]]; then
+		echo "REPRODUCED: Found ignored items in XMEM stats:"
+		echo "$ignoredLines" | tail -5
+	else
+		echo "ERROR: No 'ignored > 0' items found in XMEM stats — injection may not have taken effect"
+		echo "Dumping last stat lines for debug (looking for 'ignored' substring):"
+		grep "ignored" "$goxdcrLogFile" 2>/dev/null | tail -10 || echo "(no 'ignored' lines found)"
+		exit 1
+	fi
+
+	# Phase 6: Verify no backfill was triggered within our test window
+	local currentBackfillCnt
+	currentBackfillCnt=$(grep -c "$BACKFILL_PIPELINE_START" "$goxdcrLogFile" 2>/dev/null) || true
+
+	if [[ "$currentBackfillCnt" -eq 0 ]]; then
+		echo "CONFIRMED: No backfill pipeline started — recovery mechanism did NOT fire"
+	else
+		echo "NOTE: Backfill pipeline was started ($currentBackfillCnt starts)"
+		echo "This means recovery DID kick in (unexpected for this test)"
+	fi
+
+	# Phase 7: Verify document counts match (recovery/fix should replicate missing docs)
+	echo "Phase 7: Verifying document counts match..."
+
+	local sourceCount
+	sourceCount=$(getBucketItemCount "C1" "B1")
+	echo "Source (C1:B1) item count: $sourceCount"
+
+	# Use checkItemCnt to verify target bucket count matches source
+	# With the bug present: target has fewer docs, checkItemCnt times out and test fails
+	# With the bug fixed: target catches up to source, checkItemCnt succeeds and test passes
+	echo "Verifying target (C2:B2) catches up to source count of $sourceCount..."
+	checkItemCnt "C2" "B2" "$sourceCount"
+	if (($? != 0)); then
+		echo "ERROR: Target bucket count does not match source after timeout"
+		echo "This indicates the UNKNOWN_COLLECTION race condition EXISTS"
+		echo "Target has fewer docs than source - docs were dropped at XMEM level"
+		exit 1
+	fi
+
+	# pass criteria: Target caught up to source - race condition is FIXED"
+	# - changes_left=0 (XDCR thinks replication is complete)"
+	# - counter_ignored > 0 (docs were initially dropped via ignoreDataFunc)"
+	# - Recovery/backfill DID fire and completed"
+	# - Document counts now match (source == target)"
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

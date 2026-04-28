@@ -37,7 +37,9 @@ const (
 
 var InvalidRemoteClusterOperationErrorMessage = "Invalid remote cluster operation. "
 var InvalidRemoteClusterErrorMessage = "Invalid remote cluster. "
-var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
+
+// UnknownRemoteClusterErrorMessage is kept here as an alias for backward compatibility; the canonical value lives in service_def.
+var UnknownRemoteClusterErrorMessage = service_def.UnknownRemoteClusterErrorMessage
 var BootStrapNodeHasMovedError = errors.New("Bootstrap node in reference has been moved")
 var UUIDMismatchError = errors.New("UUID does not match")
 var RemoteSyncInProgress = errors.New("A RPC request is currently underway")
@@ -2665,15 +2667,6 @@ func getUnknownCluster(customType string, customStr string) error {
 	return fmt.Errorf("%v : %v - %v", UnknownRemoteClusterErrorMessage, customType, customStr)
 }
 
-// RemoteClusterRefNotFoundErr returns whether err represents an remote cluster resource doesn't exist.
-func RemoteClusterRefNotFoundErr(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	return strings.HasPrefix(err.Error(), UnknownRemoteClusterErrorMessage)
-}
-
 func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	service.agentMutex.RLock()
 	agent := service.agentMap[refId]
@@ -3827,7 +3820,7 @@ func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error)
 			return true, errors.New(errMsg[len(InvalidRemoteClusterErrorMessage):])
 		} else if strings.HasPrefix(errMsg, InvalidRemoteClusterOperationErrorMessage) {
 			return true, errors.New(errMsg[len(InvalidRemoteClusterOperationErrorMessage):])
-		} else if RemoteClusterRefNotFoundErr(err) {
+		} else if service_def.RemoteClusterRefNotFoundErr(err) {
 			return true, err
 		} else if strings.HasSuffix(err.Error(), utilities.NonExistentBucketError.Error()) {
 			return true, utilities.NonExistentBucketError
