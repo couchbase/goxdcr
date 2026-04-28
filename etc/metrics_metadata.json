@@ -1273,7 +1273,7 @@
     "xdcr_non_local_mutations_skipped_total": {
         "type": "counter",
         "help": "Number of document mutations that were not batched for replication to Target because they did not qualify as 'local' for the 'forwardLocalOnly' replication",
-        "added": "8.1.0",
+        "added": "8.0.2",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",

@@ -677,7 +677,7 @@ var VersionForCngSupportPhase1 = ServerVersion{8, 1, 0}
 var VersionForMetadataStatsSupport = ServerVersion{8, 1, 0}
 var VersionForKeyOnlyDeletionFilterExpr = ServerVersion{8, 1, 0}
 var VersionForConflictRateBasedAutopause = ServerVersion{8, 1, 0}
-var VersionForForwardLocalOnly = ServerVersion{8, 1, 0}
+var VersionForForwardLocalOnly = ServerVersion{8, 0, 2}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
