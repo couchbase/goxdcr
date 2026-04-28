@@ -9,10 +9,23 @@
 package service_def
 
 import (
+	"strings"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 )
+
+// UnknownRemoteClusterErrorMessage is the prefix used in errors produced when a remote cluster reference is not found.
+var UnknownRemoteClusterErrorMessage = "unknown remote cluster"
+
+// RemoteClusterRefNotFoundErr returns true if err represents a "remote cluster not found" error.
+func RemoteClusterRefNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.HasPrefix(err.Error(), UnknownRemoteClusterErrorMessage)
+}
 
 // Returns:
 // 1. bucketInfo
