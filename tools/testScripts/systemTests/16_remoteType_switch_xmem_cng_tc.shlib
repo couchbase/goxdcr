@@ -1,0 +1,324 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# MB-71594: Exercise the remote-type switch (XMEM <-> CNG) code path.
+# This test repeatedly toggles the remote cluster reference between
+# couchbase:// (XMEM) and couchbase2:// (CNG) while a replication is
+# actively running, and asserts that each switch completes within a
+# bounded time.
+
+# This test requires CNG mode (-g <cngPath>) so that a stellar-gateway
+# instance is started for C2.
+
+# =============================
+# topological map information
+# =============================
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+
+declare -A BucketProperty=(["ramQuotaMB"]=512)
+declare -A Bucket1Properties=(["ramQuotaMB"]=512 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes / Collections
+declare -a scope1Arr=("S1")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]=${scope1Arr[@]})
+declare -a collection1Arr=("col1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+# Per-switch timeout budget. The legitimate happy path is fast: known
+# self-resolving errors (RefreshNotEnabledYet, IP-family mismatch) are
+# short-circuited inside SwitchRemoteType with no retries, so the only
+# retry-budget consumers are unexpected transient errors (up to ~6.2s
+# of exponential backoff via MaxRemoteMcRetry=5 / base 200ms / factor 2).
+# A timeout here catches the MB-71594 deadlock regression — goroutine
+# parked in watcher.Reconfigure() forever — while still tolerating
+# Reconfigure's own watcher Stop/Start latency on a slow host.
+SWITCH_TIMEOUT_SECS=60
+
+# Minimum number of toggle iterations to perform. Each iteration switches
+# in one direction (XMEM -> CNG or CNG -> XMEM); 4 iterations means we
+# end up where we started after exercising both directions twice.
+NUM_SWITCH_ITERATIONS=4
+
+# Log strings emitted by replication_manager.metakv_change_listener
+# from the async switch goroutine. The goroutine always emits INIT, then
+# exactly one of DONE (success) or FAIL (error). With the agent-init
+# race tolerated by SwitchRemoteType (Provider.Init failures get logged
+# and left for lazy init on first use), every switch should reach DONE.
+# If the deadlock fix regresses, INIT is emitted but neither DONE nor
+# FAIL ever appears because Reconfigure() blocks on tgtBucketWatchersMtx
+# forever. If FAIL appears, it indicates a real problem on the switch
+# path that's not the deadlock — the test reports it but does not
+# silently conflate it with success.
+SWITCH_INIT_MSG="Initiating remote type switch for remote cluster"
+SWITCH_DONE_MSG="Remote type switch completed for remote cluster"
+SWITCH_FAIL_MSG="Failed to switch remote type for remote cluster"
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1"
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+# Issue a POST that creates the remote cluster reference using the
+# couchbase:// (XMEM) hostname form. Mirrors the non-CNG branch of
+# createRemoteClusterReference but is independent of the cngMode flag
+# so we can drive XMEM specifically even when CNG instances are also
+# running on the same target cluster.
+function createXmemRemoteClusterRef {
+	local source=$1
+	local target=$2
+
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	local targetHost=${CLUSTER_NAME_HOST_MAP[$target]:-"127.0.0.1"}
+	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+
+	echo "Creating XMEM remote cluster reference $target on $source ($targetHost:$targetPort)"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW \
+		http://$sourceHost:$sourcePort/pools/default/remoteClusters \
+		-d name=$target \
+		-d hostname=$targetHost:$targetPort \
+		-d username=$DEFAULT_ADMIN \
+		-d password=$DEFAULT_PW
+	echo ""
+}
+
+# Issue a POST to /pools/default/remoteClusters/<name> that rewrites the
+# existing reference to use couchbase2://<host>:<cngPort>. This is the
+# REST-level trigger for SwitchRemoteType in the daemon.
+function switchRemoteClusterRefToCng {
+	local source=$1
+	local target=$2
+
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	local targetHost=${CLUSTER_NAME_HOST_MAP[$target]:-"127.0.0.1"}
+
+	local targetCNGPort
+	targetCNGPort=$(cat $CNG_TMP_PATH/$target/cng.port)
+	local caCert
+	caCert=$(cat $CNG_TMP_PATH/$target/ca.pem)
+
+	local hostName="couchbase2://$targetHost:$targetCNGPort"
+
+	echo "Switching $target on $source -> CNG ($hostName)"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW \
+		http://$sourceHost:$sourcePort/pools/default/remoteClusters/$target \
+		-d name=$target \
+		-d hostname=$hostName \
+		-d username=$DEFAULT_ADMIN \
+		-d password=$DEFAULT_PW \
+		-d encryptionType=full \
+		-d demandEncryption=1 \
+		--data-urlencode "certificate=${caCert}"
+	echo ""
+}
+
+# Issue a POST to /pools/default/remoteClusters/<name> that rewrites the
+# existing reference back to a plain host:port (XMEM). This drives the
+# CNG -> XMEM direction of SwitchRemoteType.
+function switchRemoteClusterRefToXmem {
+	local source=$1
+	local target=$2
+
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+	local targetHost=${CLUSTER_NAME_HOST_MAP[$target]:-"127.0.0.1"}
+	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+
+	echo "Switching $target on $source -> XMEM ($targetHost:$targetPort)"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW \
+		http://$sourceHost:$sourcePort/pools/default/remoteClusters/$target \
+		-d name=$target \
+		-d hostname=$targetHost:$targetPort \
+		-d username=$DEFAULT_ADMIN \
+		-d password=$DEFAULT_PW \
+		-d demandEncryption=0
+	echo ""
+}
+
+# Count of "switch goroutine has reached a terminal state" log entries
+# in C1's goxdcr.log — i.e., DONE + FAIL. A non-deadlocked switch always
+# logs exactly one of these per INIT; a deadlocked switch logs neither
+# because Reconfigure() never returns.
+function getSwitchTerminalCount {
+	local sourceCluster=$1
+	local logs
+	logs=$(getInternalNodeXdcrLog "$sourceCluster")
+	local doneCnt failCnt
+	doneCnt=$(echo "$logs" | grep -c "$SWITCH_DONE_MSG")
+	failCnt=$(echo "$logs" | grep -c "$SWITCH_FAIL_MSG")
+	echo $((doneCnt + failCnt))
+}
+
+# Wait for the async switch goroutine on $source to log a terminal
+# message (DONE or FAIL), proving the goroutine returned. Takes a
+# baseline terminal count captured before the switch was issued. A
+# timeout here is the canonical regression signal for MB-71594: the
+# goroutine is parked in watcher.Reconfigure() under the watchers lock.
+function waitForSwitchToTerminate {
+	local sourceCluster=$1
+	local baseline=$2
+	local waited=0
+
+	while ((waited < SWITCH_TIMEOUT_SECS)); do
+		local cur
+		cur=$(getSwitchTerminalCount "$sourceCluster")
+		if ((cur > baseline)); then
+			# Confirm it was a clean completion, not an error path. An
+			# error path is unexpected here (we're flipping between two
+			# valid endpoints on the same loopback) and would mask the
+			# deadlock signal we care about.
+			local doneCnt
+			doneCnt=$(getInternalNodeXdcrLog "$sourceCluster" | grep -c "$SWITCH_DONE_MSG")
+			local failCnt
+			failCnt=$(getInternalNodeXdcrLog "$sourceCluster" | grep -c "$SWITCH_FAIL_MSG")
+			echo "switch goroutine on $sourceCluster terminated (waited ${waited}s; cumulative done=$doneCnt fail=$failCnt)"
+			if ((cur - baseline > 1)); then
+				echo "WARN: terminal count jumped by $((cur - baseline)) — possible coalesced metakv callbacks"
+			fi
+			if ((failCnt > 0)); then
+				echo "ERRO: switch goroutine on $sourceCluster went down the FAIL path."
+				echo "Inspect goxdcr.log around 'Failed to switch remote type' for the underlying error."
+				dumpDebugInfoBeforeExit
+				exit 1
+			fi
+			return 0
+		fi
+		sleep 2
+		waited=$((waited + 2))
+	done
+
+	echo "TIMEOUT: switch goroutine on $sourceCluster did not reach terminal state within ${SWITCH_TIMEOUT_SECS}s (baseline=$baseline, current=$(getSwitchTerminalCount "$sourceCluster"))"
+	echo "This is the canonical regression signature of MB-71594 (deadlock in SwitchRemoteType): INIT was logged but neither DONE nor FAIL was — Reconfigure() is probably parked under tgtBucketWatchersMtx."
+	dumpDebugInfoBeforeExit
+	exit 1
+}
+
+# After a remote-type switch, pipelines are restarted and stats counters
+# may dip transiently. Push another batch of mutations and verify both
+# clusters' item counts converge so we know the new wiring is live.
+function loadAndVerify {
+	local label=$1
+
+	echo "[$label] running data load and verifying replication"
+	runDataLoad
+	sleep 10
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	if (($? != 0)); then
+		echo "[$label] changesLeft never drained to zero"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Exercise XMEM <-> CNG remote-type switch"
+	echo "============================================================================"
+
+	if ((cngMode != 1)); then
+		echo "ERRO: this test must be run with -g <cngPath> (cngMode is required so a stellar-gateway is available for the CNG side of the switch)"
+		exit 1
+	fi
+
+	trap killAllBgJobs EXIT
+
+	# setupTopologies runs setupCluster + setupBuckets, and because
+	# cngMode==1, it also starts a stellar-gateway in front of C2 (and
+	# C1, but only the C2 one matters here).
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Settle ns_server before XDCR provisioning.
+	sleep 5
+
+	# Start in the XMEM direction so the very first switch we drive is
+	# XMEM -> CNG. We deliberately bypass createRemoteClusterReference's
+	# cngMode auto-routing because we need the XMEM scheme even though
+	# cngMode==1.
+	createXmemRemoteClusterRef "C1" "C2"
+	sleep 1
+
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	loadAndVerify "initial XMEM"
+
+	local initialInitCnt
+	initialInitCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$SWITCH_INIT_MSG")
+
+	local i
+	local currentType="cbcluster"
+	for ((i = 1; i <= NUM_SWITCH_ITERATIONS; i++)); do
+		echo "----------------------------------------------------------------------------"
+		echo "Switch iteration $i / $NUM_SWITCH_ITERATIONS (current=$currentType)"
+		echo "----------------------------------------------------------------------------"
+
+		# Snapshot the terminal-state log count BEFORE issuing the
+		# switch, so we can wait for the matching goroutine on this
+		# specific iteration to terminate.
+		local termBaseline
+		termBaseline=$(getSwitchTerminalCount "C1")
+
+		if [[ "$currentType" == "cbcluster" ]]; then
+			switchRemoteClusterRefToCng "C1" "C2"
+			currentType="cng"
+		else
+			switchRemoteClusterRefToXmem "C1" "C2"
+			currentType="cbcluster"
+		fi
+
+		# THE regression assertion: the async goroutine must reach a
+		# terminal state. A timeout here is the deadlock signature.
+		waitForSwitchToTerminate "C1" "$termBaseline"
+
+		# Give pipelines time to restart under the new provider AND
+		# allow the lazy-init path (canStartOp) to kick in if Provider.Init
+		# was deferred during the switch — first stats fetch on the new
+		# provider triggers the init synchronously, which can take a few
+		# seconds the first time.
+		sleep 20
+
+		loadAndVerify "after switch #$i ($currentType)"
+	done
+
+	# Cheap final sanity check: confirm INIT was actually logged the
+	# expected number of times. If it wasn't, the metakv listener never
+	# saw the change — which would indicate the switch path was bypassed
+	# entirely (different bug, but still worth flagging).
+	local finalInitCnt
+	finalInitCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$SWITCH_INIT_MSG")
+	local observedNewInits=$((finalInitCnt - initialInitCnt))
+	if ((observedNewInits < NUM_SWITCH_ITERATIONS)); then
+		echo "Expected at least $NUM_SWITCH_ITERATIONS new '$SWITCH_INIT_MSG' entries on C1, observed $observedNewInits — switch path may not have been exercised"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+	grepForPanics
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	cleanupBucketNamePropertyMap
+}

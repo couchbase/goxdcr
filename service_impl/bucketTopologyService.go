@@ -1566,23 +1566,55 @@ func (b *BucketTopologyService) SwitchRemoteType(spec *metadata.ReplicationSpeci
 	//    based on the changes made to intervalFuncMap.
 	// 2. Metadata is re-fetched and re-cached in the appropriate format for the new remote type.
 
-	// Hold the lock during the restart to prevent consumers from accessing the watcher
-	// until the restart completes.
-	b.tgtBucketWatchersMtx.Lock()
 	opts := RemoteTypeUpdate{
 		NewRemoteType:      newRemoteType,
 		NewStatsProvider:   newProvider,
 		UpdateIntervalFunc: func() { b.updateIntervalFuncMap(spec, watcher, newRemoteType) },
 	}
 	if err := watcher.Reconfigure(opts); err != nil {
-		b.tgtBucketWatchersMtx.Unlock()
 		return fmt.Errorf("SwitchRemoteType: error restarting watcher for spec %v: %w", spec.Id, err)
 	}
-	b.tgtBucketWatchersMtx.Unlock()
 
-	// Initialize the new stats provider
-	if err := b.utils.ExponentialBackoffExecutor("SwitchRemoteType:Provider.Init()", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry, base.RemoteMcRetryFactor, newProvider.Init); err != nil {
+	// Initialize the new stats provider. Two classes of error are known
+	// to be unhelpful to retry inside this short backoff window, but
+	// neither should fail the switch — the provider can be lazily
+	// initialized on first use via canStartOp() (matches the bootstrap
+	// path in ReplicationSpecChangeCallback):
+	//
+	//   1. RefreshNotEnabledYet: race between SwitchAgents (which swaps
+	//      in the new RemoteClusterAgent) and the agent finishing its
+	//      initialization. Retrying inside the 6.2s backoff window
+	//      typically isn't enough to ride out the agent's refresh
+	//      cadence. Short-circuit so we don't burn the whole budget
+	//      waiting for something a later op will trigger anyway.
+	//
+	//   2. IP-family mismatch: a configuration error that won't resolve
+	//      with retries; the remote cluster service will mark the ref
+	//      as RC_ERROR. Mirrors the same handling in
+	//      ReplicationSpecChangeCallback.
+	//
+	// Anything else still gets the normal exponential-backoff retry.
+	retryStatsOp := func() error {
+		err := newProvider.Init()
+		if err == nil {
+			return nil
+		}
+		if strings.Contains(err.Error(), errors.New("The initial reference update hasn't finished yet, refresh is not enabled and pipelines cannot be started yet").Error()) {
+			b.logger.Warnf("SwitchRemoteType:Provider.Init for spec %v: agent ref not ready yet — skipping retries, provider will lazy-init on first use: %v", spec.Id, err)
+			return nil
+		}
+		if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) || errors.Is(err, base.ErrorIpFamilyMismatch) {
+			b.logger.Warnf("SwitchRemoteType:Provider.Init for spec %v: non-retryable IP family error: %v", spec.Id, err)
+			return nil
+		}
 		return err
+	}
+	if err := b.utils.ExponentialBackoffExecutor("SwitchRemoteType:Provider.Init()", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry, base.RemoteMcRetryFactor, retryStatsOp); err != nil {
+		// Other errors exhausted retries: still don't fail the switch,
+		// since asyncSwitchRemoteType has already swapped agents and
+		// reconfigured the watcher. Log so the failure is visible; lazy
+		// init will retry on the next op.
+		b.logger.Errorf("SwitchRemoteType for spec %v failed to init new stats provider after retries; will be lazily initialized on first use: %v", spec.Id, err)
 	}
 	return nil
 }
