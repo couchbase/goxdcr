@@ -386,6 +386,32 @@ function checkCasPoisonStatsAreEqual {
 	done
 }
 
+function waitForAllPipelinesInitialized {
+	local maxRetries=30
+	local sleepBetweenRetries=10
+	local prevTotal=-1
+
+	for ((attempt = 1; attempt <= maxRetries; attempt++)); do
+		local total=0
+		for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
+			local val
+			val=$(getSpecificStatFromPrometheus "$clusterName" "B1" "xdcr_docs_cas_poisoned_total")
+			if [[ -z "$val" ]]; then
+				val=0
+			fi
+			total=$((total + val))
+		done
+		echo "Attempt $attempt/$maxRetries: cas_poisoned total across all nodes = $total (previous = $prevTotal)"
+		if ((total > 0 && total == prevTotal)); then
+			echo "Stats stabilized at $total after $attempt attempts"
+			return 0
+		fi
+		prevTotal=$total
+		sleep $sleepBetweenRetries
+	done
+	echo "WARNING: Stats did not stabilize after $maxRetries attempts (last total=$prevTotal)"
+}
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Verifying vb specific stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
@@ -423,6 +449,9 @@ function runTestCase {
 	sleep $sleepSecs
 
 	resumeReplications
+
+	echo "Waiting for all pipelines to fully initialize on all nodes after resume..."
+	waitForAllPipelinesInitialized
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
 		getFilteringStatsAfter $clusterName "B0"
