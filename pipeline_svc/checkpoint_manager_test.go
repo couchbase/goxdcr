@@ -3826,3 +3826,169 @@ func TestRestoreBrokenMappingManifests_ManifestIdHistories(t *testing.T) {
 	_, historyExists := ckmgr.cachedBrokenMap.brokenMapHistories[50]
 	assert.True(historyExists)
 }
+
+// TestFilterCkptsWithoutValidBrokenmaps_TwoPeerSHAsKeepsTraditionalRecord tests that traditional
+// main-pipeline checkpoint records survive the merge filter when the peer ships two broken-mapping SHAs.
+// This is a regression test for the bug where combinedShaMap with len > 1 would cause all traditional
+// records to be silently dropped by LoadBrokenMapping's strict check.
+func TestFilterCkptsWithoutValidBrokenmaps_TwoPeerSHAsKeepsTraditionalRecord(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterCkptsWithoutValidBrokenmaps_TwoPeerSHAsKeepsTraditionalRecord =================")
+	defer fmt.Println("============== Test case end: TestFilterCkptsWithoutValidBrokenmaps_TwoPeerSHAsKeepsTraditionalRecord =================")
+	assert := assert.New(t)
+
+	// Step 1: Create two distinct broken mappings with different content
+	// Mapping A: S1.col1 -> S1.tgt_col1
+	mapA := make(metadata.CollectionNamespaceMapping)
+	srcNsA1, err := base.NewCollectionNamespaceFromString("S1.col1")
+	assert.Nil(err)
+	tgtNsA1, err := base.NewCollectionNamespaceFromString("S1.tgt_col1")
+	assert.Nil(err)
+	mapA.AddSingleMapping(&srcNsA1, &tgtNsA1)
+
+	// Mapping B: S1.col2 -> S1.tgt_col2
+	mapB := make(metadata.CollectionNamespaceMapping)
+	srcNsB1, err := base.NewCollectionNamespaceFromString("S1.col2")
+	assert.Nil(err)
+	tgtNsB1, err := base.NewCollectionNamespaceFromString("S1.tgt_col2")
+	assert.Nil(err)
+	mapB.AddSingleMapping(&srcNsB1, &tgtNsB1)
+
+	// Step 2: Compute SHAs for both mappings
+	shaABytes, err := mapA.Sha256()
+	assert.Nil(err)
+	shaA := fmt.Sprintf("%x", shaABytes[:])
+
+	shaBBytes, err := mapB.Sha256()
+	assert.Nil(err)
+	shaB := fmt.Sprintf("%x", shaBBytes[:])
+
+	// Ensure SHAs are different
+	assert.NotEqual(shaA, shaB)
+
+	// Step 3: Create a combined SHA map (as would come from the peer shipping multiple SHAs)
+	combinedShaMap := make(metadata.ShaToCollectionNamespaceMap)
+	combinedShaMap[shaA] = &mapA
+	combinedShaMap[shaB] = &mapB
+
+	// Step 4: Create a CollectionNsMappingsDoc containing both mappings (as would be received from peer)
+	peerDoc := &metadata.CollectionNsMappingsDoc{}
+	err = peerDoc.LoadShaMap(combinedShaMap)
+	assert.Nil(err)
+
+
+	// Step 5: Create checkpoint records (traditional format with all required fields)
+	// Record 1: traditional, references shaA
+	record1 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid:                12345,
+			Seqno:                        1000,
+			Dcp_snapshot_seqno:           1000,
+			Dcp_snapshot_end_seqno:       1000,
+			SourceManifestForDCP:         0,
+			SourceManifestForBackfillMgr: 0,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:        1000,
+			TargetManifest:      1,
+			Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_001",
+				Startup_time:   "2026-04-29",
+			},
+			BrokenMappingSha256: shaA,
+		},
+		PipelineReinitHash: "hash_a",
+	}
+
+	// Record 2: traditional, references shaB
+	record2 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid:                12346,
+			Seqno:                        2000,
+			Dcp_snapshot_seqno:           2000,
+			Dcp_snapshot_end_seqno:       2000,
+			SourceManifestForDCP:         0,
+			SourceManifestForBackfillMgr: 0,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:        2000,
+			TargetManifest:      1,
+			Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_002",
+				Startup_time:   "2026-04-29",
+			},
+			BrokenMappingSha256: shaB,
+		},
+		PipelineReinitHash: "hash_b",
+	}
+
+	// Record 3: traditional, no brokenmap reference (empty SHA)
+	record3 := &metadata.CheckpointRecord{
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid:                12347,
+			Seqno:                        3000,
+			Dcp_snapshot_seqno:           3000,
+			Dcp_snapshot_end_seqno:       3000,
+			SourceManifestForDCP:         0,
+			SourceManifestForBackfillMgr: 0,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno:        3000,
+			TargetManifest:      1,
+			Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{
+				Target_vb_uuid: "uuid_003",
+				Startup_time:   "2026-04-29",
+			},
+			BrokenMappingSha256: "",
+		},
+		PipelineReinitHash: "hash_c",
+	}
+
+	var recordList metadata.CheckpointRecordsList
+	recordList = append(recordList, record1)
+	recordList = append(recordList, record2)
+	recordList = append(recordList, record3)
+
+	ckptDoc := &metadata.CheckpointsDoc{
+		Checkpoint_records: recordList,
+		SpecInternalId:     "test_spec",
+		Revision:           nil,
+	}
+
+	// Step 6: Build the input maps for filterCkptsWithoutValidBrokenmaps
+	// Main pipeline (index 0), backfill pipeline (index 1)
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	mainPipelineMap[0] = ckptDoc
+
+	filteredMaps := []metadata.VBsCkptsDocMap{
+		mainPipelineMap, // main pipeline
+		nil,             // backfill pipeline (not used in this test)
+	}
+
+	// Step 7: Call the function that has the bug
+	resultingMaps, returnedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, []*metadata.CollectionNsMappingsDoc{peerDoc})
+
+
+	// Step 8: Verify the bug exists (this is what we expect to fail on master)
+	// BUG: On master, all records are dropped because LoadBrokenMapping rejects them when len(combinedShaMap) > 1
+	// This assertion will FAIL on master because resultingMaps[common.MainPipeline][0].Checkpoint_records will be empty
+
+	// The assertions below will fail on master before the fix is applied.
+	// On master, the filter drops all records, so the list will be empty.
+	recordCount := len(resultingMaps[common.MainPipeline][0].Checkpoint_records)
+	assert.Len(resultingMaps[common.MainPipeline][0].Checkpoint_records, 3,
+		"BUG: all 3 records should survive the filter, but they were dropped. Traditional records with BrokenMappingSha256 were rejected by LoadBrokenMapping when len(combinedShaMap) > 1")
+
+	// Verify each record
+	if recordCount >= 3 {
+		resultRecords := resultingMaps[common.MainPipeline][0].Checkpoint_records
+		assert.Equal(shaA, resultRecords[0].BrokenMappingSha256, "First record should reference shaA")
+		assert.Equal(shaB, resultRecords[1].BrokenMappingSha256, "Second record should reference shaB")
+		assert.Equal("", resultRecords[2].BrokenMappingSha256, "Third record should have empty SHA")
+	}
+
+	// Verify the returned SHA map contains both SHAs
+	assert.Len(returnedShaMap, 2, "Combined SHA map should contain both shaA and shaB")
+	assert.NotNil(returnedShaMap[shaA])
+	assert.NotNil(returnedShaMap[shaB])
+}
+
