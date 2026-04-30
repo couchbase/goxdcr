@@ -105,7 +105,14 @@ function runTestCase {
 	# Check XDCR logs for "ignored" counter > 0
 	# The XMEM stat log format includes: "ignored N items"
 	local ignoredLines
-	ignoredLines=$(grep -E "ignored [1-9][0-9]* items" "$goxdcrLogFile" 2>/dev/null || true)
+
+	# The pattern for CNG is different. All the 'CollectionNotFound' errors are classified
+	# as non-retryable error and its counter is incremented.
+	if [[ "$cngMode" = "1" ]]; then
+		ignoredLines=$(grep -E "NonRetryableErrorCount: [1-9][0-9]*" "$goxdcrLogFile" 2>/dev/null || true)
+	else
+		ignoredLines=$(grep -E "ignored [1-9][0-9]* items" "$goxdcrLogFile" 2>/dev/null || true)
+	fi
 
 	if [[ -n "$ignoredLines" ]]; then
 		echo "REPRODUCED: Found ignored items in XMEM stats:"

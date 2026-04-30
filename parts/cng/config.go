@@ -91,6 +91,9 @@ type Tunables struct {
 	// (dev-only) Per-mutation send delay injection, applied on the write path.
 	devMainSendDelayMs     atomic.Int64
 	devBackfillSendDelayMs atomic.Int64
+	// (dev-only) Inject gRPC "collection not found" errors on PushDocument.
+	// Percent value is between 0 and 100.
+	devColErrPercent atomic.Int64
 
 	// (live updatable) optimisticThresholdSize is the document size (in bytes) below which we can do optimistic replication.
 	optimisticThresholdSize atomic.Int64

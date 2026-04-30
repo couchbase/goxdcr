@@ -160,6 +160,10 @@ func (n *Nozzle) PushDocument(ctx context.Context, client base.CngClient, req *b
 		VbUuid:     &vbuuid,
 	}
 
+	if err = n.maybeInjectCollectionNotFound(req); err != nil {
+		return
+	}
+
 	var content content
 	if req.Req.Opcode == mc.UPR_MUTATION {
 		content, err = getContent(n.Logger(), n.dataPool, req)

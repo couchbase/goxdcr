@@ -315,8 +315,54 @@ func isSameGrpcStatus(err error, st *status.Status) bool {
 func newCollectionMissingGRPCError() error {
 	st := status.New(codes.NotFound, "Collection is missing")
 	st, _ = st.WithDetails(&errdetails.ResourceInfo{
-		ResourceType: "collection",
+		ResourceType: ResourceTypeCollection,
 		ResourceName: "Collection is missing",
 	})
 	return st.Err()
+}
+
+func TestCollectionNotFoundDevInjection(t *testing.T) {
+	logger := log.DefaultLoggerContext
+	vbUUIDMap := map[uint16]uint64{}
+	for i := range uint16(1024) {
+		vbUUIDMap[i] = uint64(i + 1000)
+	}
+
+	n, err := New("testNozzle", logger, &Config{
+		Replication: ReplicationConfig{
+			SourceClusterUUID: "source1",
+			SourceBucketName:  "B1",
+			SourceBucketUUID:  "sourceB1",
+			TargetBucketName:  "B1",
+			TargetBucketUUID:  "targetB1",
+			TargetClusterUUID: "target1",
+			vbUUIDMap:         vbUUIDMap,
+		},
+		Services: Services{
+			RemoteClusterSvc: service_mocks.NewRemoteClusterSvc(t),
+			Utils:            utilsMock.NewUtilsIface(t),
+		},
+	})
+	assert.NoError(t, err)
+
+	n.cfg.Tunables.SetOptimisticThresholdSize(256)
+	n.cfg.Tunables.Deadline = 5 * time.Second
+	n.cfg.Tunables.devColErrPercent.Store(100)
+
+	ctx := context.Background()
+	req := makeWrappedMCRequest(mc.UPR_MUTATION, []byte(`{"a": 1}`), 7, 0, 0, 0)
+	mockClient := &basecng.MockCngXdcrClient{
+		CheckDocRsp: basecng.CheckDocumentRsp{Rsp: internal_xdcr_v1.CheckDocumentResponse{}, Err: nil},
+		PushDocRsp:  basecng.PushDocumentRsp{Rsp: internal_xdcr_v1.PushDocumentResponse{Cas: 1, Seqno: 1}, Err: nil},
+	}
+
+	childCtx := startTrace(ctx, &Trace{})
+	err = n.transfer(childCtx, mockClient, req)
+	if devInjectionsEnabled {
+		assert.Error(t, err)
+		cngErr := mapToCNGError(err)
+		assert.Equal(t, ERR_COLLECTION_NOT_FOUND, cngErr.Code)
+		return
+	}
+	assert.NoError(t, err)
 }
