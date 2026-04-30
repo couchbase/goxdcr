@@ -78,6 +78,22 @@ func IsBucketInfoFromCng(bucketInfo map[string]interface{}) bool {
 	return remoteType == base.CNG
 }
 
+// GetCngNumVBuckets returns numVBuckets stored in a CNG bucket info. CNG sends
+// the value down as a uint32 in the GetBucketInfo response (see
+// GetBucketInfoFromCNG). A returned value of 0 with a nil error means CNG
+// reported zero vBuckets (e.g. during warmup) and the caller should retry.
+func GetCngNumVBuckets(bucketInfo map[string]interface{}) (uint32, error) {
+	val, ok := bucketInfo[base.NumVBucketsKey]
+	if !ok {
+		return 0, fmt.Errorf("%v key missing from CNG bucket info", base.NumVBucketsKey)
+	}
+	n, ok := val.(uint32)
+	if !ok {
+		return 0, fmt.Errorf("%v in CNG bucket info has unexpected type: %T", base.NumVBucketsKey, val)
+	}
+	return n, nil
+}
+
 // GetCngKVVBMap extracts the CNG kv vb map from the bucket info
 func GetCngKVVBMap(bucketInfo map[string]interface{}) (map[string][]uint16, error) {
 	tmp, ok := bucketInfo[BucketInfoCngKvVbMapKey]

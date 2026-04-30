@@ -255,6 +255,39 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 			return nil, nil, base.ErrorTargetBucketTopologyNotReady
 		}
 	}
+
+	// During CNG target warmup, bucketInfo can briefly report numVBuckets=0.
+	// Wait up to one topology refresh cycle for a refreshed notification with a
+	// non-zero value before giving up. Treat a numVBuckets read error the same
+	// as a zero value — both indicate the topology is not yet usable.
+	if utilities.IsBucketInfoFromCng(latestTargetBucketTopology.GetTargetBucketInfo()) {
+		numVBs, numVBsErr := utilities.GetCngNumVBuckets(latestTargetBucketTopology.GetTargetBucketInfo())
+		if numVBsErr != nil || numVBs == 0 {
+			xdcrf.logger.Warnf("%v target CNG bucket info numVBuckets not usable (value=%v, err=%v); waiting for a refreshed notification", spec.Id, numVBs, numVBsErr)
+			ctx, cancel := context.WithTimeout(context.Background(), base.TopologyChangeCheckInterval)
+			ready := false
+			for !ready {
+				select {
+				case <-ctx.Done():
+					cancel()
+					latestTargetBucketTopology.Recycle()
+					return nil, nil, base.ErrorTargetBucketTopologyNotReady
+				case nextNotif := <-targetBucketFeed:
+					latestTargetBucketTopology.Recycle()
+					latestTargetBucketTopology = nextNotif
+					if n, err := utilities.GetCngNumVBuckets(latestTargetBucketTopology.GetTargetBucketInfo()); err == nil && n > 0 {
+						ready = true
+					}
+				case err = <-errCh:
+					cancel()
+					latestTargetBucketTopology.Recycle()
+					return nil, nil, err
+				}
+			}
+			cancel()
+		}
+	}
+
 	targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
 	defer latestTargetBucketTopology.Recycle()
 
