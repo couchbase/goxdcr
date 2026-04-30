@@ -59,6 +59,9 @@ HLV_TESTS_INIT_RING_SLEEP_SECS=45
 HLV_TESTS_BACKFILL_SLEEP_SECS=45
 HLV_TESTS_RESUME_SLEEP_SECS=40
 
+# ECCV enablement waiter
+ECCV_ENABLED_WAIT_TIMEOUT_SECS=60
+
 # HLV test with conflict logger
 HLV_TESTS_CLOG_INIT_SLEEP_SECS=300
 HLV_TESTS_CLOG_RESUME_SLEEP_SECS=20
@@ -2947,6 +2950,43 @@ function runCbepctl {
 	return 0
 }
 
+function waitForECCVEnabled {
+	local cluster=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	local elapsed=0
+	local pollInterval=2
+	local bucketJson
+
+	echo "waitForECCVEnabled: waiting for ECCV and vbucketsMaxCas to be active on $cluster/$bucketName (timeout=${ECCV_ENABLED_WAIT_TIMEOUT_SECS}s)"
+
+	while [[ $elapsed -lt $ECCV_ENABLED_WAIT_TIMEOUT_SECS ]]; do
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$cluster]:-}" ]]; then
+			bucketJson=$($CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName)
+		else
+			local idx
+			idx="$(getClusterIdx "$cluster")"
+			bucketJson=$(eval "${VSSH[$idx]} \"curl -s -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/pools/default/buckets/$bucketName\"")
+		fi
+
+		local eccvEnabled vbMaxCasLen
+		eccvEnabled=$(echo "$bucketJson" | jq -r '.enableCrossClusterVersioning' 2>/dev/null)
+		vbMaxCasLen=$(echo "$bucketJson" | jq '.vbucketsMaxCas | length' 2>/dev/null)
+
+		if [[ "$eccvEnabled" == "true" ]] && [[ "${vbMaxCasLen:-0}" -gt 0 ]]; then
+			echo "waitForECCVEnabled: ECCV enabled and vbucketsMaxCas present on $cluster/$bucketName after ${elapsed}s"
+			return 0
+		fi
+
+		echo "waitForECCVEnabled: eccvEnabled=$eccvEnabled vbMaxCasLen=${vbMaxCasLen:-0}, elapsed=${elapsed}s, retrying in ${pollInterval}s..."
+		sleep $pollInterval
+		elapsed=$((elapsed + pollInterval))
+	done
+
+	echo "waitForECCVEnabled: TIMED OUT after ${ECCV_ENABLED_WAIT_TIMEOUT_SECS}s waiting for ECCV on $cluster/$bucketName" >&2
+	return 1
+}
+
 function setCrossClusterVersioningForBucket {
 	local cluster=$1
 	local bucketName=$2
@@ -2975,6 +3015,8 @@ function setCrossClusterVersioningForBucket {
 		fi
 		echo $output
 	done
+
+	waitForECCVEnabled "$cluster" "$bucketName"
 }
 
 function setBucket {
