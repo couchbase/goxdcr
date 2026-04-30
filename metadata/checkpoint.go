@@ -1630,17 +1630,16 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 	}
 
 	if ckptRecord.IsTraditional() {
-		for sha, mapping := range allShaToBrokenMaps {
-			if mapping == nil || len(allShaToBrokenMaps) > 1 {
-				return fmt.Errorf("LoadBrokenMapping should expect one non-nil mapping %v len: %v", allShaToBrokenMaps, len(allShaToBrokenMaps))
-			}
-			if ckptRecord.BrokenMappingSha256 != sha {
-				continue
-			}
-			err := ckptRecord.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(*mapping)
-			if err != nil {
-				return err
-			}
+		if ckptRecord.BrokenMappingSha256 == "" {
+			return ckptRecord.PopulateBrokenMappingSha()
+		}
+		mapping, exists := allShaToBrokenMaps[ckptRecord.BrokenMappingSha256]
+		if !exists || mapping == nil {
+			return fmt.Errorf("Brokenmapping sha %v is not properly populated",
+				ckptRecord.BrokenMappingSha256)
+		}
+		if err := ckptRecord.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(*mapping); err != nil {
+			return err
 		}
 		return ckptRecord.PopulateBrokenMappingSha()
 	} else {
