@@ -91,7 +91,7 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 				// Log errors only when:
 				// 1. Log level is Debug or lower (i.e. more verbose), or
 				// 2. We just hit the max wait time for retries (to log at least error once for long retry scenarios)
-				if n.Logger().GetLogLevel() >= log.LogLevelDebug || attemptNum-attemptNumAtMaxWait == 1 {
+				if n.Logger().GetLogLevel() >= log.LogLevelDebug || (attemptNumAtMaxWait > 0 && attemptNum-attemptNumAtMaxWait == 1) {
 					n.Logger().Errorf("error processing req, attempt=%[1]d, key=%[2]s%[3]s%[4]s, opcode=%[5]s, cas=%[6]d err=%[7]s",
 						attemptNum,
 						base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
@@ -120,7 +120,7 @@ func (n *Nozzle) processReqWithRetry(ctx context.Context, req *base.WrappedMCReq
 				// Log errors only when:
 				// 1. Log level is Debug or lower (i.e. more verbose), or
 				// 2. We just hit the max wait time for retries (to log at least error once for long retry scenarios)
-				if n.Logger().GetLogLevel() >= log.LogLevelDebug || attemptNum-attemptNumAtMaxWait == 1 {
+				if n.Logger().GetLogLevel() >= log.LogLevelDebug || (attemptNumAtMaxWait > 0 && attemptNum-attemptNumAtMaxWait == 1) {
 					n.Logger().Errorf("req failed due non-retryable error attemptNum=%[7]d, key=%[1]s%[2]s%[3]s, opcode=%[5]s, cas=%[6]d err=%[4]v",
 						base.UdTagBegin, req.OriginalKey, base.UdTagEnd,
 						err,
