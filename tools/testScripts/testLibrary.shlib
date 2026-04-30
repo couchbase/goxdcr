@@ -86,6 +86,10 @@ HLV_TESTS_CLOG_MOBILE_BACKFILL_SLEEP_SECS=360
 # Dev Injection Globals
 SEED_INJ_MAX_MAIN_DELAY_MS=200
 SEED_INJ_MAX_NETWORK_FAULT_PERCENT=15
+SEED_INJ_MAX_BACKFILL_DELAY_MS=200
+SEED_INJ_MAX_COL_MAN_DELAY_SEC=5
+SEED_INJ_MAX_BACKFILL_REPL_UPDATE_DELAY_MS=2000
+SEED_INJ_MAX_BACKFILL_REQ_HANDLER_DELAY_SEC=5
 
 # These should be imported after clusterRunProvision script
 
@@ -781,7 +785,10 @@ function setCustomManifestRefreshInterval {
 	local cluster="$1"
 
 	for ((i = 0; i < 2; i = $(($i + 1)))); do
-		ORIG_TARGET_MAN_PULL_INTERVAL=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
+		local rawInterval
+		rawInterval=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
+		[[ -z "$rawInterval" || "$rawInterval" == "null" ]] && rawInterval=60
+		ORIG_TARGET_MAN_PULL_INTERVAL=$rawInterval
 		tempTargetManifestPullInterval="5"
 
 		local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
@@ -809,8 +816,21 @@ function setCustomManifestRefreshInterval {
 
 function resetCustomManifestRefreshInterval {
 	local cluster="$1"
+	# If ORIG_TARGET_MAN_PULL_INTERVAL was never set, default to 60
+	if [[ -z "${ORIG_TARGET_MAN_PULL_INTERVAL:-}" ]]; then
+		echo "Warning: ORIG_TARGET_MAN_PULL_INTERVAL not set, defaulting to 60"
+		ORIG_TARGET_MAN_PULL_INTERVAL=60
+	fi
 	echo "Cleaning up internal settings"
 	local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
+
+	# Check if the current value is already at the target value. If so, skip the reset.
+	local currentValue=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
+	if [[ "$currentValue" == "$ORIG_TARGET_MAN_PULL_INTERVAL" ]]; then
+		echo "ManifestRefreshTgtInterval is already $ORIG_TARGET_MAN_PULL_INTERVAL, skipping reset"
+		return 0
+	fi
+
 	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL"
 
 	# When re-setting internal settings, XDCR process will restart
@@ -821,6 +841,7 @@ function resetCustomManifestRefreshInterval {
 		echo "Error - Timed out waiting for goxdcr to restart after resetting internal settings"
 		return 1
 	fi
+	echo "XDCR restarted successfully after resetting ManifestRefreshTgtInterval"
 }
 
 function getInternalNsServerLogDir {

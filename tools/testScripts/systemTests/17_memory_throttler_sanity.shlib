@@ -1,0 +1,232 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# Injection sanity test for the dcpFlowControlThrottle and componentEventsChanLength
+# tuners. Each sub-test exercises both the main and the backfill pipeline (incremental
+# discovery) under 6 seed-derived numeric Dev injections.
+#
+# Sub-tests (run in this order):
+#   0. baseline (no tuner overrides)
+#   1. dcpFlowControlThrottle=5
+#   2. componentEventsChanLength=1000
+#   3. dcpFlowControlThrottle=5 + componentEventsChanLength=1000
+#
+# Note: the three boolean injections (HandleVBTaskDoneHang / UnrecoverableErrorInj /
+# MgrVbsTasksDoneNotifierDelay) are intentionally NOT applied because each one stalls
+# backfill pipeline shutdown well past the framework's 2-minute "status is finished
+# shutting down" wait during cleanupBucketReplications.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=1024)
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+# Replication property maps - one per sub-test
+declare -A ReplProps_Baseline=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ReplProps_DcpThrottle=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["dcpFlowControlThrottle"]=5)
+declare -A ReplProps_EventsChan=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["componentEventsChanLength"]=1000)
+declare -A ReplProps_Both=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["dcpFlowControlThrottle"]=5 ["componentEventsChanLength"]=1000)
+
+# Bucket -> Scopes / Scopes -> Collections
+# -----------------------------------------
+# The framework provisions the common base (intersection of source and target):
+# both buckets get scope S1 with the targetCols set (col1). The source-only
+# delta (col2) is added explicitly in runOneSubTest after setupTopologies, and
+# col2 is added to the target mid-flight to drive the backfill pipeline.
+SUBTEST_SCOPE_NAME="S1"
+declare -a sourceCols=("col1" "col2")
+declare -a targetCols=("col1")
+
+BUCKET_NAME_SCOPE_MAP=(["B1"]="$SUBTEST_SCOPE_NAME" ["B2"]="$SUBTEST_SCOPE_NAME")
+SCOPE_NAME_COLLECTION_MAP=(["$SUBTEST_SCOPE_NAME"]="${targetCols[*]}")
+
+# Seed-derived random Dev-injection values in the range [0, SEED_INJ_MAX_*],
+# populated once by computeSeedDevInjectionValues at the top of runTestCase and
+# reused across all four sub-tests.
+SEED_VAL_MAIN_DELAY_MS=0
+SEED_VAL_BACKFILL_DELAY_MS=0
+SEED_VAL_COL_MAN_DELAY_SEC=0
+SEED_VAL_BACKFILL_REPL_UPD_MS=0
+SEED_VAL_BACKFILL_REQ_HANDLER_SEC=0
+SEED_VAL_NETWORK_FAULT_PERCENT=0
+
+# Computes the seed-derived random Dev-injection values once. Called from
+# runTestCase. If RANDOM_SEED_ARG is unset, a random seed is auto-generated (so
+# getIntFromSeed produces non-zero values) and logged so the run can be
+# reproduced via --seed=<value>.
+function computeSeedDevInjectionValues {
+	if [[ -z "${RANDOM_SEED_ARG:-}" ]]; then
+		RANDOM_SEED_ARG=$(openssl rand -hex 8)
+		echo "RANDOM_SEED_ARG was unset; auto-generated seed for this run: $RANDOM_SEED_ARG"
+		echo "(re-run with --seed=$RANDOM_SEED_ARG to reproduce)"
+	else
+		echo "Using provided RANDOM_SEED_ARG: $RANDOM_SEED_ARG"
+	fi
+
+	SEED_VAL_MAIN_DELAY_MS=$(getIntFromSeed $SEED_INJ_MAX_MAIN_DELAY_MS)
+	SEED_VAL_BACKFILL_DELAY_MS=$(getIntFromSeed $SEED_INJ_MAX_BACKFILL_DELAY_MS)
+	SEED_VAL_COL_MAN_DELAY_SEC=$(getIntFromSeed $SEED_INJ_MAX_COL_MAN_DELAY_SEC)
+	SEED_VAL_BACKFILL_REPL_UPD_MS=$(getIntFromSeed $SEED_INJ_MAX_BACKFILL_REPL_UPDATE_DELAY_MS)
+	SEED_VAL_BACKFILL_REQ_HANDLER_SEC=$(getIntFromSeed $SEED_INJ_MAX_BACKFILL_REQ_HANDLER_DELAY_SEC)
+	SEED_VAL_NETWORK_FAULT_PERCENT=$(getIntFromSeed $SEED_INJ_MAX_NETWORK_FAULT_PERCENT)
+
+	echo "Seed-derived Dev-injection values applied to all sub-tests:"
+	echo "  xdcrDevMainSendDelayMs                        = $SEED_VAL_MAIN_DELAY_MS"
+	echo "  xdcrDevBackfillSendDelayMs                    = $SEED_VAL_BACKFILL_DELAY_MS"
+	echo "  xdcrDevColManifestSvcDelaySec                 = $SEED_VAL_COL_MAN_DELAY_SEC"
+	echo "  xdcrDevBackfillReplUpdateDelayMs              = $SEED_VAL_BACKFILL_REPL_UPD_MS"
+	echo "  xdcrDevBackfillReqHandlerStartOnceDelaySec    = $SEED_VAL_BACKFILL_REQ_HANDLER_SEC"
+	echo "  xdcrDevXmemNozzleNetworkIOFaultProbability    = $SEED_VAL_NETWORK_FAULT_PERCENT"
+}
+
+# Merges the seed-derived xdcrDev injection settings into each ReplProps_* map
+# *by name*, so createBucketReplication sends them as part of the initial spec
+# (avoids the post-creation setReplicationSettings race window where the pipeline
+# briefly runs without injections active).
+function mergeInjectionsIntoReplProps {
+	local mapName
+	for mapName in "$@"; do
+		declare -n replMap="$mapName"
+		replMap[xdcrDevMainSendDelayMs]=$SEED_VAL_MAIN_DELAY_MS
+		replMap[xdcrDevBackfillSendDelayMs]=$SEED_VAL_BACKFILL_DELAY_MS
+		replMap[xdcrDevColManifestSvcDelaySec]=$SEED_VAL_COL_MAN_DELAY_SEC
+		replMap[xdcrDevBackfillReplUpdateDelayMs]=$SEED_VAL_BACKFILL_REPL_UPD_MS
+		replMap[xdcrDevBackfillReqHandlerStartOnceDelaySec]=$SEED_VAL_BACKFILL_REQ_HANDLER_SEC
+		replMap[xdcrDevXmemNozzleNetworkIOFaultProbability]=$SEED_VAL_NETWORK_FAULT_PERCENT
+		unset -n replMap
+	done
+}
+
+function runDataLoad {
+	echo "RUNNING dataload (col1 + col2 in parallel)..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	waitForBgJobs
+}
+
+# Sub-test driver. Args:
+#   1. name of the assoc array holding repl properties (e.g. ReplProps_DcpThrottle)
+#   2. label used in log lines (e.g. "dcpThrottle")
+function runOneSubTest {
+	local replPropsName=$1
+	local label=$2
+
+	echo "============================================================================"
+	echo "Sub-test: $label (with seed-derived numeric Dev injections, applied at creation)"
+	echo "============================================================================"
+
+	setupTopologies
+	if (($? != 0)); then
+		echo "ERROR: setupTopologies failed for $label"
+		return 1
+	fi
+
+	# setupTopologies has provisioned the common base on both buckets via
+	# BUCKET_NAME_SCOPE_MAP / SCOPE_NAME_COLLECTION_MAP (S1 with targetCols).
+	# Now add the col2 on C1.B1 only.
+	echo "Adding col2 on C1.B1.$SUBTEST_SCOPE_NAME"
+	createCollection "C1" "B1" "$SUBTEST_SCOPE_NAME" "col2"
+
+	# Wait for vbuckets and topology to settle before XDCR provisioning
+	sleep 5
+
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Drive load on both col1 (will replicate via main pipeline) and col2 (broken map until collection is created on target)
+	runDataLoad
+
+	createBucketReplication "C1" "B1" "C2" "B2" "$replPropsName"
+
+	# Wait for the router to detect that col2 is absent on target (broken map).
+	# The sleep covers: ManifestRefreshTgtInterval (5s, set by setCustomManifestRefreshInterval)
+	# + xdcrDevColManifestSvcDelaySec + 5s scheduling buffer.
+	local brokenMapSleepSec=$((SEED_VAL_COL_MAN_DELAY_SEC + 5 + 5))
+	echo "[$label] Sleeping ${brokenMapSleepSec}s for broken-map detection of S1.col2"
+	sleep "$brokenMapSleepSec"
+
+	# Trigger the backfill pipeline by creating the missing target collection.
+	echo "Creating target collection col2 mid-flight to trigger backfill"
+	createCollection "C2" "B2" "S1" "col2"
+
+	# Sleep to cover the full backfill-raise chain: ManifestRefreshTgtInterval (5s)
+	# + xdcrDevColManifestSvcDelaySec + xdcrDevBackfillReqHandlerStartOnceDelaySec
+	# + 5s scheduling buffer. waitForChangesLeft0 below still covers any overshoot.
+	local backfillRaiseSleepSec=$((SEED_VAL_COL_MAN_DELAY_SEC + SEED_VAL_BACKFILL_REQ_HANDLER_SEC + 5 + 5))
+	echo "[$label] Sleeping ${backfillRaiseSleepSec}s for backfill to be raised"
+	sleep "$backfillRaiseSleepSec"
+
+	echo "[$label] Waiting for main pipeline changes_left=0"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	echo "[$label] Waiting for backfill pipeline changes_left=0"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2" "backfill"
+	echo "[$label] Both pipelines drained successfully"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	grepForPanics
+}
+
+function runTestCase {
+	local OLD_ITEM_COUNT=$CBWORKLOAD_COLLECTION_NUM_ITEMS
+	local OLD_CHANGES_LEFT_WAIT=$CHANGES_LEFT_0_WAIT_SECS
+	local OLD_CHECK_CHANGES_LEFT_MAX=$CHECK_CHANGES_LEFT_MAX
+	# Save RANDOM_SEED_ARG so the auto-generated seed (if any) doesn't leak into
+	# subsequent tests in the same runner invocation.
+	local OLD_RANDOM_SEED_ARG="${RANDOM_SEED_ARG:-}"
+
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=2500
+	CHANGES_LEFT_0_WAIT_SECS=5
+	CHECK_CHANGES_LEFT_MAX=300
+
+	echo "============================================================================"
+	echo "Running tuner injection sanity test (4 sub-tests, seed-derived numeric Dev injections):"
+	echo "  0) baseline (no tuners)"
+	echo "  1) dcpFlowControlThrottle=5"
+	echo "  2) componentEventsChanLength=1000"
+	echo "  3) dcpFlowControlThrottle=5 + componentEventsChanLength=1000"
+	echo "============================================================================"
+
+	computeSeedDevInjectionValues
+
+	# Bake the seed-derived xdcrDev settings into each ReplProps_* map so the
+	# pipeline starts with injections already active
+	mergeInjectionsIntoReplProps ReplProps_Baseline ReplProps_DcpThrottle ReplProps_EventsChan ReplProps_Both
+
+	# Lower ManifestRefreshTgtInterval from 60s to 5s so the manifest service
+	# discovers collection changes promptly.
+	setCustomManifestRefreshInterval "C1"
+
+	runOneSubTest ReplProps_Baseline    "baseline"
+	runOneSubTest ReplProps_DcpThrottle "dcpThrottle"
+	runOneSubTest ReplProps_EventsChan  "eventsChan"
+	runOneSubTest ReplProps_Both        "combined"
+
+	echo "============================================================================"
+	echo "PASSED (all sub-tests' main + backfill pipelines drained)"
+	echo "============================================================================"
+
+	resetCustomManifestRefreshInterval "C1"
+
+	CBWORKLOAD_COLLECTION_NUM_ITEMS=$OLD_ITEM_COUNT
+	CHANGES_LEFT_0_WAIT_SECS=$OLD_CHANGES_LEFT_WAIT
+	CHECK_CHANGES_LEFT_MAX=$OLD_CHECK_CHANGES_LEFT_MAX
+	RANDOM_SEED_ARG="$OLD_RANDOM_SEED_ARG"
+
+	trap - EXIT
+}
