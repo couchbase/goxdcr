@@ -3,10 +3,12 @@ package cng
 import "time"
 
 const (
-
-	// ProcessRetryInterval is the interval to wait before retrying processing a request
-	// This is different from the backoff time for retryable errors
-	ProcessRetryInterval = 5000 * time.Millisecond
+	// MaxProcessRetryInterval caps the maximum wait time between retries when processing
+	// a request hits a non-network retryable error.
+	MaxProcessRetryInterval = 40 * time.Second
+	// JitterDuration controls the max additional random delay (1s..JitterDuration)
+	// added to retry waits to avoid synchronized retries across workers.
+	JitterDuration = 5 * time.Second
 
 	WithConnRetryBackoffInitial = 2 * time.Second
 	WithConnRetryBackoffMax     = 60 * time.Second
