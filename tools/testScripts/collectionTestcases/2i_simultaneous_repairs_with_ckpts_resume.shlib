@@ -23,7 +23,10 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500)
-declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=2000)
+
+# For CNG we run with reduced workers so that the backfill does not complete 
+# before the col3 deletion is discovered
+declare -A ImplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500 ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=2000 ["cngWorkerCount"]=50)
 
 # Bucket -> Scopes
 # -----------------

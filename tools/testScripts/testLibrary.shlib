@@ -1741,6 +1741,7 @@ function waitForNumberOfEvents {
 	fi
 
 	local curMin=0
+	echo "waitForNumberOfEvents errList=$errList"
 	local actualCount=$(echo "$errList" | jq 'length')
 	if (($actualCount != $count)); then
 		echo "Expecting $count in errorsList but found $actualCount"
