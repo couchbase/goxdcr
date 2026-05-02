@@ -983,6 +983,8 @@ function startEjectNode {
 	local failoverNodeString
 	local knownNodesString
 	local optNodeNameStripped
+	local preEjectCnt
+	local postEjectCnt
 	local OLDIFS="$IFS"
 
 	IFS=$'\n'
@@ -1007,7 +1009,7 @@ function startEjectNode {
 				fi
 
 				# Get preEjectCnt with validation
-				local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
 				if [[ -z "$preEjectCnt" ]] || ! [[ "$preEjectCnt" =~ ^[0-9]+$ ]]; then
 					echo "Warning: Failed to get valid preEjectCnt on attempt $((retryCnt + 1))/$maxRetries"
 					sleep $errRetrySleep
@@ -1015,11 +1017,22 @@ function startEjectNode {
 				fi
 
 				# Attempt the rebalance POST
-				local curlOutput=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$failoverNodeString" -d "$knownNodesString" 2>&1)
-				local curlExitCode=$?
-				if (($curlExitCode != 0)) || [[ -z "$curlOutput" ]]; then
+				# Note: /controller/rebalance returns an empty body on success (HTTP 200);
+				# only check the curl exit code, not whether the output is empty.
+				local curlOutput curlExitCode
+				curlOutput=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$failoverNodeString" -d "$knownNodesString" 2>&1)
+				curlExitCode=$?
+				if (($curlExitCode != 0)); then
 					echo "Warning: Rebalance POST failed on attempt $((retryCnt + 1))/$maxRetries with exit code $curlExitCode"
 					echo "Error details: $failoverNodeString and $knownNodesString"
+					sleep $errRetrySleep
+					continue
+				fi
+				# If the server returned an explicit error payload, treat it as a failure.
+				if [[ -n "$curlOutput" ]] && echo "$curlOutput" | grep -qi '"errors"'; then
+					echo "Warning: Rebalance POST returned error on attempt $((retryCnt + 1))/$maxRetries"
+					echo "Error details: $failoverNodeString and $knownNodesString"
+					echo "Response: $curlOutput"
 					sleep $errRetrySleep
 					continue
 				fi
@@ -1028,7 +1041,7 @@ function startEjectNode {
 				waitForRebalanceToFinish $motherNode
 
 				# Validate post-eject count with proper integer check
-				local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
 				if [[ -z "$postEjectCnt" ]] || ! [[ "$postEjectCnt" =~ ^[0-9]+$ ]]; then
 					echo "Warning: Failed to get valid postEjectCnt on attempt $((retryCnt + 1))/$maxRetries"
 					sleep $errRetrySleep
