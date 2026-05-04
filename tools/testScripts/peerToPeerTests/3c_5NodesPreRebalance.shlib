@@ -75,6 +75,19 @@ function runOneReplicationCycle {
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
+	# Unlike other p2p tests, 3c never invokes setupTopologies, so _startCNGInstances
+	# is never called from the standard path. Without (re)starting CNG here, any CNG
+	# processes left running from a previous test continue to present their old node
+	# cert while generateCNGCertsBasedOnTestInput has already overwritten ca.pem on
+	# disk — the XDCR gRPC TLS handshake during replication creation then fails to
+	# verify the candidate authority certificate.
+	if ((cngMode == 1)); then
+		_startCNGInstances
+		# Give the freshly-started CNG processes a moment to bind their ports —
+		# the function nohups them and returns; without this the connection
+		# refused error surfaces during the gRPC handshake on replication create.
+		sleep 10
+	fi
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
