@@ -27,6 +27,13 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
 declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=500 ["preReplicateVBMasterCheck"]="false")
+# CNG nozzle defaults to 500 parallel workers, so the per-mutation 500ms delay
+# above is dwarfed and backfill drains in ~10s — well before the 600s soak,
+# leaving no partial checkpoints for P2P push to transfer post-failover.
+# Pin to a single worker so the delay actually serializes the backfill.
+if ((cngMode == 1)); then
+	BackfillHangLooseProperties["cngWorkerCount"]=1
+fi
 
 # Bucket -> Scopes
 # -----------------
