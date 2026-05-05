@@ -59,7 +59,7 @@ function cleanupTestCaseInternalSettings {
 
 function checkChangesLeftBackup {
 	if [[ "$cngMode" = "1" ]]; then
-	    # Set higher threshold for CNG to account for slower performance
+		# Set higher threshold for CNG to account for slower performance
 		# compared to XMem
 		local ongoingThreshold=150000
 	else
