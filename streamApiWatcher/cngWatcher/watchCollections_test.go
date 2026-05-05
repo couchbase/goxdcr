@@ -349,14 +349,17 @@ func TestCollectionsWatcher_GetResult_RaceCondition_RetryWait(t *testing.T) {
 	assert.Nil(result, "GetResult should return nil when no message received yet")
 	assert.Error(err, "GetResult should return an error when no message received yet")
 
-	// Wait for retry to succeed
-	time.Sleep(300 * time.Millisecond)
-
-	// Now GetResult should return the manifest
-	result, err = watcher.GetResult(nonBlockingCtx())
+	// Now GetResult should return the manifest. Block on initDone with a generous
+	// deadline rather than sleeping a fixed duration — under CPU contention the
+	// retry timer + mock delay can exceed any hardcoded sleep, causing flakes.
+	getResultCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err = watcher.GetResult(getResultCtx)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Equal(uint64(999), result.Uid())
+	if result != nil {
+		assert.Equal(uint64(999), result.Uid())
+	}
 
 	watcher.Stop()
 	mockUtils.AssertExpectations(t)
