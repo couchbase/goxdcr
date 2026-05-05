@@ -1935,3 +1935,21 @@ func TestGetPortsAndHostAddrsFromNodeServicesIPv4Blocked(t *testing.T) {
 	assert.Greater(len(portsMap), 0)
 	assert.Equal(len(hostAddrs), len(portsMap))
 }
+
+func TestGetServerVBucketsMapEmptyVBucketMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetServerVBucketsMapEmptyVBucketMap =================")
+	defer fmt.Println("============== Test case end: TestGetServerVBucketsMapEmptyVBucketMap =================")
+	assert := assert.New(t)
+
+	// Build a minimal bucket-info with an empty vBucketMap slice.
+	bucketInfo := map[string]interface{}{
+		base.VBucketServerMapKey: map[string]interface{}{
+			base.VBucketMapKey: []interface{}{},
+		},
+	}
+
+	result, err := testUtils.GetServerVBucketsMap("dummyConnStr", "dummyBucket", bucketInfo, nil, nil)
+	assert.Nil(result)
+	assert.NotNil(err)
+	assert.Contains(err.Error(), base.VBucketMapKey)
+}

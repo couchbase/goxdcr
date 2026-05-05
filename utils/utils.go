@@ -990,6 +990,9 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 	if !ok {
 		return nil, fmt.Errorf("Vbucket map is of wrong type. connStr=%v, bucketName=%v, vbucketMap=%v\n", connStr, bucketName, vbucketMapObj)
 	}
+	if len(vbucketMap) == 0 {
+		return nil, fmt.Errorf("received empty %v in bucket-info for connStr=%v", base.VBucketMapKey, connStr)
+	}
 
 	servers, err := u.GetServersListFromBucketInfo(bucketInfo)
 	if err != nil {
