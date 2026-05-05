@@ -104,7 +104,7 @@ function runOneReplicationCycleAndPause {
 	fi
 
 	local -i currentInstanceCnt
-	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+	currentInstanceCnt=$(getInternalNodeNsServerInfoLog "C1" | grep -c "$LOGMSG")
 
 	setCustomManifestRefreshInterval "C1"
 
@@ -123,6 +123,8 @@ function runOneReplicationCycleAndPause {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
@@ -151,6 +153,7 @@ function runOneReplicationCycleAndPause {
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"

@@ -48,6 +48,9 @@ VAGRANT_LOG_DIR="/opt/couchbase/var/lib/couchbase/logs"
 GETHIGHSEQNO_COLID_DNE="getHighSeqno could not find collection ID"
 REPL_MISSING_WHEN_STARTING="Replication Status is missing when starting pipeline"
 METAKV_SET_OP_ERR="metakv_svc_setOp encountered error"
+CKPT_BEFORE_STOP_START_MSG="Starting checkpointing before stopping"
+CKPT_BEFORE_STOP_DONE_MSG="Checkpointing completed"
+CKPT_BEFORE_STOP_TIMEOUT_MSG="Checkpointing timed out after"
 CE_ERROR="Cannot create XDCR between two Community Edition clusters"
 REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED="Current cluster encryption level requires the remote-cluster-reference to be of 'Full' encryption-type."
 UNABLE_TO_FIND_SHAS="Unable to find shas"
@@ -84,6 +87,45 @@ SEED_INJ_MAX_MAIN_DELAY_MS=200
 SEED_INJ_MAX_NETWORK_FAULT_PERCENT=15
 
 # These should be imported after clusterRunProvision script
+
+# waitForCheckpointBeforeStop <clusterName> <prePauseStartCount>
+#
+# After calling pauseReplication, invoke this function to block until the
+# checkpoint-before-stop cycle triggered by the pause has fully completed
+# (either "Checkpointing completed" or "Checkpointing timed out after" appears
+# at least once more than <prePauseStartCount> occurrences of
+# CKPT_BEFORE_STOP_START_MSG observed before the pause was issued).
+#
+# This prevents the test from racing ahead to the rebalance / resume steps
+# before C1 has finished writing all VB checkpoint docs to MetaKV.
+function waitForCheckpointBeforeStop {
+	local clusterName=$1
+	local prePauseStartCount=${2:-0}
+	# TimeoutCheckpointBeforeStop is 3 min; allow a little extra headroom.
+	local maxWaitSecs=210
+	local pollIntervalSecs=5
+	local elapsed=0
+
+	echo "Waiting for checkpoint-before-stop to finish on $clusterName (pre-pause start count: $prePauseStartCount)..."
+	while (($elapsed < $maxWaitSecs)); do
+		local logs
+		logs=$(getInternalNodeXdcrLog "$clusterName")
+		local startCnt
+		startCnt=$(echo "$logs" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
+		if (($startCnt > $prePauseStartCount)); then
+			# A new checkpoint-before-stop cycle was started; now wait for its completion.
+			local doneCnt
+			doneCnt=$(echo "$logs" | grep -cE "$CKPT_BEFORE_STOP_DONE_MSG|$CKPT_BEFORE_STOP_TIMEOUT_MSG")
+			if (($doneCnt >= $startCnt)); then
+				echo "Checkpoint-before-stop finished on $clusterName after ${elapsed}s (done/timeout count: $doneCnt)"
+				return 0
+			fi
+		fi
+		sleep $pollIntervalSecs
+		elapsed=$(($elapsed + $pollIntervalSecs))
+	done
+	echo "WARNING: waitForCheckpointBeforeStop timed out after ${maxWaitSecs}s on $clusterName; proceeding anyway"
+}
 
 function checkItemCnt {
 	local cluster=$1
@@ -1123,6 +1165,41 @@ function validateInternalLogWithInstance {
 	logs=$(getInternalNodeXdcrLog "$clusterName")
 	if ! (($? == 0)); then
 		echo "Unable to get log for validation"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+
+	count=$(echo "$logs" | grep -c "$grepStr")
+	if (($count != $instanceCnt)); then
+		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]]; then
+			echo "Warning - requested count for \"$grepStr\" is $instanceCnt or <= $maxInstanceCnt, found $count" >&2
+		else
+			echo "Error - requested count for \"$grepStr\" is $instanceCnt, but found $count" >&2
+			dumpDebugInfoBeforeExit
+			exit 1
+		fi
+	else
+		echo "Found exactly $instanceCnt of \"$grepStr\""
+	fi
+}
+
+function validateNsServerInfoLogWithInstance {
+	local clusterName=$1
+	local grepStr="$2"
+	local instanceCnt=$3
+	local maxInstanceCnt=${4:-}
+
+	logs=$(getInternalNodeNsServerInfoLog "$clusterName")
+	if ! (($? == 0)); then
+		echo "Unable to get ns_server info log for validation"
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi

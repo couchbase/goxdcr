@@ -64,7 +64,7 @@ function runOneReplicationCycle {
 	local checkInt
 
 	local -i currentInstanceCnt
-	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+	currentInstanceCnt=$(getInternalNodeNsServerInfoLog "C1" | grep -c "$LOGMSG")
 
 	createScope "C2" "B1" "S1"
 	createCollection "C2" "B1" "S1" "col1"

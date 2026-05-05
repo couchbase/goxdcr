@@ -79,6 +79,8 @@ function runOneReplicationCycleAndPause {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
@@ -97,6 +99,7 @@ function runOneReplicationCycleAndPause {
 	waitTime=$((10 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
 	echo "Waiting $waitTime seconds for pipeline to really pause"
 	sleep $waitTime
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	grepForPanics
 
 	createScope "C2" "B1" "S1"

@@ -75,7 +75,7 @@ function runOneReplicationCycleAndPause {
 	fi
 
 	local -i currentInstanceCnt
-	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+	currentInstanceCnt=$(getInternalNodeNsServerInfoLog "C1" | grep -c "$LOGMSG")
 
 	setCustomManifestRefreshInterval "C1"
 
@@ -84,6 +84,8 @@ function runOneReplicationCycleAndPause {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
@@ -92,7 +94,7 @@ function runOneReplicationCycleAndPause {
 	echo "Sleeping 30 seconds before changes left check"
 	sleep 30
 
-	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
+	validateNsServerInfoLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
@@ -101,6 +103,7 @@ function runOneReplicationCycleAndPause {
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	grepForPanics
 
 	createScope "C2" "B1" "S1"

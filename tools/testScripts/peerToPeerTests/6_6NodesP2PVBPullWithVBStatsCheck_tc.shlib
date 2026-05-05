@@ -151,14 +151,18 @@ function runOneRebalanceCycleIn {
 }
 
 function pauseReplications {
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 15 seconds for pipeline to really pause"
 	sleep 15
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	grepForPanics
 
 	pauseReplication "C1" "B1" "C2" "B1"
 	echo "Waiting 15 seconds for pipeline to really pause"
 	sleep 15
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	grepForPanics
 
 }

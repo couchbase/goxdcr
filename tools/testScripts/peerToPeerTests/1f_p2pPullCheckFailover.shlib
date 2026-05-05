@@ -100,6 +100,8 @@ function runOneReplicationCycleAndPause {
 
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	seedInjectMainPipelineDelay "C1" "B0" "C2" "B1" $SEED_INJ_MAX_MAIN_DELAY_MS
 	printGlobalScopeAndCollectionInfo
 
@@ -115,6 +117,7 @@ function runOneReplicationCycleAndPause {
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	grepForPanics
 }
 

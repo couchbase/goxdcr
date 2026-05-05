@@ -161,9 +161,12 @@ function runTestCase {
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 
+	local -i currentCkptBeforeStopCnt
+	currentCkptBeforeStopCnt=$(getInternalNodeXdcrLog "C1" | grep -c "$CKPT_BEFORE_STOP_START_MSG")
 	# Pause replication and resume to see how many ckpts backfill has
 	pauseReplication "C1" "B0" "C2" "B1"
 	sleep 15
+	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
 	resumeReplication "C1" "B0" "C2" "B1"
 	sleep 15
 	local node1Non0VBResumeCnt
