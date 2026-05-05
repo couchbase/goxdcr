@@ -3032,7 +3032,13 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 		}
 		conn.Close()
 
-		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
+		tr := &http.Transport{TLSClientConfig: tlsConfig,
+			Dial:                base.DialTCPWithTimeout,
+			ForceAttemptHTTP2:   true,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second}
+
 		wrappedTr := u.GetTLSTrackedTransport(tr, context...)
 		client = &http.Client{Transport: wrappedTr,
 			Timeout: base.DefaultHttpTimeout}
