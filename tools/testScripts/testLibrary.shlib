@@ -55,6 +55,7 @@ CE_ERROR="Cannot create XDCR between two Community Edition clusters"
 REMOTE_CLUSTER_FULL_ENCRYPTION_REQUIRED="Current cluster encryption level requires the remote-cluster-reference to be of 'Full' encryption-type."
 UNABLE_TO_FIND_SHAS="Unable to find shas"
 IMPORT_MUTATIONS_WARNING="Import mutations detected when 'mobile' setting is Off. This is not supported in active-active XDCR and Sync Gateway deployment. Ignore this warning if the deployment is active-passive."
+PROCESS_RESTART_GOMAXPROCS="INFO GOXDCR.ReplMgr: GOMAXPROCS"
 
 # HLV Test sleep configs
 HLV_TESTS_INIT_SLEEP_SECS=30
@@ -781,11 +782,18 @@ function setCustomManifestRefreshInterval {
 		ORIG_TARGET_MAN_PULL_INTERVAL=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
 		tempTargetManifestPullInterval="5"
 
+		local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
+
 		echo "Temporarily updating targetManifestPull from $ORIG_TARGET_MAN_PULL_INTERVAL to $tempTargetManifestPullInterval"
 		setInternalSettings "$cluster" "ManifestRefreshTgtInterval=$tempTargetManifestPullInterval"
 
-		echo "Sleeping 10 seconds for XDCR to reboot before checking..."
-		sleep 10
+		echo "Waiting upto 1 minute for XDCR to reboot..."
+		waitForInternalLogInstance "$cluster" "$PROCESS_RESTART_GOMAXPROCS" $(($currentRestartCt + 1)) 1
+		if ((!$? == 0)); then
+			echo "Error - Timed out waiting for goxdcr to restart after resetting internal settings"
+			return 1
+		fi
+
 		chkTargetManifestPullInterval=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
 		if (($chkTargetManifestPullInterval == $tempTargetManifestPullInterval)); then
 			return 0
@@ -800,11 +808,17 @@ function setCustomManifestRefreshInterval {
 function resetCustomManifestRefreshInterval {
 	local cluster="$1"
 	echo "Cleaning up internal settings"
+	local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
 	setInternalSettings "C1" "ManifestRefreshTgtInterval=$ORIG_TARGET_MAN_PULL_INTERVAL"
+
 	# When re-setting internal settings, XDCR process will restart
 	# Often times tests will delete replication post resetting internal settings
-	# Let goxdcr stablize before continue
-	sleep 15
+	# Thus wait (up to 5 minutes) for goxdcr to restart before returning
+	waitForInternalLogInstance "$cluster" "$PROCESS_RESTART_GOMAXPROCS" $(($currentRestartCt + 1)) 5
+	if ((!$? == 0)); then
+		echo "Error - Timed out waiting for goxdcr to restart after resetting internal settings"
+		return 1
+	fi
 }
 
 function getInternalNsServerLogDir {
