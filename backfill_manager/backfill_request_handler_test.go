@@ -829,9 +829,16 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	waitGrp.Wait()
 
 	// There's no locking because handler has 1 single go routine
-	// But this test will be a second go routine so sleep until the go routine is done before checking
-	// to make sure no concurrent read/write
-	time.Sleep(100 * time.Millisecond)
+	// Drain all handleResponses to ensure all VB-done tasks are fully processed deterministically
+	// instead of using time.Sleep which can fail on slow CI machines
+	for i := uint16(0); i < 1024; i++ {
+		err := <-handleResponses[i]
+		// The last VB done when spec has no more tasks returns errorSyncDel (spec was deleted)
+		// This is expected behavior, all other VBs should return nil or errorSyncDel
+		if err != nil && err != errorSyncDel {
+			assert.Nil(err, fmt.Sprintf("VB %d returned error %v", i, err))
+		}
+	}
 	//Before merging, vb 0 only has 0 task
 	isNil := rh.cachedBackfillSpec == nil || rh.cachedBackfillSpec.VBTasksMap == nil
 	assert.True(isNil || rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len() == 0)
@@ -845,8 +852,9 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 
 	assert.Nil(rh.HandleBackfillRequest(internalReq, "test"))
 
-	time.Sleep(100 * time.Millisecond)
 	// After merging, vb 0 has 1 task
+	// HandleBackfillRequest is synchronous and already waits for both handle and persist responses
+	// so no time.Sleep is needed
 	assert.Equal(1, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
 }
 
