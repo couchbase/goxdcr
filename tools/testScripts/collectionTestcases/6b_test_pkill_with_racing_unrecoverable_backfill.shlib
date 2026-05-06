@@ -22,9 +22,9 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["cngWorkerCount"]=50)
 # xdcrDevBackfillUnrecoverableErrorInj will ensure that we can have racing backfill requests.
-declare -A BackfillHangLooseDelayProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=10000 ["preReplicateVBMasterCheck"]="false" ["xdcrDevBackfillUnrecoverableErrorInj"]=true)
+declare -A BackfillHangLooseDelayProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=10000 ["preReplicateVBMasterCheck"]="false" ["xdcrDevBackfillUnrecoverableErrorInj"]=true ["cngWorkerCount"]=50)
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
