@@ -90,6 +90,7 @@ function runTestCase {
 	sleep 5
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+	waitForVBMastershipReadiness "C1P0" "B0"
 
 	echo "Sleeping before checking logs"
 	sleep 15

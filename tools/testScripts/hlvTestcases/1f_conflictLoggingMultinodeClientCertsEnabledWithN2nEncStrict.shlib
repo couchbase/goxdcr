@@ -218,6 +218,7 @@ function runOneRebalanceCycle {
 	addNodesIn
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+	waitForVBMastershipReadiness "C1P" "B0"
 
 	setNodeToNodeEncryption "C1" "enable"
 	setEncryptionLevel "C1" "strict"

@@ -925,6 +925,111 @@ function startRebalancingWithKnownNodes {
 	waitForRebalanceToFinish $nodeName
 }
 
+# waitForVBMastershipReadiness <nodeName> <bucketName> [timeoutSecs]
+# Polls until <nodeName> is the active master (index 0 in vBucketMap) for at
+# least one vBucket in <bucketName>.  Fails with exit 1 after timeoutSecs (default 120).
+# This is needed after rebalance-in on resource-constrained machines where topology
+# propagation can lag behind the REST acknowledgement that rebalance finished.
+function waitForVBMastershipReadiness {
+	local nodeName=$1
+	local bucketName=$2
+	local timeoutSecs=${3:-120}
+	local intervalSecs=5
+	local elapsed=0
+	local masterPort
+	local nodePort=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
+	# The KV direct port is mgmt_port + 2000 for cluster_run (e.g. 9001 -> 11211+offset or direct port)
+	# We match against the hostname:kvport entry in vBucketServerMap.serverList.
+	# cluster_run uses ports like 12000,12002,12004... (mgmtPort*2 - 6000 roughly), but
+	# the reliable way is to look at what hostname:port NsServer reports for this node.
+	local nodeHostPort
+	local masterClusterName=$1
+	# Use the mother node (first entry of CLUSTER_NAME_PORT_MAP that is NOT a dependent)
+	local motherPort=${CLUSTER_NAME_PORT_MAP["C1"]:-${nodePort}}
+
+	echo "Waiting for ${nodeName} to obtain VB mastership for bucket ${bucketName} (timeout ${timeoutSecs}s)..."
+
+	while ((elapsed < timeoutSecs)); do
+		local bucketInfo
+		bucketInfo=$($CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW \
+			http://127.0.0.1:${motherPort}/pools/default/buckets/${bucketName} 2>/dev/null)
+		if [[ -z "${bucketInfo:-}" ]]; then
+			sleep $intervalSecs
+			elapsed=$((elapsed + intervalSecs))
+			continue
+		fi
+
+		# Find the hostname entry for this node from the nodes array
+		nodeHostPort=$(echo "$bucketInfo" | jq -r \
+			--arg port "$nodePort" \
+			'.nodes[] | select(.hostname | test(":"+$port+"$")) | .hostname' 2>/dev/null | head -1)
+
+		if [[ -z "${nodeHostPort:-}" ]]; then
+			sleep $intervalSecs
+			elapsed=$((elapsed + intervalSecs))
+			continue
+		fi
+
+		# Get the index of this node in the serverList (0-based)
+		local nodeIdx
+		nodeIdx=$(echo "$bucketInfo" | jq -r \
+			--arg host "$nodeHostPort" \
+			'.vBucketServerMap.serverList | to_entries[] | select(.value | test("^"+$host|ltrimstr("http://"))) | .key' 2>/dev/null | head -1)
+
+		# serverList entries may be host:kvport, not host:mgmtport — extract KV port from nodesExt
+		# Simpler approach: count vBucketMap entries where first element equals nodeIdx
+		if [[ -z "${nodeIdx:-}" ]]; then
+			# Alternative: match via kv direct port from nodesExt
+			local kvPort
+			kvPort=$(echo "$bucketInfo" | jq -r \
+				--arg mgmt "$nodePort" \
+				'.nodes[] | select(.hostname | test(":"+$mgmt+"$")) | .ports.direct // empty' 2>/dev/null | head -1)
+			if [[ -z "${kvPort:-}" ]]; then
+				sleep $intervalSecs
+				elapsed=$((elapsed + intervalSecs))
+				continue
+			fi
+			nodeIdx=$(echo "$bucketInfo" | jq -r \
+				--arg kvport "$kvPort" \
+				'.vBucketServerMap.serverList | to_entries[] | select(.value | endswith(":"+$kvport)) | .key' 2>/dev/null | head -1)
+		fi
+
+		if [[ -z "${nodeIdx:-}" ]]; then
+			sleep $intervalSecs
+			elapsed=$((elapsed + intervalSecs))
+			continue
+		fi
+
+		# Count active master VBs (first entry of each vBucketMap row == nodeIdx)
+		local masterVBCount
+		masterVBCount=$(echo "$bucketInfo" | jq \
+			--argjson idx "$nodeIdx" \
+			'[.vBucketServerMap.vBucketMap[] | select(.[0] == $idx)] | length' 2>/dev/null)
+
+		if [[ -n "${masterVBCount:-}" ]] && ((masterVBCount > 0)); then
+			echo "${nodeName} has ${masterVBCount} active master VBs for bucket ${bucketName} after ${elapsed}s — ready."
+			return 0
+		fi
+
+		sleep $intervalSecs
+		elapsed=$((elapsed + intervalSecs))
+	done
+
+	echo "ERROR: ${nodeName} did not obtain VB mastership for bucket ${bucketName} within ${timeoutSecs}s. Topology may not have propagated."
+	exit 1
+}
+
+# waitForAllDependencyNodesVBMastership <bucketName> [timeoutSecs]
+# Calls waitForVBMastershipReadiness for every node in CLUSTER_DEPENDENCY_MAP.
+function waitForAllDependencyNodesVBMastership {
+	local bucketName=$1
+	local timeoutSecs=${2:-120}
+	local depNode
+	for depNode in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		waitForVBMastershipReadiness "$depNode" "$bucketName" "$timeoutSecs"
+	done
+}
+
 function startRebalancing {
 	local nodeName=$1
 	local knownNodesString

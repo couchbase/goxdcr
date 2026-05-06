@@ -67,7 +67,6 @@ function runTestCase {
 	local maxStableCnt=3
 	local coolDownPeriod=1
 
-	setupCluster
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
 
@@ -78,6 +77,7 @@ function runTestCase {
 	addNodesIn
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+	sleep 20
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies

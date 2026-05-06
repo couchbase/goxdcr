@@ -162,6 +162,7 @@ function runOneRebalanceCycle {
 	sleep 5
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+	waitForVBMastershipReadiness "C1P" "B0"
 
 	echo "Sleeping before checking logs"
 	sleep 15

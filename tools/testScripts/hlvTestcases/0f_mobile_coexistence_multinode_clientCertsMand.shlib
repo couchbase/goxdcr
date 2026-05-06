@@ -187,6 +187,7 @@ function runOneRebalanceCycle {
 	addNodesIn
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+	waitForVBMastershipReadiness "C1P" "B0"
 
 	# turn it back on
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do

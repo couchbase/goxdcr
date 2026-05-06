@@ -58,6 +58,7 @@ function runOneReplicationCycle {
 	local coolDownPeriod=1
 	local checkInt
 	setupTopologies
+	waitForVBMastershipReadiness "C1P" "B0"
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 	sleep 5
