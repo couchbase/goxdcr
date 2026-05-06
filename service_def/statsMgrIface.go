@@ -1647,7 +1647,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Labels:       SourceClusterV1ReplLabels,
 	},
 	SOURCE_CLUSTER_HB_RECV_SIZE: StatsProperty{
-		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrBytes},
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMetadataStatsSupport,
 		Description:  "For a given source cluster, the size of the accumulated heartbeat messages received from this cluster",

@@ -1499,7 +1499,7 @@
         "stability": "committed"
     },
     "xdcr_source_cluster_heartbeat_recv_bytes": {
-        "type": "gauge",
+        "type": "counter",
         "help": "For a given source cluster, the size of the accumulated heartbeat messages received from this cluster",
         "added": "8.1.0",
         "unit": "bytes",

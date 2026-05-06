@@ -471,19 +471,21 @@ func (s StringList) RemoveInstances(str string) StringList {
 
 // Not safe from concurrent access.
 // Caller has to make sure synchronisation is achieved, if necessary.
-func (s StringList) Search(str string, alreadySorted bool) (found bool) {
-	var listToSearch StringList
+func (s StringList) Search(str string, alreadySorted bool) bool {
 	if !alreadySorted {
-		listToSearch = SortStringList(s)
-	} else {
-		listToSearch = s
+		// perform linear search since the list is not sorted
+		for _, listStr := range s {
+			if listStr == str {
+				return true
+			}
+		}
+		return false
 	}
 
-	searchIdx := sort.SearchStrings(listToSearch, str)
-	doesNotExist := searchIdx == len(listToSearch) || listToSearch[searchIdx] != str
+	searchIdx := sort.SearchStrings(s, str)
+	found := searchIdx != len(s) && s[searchIdx] == str
 
-	found = !doesNotExist
-	return
+	return found
 }
 
 func SortStringList(list []string) []string {

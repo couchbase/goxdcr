@@ -141,16 +141,12 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 
 var sourceClusterStats = []string{service_def.SOURCE_CLUSTER_NUM_REPL, service_def.SOURCE_CLUSTER_NUM_NODES, service_def.SOURCE_CLUSTER_HB_RECV_SIZE}
 
-func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, hbSizes map[string]int64, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
-	constValueMap := make(map[string]map[string]int)
+func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string, srcHbBytes map[string]int64, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
 	specsCountMap := make(map[string]int)
-	nodesCountMap := make(map[string]int)
-	hbSizesMap := make(map[string]int)
 	runningSpecCountMap := make(map[string]int)
 	pausedSpecCountMap := make(map[string]int)
-	for uuid, specs := range specsIn {
+	for uuid, specs := range srcSpecsIn {
 		specsCountMap[uuid] = len(specs)
-		nodesCountMap[uuid] = len(nodesIn[uuid])
 		var runningCnt int
 		var pausedCnt int
 		for _, spec := range specs {
@@ -164,13 +160,21 @@ func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, 
 		pausedSpecCountMap[uuid] = pausedCnt
 	}
 
-	for uuid, size := range hbSizes {
+	nodesCountMap := make(map[string]int)
+	for uuid, nodesList := range srcNodesIn {
+		nodesCountMap[uuid] = len(nodesList)
+	}
+
+	hbSizesMap := make(map[string]int)
+	for uuid, size := range srcHbBytes {
 		hbSizesMap[uuid] = int(size)
 	}
 
-	constValueMap[service_def.SOURCE_CLUSTER_NUM_REPL] = specsCountMap
-	constValueMap[service_def.SOURCE_CLUSTER_NUM_NODES] = nodesCountMap
-	constValueMap[service_def.SOURCE_CLUSTER_HB_RECV_SIZE] = hbSizesMap
+	constValueMap := map[string]map[string]int{
+		service_def.SOURCE_CLUSTER_NUM_REPL:     specsCountMap,
+		service_def.SOURCE_CLUSTER_NUM_NODES:    nodesCountMap,
+		service_def.SOURCE_CLUSTER_HB_RECV_SIZE: hbSizesMap,
+	}
 
 	for _, oneStat := range sourceClusterStats {
 		// As a reminder:
@@ -209,7 +213,7 @@ func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, 
 		// Garbage collect any non-existant source UUIDs
 		for srcClusterUuid, _ := range srcClusterUUIDToStatsMap {
 			var gcNeeded = true
-			for currentSourceUuid, _ := range nodesIn {
+			for currentSourceUuid, _ := range srcNodesIn {
 				if srcClusterUuid == currentSourceUuid {
 					gcNeeded = false
 					break
@@ -738,56 +742,81 @@ func (p *PrometheusExporter) resetOutputBuffer() {
 	p.outputBufferMtx.Unlock()
 }
 
-func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string, hbSizes map[string]int64) {
+func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string, srcHbBytes map[string]int64) {
 	p.mapsMtx.Lock()
 	defer p.mapsMtx.Unlock()
 
-	// check for changes
-	var cacheOutdated bool
-	if len(p.srcSpecs) != len(srcSpecsIn) ||
-		len(p.srcNodes) != len(srcNodesIn) {
-		cacheOutdated = true
-		p.srcNodes = srcNodesIn
+	// check for each possible change
+	cacheOutdated := false
+	if p.checkIfSourceSpecsChanged(srcSpecsIn) {
 		p.srcSpecs = srcSpecsIn
-	} else {
-		// check to make sure srcNodes are correct
-		for srcUuid, nodesList := range srcNodesIn {
-			cachedNodesList, exists := p.srcNodes[srcUuid]
-			if !exists {
-				cacheOutdated = true
-				break
-			}
-			if len(nodesList) != len(cachedNodesList) {
-				cacheOutdated = true
-				break
-			}
-			for _, node := range nodesList {
-				if found := base.StringList(cachedNodesList).Search(node, false); !found {
-					cacheOutdated = true
-					break
-				}
-			}
-		}
-
-		if !cacheOutdated {
-			// nodes list the same, check specs
-			for srcUuid, specsIn := range srcSpecsIn {
-				cachedSpecs, exists := p.srcSpecs[srcUuid]
-				if !exists {
-					cacheOutdated = true
-					break
-				}
-				if !metadata.ReplSpecList(specsIn).SameAs(cachedSpecs) {
-					cacheOutdated = true
-					break
-				}
-			}
-		}
+		cacheOutdated = true
 	}
+	if p.checkIfSourceClustersChanged(srcNodesIn) {
+		p.srcNodes = srcNodesIn
+		cacheOutdated = true
+	}
+	if p.checkIfHeartbeatBytesReceivedChanged(srcHbBytes) {
+		p.srcHBSizes = srcHbBytes
+		cacheOutdated = true
+	}
+
 	if cacheOutdated {
 		p.resetOutputBuffer()
-		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, hbSizes, p.globalLookupMap, p.labelsTableConstructor)
+		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, srcHbBytes, p.globalLookupMap, p.labelsTableConstructor)
 	}
+}
+
+func (p *PrometheusExporter) checkIfSourceSpecsChanged(newSrcClustersSpecsMap map[string][]*metadata.ReplicationSpecification) bool {
+	if len(p.srcSpecs) != len(newSrcClustersSpecsMap) {
+		return true
+	}
+
+	for srcUuid, newSourceSpecsList := range newSrcClustersSpecsMap {
+		oldSourceSpecsList, exists := p.srcSpecs[srcUuid]
+		if !exists || !metadata.ReplSpecList(newSourceSpecsList).SameAs(oldSourceSpecsList) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (p *PrometheusExporter) checkIfSourceClustersChanged(newSrcClustersNodesList map[string][]string) bool {
+	if len(p.srcNodes) != len(newSrcClustersNodesList) {
+		return true
+	}
+
+	for srcUuid, newNodesList := range newSrcClustersNodesList {
+		oldNodesList, exists := p.srcNodes[srcUuid]
+		if !exists || len(newNodesList) != len(oldNodesList) {
+			return true
+		}
+
+		// check if the two lists have the same nodes
+		for _, node := range newNodesList {
+			if found := base.StringList(oldNodesList).Search(node, false); !found {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (p *PrometheusExporter) checkIfHeartbeatBytesReceivedChanged(newHbSizes map[string]int64) bool {
+	if len(p.srcHBSizes) != len(newHbSizes) {
+		return true
+	}
+
+	for srcUuid, newHbSize := range newHbSizes {
+		oldHbSize, exists := p.srcHBSizes[srcUuid]
+		if !exists || newHbSize != oldHbSize {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *PrometheusExporter) LoadReplicationIds(remClusterUUIDs, replIds []string) error {
