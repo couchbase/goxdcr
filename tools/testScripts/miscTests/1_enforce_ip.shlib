@@ -58,6 +58,11 @@ function setIpFamily {
 		exit $?
 	fi
 	echo "Turned off autFailover for $cluster ($host:$port)"
+
+	# Capture the current XDCR restart count before changing IP family so we can
+	# wait for the process to finish restarting afterwards.
+	local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
+
 	# Set ip family. Use couchbase-cli instead of REST api
 	# result=$(curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig -d afamilyOnly=$only -d afamily=${ip})
 	# REST API doesn't work anymore after enforce_tls test (error: Failed to update distribution configuration file ...)
@@ -78,6 +83,9 @@ function setIpFamily {
 	CLUSTER_NAME_HOST_MAP[$cluster]=$host
 
 	if [[ "$only" == "true" ]]; then
+		# Re-capture restart count before --only call. The --ipv6/ipv4 call above already
+		# triggered one restart; we need waitForInternalLogInstance to target this new one.
+		currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
 		../../../../../../../install/bin/couchbase-cli ip-family -c http://$host:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW --set --${ip}only
 		if (($? != 0)); then
 			echo "Failed to set ip family to ${ip}Only for ${clusterName} ($host:$port)"
@@ -93,6 +101,47 @@ function setIpFamily {
 	fi
 	echo "Turned on autFailover for $cluster ($host:$port)"
 	echo "Cluster $cluster $host:$port is set to $ip (only=$only)"
+
+	# Changing the IP family causes ns_server to restart the XDCR (goxdcr) process.
+	# Wait (up to 2 minutes) for XDCR on this cluster to finish restarting before
+	# returning, so that callers can safely issue REST calls against goxdcr immediately.
+	echo "Waiting up to 2 minutes for XDCR to restart after IP family change on $cluster..."
+	waitForInternalLogInstance "$cluster" "$PROCESS_RESTART_GOMAXPROCS" $(($currentRestartCt + 1)) 2
+	if ((!$? == 0)); then
+		echo "Error - Timed out waiting for goxdcr to restart after IP family change on $cluster"
+		exit 1
+	fi
+
+	# The GOMAXPROCS log line is emitted very early in goxdcr startup, before
+	# adminport's ListenAndServe() has bound the port. Callers (and ns_server's
+	# goxdcr_rest proxy) hitting goxdcr immediately can race the listener and
+	# get econnrefused, surfacing as ns_server "Unexpected server error".
+	# Poll SettingsReplicationsPath until it answers (max 60s) before returning.
+	# Probe both ipv4 and ipv6 loopback because depending on the cluster's current
+	# ip-family mode goxdcr may only be bound to one of them (e.g. ipv6-only mode
+	# binds only [::1] and a 127.0.0.1 probe will always fail).
+	local xdcrPort=${CLUSTER_NAME_XDCR_PORT_MAP[$cluster]:-}
+	local probeMaxSec=60
+	local probeElapsed=0
+	local probeOk=0
+	while (($probeElapsed < $probeMaxSec)); do
+		$CURL -fsS -o /dev/null -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$xdcrPort/settings/replications >/dev/null 2>&1
+		if (($? == 0)); then
+			probeOk=1
+			break
+		fi
+		$CURL -fsS -g -o /dev/null -u $DEFAULT_ADMIN:$DEFAULT_PW "http://[::1]:$xdcrPort/settings/replications" >/dev/null 2>&1
+		if (($? == 0)); then
+			probeOk=1
+			break
+		fi
+		sleep 2
+		probeElapsed=$(($probeElapsed + 2))
+	done
+	if (($probeOk != 1)); then
+		echo "Error - goxdcr adminport on $cluster (port $xdcrPort) did not become reachable on 127.0.0.1 or [::1] after IP family change"
+		exit 1
+	fi
 }
 
 function replicationWithIpAddress {
@@ -127,12 +176,10 @@ function testCreateRemote {
 	echo
 	echo "===== Test 1: C1:ipv4 only, C2 default: 127.0.0.1 address works."
 	setIpFamily "C1" "ipv4" "true"
-	sleep 10
 	replicationWithIpAddress "127.0.0.1"
 
 	echo
 	echo "===== Test 2: C1:ipv4 only, C2 default: [::1] address fails."
-	sleep 5
 	createRemoteClusterReference "C1" "C2" "[::1]"
 	remote=$(getRemoteCluster "C1" "C2")
 	if (($remote > 0)); then
@@ -150,7 +197,6 @@ function testCreateRemoteC2FQDN {
 	echo
 	echo "===== Test 4: C1:ipv4 only, C2 ipv6 only: both address families fail."
 	setIpFamily "C2" "ipv6" "true"
-	sleep 10
 	createRemoteClusterReference "C1" "C2" "127.0.0.1"
 	remote=$(getRemoteCluster "C1" "C2")
 	if (($remote > 0)); then
@@ -178,7 +224,6 @@ function testCreateRemoteC1AndC2FQDN {
 	echo "===== Test 5: C1:ipv6 only, C2:ipv6 only: localhost works."
 	setIpFamily "C1" "ipv6" "true"
 	setIpFamily "C2" "ipv6" "true"
-	sleep 10
 	replicationWithIpAddress "localhost"
 
 	# restore to default
@@ -214,6 +259,60 @@ function changeRemoteClusterReference {
 	eval "$curlCmd"
 }
 
+# Polls checkReplicationInfos until searchStr appears or maxWaitSec elapses.
+# Prints the final replicationInfos JSON and returns 0 if found, 1 on timeout.
+function waitForReplicationInfosContaining {
+	local clusterName=$1
+	local searchStr="$2"
+	local maxWaitSec=${3:-30}
+	local intervalSec=5
+	local elapsed=0
+	local result
+
+	while (( elapsed < maxWaitSec )); do
+		result=$(checkReplicationInfos "$clusterName")
+		local count
+		count=$(echo "$result" | grep -c "$searchStr")
+		if (( count > 0 )); then
+			echo "$result"
+			return 0
+		fi
+		sleep $intervalSec
+		elapsed=$(( elapsed + intervalSec ))
+	done
+	echo "$result"
+	return 1
+}
+
+# Polls checkReplicationInfos until searchStr is ABSENT or maxWaitSec elapses.
+# Used after a state change that should clear an error from rep_status (e.g.
+# returning a remote cluster from ipv6-only back to dual-stack). The agent's
+# periodic refresh (~15s) plus the RC status ticker (~15s) mean a stale
+# "User intervention may be required" error can linger for up to ~30s after
+# the underlying connectivity is restored.
+function waitForReplicationInfosNotContaining {
+	local clusterName=$1
+	local searchStr="$2"
+	local maxWaitSec=${3:-40}
+	local intervalSec=5
+	local elapsed=0
+	local result
+
+	while (( elapsed < maxWaitSec )); do
+		result=$(checkReplicationInfos "$clusterName")
+		local count
+		count=$(echo "$result" | grep -c "$searchStr")
+		if (( count == 0 )); then
+			echo "$result"
+			return 0
+		fi
+		sleep $intervalSec
+		elapsed=$(( elapsed + intervalSec ))
+	done
+	echo "$result"
+	return 1
+}
+
 function testChangeRemoteC1FQDN {
 	echo "==============================================================="
 	echo "====== Change Remote Cluster Reference Test C1 with FQDN ======"
@@ -227,7 +326,6 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "===== Test 1: C1:ipv4 only, C2 default: changing remote to ipv6 address fails."
 	setIpFamily "C1" "ipv4" "true"
-	sleep 30
 	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
 	checkForCrash "$result" "changeRemoteClusterReference C1 C2"
 	count=$(echo $result | grep -c "The cluster is ipv4 only")
@@ -239,7 +337,6 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "===== Test 2: C1:ipv6 only, C2 default: existing remote with ipv4 address will be in trouble."
 	setIpFamily "C1" "ipv6" "true"
-	sleep 20
 	result=$(getRemoteClusters "C1")
 	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_ERROR")
@@ -247,7 +344,10 @@ function testChangeRemoteC1FQDN {
 		echo "Change C1 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
 		exit 1
 	fi
-	result=$(checkReplicationInfos "C1")
+	# "User intervention may be required" is added by the RC status ticker (15s interval), not by
+	# validatePipeline directly. getRemoteClusters above already set ipFamilyError=true on the agent,
+	# so poll until the ticker fires and checkAndPublishRCError writes the error into rep_status.
+	result=$(waitForReplicationInfosContaining "C1" "User intervention may be required" 30)
 	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
@@ -263,7 +363,6 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "===== Test 3: C1:ipv4 (only=false), C2 default: existing remote with ipv4 address will work."
 	setIpFamily "C1" "ipv4" "false"
-	sleep 20
 	result=$(getRemoteClusters "C1")
 	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_OK")
@@ -282,8 +381,10 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "===== Test 6: C1 ipv6 only, C2 default: The previous ipv4 address will fail"
 	setIpFamily "C1" "ipv6" "true"
-	sleep 20
-	result=$(checkReplicationInfos "C1")
+	# No prior getRemoteClusters call here, so ipFamilyError is set by the agent's own periodic
+	# refresh (15s interval). Then the RC status ticker (also 15s) must fire after that.
+	# Use a 40s timeout to cover two ticker cycles.
+	result=$(waitForReplicationInfosContaining "C1" "User intervention may be required" 40)
 	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
@@ -331,8 +432,6 @@ function testChangeRemoteC1FQDN {
 	echo
 	echo "====== restore to default and cleanup."
 	setIpFamily "C1" "ipv4" "false"
-	setIpFamily "C2" "ipv4" "false"
-	sleep 10
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 
@@ -354,7 +453,6 @@ function testChangeRemoteC2FQDN {
 	echo
 	echo "===== Test 4: C1 ipv4 (only=false), C2:ipv6 only: existing remote with ipv4 address will not be able to connect."
 	setIpFamily "C2" "ipv6" "true"
-	sleep 30
 	result=$(getRemoteClusters "C1")
 	checkForCrash "$result" "getRemoteClusters C1"
 	# This test does something interesting where C2 has the hostname set up to be an FQDN
@@ -369,7 +467,9 @@ function testChangeRemoteC2FQDN {
 		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR or RC_DEGRADED but it returned $result"
 		exit 1
 	fi
-	result=$(checkReplicationInfos "C1")
+	# getRemoteClusters above set ipFamilyError=true on the agent; poll until the RC status
+	# ticker fires (15s interval) and checkAndPublishRCError writes "User intervention" into rep_status.
+	result=$(waitForReplicationInfosContaining "C1" "User intervention may be required" 30)
 	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count == 0)); then
@@ -380,8 +480,10 @@ function testChangeRemoteC2FQDN {
 	echo
 	echo "===== Test 5: C1 ipv4 (only=false), Change C2 to default. The previous erroring replication should work now."
 	setIpFamily "C2" "ipv4" "false"
-	sleep 20
-	result=$(checkReplicationInfos "C1")
+	# C1's remote cluster agent must re-probe C2 (~15s) and the RC status ticker
+	# (~15s) must then overwrite the stale "User intervention" error in rep_status.
+	# Poll for up to 40s for the error to disappear.
+	result=$(waitForReplicationInfosNotContaining "C1" "User intervention may be required" 40)
 	checkForCrash "$result" "checkReplicationInfos C1"
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count != 0)); then
