@@ -1461,9 +1461,23 @@ function writeBinaryDocument {
 		--data-urlencode value=$binaryData
 }
 
+GOXDCR_TOOLS_VENV_DIR="${GOXDCR_TOOLS_VENV_DIR:-$HOME/.cache/goxdcr-testscripts-venv}"
+GOXDCR_TOOLS_VENV_PY=""
+
 function pipCheckCouchbase {
-	if (($(pip3 list 2>&1 | grep -c couchbase) == 0)); then
-		pip3 install couchbase
+	if [[ ! -x "$GOXDCR_TOOLS_VENV_DIR/bin/python3" ]]; then
+		python3 -m venv "$GOXDCR_TOOLS_VENV_DIR" || {
+			echo "failed to create venv at $GOXDCR_TOOLS_VENV_DIR" >&2
+			return 1
+		}
+	fi
+	GOXDCR_TOOLS_VENV_PY="$GOXDCR_TOOLS_VENV_DIR/bin/python3"
+
+	if ! "$GOXDCR_TOOLS_VENV_PY" -c "import couchbase" 2>/dev/null; then
+		"$GOXDCR_TOOLS_VENV_DIR/bin/pip3" install --quiet couchbase || {
+			echo "failed to install couchbase SDK into $GOXDCR_TOOLS_VENV_DIR" >&2
+			return 1
+		}
 	fi
 }
 
@@ -1476,7 +1490,7 @@ function lockDocument {
 
 	pipCheckCouchbase
 
-	python3 <<END
+	"$GOXDCR_TOOLS_VENV_PY" <<END
 
 from couchbase.auth import PasswordAuthenticator
 from couchbase.bucket import Bucket
@@ -4314,7 +4328,7 @@ function insertNXattrs {
 
 	pipCheckCouchbase
 
-	python3 <<END
+	"$GOXDCR_TOOLS_VENV_PY" <<END
 
 from couchbase.auth import PasswordAuthenticator
 from couchbase.bucket import Bucket
@@ -4456,7 +4470,7 @@ function insertTxnXattr {
 
 	pipCheckCouchbase
 
-	python3 <<END
+	"$GOXDCR_TOOLS_VENV_PY" <<END
 
 from couchbase.auth import PasswordAuthenticator
 from couchbase.bucket import Bucket
