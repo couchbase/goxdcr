@@ -157,7 +157,7 @@ function testUpdateReplicationSettingsShouldFail {
 
 # Common error messages
 EMPTY_FILTER_ERROR="filterExpression is mandatory when either filterDeletionsWithExpression or filterExpirationsWithExpression is true"
-KEY_ONLY_FILTER_ERROR="filterExpression should be referencing only the document key when either filterDeletionsWithExpression or filterExpirationsWithExpression is true"
+KEY_ONLY_FILTER_ERROR="only key-filter expression is allowed"
 
 # ============================================================================
 # Consolidated Negative Test Functions (parameterized for deletion/expiration)
