@@ -2164,6 +2164,17 @@ func (agent *RemoteClusterAgent) executeBgSyncTask(updateMetaKv, shouldCallCb, s
 		}
 		return
 	default:
+		var err error
+		// Register the synchronous notification first so it runs LAST (LIFO defer order),
+		// guaranteeing that ReenableRefresh and clearStagedReference complete before the
+		// caller of UpdateReferenceFrom is unblocked. Otherwise a follow-up Refresh() in
+		// the same caller can race and observe temporaryDisableRefresh=true.
+		if synchronous {
+			defer func() {
+				errCh <- err
+				close(errCh)
+			}()
+		}
 		defer agent.clearStagedReference()
 		if rctx == nil {
 			defer agent.ReenableRefresh()
@@ -2188,7 +2199,6 @@ func (agent *RemoteClusterAgent) executeBgSyncTask(updateMetaKv, shouldCallCb, s
 		 * permanently by loading it to agent.reference.
 		 * If unable to successfully operate on metakv, then discard the staged changes.
 		 */
-		var err error
 		if updateMetaKv {
 			err = agent.writeToMetaKV()
 			if err == nil {
@@ -2205,13 +2215,9 @@ func (agent *RemoteClusterAgent) executeBgSyncTask(updateMetaKv, shouldCallCb, s
 				agent.callMetadataChangeCb()
 			}
 		}
-		if synchronous {
-			errCh <- err
-			close(errCh)
-		} else {
-			// Not sending err means that this was called asynchronously
-			// An asynchronous call is possible when the service starts up and the reference
-			// is loaded from the metakv. In this case, enable refresh path
+		if !synchronous {
+			// Asynchronous call (e.g. service startup loading from metakv): enable refresh path.
+			// In the synchronous case, Start() flips initDone after UpdateReferenceFrom returns.
 			atomic.StoreUint32(&agent.initDone, 1)
 		}
 		return
