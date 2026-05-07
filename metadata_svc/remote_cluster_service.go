@@ -1371,10 +1371,7 @@ func findHeartbeatUnhealthyNodes(heartbeatMap map[string]base.HeartbeatStatus) (
 	unhealthyTargets := make([]string, 0)
 	unhealthyTargetStatuses := make([]base.HeartbeatStatus, 0)
 	for targetNode, heartbeatStatus := range heartbeatMap {
-		if heartbeatStatus == base.HeartbeatInvalid || heartbeatStatus == base.HeartbeatWarmup {
-			continue
-		}
-		if heartbeatStatus != base.HeartbeatHealthy {
+		if heartbeatStatus == base.HeartbeatUnhealthy {
 			unhealthyTargets = append(unhealthyTargets, targetNode)
 			unhealthyTargetStatuses = append(unhealthyTargetStatuses, heartbeatStatus)
 		}
@@ -4655,50 +4652,12 @@ func (agent *RemoteClusterAgent) sendHeartbeat(hbMetadata *metadata.HeartbeatMet
 }
 
 func (agent *RemoteClusterAgent) generateHeartbeatMetadata(clonedRef *metadata.RemoteClusterReference) (*metadata.HeartbeatMetadata, error) {
-	var err error
 	if !agent.InitDone() {
 		// Don't send heartbeat
-		err = fmt.Errorf("RemoteClusterAgent.InitDone() for cluster %v returned false", agent.reference.Uuid())
-		return nil, err
+		return nil, fmt.Errorf("RemoteClusterAgent.InitDone() for cluster %v returned false", agent.reference.Uuid())
 	}
 
-	var sourceClusterUUID, sourceClusterName string
-
-	if sourceClusterUUID, err = agent.topologySvc.MyClusterUUID(); err != nil {
-		return nil, err
-	}
-	if sourceClusterName, err = agent.topologySvc.MyClusterName(); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(sourceClusterName) == "" {
-		sourceClusterName = base.UnknownSourceClusterName
-	}
-
-	specs, err := agent.specsReader.AllReplicationSpecsWithRemote(clonedRef)
-	if err != nil {
-		return nil, err
-	}
-
-	nodesList, err := agent.topologySvc.PeerNodesAdminAddrs()
-	if err != nil {
-		return nil, err
-	}
-
-	srcStr, err := agent.topologySvc.MyHostAddr()
-	if err != nil {
-		return nil, err
-	}
-	nodesList = append(nodesList, srcStr) // Add local node back amongst the peers
-
-	hbMetadata := &metadata.HeartbeatMetadata{
-		SourceClusterUUID: sourceClusterUUID,
-		SourceClusterName: sourceClusterName,
-		SourceSpecsList:   specs,
-		NodesList:         nodesList,
-		TTL:               time.Duration(base.SrcHeartbeatExpiryFactor) * base.SrcHeartbeatMaxInterval(),
-	}
-
-	return hbMetadata, nil
+	return PrepareHeartbeatPayload(clonedRef, agent.topologySvc, agent.specsReader)
 }
 
 func (agent *RemoteClusterAgent) GetConnectivityStatus() metadata.ConnectivityStatus {

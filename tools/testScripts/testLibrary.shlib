@@ -2862,6 +2862,20 @@ function validatePrometheusSourceRunningReplCnt {
 	fi
 }
 
+# getHbRecvBytesOnTarget <clusterName>
+# Returns the current cumulative xdcr_source_cluster_heartbeat_recv_bytes value from
+# Prometheus on the given node. Returns 0 if the metric is not yet present.
+function getHbRecvBytesOnTarget {
+	local node=$1
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -s -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/_prometheusMetrics)
+	local value
+	value=$(echo "$prometheusOut" | grep "xdcr_source_cluster_heartbeat_recv_bytes" | grep -v "HELP" | grep -v "TYPE" | awk '{print $NF}' | head -1)
+	value=$(echo "${value:-0}" | sed 's/[^0-9]//g')
+	echo "${value:-0}"
+}
+
 # Validates that the result is 0
 function validatePrometheusStatsIs0 {
 	local node=$1

@@ -2643,18 +2643,18 @@ func (c ConflictManagerAction) String() string {
 }
 
 // So on pool details and bucket details "status":
-// "healthy" currently means node recently sent heartbeat. It indicates that distributed erlang facility works between current
 //
+//	"healthy" currently means node recently sent heartbeat. It indicates that distributed erlang facility works between current
 //	node and node which status is shown. And that erlang functions reasonably well there.
 //	If there are buckets defined it also implies that all buckets are ready state. I.e. available for data ops.
 //
-// "status": "unhealthy" means that we haven't seen heartbeats from this node. Either node is down or it's sufficiently
-//
+//	"unhealthy" means that we haven't seen heartbeats from this node. Either node is down or it's sufficiently
 //	unhealthy to be unable to send heartbeats. Or network is down.
 //
-// "status": "warmup" means that there are bucket(s) on this node that are either being warmed up or otherwise unavailable.
+//	"warmup" means that there are bucket(s) on this node that are either being warmed up or otherwise unavailable.
 //
-//	Internally we're doing gen_server call with timeout of 5 seconds to find out if per-bucket memcached can respond and if it thinks that bucket is warmed up. If call either times out or ns_memcached is dead (not created yet or recently crashed) or if ns_memcached is fine but bucket is warming up, then we'll mark entire node as "warmup".
+// Internally we're doing gen_server call with timeout of 5 seconds to find out if per-bucket memcached can respond and if it thinks that bucket is warmed up.
+// If call either times out or ns_memcached is dead (not created yet or recently crashed) or if ns_memcached is fine but bucket is warming up, then we'll mark entire node as "warmup".
 type HeartbeatStatus int
 
 const (

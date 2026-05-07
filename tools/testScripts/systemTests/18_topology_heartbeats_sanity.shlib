@@ -1,0 +1,145 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+# C1P is defined so addNodesIn/startEjectNode work in steps 5 and 7.
+# setupCluster skips nodes in CLUSTER_DEPENDENCY_MAP, so the initial state
+# is two single-node clusters: C1 (source) and C2 (target).
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Heartbeat timing constants.
+# SrcHeartbeatMinInterval=10s + SrcHeartbeatMaxIntervalFactor=1 → MaxInterval=10s.
+# Heartbeats arrive every ~10s. "Within 2 heartbeats" = 30s polling timeout (with buffer).
+HB_INTERVAL_SECS=10
+HB_WAIT_2_PERIODS_SECS=30
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running Topology Heartbeats sanity test"
+	echo "============================================================================"
+
+	trap killAllBgJobs EXIT
+
+	# Set up two single-node clusters and remote cluster reference C1 -> C2
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+
+	# Reduce heartbeat interval for fast testing; both settings in one call to
+	# trigger only one XDCR process restart.
+	setInternalSettings "C1" "SrcHeartbeatMinInterval=10" "SrcHeartbeatMaxIntervalFactor=1"
+	sleep 5
+	checkInternalSetting "C1" "SrcHeartbeatMinInterval" "$HB_INTERVAL_SECS"
+	checkInternalSetting "C1" "SrcHeartbeatMaxIntervalFactor" "1"
+
+	echo -e "\nTest 1: Verify xdcr_source_cluster_heartbeat_recv_bytes increments on Target"
+	echo "Waiting for first heartbeat to arrive on C2..."
+	local v0=0
+	local maxInitialWait=$((HB_INTERVAL_SECS * 4))
+	local elapsed=0
+	while ((elapsed < maxInitialWait)) && [[ "$v0" == "0" ]]; do
+		sleep 5
+		elapsed=$((elapsed + 5))
+		v0=$(getHbRecvBytesOnTarget "C2")
+	done
+	if [[ "$v0" == "0" ]]; then
+		echo "FAIL: No heartbeat recv_bytes on C2 after ${maxInitialWait}s"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	echo "1st heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v0"
+
+	sleep $((HB_INTERVAL_SECS + 5))
+	local v1
+	v1=$(getHbRecvBytesOnTarget "C2")
+	if ((v1 <= v0)); then
+		echo "FAIL: recv_bytes did not increase after 2nd heartbeat: v0=$v0 v1=$v1"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	echo "2nd heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v1"
+
+	sleep $((HB_INTERVAL_SECS + 5))
+	local v2
+	v2=$(getHbRecvBytesOnTarget "C2")
+	if ((v2 <= v1)); then
+		echo "FAIL: recv_bytes did not increase after 3rd heartbeat: v1=$v1 v2=$v2"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	echo "3rd heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v2"
+	echo ">>> PASS: xdcr_source_cluster_heartbeat_recv_bytes increased over 3 heartbeats"
+
+	echo -e "\nTest 2: Verify Source nodes are known to Target"
+	validatePrometheusSourceNodesCnt "C2" 1
+	if (($? != 0)); then
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+	echo ">>> PASS: Source cluster visible on C2 via xdcr_number_of_source_nodes_total"
+
+	echo -e "\nTest 3: Verify replication is known to Target"
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	sleep $HB_WAIT_2_PERIODS_SECS
+	validatePrometheusSourceRunningReplCnt "C2" 1
+	echo ">>> PASS: Replication visible on C2 via xdcr_number_of_source_replications_total"
+
+	echo -e "\nTest 4: Verify new Source node is known to Target"
+	addNodesIn
+	startRebalancing "C1"
+	sleep $HB_WAIT_2_PERIODS_SECS
+	validatePrometheusSourceNodesCnt "C2" 2
+	echo ">>> PASS: 2 source nodes visible on C2 via xdcr_number_of_source_nodes_total"
+
+	echo -e "\nTest 5: Verify replication deletion is known to Target"
+	cleanupBucketReplications
+	sleep $HB_WAIT_2_PERIODS_SECS
+	validatePrometheusSourceRunningReplCnt "C2" 0
+	echo ">>> PASS: Replication removed visible on C2 via xdcr_number_of_source_replications_total"
+
+	echo -e "\nTest 6: Verify node removal is known to Target"
+	startEjectNode "C1P" "C1"
+	sleep $HB_WAIT_2_PERIODS_SECS
+	validatePrometheusSourceNodesCnt "C2" 1
+	echo ">>> PASS: Single source node visible on C2 via xdcr_number_of_source_nodes_total after node removal"
+
+	echo -e "\nTest 7: Verify non-KV node is NOT counted by Target"
+	addOneNodeIn "C1P" "C1" "index"
+	startRebalancing "C1"
+	sleep $HB_WAIT_2_PERIODS_SECS
+	validatePrometheusSourceNodesCnt "C2" 1
+	echo ">>> PASS: Non-KV source node is NOT counted on C2 via xdcr_number_of_source_nodes_total"
+
+	grepForPanics
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	restoreClusterBack "C1"
+}

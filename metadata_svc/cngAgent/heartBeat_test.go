@@ -365,6 +365,7 @@ func TestHeartBeatManager_GenerateHeartbeatMetadata_EmptyClusterName(t *testing.
 	topologyMock.On("MyClusterUUID").Return(testSourceClusterUUID, nil).Once()
 	topologyMock.On("MyClusterName").Return("   ", nil).Once() // Empty name with spaces
 	topologyMock.On("PeerNodesAdminAddrs").Return([]string{"peer1:18091", "peer2:18091"}, nil).Once()
+	topologyMock.On("IsKVNode").Return(true, nil)
 	topologyMock.On("MyHostAddr").Return(testHostAddr, nil).Once()
 
 	// Mock specs reader
@@ -442,6 +443,7 @@ func TestHeartBeatManager_GenerateHeartbeatMetadata_MyHostAddrError(t *testing.T
 	topologyMock.On("MyClusterUUID").Return(testSourceClusterUUID, nil).Once()
 	topologyMock.On("MyClusterName").Return(testSourceClusterName, nil).Once()
 	topologyMock.On("PeerNodesAdminAddrs").Return([]string{"peer1:18091"}, nil).Once()
+	topologyMock.On("IsKVNode").Return(true, nil)
 	topologyMock.On("MyHostAddr").Return("", fmt.Errorf("host addr error")).Once()
 
 	// Mock specs reader
@@ -485,6 +487,7 @@ func TestHeartBeatManager_GenerateHeartbeatMetadata_Success(t *testing.T) {
 	topologyMock.On("MyClusterUUID").Return(testSourceClusterUUID, nil).Once()
 	topologyMock.On("MyClusterName").Return(testSourceClusterName, nil).Once()
 	topologyMock.On("PeerNodesAdminAddrs").Return([]string{"peer1:18091", "peer2:18091"}, nil).Once()
+	topologyMock.On("IsKVNode").Return(true, nil)
 	topologyMock.On("MyHostAddr").Return(testHostAddr, nil).Once()
 
 	// Mock specs reader
@@ -500,6 +503,60 @@ func TestHeartBeatManager_GenerateHeartbeatMetadata_Success(t *testing.T) {
 	assert.Equal(specsTypeCasted, metadata.SourceSpecsList)
 	assert.Len(metadata.NodesList, 3) // 2 peers + 1 local
 	assert.Contains(metadata.NodesList, testHostAddr)
+	assert.Contains(metadata.NodesList, "peer1:18091")
+	assert.Contains(metadata.NodesList, "peer2:18091")
+
+	expectedTTL := time.Duration(base.SrcHeartbeatExpiryFactor) * base.SrcHeartbeatMaxInterval()
+	assert.Equal(expectedTTL, metadata.TTL)
+
+	topologyMock.AssertExpectations(t)
+	specsReaderMock.AssertExpectations(t)
+}
+
+func TestHeartBeatManager_GenerateHeartbeatMetadata_Success_WithNonKVOrchestrator(t *testing.T) {
+	assert := assert.New(t)
+	hbManager, topologyMock, specsReaderMock, _ := createTestHeartbeatManager()
+	ref := createTestRemoteClusterReferenceWithConnStr()
+
+	// Create test specs
+	spec1 := &metadata.ReplicationSpecification{}
+	spec1.Id = "spec1"
+	spec2 := &metadata.ReplicationSpecification{}
+	spec2.Id = "spec2"
+	specs := []*metadata.ReplicationSpecification{spec1, spec2}
+	specsTypeCasted := metadata.ReplSpecList(specs)
+
+	// Mock original heartbeat settings
+	originalMinInterval := base.SrcHeartbeatMinInterval
+	originalMaxIntervalFactor := base.SrcHeartbeatMaxIntervalFactor
+	defer func() {
+		base.SrcHeartbeatMinInterval = originalMinInterval
+		base.SrcHeartbeatMaxIntervalFactor = originalMaxIntervalFactor
+	}()
+
+	// Set test values
+	base.SrcHeartbeatMinInterval = 1 * time.Minute
+	base.SrcHeartbeatMaxIntervalFactor = 5
+
+	// Mock topology service calls
+	topologyMock.On("MyClusterUUID").Return(testSourceClusterUUID, nil).Once()
+	topologyMock.On("MyClusterName").Return(testSourceClusterName, nil).Once()
+	topologyMock.On("PeerNodesAdminAddrs").Return([]string{"peer1:18091", "peer2:18091"}, nil).Once()
+	topologyMock.On("IsKVNode").Return(false, nil)
+
+	// Mock specs reader
+	specsReaderMock.On("AllReplicationSpecsWithRemote", ref).Return(specs, nil).Once()
+
+	metadata, err := hbManager.generateHeartbeatMetadata(ref)
+	assert.NoError(err)
+	assert.NotNil(metadata)
+
+	// Verify metadata fields
+	assert.Equal(testSourceClusterUUID, metadata.SourceClusterUUID)
+	assert.Equal(testSourceClusterName, metadata.SourceClusterName)
+	assert.Equal(specsTypeCasted, metadata.SourceSpecsList)
+	assert.Len(metadata.NodesList, 2) // only the 2 peers, since orchestrator node is non-KV
+	assert.NotContains(metadata.NodesList, testHostAddr)
 	assert.Contains(metadata.NodesList, "peer1:18091")
 	assert.Contains(metadata.NodesList, "peer2:18091")
 
@@ -806,6 +863,7 @@ func TestHeartBeatManager_FullHeartbeatFlow_Integration(t *testing.T) {
 	topologyMock.On("MyClusterUUID").Return(testSourceClusterUUID, nil).Once()
 	topologyMock.On("MyClusterName").Return(testSourceClusterName, nil).Once()
 	topologyMock.On("PeerNodesAdminAddrs").Return([]string{"peer1:18091"}, nil).Once()
+	topologyMock.On("IsKVNode").Return(true, nil)
 	topologyMock.On("MyHostAddr").Return(testHostAddr, nil).Times(2) // Once for metadata generation, once for request composition
 
 	specsReaderMock.On("AllReplicationSpecsWithRemote", ref).Return(specs, nil).Once()

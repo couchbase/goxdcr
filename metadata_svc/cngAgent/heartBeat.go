@@ -2,13 +2,13 @@ package cngAgent
 
 import (
 	"context"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/metadata_svc"
 	"github.com/couchbase/goxdcr/v8/peerToPeer"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"google.golang.org/grpc/codes"
@@ -64,45 +64,7 @@ func (hbt *heartBeatManager) heartbeatPreCheck() bool {
 
 // generateHeartbeatMetadata generates the heartbeat metadata for the remote cluster.
 func (hbt *heartBeatManager) generateHeartbeatMetadata(clonedRef *metadata.RemoteClusterReference) (*metadata.HeartbeatMetadata, error) {
-	var err error
-	var sourceClusterUUID, sourceClusterName string
-
-	if sourceClusterUUID, err = hbt.services.topologySvc.MyClusterUUID(); err != nil {
-		return nil, err
-	}
-	if sourceClusterName, err = hbt.services.topologySvc.MyClusterName(); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(sourceClusterName) == "" {
-		sourceClusterName = base.UnknownSourceClusterName
-	}
-
-	specs, err := hbt.specsReader.AllReplicationSpecsWithRemote(clonedRef)
-	if err != nil {
-		return nil, err
-	}
-
-	nodesList, err := hbt.services.topologySvc.PeerNodesAdminAddrs()
-	if err != nil {
-		return nil, err
-	}
-
-	srcStr, err := hbt.services.topologySvc.MyHostAddr()
-	if err != nil {
-		return nil, err
-	}
-	// Add local node back amongst the peers
-	nodesList = append(nodesList, srcStr)
-
-	hbMetadata := &metadata.HeartbeatMetadata{
-		SourceClusterUUID: sourceClusterUUID,
-		SourceClusterName: sourceClusterName,
-		SourceSpecsList:   specs,
-		NodesList:         nodesList,
-		TTL:               time.Duration(base.SrcHeartbeatExpiryFactor) * base.SrcHeartbeatMaxInterval(),
-	}
-
-	return hbMetadata, nil
+	return metadata_svc.PrepareHeartbeatPayload(clonedRef, hbt.services.topologySvc, hbt.specsReader)
 }
 
 // composeHeartbeatRequest composes the heartbeat request for CNG.
