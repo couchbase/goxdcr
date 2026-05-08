@@ -36,7 +36,20 @@ if (($? != 0)); then
 fi
 
 testCaseNumber="${1:-}"
+mobileImportSimDir="${2:-}"
+mobileImportSimBin=""
 testCasesDirectory="miscTests"
+
+if [[ "$mobileImportSimDir" != "" ]]; then
+	mobileImportSimBin="$mobileImportSimDir/mobileImportSim"
+	if [[ ! -f "$mobileImportSimBin" ]]; then
+		echo "ERROR: cannot find mobileImportSim binary in $mobileImportSimBin. Did you run compile?"
+		exit 1
+	fi
+fi
+
+# Export mobileImportSimBin so it's available to test cases
+export mobileImportSimBin
 
 if [[ -z "$testCaseNumber" ]]; then
 	for testcase in $(ls $testCasesDirectory); do

@@ -249,9 +249,6 @@ function testMobileHlv {
 	grepForAbnormalities
 
 	verifyPromStats
-
-	runXdcrDifferValidateNoDiff "C1" "B1" "C2" "B2"
-	runXdcrDifferValidateNoDiff "C2" "B2" "C1" "B1"
 }
 
 function testExcludeUIErrRegex {

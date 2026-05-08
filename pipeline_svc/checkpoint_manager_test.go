@@ -80,7 +80,7 @@ func TestCombineFailoverlogs(t *testing.T) {
 	checkMap[nodeName][2] = badDoc
 	checkMap[nodeName][3] = goodDoc // vb3 isn't included
 
-	results := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{checkMap, nil}, failoverLogMap)
+	results := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{checkMap, nil}, failoverLogMap, log.NewLogger("", nil))
 	result := results[0]
 	assert.Len(result, 3)
 
@@ -112,7 +112,7 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 		}
 	}
 
-	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbCkptsMap, nil}, srcFailoverLogs)
+	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbCkptsMap, nil}, srcFailoverLogs, log.NewLogger("", nil))
 	filteredMap := filteredMaps[0]
 	for _, ckptDoc := range filteredMap {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
@@ -122,7 +122,7 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 	assert.Nil(err)
 	tgtFailoverLogs := make(map[uint16]*mcc.FailoverLog)
 	assert.Nil(json.Unmarshal(tgtFailoverLogsSlice, &tgtFailoverLogs))
-	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{filteredMap, nil}, tgtFailoverLogs)
+	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{filteredMap, nil}, tgtFailoverLogs, log.NewLogger("", nil))
 	filteredMapTgt := filteredMapTgts[0]
 	for _, ckptDoc := range filteredMapTgt {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
