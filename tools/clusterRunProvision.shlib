@@ -3330,7 +3330,6 @@ function listInternalSettings {
 	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
-	importProvisionedConfig
 
 	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 	if [[ -z "$port" ]]; then
@@ -3380,7 +3379,6 @@ function setInternalSettings {
 	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
-	importProvisionedConfig
 
 	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 
