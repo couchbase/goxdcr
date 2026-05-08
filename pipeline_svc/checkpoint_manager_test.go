@@ -95,7 +95,7 @@ func TestCombineFailoverlogs(t *testing.T) {
 	checkMap[nodeName][2] = badDoc
 	checkMap[nodeName][3] = goodDoc // vb3 isn't included
 
-	results := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{checkMap, nil}, failoverLogMap)
+	results := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{checkMap, nil}, failoverLogMap, log.NewLogger("", nil))
 	result := results[0]
 	assert.Len(result, 3)
 
@@ -103,7 +103,7 @@ func TestCombineFailoverlogs(t *testing.T) {
 	assert.Len(result[1].Checkpoint_records, 2)
 	assert.Len(result[2].Checkpoint_records, 1)
 
-	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash")
+	hashFilteredResults := filterCkptsBasedOnPipelineReinitHash(results, "goodHash", nil)
 	hashFilteredResult := hashFilteredResults[0]
 	assert.Len(hashFilteredResult, len(result))
 
@@ -135,7 +135,7 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 		}
 	}
 
-	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbCkptsMap, nil}, srcFailoverLogs)
+	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbCkptsMap, nil}, srcFailoverLogs, log.NewLogger("", nil))
 	filteredMap := filteredMaps[0]
 	for _, ckptDoc := range filteredMap {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
@@ -2447,7 +2447,7 @@ func TestFilterCkptsWithoutValidBrokenmaps_TwoPeerSHAsKeepsTraditionalRecord(t *
 	}
 
 	// Step 7: Call the function that has the bug
-	resultingMaps, returnedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, []*metadata.CollectionNsMappingsDoc{peerDoc})
+	resultingMaps, returnedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, []*metadata.CollectionNsMappingsDoc{peerDoc}, log.NewLogger("", nil))
 
 	// Step 8: Verify the bug exists (this is what we expect to fail on master)
 	// BUG: On master, all records are dropped because LoadBrokenMapping rejects them when len(combinedShaMap) > 1
