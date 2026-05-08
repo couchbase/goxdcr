@@ -1556,9 +1556,11 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	ckmgr.logger.Infof("StartSeqnoGetter %v is started to do _pre_prelicate for vbs %v\n", getter_id, listOfVbs)
 	defer waitGrp.Done()
 
+	// ignoredMap accumulates per-vbno reasons for skipped checkpoint records across this getter's VBs, used for a single diagnostic log line at the end.
+	ignoredMap := map[uint16]map[string]struct{}{}
 	for _, vbno := range listOfVbs {
 		seqnoMax := ckmgr.getMaxSeqno(vbno)
-		vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCtx)
+		vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax, preReplicateCtx, ignoredMap)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
@@ -1595,6 +1597,9 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			}
 		}
 	}
+	if len(ignoredMap) > 0 {
+		ckmgr.logger.Infof("StartSeqnoGetter %v skipped ckpt records: %v", getter_id, ignoredMap)
+	}
 }
 
 func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx *preReplicateCtx) error {
@@ -1627,13 +1632,13 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 		for _, tgtVBno := range ckmgr.getMyTgtVBs() {
 			globalTargetTimestamp[tgtVBno] = service_def.NewEmptyRemoteVBReplicationStatus(tgtVBno)
 		}
-		_, err := ckmgr.populateGlobalTargetVBOpaque(vbno, globalTargetTimestamp, ctx)
+		_, err := ckmgr.populateGlobalTargetVBOpaque(vbno, globalTargetTimestamp, ctx, nil)
 		if err != nil {
 			ckmgr.logger.Errorf("populateGlobalTargetVBOpaque for vb %v had err %v", vbno, err)
 			return err
 		}
 	} else {
-		_, err := ckmgr.populateTargetVBOpaque(vbno, service_def.NewEmptyRemoteVBReplicationStatus(vbno), ctx)
+		_, err := ckmgr.populateTargetVBOpaque(vbno, service_def.NewEmptyRemoteVBReplicationStatus(vbno), ctx, nil)
 		if err != nil {
 			ckmgr.logger.Errorf("populateTargetVBOpaque for vb %v had err %v", vbno, err)
 			return err
@@ -1642,7 +1647,7 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16, ctx 
 	return nil
 }
 
-func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bMatch bool, err error) {
+func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx, ignoredMap map[uint16]map[string]struct{}) (bMatch bool, err error) {
 	var trackingCtx *utilities.Context
 	if ctx != nil {
 		trackingCtx = ctx.dataTrackingCtx
@@ -1658,10 +1663,13 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaque(vbno uint16, targetTimest
 		ckmgr.logger.Debugf("Remote vbucket %v has a new opaque %v, update\n", current_remoteVBOpaque, vbno)
 		ckmgr.logger.Debugf("Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", targetTimestamp, vbno, bMatch)
 	}
+	if !bMatch {
+		recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("preRepl=%d@%v", targetTimestamp.VBSeqno, targetTimestamp.VBOpaque))
+	}
 	return
 }
 
-func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bool, error) {
+func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx, ignoredMap map[uint16]map[string]struct{}) (bool, error) {
 	var trackingCtx *utilities.Context
 	if ctx != nil {
 		trackingCtx = ctx.dataTrackingCtx
@@ -1672,6 +1680,7 @@ func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, global
 			ckmgr.logger.Errorf("Pre_replicate failed for %v. err=%v\n", vbno, err)
 			return false, err
 		} else if !bMatch {
+			recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("preRepl=%d:%d@%v", targetVbno, oneTargetTs.VBSeqno, oneTargetTs.VBOpaque))
 			return false, nil
 		}
 
@@ -1682,7 +1691,7 @@ func (ckmgr *CheckpointManager) populateGlobalTargetVBOpaque(vbno uint16, global
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *preReplicateCtx) (*base.VBTimestamp, base.VBCountMetric, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64, ctx *preReplicateCtx, ignoredMap map[uint16]map[string]struct{}) (*base.VBTimestamp, base.VBCountMetric, uint64, metadata.ManifestIdAndBrokenMapPair, map[uint16]metadata.ManifestIdAndBrokenMapPair, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -1711,6 +1720,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 			err := ckmgr.extractTargetTimestamp(vbno, &targetTimestamp, globalTargetTimestamp, ckpt_record)
 			if err != nil {
 				ckptRecord.lock.RUnlock()
+				recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("extTgtTs=%d", ckpt_record.Seqno))
 				continue
 			}
 		}
@@ -1724,6 +1734,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceDCPManifestId)
 			if err != nil {
 				ckmgr.logger.Debugf("Unable to find DCP source manifest ID %v, skipping a record...", sourceDCPManifestId)
+				recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("srcDCPMan=%d", sourceDCPManifestId))
 				continue
 			}
 		}
@@ -1731,6 +1742,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceBackfillManifestId)
 			if err != nil {
 				ckmgr.logger.Debugf("Unable to find BackfillMgr source manifest ID %v, skipping a record...", sourceBackfillManifestId)
+				recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("srcBfillMan=%d", sourceBackfillManifestId))
 				continue
 			}
 		}
@@ -1744,12 +1756,12 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 					vbno, currBackfillColIDs, ok, ckpt_record.BackfillCollections)
 				ckmgr.backfillCollectionsMtx.RUnlock()
 			}
-
+			recordIgnoredCkpt(ignoredMap, vbno, fmt.Sprintf("bfillCols=%v", ckpt_record.BackfillCollections))
 			continue
 		}
 
 		if targetTimestamp != nil || globalTargetTimestamp != nil {
-			bMatch, err := ckmgr.validateTargetTimestampForResume(vbno, targetTimestamp, globalTargetTimestamp, ctx)
+			bMatch, err := ckmgr.validateTargetTimestampForResume(vbno, targetTimestamp, globalTargetTimestamp, ctx, ignoredMap)
 			if err != nil {
 				return nil, nil, 0, metadata.ManifestIdAndBrokenMapPair{}, nil, err
 			}
@@ -1774,11 +1786,11 @@ POPULATE:
 	return vbts, vbStatMap, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalMappingPair, nil
 }
 
-func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx) (bool, error) {
+func (ckmgr *CheckpointManager) validateTargetTimestampForResume(vbno uint16, targetTimestamp *service_def.RemoteVBReplicationStatus, globalTs map[uint16]*service_def.RemoteVBReplicationStatus, ctx *preReplicateCtx, ignoredMap map[uint16]map[string]struct{}) (bool, error) {
 	if ckmgr.isVariableVBMode() {
-		return ckmgr.populateGlobalTargetVBOpaque(vbno, globalTs, ctx)
+		return ckmgr.populateGlobalTargetVBOpaque(vbno, globalTs, ctx, ignoredMap)
 	} else {
-		return ckmgr.populateTargetVBOpaque(vbno, targetTimestamp, ctx)
+		return ckmgr.populateTargetVBOpaque(vbno, targetTimestamp, ctx, ignoredMap)
 	}
 }
 
@@ -3064,7 +3076,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 		// If one VB starts rollback, it'll affect many other VBs in the same timeframe. Get a single instance of rollback context
 		rollbackPreReplicateCtx.globalCtx = ckmgr.getRollbackCtx()
 	}
-	vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackPreReplicateCtx)
+	vbts, vbStats, lastSuccessfulBackfillMgrSrcManifestId, traditionalPair, globalPairs, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno, rollbackPreReplicateCtx, nil)
 	defer ckmgr.trackDataTransfer(rollbackPreReplicateCtx.dataTrackingCtx)
 	if err != nil {
 		return nil, err
@@ -3321,7 +3333,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 	}
 
-	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbMainCkptsMap, nodeVbBackfillCkptsMap}, srcFailoverLogs)
+	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbMainCkptsMap, nodeVbBackfillCkptsMap}, srcFailoverLogs, ckmgr.logger)
 	vbsThatNeedTargetFailoverlogs := findVbsThatNeedTargetFailoverLogs(filteredMaps)
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
 		dataTransferCtx := utilities.NewDataTrackingCtx()
@@ -3352,7 +3364,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 
 	filteredMaps = filterCkptsBasedOnPipelineReinitHash(filteredMaps, ckmgr.pipelineReinitHash, ckmgr.logger)
 
-	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
+	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping, ckmgr.logger)
 	if err != nil {
 		// filteredMap may still be valid... continue
 		ckmgr.logger.Warnf("filterCkptsWithoutValidBrokenMaps had errors: %v", err)
@@ -3564,9 +3576,14 @@ func (ckmgr *CheckpointManager) checkSpecInternalID(combinedBrokenMappingSpecInt
 	return brokenMapInternalId, nil
 }
 
-func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, compressedBrokenMappings []*metadata.CollectionNsMappingsDoc) ([]metadata.VBsCkptsDocMap, metadata.ShaToCollectionNamespaceMap, error) {
+func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, compressedBrokenMappings []*metadata.CollectionNsMappingsDoc, logger *log.CommonLogger) ([]metadata.VBsCkptsDocMap, metadata.ShaToCollectionNamespaceMap, error) {
 	errMap := make(base.ErrorMap)
 	var errCnt int
+	// ignoredShas tracks per-pipeline (index 0=main, 1=backfill), per-vbno broken-mapping SHAs that could not be resolved and caused their checkpoint record to be dropped.
+	ignoredShas := [2]map[uint16]map[string]struct{}{
+		make(map[uint16]map[string]struct{}),
+		make(map[uint16]map[string]struct{}),
+	}
 	combinedShaMap := make(metadata.ShaToCollectionNamespaceMap)
 
 	for _, oneMap := range compressedBrokenMappings {
@@ -3581,8 +3598,8 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 		}
 	}
 
-	for _, filteredMap := range filteredMaps {
-		for _, ckptDoc := range filteredMap {
+	for i, filteredMap := range filteredMaps {
+		for vbno, ckptDoc := range filteredMap {
 			var replacementList metadata.CheckpointRecordsList
 			for _, ckptRecord := range ckptDoc.Checkpoint_records {
 				if ckptRecord == nil {
@@ -3601,6 +3618,8 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 							}
 							// BrokenMapping is found, ok to keep
 							replacementList = append(replacementList, ckptRecord)
+						} else {
+							recordIgnoredCkpt(ignoredShas[i], vbno, ckptRecord.BrokenMappingSha256)
 						}
 					}
 				} else {
@@ -3612,6 +3631,12 @@ func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, c
 		}
 	}
 
+	pipelineNames := [2]string{"main", "backfill"}
+	for i, m := range ignoredShas {
+		if len(m) > 0 {
+			logger.Infof("filterCkptsWithoutValidBrokenmaps (%v) removed records with unresolvable brokenmap SHAs: %v", pipelineNames[i], m)
+		}
+	}
 	if len(errMap) > 0 {
 		return filteredMaps, combinedShaMap, errors.New(base.FlattenErrorMap(errMap))
 	}
@@ -3622,6 +3647,11 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
+	// ignoredRecords tracks per-pipeline (index 0=main, 1=backfill), per-vbno reasons for checkpoint records dropped due to target failover log mismatch.
+	ignoredRecords := [2]map[uint16]map[string]struct{}{
+		make(map[uint16]map[string]struct{}),
+		make(map[uint16]map[string]struct{}),
+	}
 
 	for i, ckptsMap := range ckptsMaps {
 		switch i {
@@ -3663,16 +3693,40 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
 					continue
 				}
+				recordIgnoredCkpt(ignoredRecords[i], vbno, fmt.Sprintf("tgtSeqno=%d,num=%d", ckptRecord.Target_Seqno, failoverLog.NumEntries))
 			}
+		}
+	}
+	pipelineNames := [2]string{"main", "backfill"}
+	for i, m := range ignoredRecords {
+		if len(m) > 0 {
+			logger.Infof("filterInvalidCkptsBasedOnTargetFailover (%v) removed records: %v", pipelineNames[i], m)
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
 
-func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, srcFailoverLogs map[uint16]*mcc.FailoverLog) []metadata.VBsCkptsDocMap {
+// recordIgnoredCkpt records a rejected checkpoint record into ignoredMap keyed by vbno and reason.
+// Nil-safe: no-op when ignoredMap is nil.
+func recordIgnoredCkpt(ignoredMap map[uint16]map[string]struct{}, vbno uint16, reason string) {
+	if ignoredMap == nil {
+		return
+	}
+	if ignoredMap[vbno] == nil {
+		ignoredMap[vbno] = map[string]struct{}{}
+	}
+	ignoredMap[vbno][reason] = struct{}{}
+}
+
+func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, srcFailoverLogs map[uint16]*mcc.FailoverLog, logger *log.CommonLogger) []metadata.VBsCkptsDocMap {
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
+	// ignoredRecords tracks per-pipeline (index 0=main, 1=backfill), per-vbno reasons for checkpoint records dropped because their failover UUID was absent from the source failover log.
+	ignoredRecords := [2]map[uint16]map[string]struct{}{
+		make(map[uint16]map[string]struct{}),
+		make(map[uint16]map[string]struct{}),
+	}
 
 	for i, ckptsMap := range nodeVbCkptMaps {
 		switch i {
@@ -3699,6 +3753,11 @@ func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, src
 					combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
 				}
 
+				var logUuids []uint64
+				for _, pair := range *failoverLog {
+					logUuids = append(logUuids, pair[0])
+				}
+
 				// Validate that this record is valid
 				for _, ckptRecord := range ckptDoc.Checkpoint_records {
 					if ckptRecord == nil {
@@ -3706,18 +3765,28 @@ func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, src
 					}
 
 					ckptRecordVbUuid := ckptRecord.Failover_uuid
-
+					matched := false
 					for _, vbUuidSeqnoPair := range *failoverLog {
 						failoverVbUuid := vbUuidSeqnoPair[0]
 
 						if ckptRecordVbUuid == failoverVbUuid {
 							// Usable checkpoint based purely off of source bucket info
 							combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+							matched = true
 							continue
 						}
 					}
+					if !matched {
+						recordIgnoredCkpt(ignoredRecords[i], vbno, fmt.Sprintf("rec=%d,log=%v", ckptRecordVbUuid, logUuids))
+					}
 				}
 			}
+		}
+	}
+	pipelineNames := [2]string{"main", "backfill"}
+	for i, m := range ignoredRecords {
+		if len(m) > 0 {
+			logger.Infof("filterInvalidCkptsBasedOnSourceFailover (%v) removed records: %v", pipelineNames[i], m)
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
@@ -3727,7 +3796,11 @@ func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, c
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
-	reinitHashRecordMap := make(map[uint16]map[string]bool)
+	// reinitHashRecordMap tracks per-pipeline (index 0=main, 1=backfill), per-vbno reasons for checkpoint records dropped because their pipeline reinit hash did not match the current hash.
+	reinitHashRecordMap := [2]map[uint16]map[string]struct{}{
+		make(map[uint16]map[string]struct{}),
+		make(map[uint16]map[string]struct{}),
+	}
 
 	for i, ckptsMap := range ckptsMaps {
 		switch i {
@@ -3755,10 +3828,7 @@ func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, c
 				}
 
 				if ckptRecord.PipelineReinitHash != currentReinitHash {
-					if _, exists := reinitHashRecordMap[vbno]; !exists {
-						reinitHashRecordMap[vbno] = make(map[string]bool)
-					}
-					reinitHashRecordMap[vbno][ckptRecord.PipelineReinitHash] = true
+					recordIgnoredCkpt(reinitHashRecordMap[i], vbno, fmt.Sprintf("rec=%v,cur=%v", ckptRecord.PipelineReinitHash, currentReinitHash))
 					continue
 				}
 
@@ -3766,8 +3836,11 @@ func filterCkptsBasedOnPipelineReinitHash(ckptsMaps []metadata.VBsCkptsDocMap, c
 			}
 		}
 	}
-	if len(reinitHashRecordMap) > 0 {
-		logger.Warnf("filterCkptsBasedOnPipelineReinitHash based on current hash %v removed records with reinitHashes: %v", currentReinitHash, reinitHashRecordMap)
+	pipelineNames := [2]string{"main", "backfill"}
+	for i, m := range reinitHashRecordMap {
+		if len(m) > 0 {
+			logger.Warnf("filterCkptsBasedOnPipelineReinitHash (%v) removed records: %v", pipelineNames[i], m)
+		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
@@ -4149,7 +4222,7 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 
 	filteredMaps := filterCkptsBasedOnPipelineReinitHash([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, ckmgr.pipelineReinitHash, ckmgr.logger)
 
-	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
+	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping, ckmgr.logger)
 	if err != nil {
 		err := fmt.Errorf("filterCkptsWithoutValidBrokenMaps - %v", err)
 		ckmgr.logger.Errorf(err.Error())
@@ -4405,6 +4478,11 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 	mainPipelineMap := make(metadata.VBsCkptsDocMap)
 	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
 	var combinedMap metadata.VBsCkptsDocMap
+	// ignoredRecords tracks per-pipeline (index 0=main, 1=backfill), per-vbno reasons for checkpoint records dropped by pre-replicate validation.
+	ignoredRecords := [2]map[uint16]map[string]struct{}{
+		make(map[uint16]map[string]struct{}),
+		make(map[uint16]map[string]struct{}),
+	}
 
 	for i, oneCkptsMap := range ckptsMaps {
 		switch i {
@@ -4431,12 +4509,21 @@ func (ckmgr *CheckpointManager) filterInvalidCkptsBasedOnPreReplicate(ckptsMaps 
 
 				bMatch, err := ckmgr.IsCkptRecordValidBasedOnPreReplicate(ckptRecord, ctx, vbno)
 				if err != nil {
+					recordIgnoredCkpt(ignoredRecords[i], vbno, fmt.Sprintf("srcPair=%d@%d,tgtSeqno=%d,err=%v", ckptRecord.Failover_uuid, ckptRecord.Seqno, ckptRecord.Target_Seqno, err))
 					continue
 				}
 				if bMatch {
 					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+				} else {
+					recordIgnoredCkpt(ignoredRecords[i], vbno, fmt.Sprintf("srcPair=%d@%d,tgtSeqno=%d", ckptRecord.Failover_uuid, ckptRecord.Seqno, ckptRecord.Target_Seqno))
 				}
 			}
+		}
+	}
+	pipelineNames := [2]string{"main", "backfill"}
+	for i, m := range ignoredRecords {
+		if len(m) > 0 {
+			ckmgr.logger.Infof("filterInvalidCkptsBasedOnPreReplicate (%v) removed records: %v", pipelineNames[i], m)
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
