@@ -538,6 +538,7 @@ function waitForChangesLeft0 {
 
 	echo "changes_left never went to zero for $1.$2 -> $3.$4"
 	dumpDebugInfoBeforeExit "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"
+	runDifferFindDifference "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"
 	exit 1
 }
 
@@ -600,6 +601,7 @@ function checkChangesLeftInternalWithSpecifiedCount {
 			sleep 10
 		fi
 	done
+	runDifferFindDifference "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"
 	dumpDebugInfoBeforeExit
 	exit 1
 }
