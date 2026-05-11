@@ -85,6 +85,13 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
+	# Let ns_server's per-bucket stats archive catch up to the post-dataload
+	# value before capturing baselines. With 1024 source VBs the initial system
+	# event burst (~11264 events) keeps the stats archive lagging right after
+	# changes_left first hits 0, so an immediate capture can return the pre-
+	# dataload docs_processed.
+	sleep 5
+
 	oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
 	oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
 
