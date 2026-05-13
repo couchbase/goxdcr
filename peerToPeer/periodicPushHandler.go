@@ -251,6 +251,7 @@ func (p *PeriodicPushHandler) storePushReqInfoByType(payload *ReplicationPayload
 	// If a peer node sends a request but this node does not have an active pipeline, then it's a race condition
 	// and should be treated as such
 
+	payload.PushSender = sender
 	fullTopic := common.ComposeFullTopic(payload.ReplicationSpecId, pipelineType)
 	return p.requestMerger(fullTopic, sender, payload)
 }

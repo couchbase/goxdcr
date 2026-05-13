@@ -670,6 +670,7 @@ type ReplicationPayload struct {
 	ReplicationSpecId string
 	SourceBucketName  string
 	InternalSpecId    string
+	PushSender        string `json:"-"`
 }
 
 func NewReplicationPayload(specId, srcBucketName, internalSpecId string) ReplicationPayload {

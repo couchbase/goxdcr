@@ -12,9 +12,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -3281,7 +3283,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 		if len(oneNodeVbsCkptMap) > 0 {
 			needToGetFailoverLogs = true
-			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v opaque %v", node, resp.ReplicationSpecId, resp.GetOpaque())
+			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v opaque %v vbs=%v", node, resp.ReplicationSpecId, resp.GetOpaque(), slices.Collect(maps.Keys(oneNodeVbsCkptMap)))
 			nodeVbMainCkptsMap[node] = oneNodeVbsCkptMap
 		}
 		oneNodeVbsBackfillCkptMap, err := payload.GetAllCheckpoints(common.BackfillPipeline)
@@ -3290,7 +3292,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 		if len(oneNodeVbsBackfillCkptMap) > 0 {
 			needToGetFailoverLogs = true
-			ckmgr.logger.Infof("Received peerToPeer backfill checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
+			ckmgr.logger.Infof("Received peerToPeer backfill checkpoint data from node %v replId %v vbs=%v", node, resp.ReplicationSpecId, slices.Collect(maps.Keys(oneNodeVbsBackfillCkptMap)))
 			nodeVbBackfillCkptsMap[node] = oneNodeVbsBackfillCkptMap
 		}
 
@@ -4143,6 +4145,8 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		ckmgr.logger.Errorf("Nil periodicPayload")
 		return base.ErrorNilPtr
 	}
+
+	ckmgr.logger.Infof("P2P push received from=%v replId=%v vbs=%v", periodicPayload.PushSender, periodicPayload.ReplicationSpecId, periodicPayload.GetPushVBs())
 
 	// Before accepting peer nodes' payload, do our due diligence and find out the VBs that this node owns
 	// In the case where a peer node and this node both think it owns the VB, be conservative and do not merge
