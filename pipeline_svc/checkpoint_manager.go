@@ -3414,6 +3414,9 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		combinedGlobalInfoShaMap.Load(shaMap)
 	}
 
+	mergedVBs := vbsFromCkptsMaps(filteredMaps)
+	ckmgr.logger.Infof("P2P pull VBs: main=%v backfill=%v", mergedVBs[0], mergedVBs[1])
+
 	getterFunc := func() *MergeCkptArgs {
 		return &MergeCkptArgs{
 			PipelinesCkptDocs:       filteredMaps,
@@ -3734,6 +3737,17 @@ func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap
 		}
 	}
 	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
+}
+
+// vbsFromCkptsMaps returns two VB lists (index 0=main, 1=backfill) extracted from the keys of the maps.
+func vbsFromCkptsMaps(maps []metadata.VBsCkptsDocMap) [2][]uint16 {
+	var result [2][]uint16
+	for i := 0; i < 2 && i < len(maps); i++ {
+		for vb := range maps[i] {
+			result[i] = append(result[i], vb)
+		}
+	}
+	return result
 }
 
 // recordIgnoredCkpt records a rejected checkpoint record into ignoredMap keyed by vbno and reason.
@@ -4263,6 +4277,9 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	if done {
 		return err
 	}
+
+	pushedVBs := vbsFromCkptsMaps(pipelinesCkpts)
+	ckmgr.logger.Infof("P2P push VBs: main=%v backfill=%v", pushedVBs[0], pushedVBs[1])
 
 	respCh := make(chan error)
 	err = ckmgr.requestPeriodicMerge(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, respCh, payload.GlobalInfoDoc)
