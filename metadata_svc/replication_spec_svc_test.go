@@ -801,7 +801,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterDeletionsWithFEKey,
-			expectedErrMsg:   "should be referencing only the document key",
+			expectedErrMsg:   "only key-filter expression is allowed",
 		},
 		{
 			name:             "Valid FilterDeletionsWithFEKey with key-only expression",
@@ -833,7 +833,7 @@ func TestValidateDeletionFilterExprForTombstones(t *testing.T) {
 			clusterVersion:   version80Compat,
 			expectedErrCount: 1,
 			expectedErrKey:   metadata.FilterExpirationsWithFEKey,
-			expectedErrMsg:   "should be referencing only the document key",
+			expectedErrMsg:   "only key-filter expression is allowed",
 		},
 		{
 			name:             "Both toggles enabled but FilterDelKey is false - fails on FilterDeletionsWithFEKey",
