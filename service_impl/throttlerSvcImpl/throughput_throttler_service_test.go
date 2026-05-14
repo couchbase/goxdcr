@@ -1,11 +1,10 @@
 package throttlerSvcImpl
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def/throttlerSvc"
 	"github.com/stretchr/testify/assert"
@@ -383,109 +382,88 @@ func Test_CanSend(t *testing.T) {
 	}
 }
 
+// TestLowTokensThrottling verifies the corner case fixed in MB-70816:
+// when throughput_limit is below NumberOfSlotsForThroughputThrottling,
+// the throttler must still inject one token per slot tick (capped at
+// numOfSlots), so consumers can sustain numOfSlots items per second even
+// with a sub-1-per-slot limit. It also verifies that as the limit grows
+// past numOfSlots, exactly `limit` items are released per logical second.
+//
+// The test drives the throttler with a logical clock — every call to
+// updateOnce() advances exactly one slot. There are no goroutines, no
+// real-time tickers, and no time.Sleep, so the outcome is independent of
+// CPU contention or scheduler latency.
 func TestLowTokensThrottling(t *testing.T) {
-	// Test ensures that the system can recover when the overall throughput is completely driven by low priority pipelines
-	const (
-		itemCount        = 100
-		initialLowTokens = int64(1)
-		numOfSlots       = 10
-		numConsumers     = 3
-		tickInterval     = 1 * time.Second
-	)
+	const itemCount = 100
+	numOfSlots := int64(base.NumberOfSlotsForThroughputThrottling)
+	initialLowTokens := int64(1)
 
-	itemsQueue := make(chan throttlerSvc.ThrottlerReq, itemCount)
 	throttler := NewThroughputThrottlerSvc(&log.LoggerContext{})
+	throttler.SetId("unit-test")
+	throttler.UpdateSettings(map[string]interface{}{
+		throttlerSvc.LowTokensKey:  initialLowTokens,
+		throttlerSvc.HighTokensKey: int64(0),
+	})
 
-	var (
-		prevLowTokens      = initialLowTokens
-		prevItemsProcessed int64
-		itemsProcessed     int64
-		onceStarted        bool
-		wg                 sync.WaitGroup
-	)
+	// 1) Cap check: with limit < numOfSlots and no consumer, ticking past
+	//    numOfSlots must not let the quota exceed numOfSlots.
+	for i := int64(0); i < numOfSlots*3; i++ {
+		throttler.updateOnce()
+	}
+	assert.Equal(t, numOfSlots, atomic.LoadInt64(&throttler.throughput_quota),
+		"quota must saturate at numOfSlots when limit < numOfSlots")
 
-	// Producer
-	go func() {
-		defer close(itemsQueue)
-		for i := 0; i < itemCount; i++ {
-			itemsQueue <- throttlerSvc.ThrottlerReqLowRepl
-		}
-	}()
+	// Drain the accumulated quota so the next phase starts at zero.
+	for throttler.CanSend(throttlerSvc.ThrottlerReqLowRepl) {
+	}
+	assert.Equal(t, int64(0), atomic.LoadInt64(&throttler.throughput_quota))
 
-	// Consumer
-	consumer := func() {
-		defer wg.Done()
-		for item := range itemsQueue {
-			for {
-				if throttler.CanSend(item) {
-					atomic.AddInt64(&itemsProcessed, 1)
-					break
+	// 2) End-to-end throughput: simulate a producer of itemCount items and a
+	//    consumer that drains the quota after every slot tick. Each iteration
+	//    of the outer loop is one logical second (numOfSlots ticks). After
+	//    each second, grow the limit by 10% — mirrors the dynamic-rate growth
+	//    the original test exercised.
+	var itemsProcessed int64
+	currentLimit := initialLowTokens
+
+	for atomic.LoadInt64(&itemsProcessed) < int64(itemCount) {
+		prevProcessed := atomic.LoadInt64(&itemsProcessed)
+
+	cycle:
+		for slot := int64(0); slot < numOfSlots; slot++ {
+			throttler.updateOnce()
+			for throttler.CanSend(throttlerSvc.ThrottlerReqLowRepl) {
+				if atomic.AddInt64(&itemsProcessed, 1) >= int64(itemCount) {
+					break cycle
 				}
-				throttler.Wait()
 			}
 		}
-	}
 
-	// Setup and start throttler + consumers
-	startThrottler := func() {
+		batchProcessed := atomic.LoadInt64(&itemsProcessed) - prevProcessed
+
+		// Expected throughput for this cycle:
+		//   - limit <  numOfSlots: numOfSlots (one token per slot tick).
+		//   - limit >= numOfSlots: exactly `limit` (baseQuota + distributed remainder).
+		// The last cycle may be partial when remaining < expected.
+		expected := currentLimit
+		if currentLimit < numOfSlots {
+			expected = numOfSlots
+		}
+		if remaining := int64(itemCount) - prevProcessed; expected > remaining {
+			expected = remaining
+		}
+		assert.Equal(t, expected, batchProcessed,
+			"unexpected throughput in cycle with limit=%d (processed so far=%d)",
+			currentLimit, prevProcessed)
+
+		// Grow by 10% (integer arithmetic — matches the original test).
+		newLimit := batchProcessed + (batchProcessed * 10 / 100)
 		throttler.UpdateSettings(map[string]interface{}{
-			throttlerSvc.LowTokensKey:  initialLowTokens,
-			throttlerSvc.HighTokensKey: int64(0),
+			throttlerSvc.LowTokensKey: newLimit,
 		})
-		throttler.Start()
-
-		prevLowTokens = initialLowTokens
-		prevItemsProcessed = 0
-
-		for i := 0; i < numConsumers; i++ {
-			wg.Add(1)
-			go consumer()
-		}
+		currentLimit = newLimit
 	}
 
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
-
-testLoop:
-	for {
-		select {
-		case <-ticker.C:
-			if !onceStarted {
-				startThrottler()
-				onceStarted = true
-				continue
-			}
-
-			currQueueLen := len(itemsQueue)
-			if currQueueLen == 0 {
-				break testLoop
-			}
-
-			totalProcessed := atomic.LoadInt64(&itemsProcessed)
-			batchProcessed := totalProcessed - prevItemsProcessed
-
-			if prevLowTokens < numOfSlots {
-				// Allowing off-by-one error due to a possible race condition
-				// It is possible that a consumer might be executing CanSend function concurrently when here
-				// As a result the the itemsProcessed does not reflect the exact expected count(prevLowTokens)
-				// Hence allow a delta of 1.
-				assert.InDelta(t, float64(numOfSlots), float64(batchProcessed), 1)
-			} else {
-				assert.InDelta(t, float64(prevLowTokens), float64(batchProcessed), 1)
-			}
-
-			// grow by 10%
-			newLowTokens := batchProcessed + (batchProcessed * 10 / 100)
-			throttler.UpdateSettings(map[string]interface{}{
-				throttlerSvc.LowTokensKey: newLowTokens,
-			})
-			prevLowTokens = newLowTokens
-			prevItemsProcessed = totalProcessed
-		}
-	}
-
-	wg.Wait()
-
-	// Final assertion: All items should be processed
-	assert.Equal(t, int64(itemCount), atomic.LoadInt64(&itemsProcessed), "Not all items were processed")
+	assert.Equal(t, int64(itemCount), atomic.LoadInt64(&itemsProcessed),
+		"Not all items were processed")
 }
