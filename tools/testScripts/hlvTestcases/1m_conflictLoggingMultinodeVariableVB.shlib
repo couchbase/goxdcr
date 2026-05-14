@@ -235,8 +235,15 @@ function runReplicationResume {
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	resumeReplication "C2" "B1" "C1" "B0"
-	echo "Waiting $HLV_TESTS_CLOG_RESUME_SLEEP_SECS seconds for resume to finish"
-	sleep $HLV_TESTS_CLOG_RESUME_SLEEP_SECS
+
+	# With 1024 vbuckets on B0 plus the post-rebalance xdcr restart, C1P's
+	# pipeline initialization (GetBucketInfo / GetAllMetadataFromCatalog on
+	# the large bucket) can take well over a minute before the
+	# preReplicateVBMasterCheck P2P request is sent. Poll for the resulting
+	# log lines instead of using a fixed sleep so the test self-paces.
+	echo "Waiting up to 3 minutes for resume P2P checkpoint exchange to appear in logs"
+	waitForInternalLogInstance "C1" "$CKPT_FOUND_DOCS" $(($curCkptsFoundDocsCnt + 2)) 3
+	waitForInternalLogInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCnt + 1)) 3
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
