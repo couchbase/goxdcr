@@ -1336,6 +1336,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	if val, ok := settings[base.ForwardLocalOnlyKey]; ok {
 		xmemSettings[base.ForwardLocalOnlyKey] = val
 	}
+	if val, ok := settings[base.DevReplOptsKey]; ok {
+		xmemSettings[base.DevReplOptsKey] = val
+	}
 
 	return xmemSettings, nil
 }
