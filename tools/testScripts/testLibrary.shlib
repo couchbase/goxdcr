@@ -3355,6 +3355,7 @@ function verifyClogStats {
 
 		if ((afterVal < beforeVal)); then
 			echo "ERROR: $statKey decreased! Before: $beforeVal, After: $afterVal"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	done
