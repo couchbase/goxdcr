@@ -359,7 +359,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, err :=
 		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef,
-			nozzleType, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap, targetKvVbMap)
+			nozzleType, logger_ctx, sourceClusterUUID, pipelineType, kvsVbMap, targetKvVbMap.Clone())
 
 	if err != nil {
 		return nil, nil, err
