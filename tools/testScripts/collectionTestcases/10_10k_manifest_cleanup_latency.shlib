@@ -1,0 +1,111 @@
+# Copyright 2026-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000)
+CLUSTER_NAME_BUCKET_MAP=()
+
+# Resolve the directory containing this test file so we can locate static data.
+TEST_CASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${TEST_CASE_DIR}/../../.." && pwd)"
+MANIFEST_TEST_DATA_DIR="${REPO_ROOT}/utils/testInternalData"
+
+# Sub-test helper: store a pre-generated manifest blob, time its deletion, verify
+# pre/post state.
+# Globals written: _subTestElapsedMs (milliseconds for the delete operation)
+function runManifestCleanupSubTest {
+	local subTestLabel=$1
+	local dataFile=$2
+	local replId=$3
+
+	if [[ ! -f "$dataFile" ]]; then
+		echo "[$subTestLabel] ERROR: test data file not found: $dataFile"
+		exit 1
+	fi
+
+	local blobData
+	blobData=$(cat "$dataFile")
+	if [[ -z "$blobData" ]]; then
+		echo "[$subTestLabel] ERROR: test data file is empty: $dataFile"
+		exit 1
+	fi
+
+	local metakvKey="ckpt/manifest/${replId}/src"
+
+	echo "--- [$subTestLabel] storing blob on metakv at $metakvKey ---"
+	updateNsServerSimpleStore "C1" "$metakvKey" "$blobData"
+
+	local preStatus
+	preStatus=$(getNsServerSimpleStoreStatus "C1" "$metakvKey")
+	if [[ "$preStatus" != "200" ]]; then
+		echo "[$subTestLabel] ERROR: expected HTTP 200 before delete, got $preStatus"
+		exit 1
+	fi
+	echo "--- [$subTestLabel] pre-delete status: $preStatus (expected 200) ---"
+
+	local startTime endTime
+	startTime=$(date +%s%N)
+	deleteNsServerSimpleStore "C1" "$metakvKey"
+	endTime=$(date +%s%N)
+	_subTestElapsedMs=$(( (endTime - startTime) / 1000000 ))
+
+	local postStatus
+	postStatus=$(getNsServerSimpleStoreStatus "C1" "$metakvKey")
+	if [[ "$postStatus" != "404" ]]; then
+		echo "[$subTestLabel] ERROR: expected HTTP 404 after delete, got $postStatus"
+		exit 1
+	fi
+	echo "--- [$subTestLabel] post-delete status: $postStatus (expected 404) ---"
+
+	echo "[$subTestLabel] delete latency: ${_subTestElapsedMs}ms"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running manifest cleanup latency test: 3-manifest vs 10k-manifest"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupCluster
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Use a synthetic replication ID; no real replication is created.
+	local replId="TestBucket1/_default/_default/TestBucket2"
+
+	runManifestCleanupSubTest "3-manifest" \
+		"${MANIFEST_TEST_DATA_DIR}/manifestsDoc_3_manifests.json" \
+		"$replId"
+	local time3=$_subTestElapsedMs
+
+	runManifestCleanupSubTest "10k-manifest" \
+		"${MANIFEST_TEST_DATA_DIR}/manifestsDoc_10k_manifests.json" \
+		"$replId"
+	local time10k=$_subTestElapsedMs
+
+	echo "============================================================================"
+	echo "Comparison — 3 manifests: ${time3}ms  |  10k manifests: ${time10k}ms"
+
+	# Assert 10k-manifest delete is not more than 1.5x the 3-manifest delete.
+	local threshold=$(( time3 * 3 / 2 ))
+	if (( time10k > threshold )); then
+		echo "FAILED: 10k-manifest delete (${time10k}ms) exceeded 1.5x of 3-manifest delete (${time3}ms, threshold=${threshold}ms)"
+		exit 1
+	fi
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+}

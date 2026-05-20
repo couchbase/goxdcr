@@ -3286,6 +3286,32 @@ function updateNsServerSimpleStore {
 	exit 1
 }
 
+function deleteNsServerSimpleStore {
+	local clusterName=$1
+	local key=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -s -u $DEFAULT_ADMIN:$DEFAULT_PW localhost:$port/_metakv/$key -X DELETE
+	if (($? == 0)); then
+		echo "Deleted simple store key $key"
+		return
+	fi
+
+	echo "simple store delete failed for key $key"
+	dumpDebugInfoBeforeExit
+	exit 1
+}
+
+function getNsServerSimpleStoreStatus {
+	local clusterName=$1
+	local key=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	local httpStatus
+	httpStatus=$($CURL -s -o /dev/null -w "%{http_code}" -u $DEFAULT_ADMIN:$DEFAULT_PW localhost:$port/_metakv/$key)
+	echo "$httpStatus"
+}
+
 # clog stats that require monitoring
 declare -A requiredClogStats=(["xdcr_clog_src_docs_written_total"]=0 ["xdcr_clog_tgt_docs_written_total"]=0 ["xdcr_clog_crd_docs_written_total"]=0 ["xdcr_clog_hibernated_count_total"]=0 ["xdcr_clog_docs_filtered_total"]=0 ["xdcr_true_conflicts_detected_total"]=0 ["xdcr_subdoc_cmd_docs_skipped_total"]=0 ["xdcr_get_docs_cas_changed_total"]=0)
 

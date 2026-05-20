@@ -1087,12 +1087,23 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		}
 	} else {
 		if oldSpec == nil && newSpec != nil {
+			// Since objects on simple-store are NOT purged when a node moves out of the cluster,
+			// XDCR needs to take care of cleaning out stale objects itself when the node rejoins the cluster.
+			// Hence defensively deleting stale simple-store objects for any new replication spec that is received.
+
 			backfillId := common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)
 
 			waitGrp := sync.WaitGroup{}
-			waitGrp.Add(2)
+			waitGrp.Add(4)
+
+			// clean-up any stale checkpoint docs leftover from an old main/backfill pipeline run
 			go ckpt_svc.cleanOldLeftoverCkpts(newSpec.Id, newSpec.InternalId, &waitGrp)
 			go ckpt_svc.cleanOldLeftoverCkpts(backfillId, newSpec.InternalId, &waitGrp)
+
+			// these will run before the Medium priority CollectionsManifestService.ReplicationSpecChangeCallback()
+			go ckpt_svc.cleanOldLeftoverManifests(newSpec.Id, true /* isSource */, &waitGrp)
+			go ckpt_svc.cleanOldLeftoverManifests(newSpec.Id, false /* isSource */, &waitGrp)
+
 			waitGrp.Wait()
 
 			ckpt_svc.brokenMapRefCountSvc.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
@@ -1121,9 +1132,33 @@ func (ckpt_svc *CheckpointsService) cleanOldLeftoverCkpts(id, internalId string,
 	if err == nil && oldCkptDocs != nil {
 		castedDocs := metadata.VBsCkptsDocMap(oldCkptDocs)
 		if !castedDocs.InternalIdMatch(internalId) {
-			ckpt_svc.logger.Warnf("Old ckpt docs with the same replId %v found - cleaning them up", id)
+			ckpt_svc.logger.Warnf("Old ckpt docs with different SpecInternalId %v found - cleaning them up", id)
 			ckpt_svc.DelCheckpointsDocs(id)
 		}
+	}
+}
+
+func (ckpt_svc *CheckpointsService) cleanOldLeftoverManifests(id string, forSource bool, w *sync.WaitGroup) {
+	defer w.Done()
+
+	label := "Target"
+	if forSource {
+		label = "Source"
+	}
+	manifestPath := getManifestDocKey(id, forSource)
+
+	// check if a manifest object exists on the simple-store
+	if _, _, err := ckpt_svc.metadata_svc.Get(manifestPath); err != nil {
+		if err != service_def.MetadataNotFoundErr {
+			ckpt_svc.logger.Warnf("failed to check for stale %v manifests on simple-store for %v, cleanup could be pending: %v", label, id, err)
+		}
+		return
+	}
+	ckpt_svc.logger.Infof("stale %v manifests found on simple-store for %v - cleaning up", label, id)
+
+	// delete the stale manifest object
+	if delErr := ckpt_svc.metadata_svc.Del(manifestPath, nil); delErr != nil {
+		ckpt_svc.logger.Errorf(base.StaleManifestCleanupErrMsg, label, id, delErr)
 	}
 }
 
