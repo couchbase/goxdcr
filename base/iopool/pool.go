@@ -220,7 +220,11 @@ func (pool *ConnPoolImpl) UpdateGCInterval(d time.Duration) {
 	defer pool.logger.Infof("set CLog pool GC interval to %v", d)
 
 	pool.mu.Lock()
-	pool.gcTicker = time.NewTicker(d)
+	if pool.gcTicker == nil {
+		pool.gcTicker = time.NewTicker(d)
+	} else {
+		pool.gcTicker.Reset(d)
+	}
 	pool.mu.Unlock()
 }
 
