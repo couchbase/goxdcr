@@ -132,7 +132,7 @@ func main() {
 	argParse()
 
 	if err := validateIpFamilyOptions(options.ipv4, options.ipv6); err != nil {
-		fmt.Printf("Invalid options ipv4=%v,ipv6=%\n", options.ipv4, options.ipv6)
+		fmt.Printf("Invalid options ipv4=%v,ipv6=%v\n", options.ipv4, options.ipv6)
 		os.Exit(1)
 	}
 

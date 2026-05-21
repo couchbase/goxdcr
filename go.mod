@@ -26,6 +26,8 @@ replace github.com/couchbase/cbgt => ../../../../../cbgt
 
 replace github.com/couchbase/hebrew => ../../../../../hebrew
 
+replace github.com/couchbase/gocoverage => ../../../../../gocoverage
+
 replace github.com/couchbase/cbauth => ../cbauth
 
 require (
@@ -39,6 +41,7 @@ require (
 	github.com/couchbase/goutils v0.3.0
 	github.com/couchbase/tools-common/http v1.0.7
 	github.com/couchbaselabs/gojsonsm v1.0.1
+	github.com/couchbase/gocoverage v0.0.0
 	github.com/glenn-brown/golang-pkg-pcre v0.0.0-20120522223659-48bb82a8b8ce
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
