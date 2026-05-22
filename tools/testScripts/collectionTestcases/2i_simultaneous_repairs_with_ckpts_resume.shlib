@@ -127,7 +127,7 @@ function runTestCase {
 		return 1
 	fi
 
-	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1
+	validateInternalLogWithInstance "C1" "$HALTBACKFILLWITHCB_MSG" 1 2
 	validateInternalLogWithInstance "C1" "$BACKFILL_HANDLER_NIL" 0
 	grepForPanics
 	validateXDCRCheckpoints "C1"
