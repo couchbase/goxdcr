@@ -57,80 +57,83 @@ const (
 
 // constants used for parsing replication settings
 const (
-	ReplicationType                   = "replicationType"
-	FilterExpression                  = "filterExpression"
-	PauseRequested                    = "pauseRequested"
-	CheckpointInterval                = "checkpointInterval"
-	BatchCount                        = "workerBatchSize"
-	BatchSize                         = "docBatchSizeKb"
-	FailureRestartInterval            = "failureRestartInterval"
-	OptimisticReplicationThreshold    = "optimisticReplicationThreshold"
-	SourceNozzlePerNode               = base.SourceNozzlePerNode
-	TargetNozzlePerNode               = base.TargetNozzlePerNode
-	MaxExpectedReplicationLag         = "maxExpectedReplicationLag"
-	TimeoutPercentageCap              = "timeoutPercentageCap"
-	LogLevel                          = "logLevel"
-	StatsInterval                     = "statsInterval"
-	BandwidthLimit                    = "networkUsageLimit"
-	ReplicationTypeValue              = "continuous"
-	GoMaxProcs                        = "goMaxProcs"
-	GoGC                              = "goGC"
-	FilterVersionKey                  = "filterVersion"
-	FilterSkipRestreamKey             = "filterSkipRestream"
-	Priority                          = "priority"
-	BacklogThreshold                  = "desiredLatency" // desired latency is the parameter exposed to UI and CLI
-	FilterExpKey                      = "filterExpiration"
-	FilterDelKey                      = "filterDeletion"
-	BypassExpiryKey                   = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
-	BypassUncommittedTxnKey           = base.BypassUncommittedTxnKey
-	CollectionsMappingKey             = base.CollectionsMappingKey
-	CollectionsMirrorKey              = base.CollectionsMirrorKey
-	CollectionsMigrateKey             = base.CollectionsMigrateKey
-	CollectionsOsoKey                 = base.CollectionsOsoKey
-	CollectionsMappingRulesKey        = base.CollectionsMappingRulesKey
-	ManualBackfillRequested           = base.ManualBackfillKey
-	CollectionsDelAllBackfillKey      = base.CollectionsDelAllBackfillKey
-	CollectionsDelVbBackfillKey       = base.CollectionsDelSingleVBBackfillKey
-	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
-	RetryOnRemoteAuthErrMaxWaitKey    = base.RetryOnRemoteAuthErrMaxWaitSecKey
-	RetryOnErrExceptAuthErrMaxWaitKey = base.RetryOnErrExceptAuthErrMaxWaitSecKey
-	MergeFunctionMappingKey           = base.MergeFunctionMappingKey
-	JSFunctionTimeoutKey              = base.JSFunctionTimeoutKey
-	DismissEventKey                   = metadata.DismissEventKey
-	PreReplicateVBMasterCheckKey      = base.PreReplicateVBMasterCheckKey
-	ReplicateCkptIntervalKey          = base.ReplicateCkptIntervalKey
-	CkptSvcCacheEnabledKey            = metadata.CkptSvcCacheEnabledKey
-	FilterSystemScopeKey              = base.FilterSystemScope
-	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
-	MobileCompatibleKey               = base.MobileCompatibleKey
-	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
-	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
-	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
-	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
-	GenericServicesLogLevelKey        = metadata.GenericServicesLogLevelKey
-	CLogKey                           = base.CLogKey
-	CLogSetMetaTimeoutKey             = base.CLogSetMetaTimeout
-	CLogPoolGetTimeoutKey             = base.CLogPoolGetTimeout
-	CLogNetworkRetryCountKey          = base.CLogNetworkRetryCount
-	CLogNetworkRetryIntervalKey       = base.CLogNetworkRetryInterval
-	CLogWorkerCountKey                = base.CLogWorkerCount
-	CLogQueueCapacityKey              = base.CLogQueueCapacity
-	CLogMaxErrorCountKey              = base.CLogMaxErrorCount
-	CLogErrorTimeWindowKey            = base.CLogErrorTimeWindow
-	CLogReattemptDurationKey          = base.CLogReattemptDuration
-	CLogConnPoolLimitKey              = base.CLogConnPoolLimit
-	CLogConnPoolGCIntervalKey         = base.CLogConnPoolGCInterval
-	CLogConnPoolReapIntervalKey       = base.CLogConnPoolReapInterval
-	SkipReplSpecAutoGcKey             = base.SkipReplSpecAutoGcKey
-	DisableHlvBasedShortCircuitKey    = base.DisableHlvBasedShortCircuitKey
-	DCPFlowControlThrottleKey         = base.DCPFlowControlThrottleKey
-	ComponentEventsChanLengthKey      = base.ComponentEventsChanLengthKey
-	DevReplOptsKey                    = base.DevReplOptsKey
-	FilterDeletionsWithFEKey          = base.FilterDeletionsWithFEKey
-	FilterExpirationsWithFEKey        = base.FilterExpirationsWithFEKey
-	MinPVLenForMobileKey              = base.MinPVLenForMobileKey
-	CLogPauseReplThresholdKey         = base.CLogPauseReplThresholdKey
-	CLogMonitorDurationKey            = base.CLogMonitorDurationKey
+	ReplicationType                      = "replicationType"
+	FilterExpression                     = "filterExpression"
+	PauseRequested                       = "pauseRequested"
+	CheckpointInterval                   = "checkpointInterval"
+	BatchCount                           = "workerBatchSize"
+	BatchSize                            = "docBatchSizeKb"
+	FailureRestartInterval               = "failureRestartInterval"
+	OptimisticReplicationThreshold       = "optimisticReplicationThreshold"
+	SourceNozzlePerNode                  = base.SourceNozzlePerNode
+	TargetNozzlePerNode                  = base.TargetNozzlePerNode
+	MaxExpectedReplicationLag            = "maxExpectedReplicationLag"
+	TimeoutPercentageCap                 = "timeoutPercentageCap"
+	LogLevel                             = "logLevel"
+	StatsInterval                        = "statsInterval"
+	BandwidthLimit                       = "networkUsageLimit"
+	ReplicationTypeValue                 = "continuous"
+	GoMaxProcs                           = "goMaxProcs"
+	GoGC                                 = "goGC"
+	FilterVersionKey                     = "filterVersion"
+	FilterSkipRestreamKey                = "filterSkipRestream"
+	Priority                             = "priority"
+	BacklogThreshold                     = "desiredLatency" // desired latency is the parameter exposed to UI and CLI
+	FilterExpKey                         = "filterExpiration"
+	FilterDelKey                         = "filterDeletion"
+	BypassExpiryKey                      = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
+	BypassUncommittedTxnKey              = base.BypassUncommittedTxnKey
+	CollectionsMappingKey                = base.CollectionsMappingKey
+	CollectionsMirrorKey                 = base.CollectionsMirrorKey
+	CollectionsMigrateKey                = base.CollectionsMigrateKey
+	CollectionsOsoKey                    = base.CollectionsOsoKey
+	CollectionsMappingRulesKey           = base.CollectionsMappingRulesKey
+	ManualBackfillRequested              = base.ManualBackfillKey
+	CollectionsDelAllBackfillKey         = base.CollectionsDelAllBackfillKey
+	CollectionsDelVbBackfillKey          = base.CollectionsDelSingleVBBackfillKey
+	RetryOnRemoteAuthErrKey              = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrMaxWaitKey       = base.RetryOnRemoteAuthErrMaxWaitSecKey
+	RetryOnErrExceptAuthErrMaxWaitKey    = base.RetryOnErrExceptAuthErrMaxWaitSecKey
+	MergeFunctionMappingKey              = base.MergeFunctionMappingKey
+	JSFunctionTimeoutKey                 = base.JSFunctionTimeoutKey
+	DismissEventKey                      = metadata.DismissEventKey
+	PreReplicateVBMasterCheckKey         = base.PreReplicateVBMasterCheckKey
+	ReplicateCkptIntervalKey             = base.ReplicateCkptIntervalKey
+	CkptSvcCacheEnabledKey               = metadata.CkptSvcCacheEnabledKey
+	FilterSystemScopeKey                 = base.FilterSystemScope
+	FilterBinaryDocsKey                  = metadata.FilterBinaryDocsKey
+	MobileCompatibleKey                  = base.MobileCompatibleKey
+	EnableDcpPurgeRollback               = base.EnableDcpPurgeRollback
+	TargetTopologyLogFreq                = base.TargetTopologyLogFreqKey
+	CasDriftThresholdSecsKey             = base.CASDriftThresholdSecsKey
+	PreCheckCasDriftThresholdHoursKey    = base.PreCheckCasDriftThresholdHoursKey
+	GenericServicesLogLevelKey           = metadata.GenericServicesLogLevelKey
+	CLogKey                              = base.CLogKey
+	CLogSetMetaTimeoutKey                = base.CLogSetMetaTimeout
+	CLogPoolGetTimeoutKey                = base.CLogPoolGetTimeout
+	CLogNetworkRetryCountKey             = base.CLogNetworkRetryCount
+	CLogNetworkRetryIntervalKey          = base.CLogNetworkRetryInterval
+	CLogWorkerCountKey                   = base.CLogWorkerCount
+	CLogQueueCapacityKey                 = base.CLogQueueCapacity
+	CLogMaxErrorCountKey                 = base.CLogMaxErrorCount
+	CLogErrorTimeWindowKey               = base.CLogErrorTimeWindow
+	CLogReattemptDurationKey             = base.CLogReattemptDuration
+	CLogConnPoolLimitKey                 = base.CLogConnPoolLimit
+	CLogConnPoolGCIntervalKey            = base.CLogConnPoolGCInterval
+	CLogConnPoolReapIntervalKey          = base.CLogConnPoolReapInterval
+	RemoteMemcachedConnPoolMaxConnsKey   = base.RemoteMemcachedConnPoolMaxConnsKey
+	RemoteMemcachedConnPoolMinConnsKey   = base.RemoteMemcachedConnPoolMinConnsKey
+	RemoteMemcachedConnPoolGCIntervalKey = base.RemoteMemcachedConnPoolGCIntervalKey
+	SkipReplSpecAutoGcKey                = base.SkipReplSpecAutoGcKey
+	DisableHlvBasedShortCircuitKey       = base.DisableHlvBasedShortCircuitKey
+	DCPFlowControlThrottleKey            = base.DCPFlowControlThrottleKey
+	ComponentEventsChanLengthKey         = base.ComponentEventsChanLengthKey
+	DevReplOptsKey                       = base.DevReplOptsKey
+	FilterDeletionsWithFEKey             = base.FilterDeletionsWithFEKey
+	FilterExpirationsWithFEKey           = base.FilterExpirationsWithFEKey
+	MinPVLenForMobileKey                 = base.MinPVLenForMobileKey
+	CLogPauseReplThresholdKey            = base.CLogPauseReplThresholdKey
+	CLogMonitorDurationKey               = base.CLogMonitorDurationKey
 
 	// CNG related settings
 	CNGWorkerCountKey = base.CNGWorkerCountKey
@@ -213,78 +216,81 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 
 // replication settings key in rest api -> internal replication settings key
 var RestKeyToSettingsKeyMap = map[string]string{
-	base.Type:                         metadata.ReplicationTypeKey,
-	FilterExpression:                  metadata.FilterExpressionKey,
-	PauseRequested:                    metadata.ActiveKey,
-	CheckpointInterval:                metadata.CheckpointIntervalKey,
-	BatchCount:                        metadata.BatchCountKey,
-	BatchSize:                         metadata.BatchSizeKey,
-	FailureRestartInterval:            metadata.FailureRestartIntervalKey,
-	OptimisticReplicationThreshold:    metadata.OptimisticReplicationThresholdKey,
-	SourceNozzlePerNode:               metadata.SourceNozzlePerNodeKey,
-	TargetNozzlePerNode:               metadata.TargetNozzlePerNodeKey,
-	LogLevel:                          metadata.PipelineLogLevelKey,
-	StatsInterval:                     metadata.PipelineStatsIntervalKey,
-	BandwidthLimit:                    metadata.BandwidthLimitKey,
-	GoMaxProcs:                        metadata.GoMaxProcsKey,
-	GoGC:                              metadata.GoGCKey,
-	base.CompressionTypeREST:          metadata.CompressionTypeKey,
-	FilterVersionKey:                  metadata.FilterVersionKey,
-	FilterSkipRestreamKey:             metadata.FilterSkipRestreamKey,
-	Priority:                          metadata.PriorityKey,
-	BacklogThreshold:                  metadata.BacklogThresholdKey,
-	FilterExpKey:                      metadata.FilterExpKey,
-	FilterDelKey:                      metadata.FilterDelKey,
-	BypassExpiryKey:                   metadata.BypassExpiryKey,
-	BypassUncommittedTxnKey:           metadata.BypassUncommittedTxnKey,
-	CollectionsMappingKey:             metadata.CollectionsMgtMappingKey,
-	CollectionsMigrateKey:             metadata.CollectionsMgtMigrateKey,
-	CollectionsMirrorKey:              metadata.CollectionsMgtMirrorKey,
-	CollectionsOsoKey:                 metadata.CollectionsMgtOsoKey,
-	CollectionsMappingRulesKey:        metadata.CollectionsMappingRulesKey,
-	ManualBackfillRequested:           metadata.CollectionsManualBackfillKey,
-	CollectionsDelAllBackfillKey:      metadata.CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey:       metadata.CollectionsDelVbBackfillKey,
-	RetryOnRemoteAuthErrKey:           metadata.RetryOnRemoteAuthErrKey,
-	RetryOnRemoteAuthErrMaxWaitKey:    metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
-	RetryOnErrExceptAuthErrMaxWaitKey: metadata.RetryOnErrExceptAuthErrMaxWaitSecKey,
-	MergeFunctionMappingKey:           metadata.MergeFunctionMappingKey,
-	JSFunctionTimeoutKey:              metadata.JSFunctionTimeoutKey,
-	DismissEventKey:                   metadata.DismissEventKey,
-	PreReplicateVBMasterCheckKey:      metadata.PreReplicateVBMasterCheckKey,
-	ReplicateCkptIntervalKey:          metadata.ReplicateCkptIntervalKey,
-	CkptSvcCacheEnabledKey:            metadata.CkptSvcCacheEnabledKey,
-	FilterSystemScopeKey:              metadata.FilterSystemScopeKey,
-	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
-	MobileCompatibleKey:               metadata.MobileCompatibleKey,
-	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
-	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
-	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
-	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
-	GenericServicesLogLevelKey:        metadata.GenericServicesLogLevelKey,
-	CLogKey:                           metadata.CLogKey,
-	CLogSetMetaTimeoutKey:             metadata.CLogSetMetaTimeoutKey,
-	CLogPoolGetTimeoutKey:             metadata.CLogPoolGetTimeoutKey,
-	CLogNetworkRetryCountKey:          metadata.CLogNetworkRetryCountKey,
-	CLogNetworkRetryIntervalKey:       metadata.CLogNetworkRetryIntervalKey,
-	CLogWorkerCountKey:                metadata.CLogWorkerCountKey,
-	CLogQueueCapacityKey:              metadata.CLogQueueCapacityKey,
-	CLogMaxErrorCountKey:              metadata.CLogMaxErrorCountKey,
-	CLogErrorTimeWindowKey:            metadata.CLogErrorTimeWindowKey,
-	CLogReattemptDurationKey:          metadata.CLogReattemptDurationKey,
-	CLogConnPoolLimitKey:              metadata.CLogConnPoolLimitKey,
-	CLogConnPoolGCIntervalKey:         metadata.CLogConnPoolGCIntervalKey,
-	CLogConnPoolReapIntervalKey:       metadata.CLogConnPoolReapIntervalKey,
-	SkipReplSpecAutoGcKey:             metadata.SkipReplSpecAutoGcKey,
-	DisableHlvBasedShortCircuitKey:    metadata.DisableHlvBasedShortCircuitKey,
-	DCPFlowControlThrottleKey:         metadata.DCPFlowControlThrottleKey,
-	ComponentEventsChanLengthKey:      metadata.ComponentEventsChanLengthKey,
-	DevReplOptsKey:                    metadata.DevReplOptsKey,
-	FilterDeletionsWithFEKey:          metadata.FilterDeletionsWithFEKey,
-	FilterExpirationsWithFEKey:        metadata.FilterExpirationsWithFEKey,
-	MinPVLenForMobileKey:              metadata.MinPVLenForMobileKey,
-	CLogPauseReplThresholdKey:         metadata.CLogPauseReplThresholdKey,
-	CLogMonitorDurationKey:            metadata.CLogMonitorDurationKey,
+	base.Type:                            metadata.ReplicationTypeKey,
+	FilterExpression:                     metadata.FilterExpressionKey,
+	PauseRequested:                       metadata.ActiveKey,
+	CheckpointInterval:                   metadata.CheckpointIntervalKey,
+	BatchCount:                           metadata.BatchCountKey,
+	BatchSize:                            metadata.BatchSizeKey,
+	FailureRestartInterval:               metadata.FailureRestartIntervalKey,
+	OptimisticReplicationThreshold:       metadata.OptimisticReplicationThresholdKey,
+	SourceNozzlePerNode:                  metadata.SourceNozzlePerNodeKey,
+	TargetNozzlePerNode:                  metadata.TargetNozzlePerNodeKey,
+	LogLevel:                             metadata.PipelineLogLevelKey,
+	StatsInterval:                        metadata.PipelineStatsIntervalKey,
+	BandwidthLimit:                       metadata.BandwidthLimitKey,
+	GoMaxProcs:                           metadata.GoMaxProcsKey,
+	GoGC:                                 metadata.GoGCKey,
+	base.CompressionTypeREST:             metadata.CompressionTypeKey,
+	FilterVersionKey:                     metadata.FilterVersionKey,
+	FilterSkipRestreamKey:                metadata.FilterSkipRestreamKey,
+	Priority:                             metadata.PriorityKey,
+	BacklogThreshold:                     metadata.BacklogThresholdKey,
+	FilterExpKey:                         metadata.FilterExpKey,
+	FilterDelKey:                         metadata.FilterDelKey,
+	BypassExpiryKey:                      metadata.BypassExpiryKey,
+	BypassUncommittedTxnKey:              metadata.BypassUncommittedTxnKey,
+	CollectionsMappingKey:                metadata.CollectionsMgtMappingKey,
+	CollectionsMigrateKey:                metadata.CollectionsMgtMigrateKey,
+	CollectionsMirrorKey:                 metadata.CollectionsMgtMirrorKey,
+	CollectionsOsoKey:                    metadata.CollectionsMgtOsoKey,
+	CollectionsMappingRulesKey:           metadata.CollectionsMappingRulesKey,
+	ManualBackfillRequested:              metadata.CollectionsManualBackfillKey,
+	CollectionsDelAllBackfillKey:         metadata.CollectionsDelAllBackfillKey,
+	CollectionsDelVbBackfillKey:          metadata.CollectionsDelVbBackfillKey,
+	RetryOnRemoteAuthErrKey:              metadata.RetryOnRemoteAuthErrKey,
+	RetryOnRemoteAuthErrMaxWaitKey:       metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
+	RetryOnErrExceptAuthErrMaxWaitKey:    metadata.RetryOnErrExceptAuthErrMaxWaitSecKey,
+	MergeFunctionMappingKey:              metadata.MergeFunctionMappingKey,
+	JSFunctionTimeoutKey:                 metadata.JSFunctionTimeoutKey,
+	DismissEventKey:                      metadata.DismissEventKey,
+	PreReplicateVBMasterCheckKey:         metadata.PreReplicateVBMasterCheckKey,
+	ReplicateCkptIntervalKey:             metadata.ReplicateCkptIntervalKey,
+	CkptSvcCacheEnabledKey:               metadata.CkptSvcCacheEnabledKey,
+	FilterSystemScopeKey:                 metadata.FilterSystemScopeKey,
+	FilterBinaryDocsKey:                  metadata.FilterBinaryDocsKey,
+	MobileCompatibleKey:                  metadata.MobileCompatibleKey,
+	EnableDcpPurgeRollback:               metadata.EnableDcpPurgeRollback,
+	TargetTopologyLogFreq:                metadata.TargetTopologyLogFreqKey,
+	CasDriftThresholdSecsKey:             metadata.CASDriftThresholdSecsKey,
+	PreCheckCasDriftThresholdHoursKey:    metadata.PreCheckCasDriftThresholdHoursKey,
+	GenericServicesLogLevelKey:           metadata.GenericServicesLogLevelKey,
+	CLogKey:                              metadata.CLogKey,
+	CLogSetMetaTimeoutKey:                metadata.CLogSetMetaTimeoutKey,
+	CLogPoolGetTimeoutKey:                metadata.CLogPoolGetTimeoutKey,
+	CLogNetworkRetryCountKey:             metadata.CLogNetworkRetryCountKey,
+	CLogNetworkRetryIntervalKey:          metadata.CLogNetworkRetryIntervalKey,
+	CLogWorkerCountKey:                   metadata.CLogWorkerCountKey,
+	CLogQueueCapacityKey:                 metadata.CLogQueueCapacityKey,
+	CLogMaxErrorCountKey:                 metadata.CLogMaxErrorCountKey,
+	CLogErrorTimeWindowKey:               metadata.CLogErrorTimeWindowKey,
+	CLogReattemptDurationKey:             metadata.CLogReattemptDurationKey,
+	CLogConnPoolLimitKey:                 metadata.CLogConnPoolLimitKey,
+	CLogConnPoolGCIntervalKey:            metadata.CLogConnPoolGCIntervalKey,
+	CLogConnPoolReapIntervalKey:          metadata.CLogConnPoolReapIntervalKey,
+	RemoteMemcachedConnPoolMaxConnsKey:   metadata.RemoteMemcachedConnPoolMaxConnsKey,
+	RemoteMemcachedConnPoolMinConnsKey:   metadata.RemoteMemcachedConnPoolMinConnsKey,
+	RemoteMemcachedConnPoolGCIntervalKey: metadata.RemoteMemcachedConnPoolGCIntervalKey,
+	SkipReplSpecAutoGcKey:                metadata.SkipReplSpecAutoGcKey,
+	DisableHlvBasedShortCircuitKey:       metadata.DisableHlvBasedShortCircuitKey,
+	DCPFlowControlThrottleKey:            metadata.DCPFlowControlThrottleKey,
+	ComponentEventsChanLengthKey:         metadata.ComponentEventsChanLengthKey,
+	DevReplOptsKey:                       metadata.DevReplOptsKey,
+	FilterDeletionsWithFEKey:             metadata.FilterDeletionsWithFEKey,
+	FilterExpirationsWithFEKey:           metadata.FilterExpirationsWithFEKey,
+	MinPVLenForMobileKey:                 metadata.MinPVLenForMobileKey,
+	CLogPauseReplThresholdKey:            metadata.CLogPauseReplThresholdKey,
+	CLogMonitorDurationKey:               metadata.CLogMonitorDurationKey,
 
 	// CNG nozzle settings
 	CNGWorkerCountKey: metadata.CNGWorkerCountKey,
@@ -360,6 +366,9 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CLogConnPoolLimitKey:                 CLogConnPoolLimitKey,
 	metadata.CLogConnPoolGCIntervalKey:            CLogConnPoolGCIntervalKey,
 	metadata.CLogConnPoolReapIntervalKey:          CLogConnPoolReapIntervalKey,
+	metadata.RemoteMemcachedConnPoolMaxConnsKey:   RemoteMemcachedConnPoolMaxConnsKey,
+	metadata.RemoteMemcachedConnPoolMinConnsKey:   RemoteMemcachedConnPoolMinConnsKey,
+	metadata.RemoteMemcachedConnPoolGCIntervalKey: RemoteMemcachedConnPoolGCIntervalKey,
 	metadata.SkipReplSpecAutoGcKey:                SkipReplSpecAutoGcKey,
 	metadata.DisableHlvBasedShortCircuitKey:       DisableHlvBasedShortCircuitKey,
 	metadata.DCPFlowControlThrottleKey:            DCPFlowControlThrottleKey,
