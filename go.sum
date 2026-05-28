@@ -21,8 +21,9 @@ github.com/couchbase/gocbcoreps v0.1.5-0.20260107140814-1c3a03f888f8 h1:WwGhY3TY
 github.com/couchbase/gocbcoreps v0.1.5-0.20260107140814-1c3a03f888f8/go.mod h1:AUR8DPPmvM+uMkb+Q01Y0mMXINdEY/jUL/qE+kPJ67s=
 github.com/couchbase/goprotostellar v1.0.6-0.20260407143512-d7af25156dcc h1:wQfvYGOutMCo9be0xnHtM1FqnwKcmPVGRPx6xXw5wOo=
 github.com/couchbase/goprotostellar v1.0.6-0.20260407143512-d7af25156dcc/go.mod h1:X58ot5FRqlBTBkwG/oI4klunpu4MApjGktheqeRWQw0=
-github.com/couchbase/goutils v0.1.2 h1:gWr8B6XNWPIhfalHNog3qQKfGiYyh4K4VhO3P2o9BCs=
 github.com/couchbase/goutils v0.1.2/go.mod h1:h89Ek/tiOxxqjz30nPPlwZdQbdB8BwgnuBxeoUe/ViE=
+github.com/couchbase/goutils v0.3.0 h1:rsv72B6BDjW9jmwlfiDUrdu3EpNvPuo5WLULHzQ0DLE=
+github.com/couchbase/goutils v0.3.0/go.mod h1:7Gm+D3vXfV4HS+hQWvKfy6e6ILCptGXNqBKvQXhplhk=
 github.com/couchbase/tools-common/errors v1.0.0 h1:lEPRdPrk7iHOiZIJspEH7OnywxRR+SKlrG78KkOWnXA=
 github.com/couchbase/tools-common/errors v1.0.0/go.mod h1:9or/a3TpNd/1aZIUr/a8y0uF03O9hachXFCnu6Y3sjM=
 github.com/couchbase/tools-common/http v1.0.7 h1:Cs73GNlUEr/hUx+w3beJHj2k+PyerFJZMo3MhW9kBj8=
