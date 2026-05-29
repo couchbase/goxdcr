@@ -182,22 +182,6 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				return nil
 			}
 
-			// function to init the stats provider
-			retryStatsOp := func() error {
-				err = statsProvider.Init()
-				if err != nil {
-					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) || errors.Is(err, base.ErrorIpFamilyMismatch) {
-						// IP-family mismatch is a configuration error — retrying is fruitless.
-						// Let it pass; the remote cluster service will mark the ref as RC_ERROR.
-						b.logger.Warnf("statsProvider.Init for spec %v: non-retryable IP family error: %v", specCpy.Id, err)
-						return nil
-					}
-					b.logger.Errorf("statsProvider.Init has error: %v", err)
-					return err
-				}
-				return nil
-			}
-
 			// start the watcher
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
@@ -205,12 +189,11 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to start remote watcher: %v. XDCR must restart to try again.", specCpy.Id, retryErr))
 			}
 
-			// init the stats provider
-			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
-				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryStatsOp)
-			if retryErr != nil {
-				b.logger.Errorf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v", specCpy.Id, retryErr)
-			}
+			// The stats provider is registered above but is NOT initialized here.
+			// canStartOp() on every public read path (GetFailoverLog / GetVBucketStats)
+			// lazy-inits on first use. Eagerly initializing
+			// at boot would gate the adminport on a remote round-trip and block for
+			// ~3.5 min of backoff retries in erroneous scenarios.
 		}()
 	}
 	waitGrp.Wait()
@@ -1026,22 +1009,6 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 				return nil
 			}
 
-			// function to init the stats provider
-			retryStatsOp := func() error {
-				err = statsProvider.Init()
-				if err != nil {
-					if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) || errors.Is(err, base.ErrorIpFamilyMismatch) {
-						// IP-family mismatch is a configuration error — retrying is fruitless.
-						// Let it pass; the remote cluster service will mark the ref as RC_ERROR.
-						b.logger.Warnf("statsProvider.Init for spec %v: non-retryable IP family error: %v", newSpec.Id, err)
-						return nil
-					}
-					b.logger.Errorf("statsProvider.Init has error: %v", err)
-					return err
-				}
-				return nil
-			}
-
 			// start the watcher
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
@@ -1049,12 +1016,10 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 				panic(fmt.Sprintf("Bucket Topology service bootstrapping for spec %v failed to start remote watcher: %v. XDCR must restart to try again.", newSpec.Id, retryErr))
 			}
 
-			// init the stats provider
-			retryErr = b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote stats)",
-				base.RemoteBucketMonitorWaitTime, base.RemoteBucketMonitorMaxRetry, base.RemoteBucketMonitorRetryFactor, retryStatsOp)
-			if retryErr != nil {
-				b.logger.Errorf("Bucket Topology service bootstrapping for spec %v failed to init statsProvider: %v", newSpec.Id, retryErr)
-			}
+			// The stats provider is registered above but is NOT initialized here.
+			// canStartOp() on every public read path lazy-inits on first use; eager
+			// init here would stall spec attachment on a remote round-trip with up
+			// to ~3.5 min of backoff retries in erroneous scenarios.
 		}()
 
 		waitGrp.Wait()

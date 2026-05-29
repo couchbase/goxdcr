@@ -2061,3 +2061,175 @@ func TestCngBucketStatsProvider_GetFailoverLog_TracksDataOnError(t *testing.T) {
 	utilsMockObj.AssertExpectations(t)
 	provider.Close()
 }
+
+// ============= UpdateConnPoolTunables Tests (MB-72144 / MB-70265) =============
+
+// buildSettingsWithMaxConns returns a *GlobalSettings whose remote-memcached
+// max-conns-per-server is set to the requested value. Used to drive
+// UpdateConnPoolTunables in the tests below.
+func buildSettingsWithMaxConns(t *testing.T, maxConns int) *metadata.GlobalSettings {
+	t.Helper()
+	settings := metadata.DefaultGlobalSettings()
+	_, errMap := settings.UpdateSettingsFromMap(map[string]interface{}{
+		metadata.RemoteMemcachedConnPoolMaxConnsKey: maxConns,
+	})
+	if len(errMap) > 0 {
+		t.Fatalf("failed to seed global settings: %v", errMap)
+	}
+	return settings
+}
+
+// TestClusterBucketStatsProvider_UpdateConnPoolTunables_BeforeInit verifies the
+// MB-70265 regression: a global-settings change that arrives BEFORE the
+// provider's first Init must still be honoured when Init eventually runs.
+// Before the fix, UpdateConnPoolTunables silently returned without caching the
+// new tunables, so the eventual Init constructed the component with stale
+// values.
+func TestClusterBucketStatsProvider_UpdateConnPoolTunables_BeforeInit(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_UpdateConnPoolTunables_BeforeInit =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_UpdateConnPoolTunables_BeforeInit =================")
+	assert := assert.New(t)
+
+	provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc := setupClusterBucketStatsProvider()
+
+	// Sanity: the provider starts with testTunables() (MaxConnsPerServer=5)
+	// and has no live component yet.
+	assert.Nil(provider.remoteMemcachedComponent, "component must be nil before Init")
+	assert.Equal(testMaxConnectionsPerServer, provider.GetRemoteMemcachedTunables().MaxConnsPerServer)
+
+	// Apply a tunables update before Init. With the fix this still caches.
+	const newMax = 42
+	provider.UpdateConnPoolTunables(buildSettingsWithMaxConns(t, newMax))
+	assert.Nil(provider.remoteMemcachedComponent, "component should still be nil after pre-Init Update")
+	assert.Equal(newMax, provider.GetRemoteMemcachedTunables().MaxConnsPerServer,
+		"cached tunables must reflect pre-Init UpdateConnPoolTunables")
+
+	// Now wire up mocks and run Init. The constructor inside Init reads
+	// GetRemoteMemcachedTunables(), so the component must come up with newMax.
+	testRef := createTestRemoteClusterRef()
+	mockRemoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(testRef, nil)
+	mockRemoteClusterSvc.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
+
+	mockTargetNotification := &service_defMock.TargetNotification{}
+	mockTargetNotification.On("GetTargetServerVBMap").Return(createTestKvVbMap())
+	mockTargetNotification.On("Recycle").Return()
+	targetNotificationCh := make(chan service_def.TargetNotification, 1)
+	targetNotificationCh <- mockTargetNotification
+	mockBucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.Anything, mock.Anything).Return(targetNotificationCh, make(chan error, 1), nil)
+	mockBucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.Anything, mock.Anything).Return(nil)
+
+	mockClient := &clientMocks.ClientIface{}
+	mockClient.On("Close").Return(nil)
+	mockUtils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockClient, nil)
+	mockUtils.On("ExecWithTimeout", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		fn := args.Get(0).(func() error)
+		fn()
+	}).Return(nil)
+
+	assert.NoError(provider.Init())
+	assert.NotNil(provider.remoteMemcachedComponent)
+	assert.Equal(newMax, provider.remoteMemcachedComponent.MaxConnsPerServer,
+		"live component must be constructed with the pre-Init tunables update")
+
+	provider.Close()
+}
+
+// TestClusterBucketStatsProvider_UpdateConnPoolTunables_AfterInit is the
+// happy-path baseline: when the live component exists, UpdateConnPoolTunables
+// must push the new value through to it. Pre-fix this already worked; the test
+// guards against future regression.
+func TestClusterBucketStatsProvider_UpdateConnPoolTunables_AfterInit(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_UpdateConnPoolTunables_AfterInit =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_UpdateConnPoolTunables_AfterInit =================")
+	assert := assert.New(t)
+
+	provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc := setupClusterBucketStatsProvider()
+	setupBasicMocksForProvider(provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc)
+
+	// Live component is up; baseline matches testTunables().
+	assert.True(provider.InitDone())
+	assert.Equal(testMaxConnectionsPerServer, provider.remoteMemcachedComponent.MaxConnsPerServer)
+
+	const newMax = 77
+	provider.UpdateConnPoolTunables(buildSettingsWithMaxConns(t, newMax))
+	assert.Equal(newMax, provider.GetRemoteMemcachedTunables().MaxConnsPerServer)
+	assert.Equal(newMax, provider.remoteMemcachedComponent.MaxConnsPerServer,
+		"live component should reflect the post-Init tunables push")
+
+	provider.Close()
+}
+
+// TestClusterBucketStatsProvider_UpdateConnPoolTunables_ConcurrentWithInit
+// drives Init and UpdateConnPoolTunables concurrently across many goroutines.
+// With initMtx held across the entire UpdateConnPoolTunables critical section,
+// `go test -race` should see no data race on the remoteMemcachedComponent
+// pointer, and the final cached/live tunables should match each other.
+func TestClusterBucketStatsProvider_UpdateConnPoolTunables_ConcurrentWithInit(t *testing.T) {
+	fmt.Println("============== Test case start: TestClusterBucketStatsProvider_UpdateConnPoolTunables_ConcurrentWithInit =================")
+	defer fmt.Println("============== Test case end: TestClusterBucketStatsProvider_UpdateConnPoolTunables_ConcurrentWithInit =================")
+	assert := assert.New(t)
+
+	provider, mockUtils, mockBucketTopologySvc, mockRemoteClusterSvc := setupClusterBucketStatsProvider()
+
+	// Wire the same mocks setupBasicMocksForProvider uses, but DON'T call Init
+	// — we want the race window where Init and UpdateConnPoolTunables overlap.
+	testRef := createTestRemoteClusterRef()
+	mockRemoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(testRef, nil)
+	mockRemoteClusterSvc.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
+
+	mockTargetNotification := &service_defMock.TargetNotification{}
+	mockTargetNotification.On("GetTargetServerVBMap").Return(createTestKvVbMap())
+	mockTargetNotification.On("Recycle").Return()
+	targetNotificationCh := make(chan service_def.TargetNotification, 8)
+	for i := 0; i < cap(targetNotificationCh); i++ {
+		targetNotificationCh <- mockTargetNotification
+	}
+	mockBucketTopologySvc.On("SubscribeToRemoteBucketFeed", mock.Anything, mock.Anything).Return(targetNotificationCh, make(chan error, 1), nil)
+	mockBucketTopologySvc.On("UnSubscribeRemoteBucketFeed", mock.Anything, mock.Anything).Return(nil)
+
+	mockClient := &clientMocks.ClientIface{}
+	mockClient.On("Close").Return(nil)
+	mockUtils.On("GetRemoteMemcachedConnection", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockClient, nil)
+	mockUtils.On("ExecWithTimeout", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		fn := args.Get(0).(func() error)
+		fn()
+	}).Return(nil)
+
+	// One writer drives a deterministic sequence of tunable values so the test
+	// can assert the final state. Many initters race against it; Init is
+	// idempotent so all calls land on the same component.
+	const finalMax = 99
+	updateValues := []int{10, 25, 50, 75, finalMax}
+
+	var wg sync.WaitGroup
+	const numInitters = 32
+
+	for i := 0; i < numInitters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = provider.Init()
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, v := range updateValues {
+			provider.UpdateConnPoolTunables(buildSettingsWithMaxConns(t, v))
+		}
+	}()
+
+	wg.Wait()
+
+	// After everyone is done: cache and live component must agree, and both
+	// must reflect the writer's final value.
+	assert.True(provider.InitDone(), "at least one Init must have succeeded")
+	assert.NotNil(provider.remoteMemcachedComponent)
+	assert.Equal(finalMax, provider.GetRemoteMemcachedTunables().MaxConnsPerServer,
+		"cached tunables must reflect the writer's final value")
+	assert.Equal(finalMax, provider.remoteMemcachedComponent.MaxConnsPerServer,
+		"live component must reflect the writer's final value (would fail under TOCTOU lost-update)")
+
+	provider.Close()
+}

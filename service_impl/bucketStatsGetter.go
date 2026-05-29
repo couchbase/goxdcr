@@ -552,16 +552,34 @@ func (provider *ClusterBucketStatsProvider) GetVBucketStats(requestOpts *base.VB
 
 // UpdateConnPoolTunables updates the connection pool tunables based on the provided global settings.
 // This method should be called when global settings are changed.
+//
+// The provider's cached tunables are updated unconditionally so that a subsequent lazy Init()
+// (driven by canStartOp on first read) constructs the remoteMemcachedComponent with the latest
+// values. If the component is already live, the change is also pushed to it immediately.
+//
+// initMtx is held across the cache write, pointer read, and live push to serialise with Init():
+//   - prevents a data race on the remoteMemcachedComponent pointer
+//   - prevents a TOCTOU window where Init reads the cached tunables BEFORE this call's cache
+//     update but stores the component AFTER this call's nil-check, leaving the live component
+//     permanently stale.
+//
+// Settings updates are rare; blocking them for the duration of an Init
+// is an acceptable tradeoff for the simpler invariant.
 func (provider *ClusterBucketStatsProvider) UpdateConnPoolTunables(settings *metadata.GlobalSettings) {
-	if provider.remoteMemcachedComponent == nil {
-		return
-	}
 	tunables := base.RemoteMemcachedTunables{
 		MaxConnsPerServer: settings.GetRemoteMemcachedConnPoolMaxConns(),
 		MinConnsPerServer: settings.GetRemoteMemcachedConnPoolMinConns(),
 		GCInterval:        settings.GetRemoteMemcachedConnPoolGCInterval(),
 	}
+
+	provider.initMtx.Lock()
+	defer provider.initMtx.Unlock()
+
 	provider.SetRemoteMemcachedTunables(tunables)
+	if provider.remoteMemcachedComponent == nil {
+		provider.logger.Infof("Cached connection pool tunables for bucket %s on cluster %s (provider not yet initialized): %+v", provider.bucketName, provider.clusterUuid, tunables)
+		return
+	}
 	provider.remoteMemcachedComponent.SetTunables(tunables)
 	provider.logger.Infof("Updated connection pool tunables for bucket %s on cluster %s: %+v", provider.bucketName, provider.clusterUuid, tunables)
 }
