@@ -316,6 +316,12 @@ func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 			continue
 		}
 
+		if !base.NodeIsActiveMember(nodeInfo) {
+			// A failed-over (inactiveFailed) or pending (inactiveAdded) node is not an
+			// active cluster member - it should not be reported as a peer/source node.
+			continue
+		}
+
 		hasKV, hasKVErr := base.NodeHasKVService(nodeInfo)
 		if hasKVErr != nil || !hasKV {
 			// Don't return the address since XDCR deals exclusively with data service nodes only as peers

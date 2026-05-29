@@ -1991,24 +1991,10 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 			continue
 		}
 
-		clusterMembershipObj, ok := nodeInfoMap[ClusterMembershipKey]
-		if !ok {
-			// this could happen when target is elastic search cluster (or maybe very old couchbase cluster?)
-			// consider the node to be "active" to be safe
-			errMsg := fmt.Sprintf("node info map does not contain cluster membership. node info map=%v ", nodeInfoMap)
-			logger.Debug(errMsg)
-			activeNodeList = append(activeNodeList, node)
-			continue
-		}
-		clusterMembership, ok := clusterMembershipObj.(string)
-		if !ok {
-			// play safe and return the node as active
-			errMsg := fmt.Sprintf("cluster membership is not string type. type=%v ", reflect.TypeOf(clusterMembershipObj))
-			logger.Warn(errMsg)
-			activeNodeList = append(activeNodeList, node)
-			continue
-		}
-		if clusterMembership == "" || clusterMembership == ClusterMembership_Active {
+		// A missing or non-active membership (e.g. failed-over node) is excluded. Missing or
+		// non-string membership is treated as active to be safe (e.g. elastic search or very
+		// old couchbase clusters).
+		if NodeIsActiveMember(nodeInfoMap) {
 			activeNodeList = append(activeNodeList, node)
 		}
 	}
@@ -2039,6 +2025,23 @@ func IsRemoteClusterFullyEnterprise(nodesList []any) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// NodeIsActiveMember returns true when the node is a full, active member of the cluster.
+// A node that has been failed over (clusterMembership=="inactiveFailed") or is pending
+// addition ("inactiveAdded") is not yet/anymore an active member. When the membership
+// field is missing or not a string (e.g. elastic search or very old clusters) we play
+// safe and treat the node as active, matching GetNodeListFromInfoMap's behavior.
+func NodeIsActiveMember(nodeInfoMap map[string]interface{}) bool {
+	clusterMembershipObj, ok := nodeInfoMap[ClusterMembershipKey]
+	if !ok {
+		return true
+	}
+	clusterMembership, ok := clusterMembershipObj.(string)
+	if !ok {
+		return true
+	}
+	return clusterMembership == "" || clusterMembership == ClusterMembership_Active
 }
 
 func NodeHasKVService(nodeInfoMap map[string]interface{}) (bool, error) {

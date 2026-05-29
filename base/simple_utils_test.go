@@ -960,3 +960,68 @@ func TestValidateHostAddrForCbCluster(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeIsActiveMember(t *testing.T) {
+	fmt.Println("============== Test case start: TestNodeIsActiveMember =================")
+	defer fmt.Println("============== Test case end: TestNodeIsActiveMember =================")
+	assert := assert.New(t)
+
+	// Active node
+	assert.True(NodeIsActiveMember(map[string]interface{}{ClusterMembershipKey: ClusterMembership_Active}))
+	// Failed-over node must not be considered active
+	assert.False(NodeIsActiveMember(map[string]interface{}{ClusterMembershipKey: "inactiveFailed"}))
+	// Pending (added but not rebalanced in) node must not be considered active
+	assert.False(NodeIsActiveMember(map[string]interface{}{ClusterMembershipKey: "inactiveAdded"}))
+	// Empty membership string is treated as active
+	assert.True(NodeIsActiveMember(map[string]interface{}{ClusterMembershipKey: ""}))
+	// Missing membership field - play safe, treat as active
+	assert.True(NodeIsActiveMember(map[string]interface{}{}))
+	// Non-string membership - play safe, treat as active
+	assert.True(NodeIsActiveMember(map[string]interface{}{ClusterMembershipKey: 123}))
+}
+
+func TestNodeIsActiveMemberWithNullMembership(t *testing.T) {
+	assert := assert.New(t)
+
+	nodeInfo := map[string]interface{}{ClusterMembershipKey: nil}
+	assert.True(NodeIsActiveMember(nodeInfo))
+}
+
+func TestNodeIsActiveMemberRejectsUnknownMembership(t *testing.T) {
+	assert := assert.New(t)
+
+	nodeInfo := map[string]interface{}{ClusterMembershipKey: "warmup"}
+	assert.False(NodeIsActiveMember(nodeInfo))
+}
+
+func TestGetNodeListFromInfoMapFiltersInactiveWithoutServices(t *testing.T) {
+	assert := assert.New(t)
+
+	infoMap := map[string]interface{}{
+		NodesKey: []interface{}{
+			map[string]interface{}{ClusterMembershipKey: "inactiveFailed"},
+			map[string]interface{}{ServicesKey: []interface{}{"kv"}, ClusterMembershipKey: ClusterMembership_Active},
+		},
+	}
+
+	nodes, err := GetNodeListFromInfoMap(infoMap, nil)
+	assert.NoError(err)
+	assert.Len(nodes, 1)
+}
+
+func TestGetNodeListFromInfoMapFiltersInactiveMembers(t *testing.T) {
+	assert := assert.New(t)
+
+	infoMap := map[string]interface{}{
+		NodesKey: []interface{}{
+			map[string]interface{}{ServicesKey: []interface{}{"kv"}, ClusterMembershipKey: "inactiveFailed"},
+			map[string]interface{}{ServicesKey: []interface{}{"kv"}, ClusterMembershipKey: ClusterMembership_Active},
+			map[string]interface{}{ServicesKey: []interface{}{"kv"}},
+		},
+	}
+
+	nodes, err := GetNodeListFromInfoMap(infoMap, nil)
+	assert.NoError(err)
+	assert.Len(nodes, 2)
+}
+
