@@ -39,6 +39,8 @@ function runTestCase {
 	echo "Running Topology Heartbeats sanity test"
 	echo "============================================================================"
 
+	hardResetNodes
+
 	trap killAllBgJobs EXIT
 
 	# Set up two single-node clusters and remote cluster reference C1 -> C2
