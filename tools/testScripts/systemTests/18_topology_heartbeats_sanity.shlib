@@ -26,11 +26,13 @@ insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
-# Heartbeat timing constants.
-# SrcHeartbeatMinInterval=10s + SrcHeartbeatMaxIntervalFactor=1 → MaxInterval=10s.
-# Heartbeats arrive every ~10s. "Within 2 heartbeats" = 30s polling timeout (with buffer).
-HB_INTERVAL_SECS=10
-HB_WAIT_2_PERIODS_SECS=30
+# Heartbeat timing applied for fast testing. These are the values we WRITE to
+# the source's internal settings; the actual wait budgets used below are derived
+# at runtime from the live settings (see getHeartbeatMaxIntervalSecs /
+# getHeartbeatPropagationWaitSecs) so the test adapts automatically rather than
+# assuming a fixed cadence.
+HB_SET_MIN_INTERVAL=10
+HB_SET_MAX_FACTOR=1
 
 function runTestCase {
 	echo "============================================================================"
@@ -50,15 +52,27 @@ function runTestCase {
 
 	# Reduce heartbeat interval for fast testing; both settings in one call to
 	# trigger only one XDCR process restart.
-	setInternalSettings "C1" "SrcHeartbeatMinInterval=10" "SrcHeartbeatMaxIntervalFactor=1"
+	setInternalSettings "C1" "SrcHeartbeatMinInterval=$HB_SET_MIN_INTERVAL" "SrcHeartbeatMaxIntervalFactor=$HB_SET_MAX_FACTOR"
 	sleep 5
-	checkInternalSetting "C1" "SrcHeartbeatMinInterval" "$HB_INTERVAL_SECS"
-	checkInternalSetting "C1" "SrcHeartbeatMaxIntervalFactor" "1"
+	checkInternalSetting "C1" "SrcHeartbeatMinInterval" "$HB_SET_MIN_INTERVAL"
+	checkInternalSetting "C1" "SrcHeartbeatMaxIntervalFactor" "$HB_SET_MAX_FACTOR"
+
+	# Derive the wait budgets from the source's live heartbeat settings rather
+	# than hardcoding them: hbMaxInterval is the worst-case gap between any two
+	# heartbeats; hbStep is how long to wait to guarantee a fresh heartbeat
+	# arrived; hbWait is how long to allow a source-side change to propagate to
+	# the target's heartbeat-derived stats.
+	local hbMaxInterval
+	hbMaxInterval=$(getHeartbeatMaxIntervalSecs "C1")
+	local hbStep=$((hbMaxInterval + 5))
+	local hbWait
+	hbWait=$(getHeartbeatPropagationWaitSecs "C1")
+	echo "Derived heartbeat timing from C1: maxInterval=${hbMaxInterval}s, perHeartbeatWait=${hbStep}s, propagationWait=${hbWait}s"
 
 	echo -e "\nTest 1: Verify xdcr_source_cluster_heartbeat_recv_bytes increments on Target"
 	echo "Waiting for first heartbeat to arrive on C2..."
 	local v0=0
-	local maxInitialWait=$((HB_INTERVAL_SECS * 4))
+	local maxInitialWait=$((hbMaxInterval * 4))
 	local elapsed=0
 	while ((elapsed < maxInitialWait)) && [[ "$v0" == "0" ]]; do
 		sleep 5
@@ -72,7 +86,7 @@ function runTestCase {
 	fi
 	echo "1st heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v0"
 
-	sleep $((HB_INTERVAL_SECS + 5))
+	sleep $hbStep
 	local v1
 	v1=$(getHbRecvBytesOnTarget "C2")
 	if ((v1 <= v0)); then
@@ -82,7 +96,7 @@ function runTestCase {
 	fi
 	echo "2nd heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v1"
 
-	sleep $((HB_INTERVAL_SECS + 5))
+	sleep $hbStep
 	local v2
 	v2=$(getHbRecvBytesOnTarget "C2")
 	if ((v2 <= v1)); then
@@ -93,44 +107,43 @@ function runTestCase {
 	echo "3rd heartbeat received: xdcr_source_cluster_heartbeat_recv_bytes=$v2"
 	echo ">>> PASS: xdcr_source_cluster_heartbeat_recv_bytes increased over 3 heartbeats"
 
+	# The validate* helpers below poll up to hbWait for the heartbeat-derived
+	# stat to converge to the expected value, so no fixed post-change sleep is
+	# needed - the wait scales with the configured heartbeat interval.
 	echo -e "\nTest 2: Verify Source nodes are known to Target"
-	validatePrometheusSourceNodesCnt "C2" 1
-	if (($? != 0)); then
-		dumpDebugInfoBeforeExit
-		exit 1
-	fi
+	validatePrometheusSourceNodesCnt "C2" 1 "$hbWait"
 	echo ">>> PASS: Source cluster visible on C2 via xdcr_number_of_source_nodes_total"
 
 	echo -e "\nTest 3: Verify replication is known to Target"
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
-	sleep $HB_WAIT_2_PERIODS_SECS
-	validatePrometheusSourceRunningReplCnt "C2" 1
+	validatePrometheusSourceRunningReplCnt "C2" 1 "$hbWait"
 	echo ">>> PASS: Replication visible on C2 via xdcr_number_of_source_replications_total"
 
 	echo -e "\nTest 4: Verify new Source node is known to Target"
 	addNodesIn
 	startRebalancing "C1"
-	sleep $HB_WAIT_2_PERIODS_SECS
-	validatePrometheusSourceNodesCnt "C2" 2
+	validatePrometheusSourceNodesCnt "C2" 2 "$hbWait"
 	echo ">>> PASS: 2 source nodes visible on C2 via xdcr_number_of_source_nodes_total"
 
 	echo -e "\nTest 5: Verify replication deletion is known to Target"
 	cleanupBucketReplications
-	sleep $HB_WAIT_2_PERIODS_SECS
-	validatePrometheusSourceRunningReplCnt "C2" 0
+	validatePrometheusSourceRunningReplCnt "C2" 0 "$hbWait"
 	echo ">>> PASS: Replication removed visible on C2 via xdcr_number_of_source_replications_total"
 
 	echo -e "\nTest 6: Verify node removal is known to Target"
 	startEjectNode "C1P" "C1"
-	sleep $HB_WAIT_2_PERIODS_SECS
-	validatePrometheusSourceNodesCnt "C2" 1
+	validatePrometheusSourceNodesCnt "C2" 1 "$hbWait"
 	echo ">>> PASS: Single source node visible on C2 via xdcr_number_of_source_nodes_total after node removal"
 
 	echo -e "\nTest 7: Verify non-KV node is NOT counted by Target"
 	addOneNodeIn "C1P" "C1" "index"
 	startRebalancing "C1"
-	sleep $HB_WAIT_2_PERIODS_SECS
-	validatePrometheusSourceNodesCnt "C2" 1
+	# Unlike the other checks, here we assert the count does NOT change. Give a
+	# full propagation window for any (incorrect) update to land before
+	# confirming the count is still 1, otherwise we might check before the
+	# index node could ever have been reflected.
+	sleep $hbWait
+	validatePrometheusSourceNodesCnt "C2" 1 "$hbWait"
 	echo ">>> PASS: Non-KV source node is NOT counted on C2 via xdcr_number_of_source_nodes_total"
 
 	grepForPanics

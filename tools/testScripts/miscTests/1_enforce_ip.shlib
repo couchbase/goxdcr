@@ -49,13 +49,13 @@ function probeNsServerReachable {
 	local port=$2
 	local maxSec=${3:-30}
 	local elapsed=0
-	while (( elapsed < maxSec )); do
+	while ((elapsed < maxSec)); do
 		curl -fsS -o /dev/null -u $DEFAULT_ADMIN:$DEFAULT_PW "http://${host}:${port}/pools" >/dev/null 2>&1
-		if (( $? == 0 )); then
+		if (($? == 0)); then
 			return 0
 		fi
 		sleep 2
-		elapsed=$(( elapsed + 2 ))
+		elapsed=$((elapsed + 2))
 	done
 	return 1
 }
@@ -318,16 +318,16 @@ function waitForReplicationInfosContaining {
 	local elapsed=0
 	local result
 
-	while (( elapsed < maxWaitSec )); do
+	while ((elapsed < maxWaitSec)); do
 		result=$(checkReplicationInfos "$clusterName")
 		local count
 		count=$(echo "$result" | grep -c "$searchStr")
-		if (( count > 0 )); then
+		if ((count > 0)); then
 			echo "$result"
 			return 0
 		fi
 		sleep $intervalSec
-		elapsed=$(( elapsed + intervalSec ))
+		elapsed=$((elapsed + intervalSec))
 	done
 	echo "$result"
 	return 1
@@ -347,16 +347,16 @@ function waitForReplicationInfosNotContaining {
 	local elapsed=0
 	local result
 
-	while (( elapsed < maxWaitSec )); do
+	while ((elapsed < maxWaitSec)); do
 		result=$(checkReplicationInfos "$clusterName")
 		local count
 		count=$(echo "$result" | grep -c "$searchStr")
-		if (( count == 0 )); then
+		if ((count == 0)); then
 			echo "$result"
 			return 0
 		fi
 		sleep $intervalSec
-		elapsed=$(( elapsed + intervalSec ))
+		elapsed=$((elapsed + intervalSec))
 	done
 	echo "$result"
 	return 1

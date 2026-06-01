@@ -56,7 +56,7 @@ function runManifestCleanupSubTest {
 	startTime=$(date +%s%N)
 	deleteNsServerSimpleStore "C1" "$metakvKey"
 	endTime=$(date +%s%N)
-	_subTestElapsedMs=$(( (endTime - startTime) / 1000000 ))
+	_subTestElapsedMs=$(((endTime - startTime) / 1000000))
 
 	local postStatus
 	postStatus=$(getNsServerSimpleStoreStatus "C1" "$metakvKey")
@@ -100,8 +100,8 @@ function runTestCase {
 	echo "Comparison — 3 manifests: ${time3}ms  |  10k manifests: ${time10k}ms"
 
 	# Assert 10k-manifest delete is not more than 1.5x the 3-manifest delete.
-	local threshold=$(( time3 * 3 / 2 ))
-	if (( time10k > threshold )); then
+	local threshold=$((time3 * 3 / 2))
+	if ((time10k > threshold)); then
 		echo "FAILED: 10k-manifest delete (${time10k}ms) exceeded 1.5x of 3-manifest delete (${time3}ms, threshold=${threshold}ms)"
 		exit 1
 	fi

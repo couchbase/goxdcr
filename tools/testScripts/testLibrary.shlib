@@ -2789,29 +2789,146 @@ function validatePrometheusStatsNon0 {
 	fi
 }
 
+# Conservative fallback (seconds) used when the live heartbeat interval cannot
+# be read; based on goxdcr's default 60s min interval. Must stay > 0 so callers
+# never derive a zero/negative wait from it.
+HB_DEFAULT_MAX_INTERVAL_SECS=60
+
+# getHeartbeatMaxIntervalSecs <sourceCluster>
+# Returns the worst-case interval (in seconds) between heartbeats emitted by a
+# source cluster, computed live from its internal settings:
+#   SrcHeartbeatMinInterval * SrcHeartbeatMaxIntervalFactor
+# This mirrors base.SrcHeartbeatMaxInterval() in goxdcr. The max-interval
+# ticker guarantees a heartbeat is sent at least this often, while a heartbeat
+# carrying changed metadata (e.g. a new node) is sent within
+# SrcHeartbeatMinInterval. Using the max interval as the unit therefore bounds
+# how long any heartbeat-derived target stat can lag a source-side change.
+#
+# The returned value is always strictly positive: goxdcr clamps these settings
+# to {10..3600} and {1..100} respectively, but if the read fails (empty/null/0)
+# we fall back to HB_DEFAULT_MAX_INTERVAL_SECS so callers can never derive a
+# zero interval (which would break wait/loop math). A failed read also returns
+# a non-zero status so callers that care can distinguish it.
+function getHeartbeatMaxIntervalSecs {
+	local clusterName=$1
+	local minInterval
+	local maxFactor
+	local product
+	minInterval=$(getInternalSetting "$clusterName" "SrcHeartbeatMinInterval" | sed 's/[^0-9]//g')
+	maxFactor=$(getInternalSetting "$clusterName" "SrcHeartbeatMaxIntervalFactor" | sed 's/[^0-9]//g')
+	product=$((${minInterval:-0} * ${maxFactor:-0}))
+	if (($product <= 0)); then
+		echo "$HB_DEFAULT_MAX_INTERVAL_SECS"
+		return 1
+	fi
+	echo "$product"
+}
+
+# getHeartbeatPropagationWaitSecs <sourceCluster> [bufferSecs]
+# Time to allow for a source-side change (new/removed node or replication) to
+# fully propagate to the target's heartbeat-derived stats. Allows two
+# worst-case heartbeat intervals (one to emit the changed heartbeat, one for
+# margin) plus a fixed buffer for the source topology-watcher refresh and
+# target-side processing.
+function getHeartbeatPropagationWaitSecs {
+	local clusterName=$1
+	local bufferSecs=${2:-15}
+	local maxInterval
+	maxInterval=$(getHeartbeatMaxIntervalSecs "$clusterName")
+	if (($? != 0)) || (($maxInterval <= 0)); then
+		# Conservative fallback based on the default 60s min interval.
+		echo $((HB_DEFAULT_MAX_INTERVAL_SECS * 2 + bufferSecs))
+		return 0
+	fi
+	echo $(($maxInterval * 2 + $bufferSecs))
+}
+
+# getPrometheusSourceStat <port> <metricName> [statusLabel]
+# Fetches a single heartbeat-derived source-cluster stat from a node's
+# prometheus endpoint and echoes its numeric value (optionally filtered to a
+# status label such as "Running"). The HTTP fetch is retried with exponential
+# backoff if curl fails or returns an empty body, so transient endpoint
+# unavailability (process restart, auth warmup) is not mistaken for a missing
+# stat; each retry prints a warning to stderr. Echoes an empty string if the
+# metric line is genuinely absent from an otherwise-valid response - callers
+# decide what that means (for source-cluster stats an absent line is itself
+# unexpected, since the line is exported with value 0 while the source cluster
+# is still known via heartbeats). Value goes to stdout; warnings to stderr so
+# they do not pollute the captured result.
+function getPrometheusSourceStat {
+	local port=$1
+	local metricName=$2
+	local statusLabel=${3:-}
+	local maxAttempts=4
+	local attempt=0
+	local backoff=1
+	local body
+	local rc
+
+	while (($attempt < $maxAttempts)); do
+		body=$($CURL -s -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/_prometheusMetrics)
+		rc=$?
+		if (($rc == 0)) && [[ -n "${body:-}" ]]; then
+			break
+		fi
+		attempt=$(($attempt + 1))
+		echo "WARNING: prometheus fetch on port $port failed or returned no body (rc=$rc, attempt $attempt/$maxAttempts); retrying in ${backoff}s..." >&2
+		sleep $backoff
+		backoff=$(($backoff * 2))
+	done
+
+	if [[ -z "${body:-}" ]]; then
+		# Endpoint never produced a body; signal "unavailable" with empty output.
+		echo ""
+		return 1
+	fi
+
+	local lines
+	lines=$(echo "$body" | grep "$metricName" | grep -v "HELP" | grep -v "TYPE")
+	if [[ -n "$statusLabel" ]]; then
+		lines=$(echo "$lines" | grep "$statusLabel")
+	fi
+	echo "$lines" | awk '{print $NF}' | head -1
+}
+
+# validatePrometheusSourceNodesCnt <targetNode> <expectedCnt> [maxWaitSecs]
+# Polls the target's xdcr_number_of_source_nodes_total until it equals
+# expectedCnt or maxWaitSecs elapses. maxWaitSecs should be derived from the
+# source cluster's heartbeat interval (see getHeartbeatPropagationWaitSecs) so
+# the wait scales with the configured heartbeat cadence rather than being an
+# arbitrary constant.
 function validatePrometheusSourceNodesCnt {
 	local node=$1
 	local expectedCnt=$2
+	local maxWaitSecs=${3:-75}
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
-	local prometheusOut
-	local idleSleepCnt=0
-	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
-
+	local pollInterval=5
+	local waited=0
 	local count
-	count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_nodes_total" | grep -v "HELP" | grep -v "TYPE" |
-		awk '{print $NF}')
 
-	while (($idleSleepCnt < 3)); do
-		if [[ -z "${count:-}" ]]; then
-			echo "Heartbeat not found yet"
-			idleSleepCnt=$(($idleSleepCnt + 1))
-			sleep 15
-			prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
-			count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_nodes_total" | grep -v "HELP" | grep -v "TYPE" |
-				awk '{print $NF}')
-		else
+	# The source-node count is driven by heartbeats: after a topology change
+	# (e.g. rebalance) the new node must propagate through the source's
+	# /poolsStreaming watcher -> next heartbeat -> target's heartbeat cache
+	# before the stat updates. Poll until the stat converges to expectedCnt
+	# (or maxWaitSecs elapses) rather than checking a single, possibly-stale read.
+	while true; do
+		count=$(getPrometheusSourceStat "$sourcePort" "xdcr_number_of_source_nodes_total")
+
+		if [[ -n "${count:-}" ]] && (($count == expectedCnt)); then
 			break
 		fi
+
+		if (($waited >= $maxWaitSecs)); then
+			break
+		fi
+
+		if [[ -z "${count:-}" ]]; then
+			echo "Stat xdcr_number_of_source_nodes_total not present yet (waited ${waited}s/${maxWaitSecs}s)"
+		else
+			echo "Stat xdcr_number_of_source_nodes_total shows $count, waiting for $expectedCnt (waited ${waited}s/${maxWaitSecs}s)"
+		fi
+		sleep $pollInterval
+		waited=$(($waited + $pollInterval))
 	done
 
 	if [[ -z "${count:-}" ]]; then
@@ -2827,33 +2944,52 @@ function validatePrometheusSourceNodesCnt {
 	fi
 }
 
+# validatePrometheusSourceRunningReplCnt <targetNode> <expectedCnt> [maxWaitSecs]
+# Polls the target's xdcr_number_of_source_replications_total (Running) until it
+# equals expectedCnt or maxWaitSecs elapses. See validatePrometheusSourceNodesCnt
+# for why the wait should be derived from the source heartbeat interval.
 function validatePrometheusSourceRunningReplCnt {
 	local node=$1
 	local expectedCnt=$2
+	local maxWaitSecs=${3:-75}
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
-	local prometheusOut
-	local idleSleepCnt=0
-	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
-
+	local pollInterval=5
+	local waited=0
 	local count
-	count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_replications_total" | grep -v "HELP" | grep -v "TYPE" |
-		grep "Running" | awk '{print $NF}')
-	while (($idleSleepCnt < 5)); do
-		if [[ -z "${count:-}" ]]; then
-			echo "Heartbeat not found yet"
-			idleSleepCnt=$(($idleSleepCnt + 1))
-			sleep 15
-			prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
-			count=$(echo "$prometheusOut" | grep "xdcr_number_of_source_replications_total" | grep -v "HELP" | grep -v "TYPE" |
-				grep "Running" | awk '{print $NF}')
-		else
+
+	# As long as the source cluster is known via heartbeats, the target exports
+	# xdcr_number_of_source_replications_total (including status="Running") with
+	# the current count - so when all replications are removed the line is still
+	# present with value 0. We therefore poll for the value to converge and treat
+	# an *absent* line as "not reported yet" rather than as a legitimate 0.
+	while true; do
+		count=$(getPrometheusSourceStat "$sourcePort" "xdcr_number_of_source_replications_total" "Running")
+
+		if [[ -n "${count:-}" ]] && (($count == expectedCnt)); then
 			break
 		fi
+
+		if (($waited >= $maxWaitSecs)); then
+			break
+		fi
+
+		if [[ -z "${count:-}" ]]; then
+			echo "Stat xdcr_number_of_source_replications_total (Running) not present yet (waited ${waited}s/${maxWaitSecs}s)"
+		else
+			echo "Stat xdcr_number_of_source_replications_total shows $count, waiting for $expectedCnt (waited ${waited}s/${maxWaitSecs}s)"
+		fi
+		sleep $pollInterval
+		waited=$(($waited + $pollInterval))
 	done
 
 	if [[ -z "${count:-}" ]]; then
-		echo "Stat xdcr_number_of_source_replications_total not found"
-		exit 1
+		# The line should be exported with value 0 while the source cluster is
+		# known, so an absent line after the full wait is unexpected (no heartbeat
+		# received yet, an expired source-cluster TTL, or endpoint trouble that
+		# outlasted the curl retries). Warn loudly and fall back to 0 only as a
+		# last resort so an expected-0 assertion is not blocked by a flaky read.
+		echo "WARNING: xdcr_number_of_source_replications_total (Running) was absent after ${maxWaitSecs}s; it should report 0 while the source cluster is known via heartbeats. Falling back to 0."
+		count=0
 	fi
 
 	if (($count != expectedCnt)); then

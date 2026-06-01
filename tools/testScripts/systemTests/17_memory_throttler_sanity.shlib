@@ -212,10 +212,10 @@ function runTestCase {
 	# discovers collection changes promptly.
 	setCustomManifestRefreshInterval "C1"
 
-	runOneSubTest ReplProps_Baseline    "baseline"
+	runOneSubTest ReplProps_Baseline "baseline"
 	runOneSubTest ReplProps_DcpThrottle "dcpThrottle"
-	runOneSubTest ReplProps_EventsChan  "eventsChan"
-	runOneSubTest ReplProps_Both        "combined"
+	runOneSubTest ReplProps_EventsChan "eventsChan"
+	runOneSubTest ReplProps_Both "combined"
 
 	echo "============================================================================"
 	echo "PASSED (all sub-tests' main + backfill pipelines drained)"
