@@ -2229,8 +2229,26 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	case common.HlvUpdated:
 		metricMap[service_def.HLV_UPDATED_METRIC].(metrics.Counter).Inc(1)
 	case common.DataSentHitGuardrail:
-		responseCode, ok := event.Data.(mc.Status)
-		if !ok {
+		var responseCode mc.Status
+
+		switch errCode := event.Data.(type) {
+		case cng.CNGErrorCode:
+			// Translate CNG error code to mc status here to preserve
+			// common handling of guardrail related metrics.
+			// This is done mainly to avoid importing mc package in CNG Nozzle.
+			// Or having to write big branching and duplicating code
+
+			switch errCode {
+			case cng.ERR_GUARDRAIL_BUCKET_RESIDENT_RATIO_TOO_LOW:
+				responseCode = mc.BUCKET_RESIDENT_RATIO_TOO_LOW
+			case cng.ERR_GUARDRAIL_BUCKET_DATA_SIZE_TOO_BIG:
+				responseCode = mc.BUCKET_DATA_SIZE_TOO_BIG
+			case cng.ERR_GUARDRAIL_BUCKET_DISK_SPACE_TOO_LOW:
+				responseCode = mc.BUCKET_DISK_SPACE_TOO_LOW
+			}
+		case mc.Status:
+			responseCode = errCode
+		default:
 			return nil
 		}
 

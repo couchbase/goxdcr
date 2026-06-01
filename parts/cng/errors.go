@@ -22,6 +22,12 @@ var nonRetryableErrorCodes = map[CNGErrorCode]bool{
 	ERR_NOZZLE_SHUTDOWN:      true,
 }
 
+var GuardrailErrorCodes = map[CNGErrorCode]bool{
+	ERR_GUARDRAIL_BUCKET_RESIDENT_RATIO_TOO_LOW: true,
+	ERR_GUARDRAIL_BUCKET_DATA_SIZE_TOO_BIG:      true,
+	ERR_GUARDRAIL_BUCKET_DISK_SPACE_TOO_LOW:     true,
+}
+
 // gRPC errors
 
 // CNGErrorCode defines error codes for CNG nozzle related errors
@@ -112,6 +118,11 @@ const (
 	ERR_GRPC_UNAVAILABLE         CNGErrorCode = 23
 	ERR_GRPC_DATA_LOSS           CNGErrorCode = 24
 	ERR_GRPC_UNAUTHENTICATED     CNGErrorCode = 25
+
+	// Guardrail errors
+	ERR_GUARDRAIL_BUCKET_RESIDENT_RATIO_TOO_LOW CNGErrorCode = 40
+	ERR_GUARDRAIL_BUCKET_DATA_SIZE_TOO_BIG      CNGErrorCode = 41
+	ERR_GUARDRAIL_BUCKET_DISK_SPACE_TOO_LOW     CNGErrorCode = 42
 
 	ERR_NOZZLE_SHUTDOWN CNGErrorCode = 100
 )
@@ -213,6 +224,23 @@ func mapGrpcStatusToCNGError(st *status.Status) (cngErr *CNGError) {
 					cngErr.Code = ERR_VB_MISMATCH
 					// We bailout on first match as multiple details for same reason is unlikely
 					break
+				}
+			}
+		}
+		return
+	case codes.ResourceExhausted:
+		for _, d := range st.Details() {
+			errInfo, ok := d.(*errdetails.ErrorInfo)
+			if ok {
+				// In case of unknown reason, we will just categorize
+				// as generic ResourceExhausted error
+				switch errInfo.Reason {
+				case RateLimitBucketResidentRatioTooLow:
+					cngErr.Code = ERR_GUARDRAIL_BUCKET_RESIDENT_RATIO_TOO_LOW
+				case RateLimitBucketDataSizeTooBig:
+					cngErr.Code = ERR_GUARDRAIL_BUCKET_DATA_SIZE_TOO_BIG
+				case RateLimitBucketDiskSpaceTooLow:
+					cngErr.Code = ERR_GUARDRAIL_BUCKET_DISK_SPACE_TOO_LOW
 				}
 			}
 		}

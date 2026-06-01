@@ -42,6 +42,16 @@ func (n *Nozzle) raiseErrorEvent(req *base.WrappedMCRequest, t *Trace, err error
 
 	cngErr := mapToCNGError(err)
 
+	// Note: copying the behaviour from XMEM here
+	// i.e. raising of Guardrail event and DataSentFailed event are mutually exclusive.
+	if GuardrailErrorCodes[cngErr.Code] {
+		if n.guardrailUI != nil {
+			n.guardrailUI.noteGuardrail(cngErr.Code)
+		}
+		n.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, cngErr.Code, n, []any{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, nil))
+		return
+	}
+
 	if cngErr.Code == ERR_UNKNOWN {
 		n.RaiseEvent(common.NewEvent(common.DataSentFailedUnknownStatus, nil, n, []any{req.GetSourceVB(), req.GetTargetVB(), req.Seqno}, nil))
 	} else {

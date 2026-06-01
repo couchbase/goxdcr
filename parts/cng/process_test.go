@@ -225,7 +225,7 @@ func TestTransfer(t *testing.T) {
 					RemoteClusterSvc: service_mocks.NewRemoteClusterSvc(t),
 					Utils:            utilsMock.NewUtilsIface(t),
 				},
-			})
+			}, nil)
 			assert.NoError(t, err)
 
 			n.cfg.Tunables.SetOptimisticThresholdSize(256)
@@ -342,7 +342,7 @@ func TestCollectionNotFoundDevInjection(t *testing.T) {
 			RemoteClusterSvc: service_mocks.NewRemoteClusterSvc(t),
 			Utils:            utilsMock.NewUtilsIface(t),
 		},
-	})
+	}, nil)
 	assert.NoError(t, err)
 
 	n.cfg.Tunables.SetOptimisticThresholdSize(256)

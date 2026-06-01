@@ -25,4 +25,9 @@ const (
 	// CNGAbortReasonVbuuidMismatch indicates that the vbuuid from source and target do not match
 	// This is stamped in the details of grpc error for code == Aborted
 	CNGAbortReasonVbuuidMismatch = "VBUUID_MISMATCH"
+
+	// Guardrail reasons stamped in error details for ResourceExhausted errors
+	RateLimitBucketResidentRatioTooLow = "RATE_LIMIT_BUCKET_RESIDENT_RATIO_TOO_LOW"
+	RateLimitBucketDataSizeTooBig      = "RATE_LIMIT_BUCKET_DATA_SIZE_TOO_BIG"
+	RateLimitBucketDiskSpaceTooLow     = "RATE_LIMIT_BUCKET_DISK_SPACE_TOO_LOW"
 )

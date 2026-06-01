@@ -23,6 +23,8 @@ type Nozzle struct {
 	cfg   *Config
 	stats *Stats
 
+	guardrailUI *guardrailUI
+
 	netFaultInjector cngNetFaultInjector
 
 	upstreamObjRecycler    func(any)
@@ -38,7 +40,7 @@ type Nozzle struct {
 }
 
 // New creates a new nozzle for CNG protocol
-func New(id string, loggerContext *log.LoggerContext, cfg *Config) (n *Nozzle, err error) {
+func New(id string, loggerContext *log.LoggerContext, cfg *Config, eventsProducer common.PipelineEventsProducer) (n *Nozzle, err error) {
 	if id == "" {
 		return nil, fmt.Errorf("id is empty")
 	}
@@ -74,6 +76,8 @@ func New(id string, loggerContext *log.LoggerContext, cfg *Config) (n *Nozzle, e
 		upstreamErrReporterMap: map[uint16]utils.ErrReportFunc{},
 		dataPool:               base.NewNoDataPool(),
 	}
+
+	n.guardrailUI = newGuardrailUI(cfg.Replication.Topic, eventsProducer, n.stopCh, logger)
 
 	return
 }

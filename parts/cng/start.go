@@ -60,6 +60,10 @@ func (n *Nozzle) startInner(ctx context.Context, settings metadata.ReplicationSe
 		go n.worker(ctx)
 	}
 
+	if n.guardrailUI != nil {
+		n.guardrailUI.start()
+	}
+
 	return
 }
 

@@ -61,7 +61,13 @@ func (x *XDCRFactory) constructCNGNozzle(topic string, // Replication topic
 	}
 
 	var nozzle *cng.Nozzle
-	nozzle, err = cng.New(id, x.logger.LoggerContext(), cfg)
+	eventsProducer, err := x.GetEventsProducer(topic)
+	if err != nil {
+		x.logger.Errorf("Error getting events producer for CNG nozzle, err=%v\n", err)
+		return nil, nil, nil, "", "", err
+	}
+
+	nozzle, err = cng.New(id, x.logger.LoggerContext(), cfg, eventsProducer)
 	if err != nil {
 		x.logger.Errorf("Error constructing CNG nozzle, err=%v\n", err)
 		return nil, nil, nil, "", "", err
