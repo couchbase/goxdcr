@@ -132,6 +132,33 @@ function waitForCheckpointBeforeStop {
 	echo "WARNING: waitForCheckpointBeforeStop timed out after ${maxWaitSecs}s on $clusterName; proceeding anyway"
 }
 
+# Wait until the backfill pipeline has (re)started more times than the supplied
+# baseline count, i.e. a new "Starting BackfillPipeline" has been logged. This is
+# used to make sure a restart-triggering action (resume, failover, etc.) has
+# actually produced a distinct backfill pipeline start before the next such action
+# is issued -- otherwise two overlapping restarts can coalesce into a single
+# backfill pipeline start and throw off start-count validations.
+function waitForBackfillPipelineStart {
+	local clusterName=$1
+	local baselineStartCount=${2:-0}
+	local maxWaitSecs=${3:-120}
+	local pollIntervalSecs=5
+	local elapsed=0
+
+	echo "Waiting for backfill pipeline to (re)start on $clusterName (baseline start count: $baselineStartCount)..."
+	while (($elapsed < $maxWaitSecs)); do
+		local startCnt
+		startCnt=$(getInternalNodeXdcrLog "$clusterName" | grep -c "$BACKFILL_START_MSG")
+		if (($startCnt > $baselineStartCount)); then
+			echo "Backfill pipeline (re)started on $clusterName after ${elapsed}s (start count: $startCnt)"
+			return 0
+		fi
+		sleep $pollIntervalSecs
+		elapsed=$(($elapsed + $pollIntervalSecs))
+	done
+	echo "WARNING: waitForBackfillPipelineStart timed out after ${maxWaitSecs}s on $clusterName; proceeding anyway"
+}
+
 function checkItemCnt {
 	local cluster=$1
 	local bucket=$2
