@@ -103,6 +103,28 @@ func TestCollectionsManifestAgent_Start(t *testing.T) {
 	agent.Stop()
 }
 
+// TestGetStartingManifests_NilPeerGetter reproduces the panic that occurs when
+// GetStartingManifests is called before SetPeerManifestsGetter has been invoked
+// (e.g. MetaKV callbacks fire during startup before P2P handlers are initialised).
+func TestGetStartingManifests_NilPeerGetter(t *testing.T) {
+	a := assert.New(t)
+
+	// Construct the service with peerManifestGetter intentionally left nil,
+	// simulating the window during startup before SetPeerManifestsGetter is called.
+	svc := &CollectionsManifestService{}
+	spec, err := metadata.NewReplicationSpecification("B1", "srcUUID", "tgtCluster", "B2", "tgtUUID")
+	a.Nil(err)
+
+	// Before the fix this panics with: nil pointer dereference.
+	// After the fix it must return startupPathNotSet and must not panic.
+	a.NotPanics(func() {
+		src, tgt, err := svc.GetStartingManifests(spec)
+		a.Nil(src)
+		a.Nil(tgt)
+		a.Equal(startupPathNotSet, err)
+	})
+}
+
 func TestCollectionsManifestAgent_remoteClusterHasNoCollectionsCapability(t *testing.T) {
 	remoteClusterSvc, ckptSvc, bucketTopSvc, manifestOps, manifestSvc, peerManifestGetter, _, utils := setupCommonMocks()
 

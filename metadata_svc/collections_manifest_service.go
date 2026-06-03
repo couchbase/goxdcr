@@ -273,7 +273,13 @@ func (c *CollectionsManifestService) getAgent(spec *metadata.ReplicationSpecific
 }
 
 func (c *CollectionsManifestService) GetStartingManifests(spec *metadata.ReplicationSpecification) (src, tgt *metadata.CollectionsManifest, err error) {
-	manifestsPair, err := c.peerManifestGetter(spec.Id, spec.InternalId)
+	c.peerManifestGetterMtx.RLock()
+	getter := c.peerManifestGetter
+	c.peerManifestGetterMtx.RUnlock()
+	if getter == nil {
+		return nil, nil, startupPathNotSet
+	}
+	manifestsPair, err := getter(spec.Id, spec.InternalId)
 	if err != nil {
 		// It is potentially possible target doesn't support collections
 		origErr := err
