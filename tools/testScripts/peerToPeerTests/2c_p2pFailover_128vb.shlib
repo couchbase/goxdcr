@@ -168,8 +168,21 @@ function runTestCase {
 	pauseReplication "C1" "B0" "C2" "B1"
 	sleep 15
 	waitForCheckpointBeforeStop "C1" $currentCkptBeforeStopCnt
+
+	# Capture the backfill start count right before resuming so we can confirm the
+	# resume actually produces a distinct backfill pipeline restart.
+	local -i preResumeBackfillStartCntC1
+	preResumeBackfillStartCntC1=$(getInternalNodeXdcrLog "C1" | grep -c "$BACKFILL_START_MSG")
 	resumeReplication "C1" "B0" "C2" "B1"
 	sleep 15
+	# Wait for the resume-triggered backfill pipeline restart to fully land (and be
+	# logged) before failing a node out. If we proceed while the resume restart is
+	# still in flight, the failover topology-change restart coalesces with it into a
+	# single "Starting BackfillPipeline", leaving fewer backfill starts than the
+	# validation below expects.
+	waitForBackfillPipelineStart "C1" $preResumeBackfillStartCntC1
+	local -i postResumeBackfillStartCntC1
+	postResumeBackfillStartCntC1=$(getInternalNodeXdcrLog "C1" | grep -c "$BACKFILL_START_MSG")
 	local node1Non0VBResumeCnt
 	node1Non0VBResumeCnt=$(getNumOfBackfillCkptTookPlaceVB "C1" "C2" "B0" "B1")
 	echo "For node C1, it had $node1Non0VBResumeCnt VBs that resumed from 0 prior to failover"
@@ -200,6 +213,11 @@ function runTestCase {
 	# with non-0 seqno for at least one more VBs than it originally resumed
 	# Note: For 128 VB's, it's potentially too stringent a check fewer vbuckets to hash to and a low number of mutations
 	# validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "$(($node1Non0VBResumeCnt + 1))"
+
+	# The failover above triggers a source topology change which restarts the pipeline
+	# (and hence the backfill pipeline) once more. Wait for that restart to land before
+	# asserting on the backfill start count so we don't race the log validation.
+	waitForBackfillPipelineStart "C1" $postResumeBackfillStartCntC1
 
 	# Make sure backfill pipeline only starts once for node C1P and a few times only for node C1 and not more than that
 	validateInternalLogWithInstance "C1" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1 + 2)) $(($currentBackfillStartCntC1 + 5))
