@@ -32,7 +32,7 @@ require (
 	github.com/couchbase/cbauth v0.1.18
 	github.com/couchbase/eventing-ee v0.0.0-00010101000000-000000000000
 	github.com/couchbase/go-couchbase v0.1.1
-	github.com/couchbase/gocb/v2 v2.12.2-0.20260407160817-f3cc07463f4d // TODO: MB-70129
+	github.com/couchbase/gocb/v2 v2.12.3 // TODO: MB-70129
 	github.com/couchbase/gocbcore/v9 v9.1.11
 	github.com/couchbase/gomemcached v0.3.4
 	github.com/couchbase/goprotostellar v1.0.6-0.20260407143512-d7af25156dcc
@@ -58,7 +58,7 @@ require (
 	github.com/corpix/uarand v0.0.0-20170723150923-031be390f409 // indirect
 	github.com/couchbase/clog v0.1.0 // indirect
 	github.com/couchbase/go_json v0.0.0-20250803152502-4641f4ef8578 // indirect
-	github.com/couchbase/gocbcore/v10 v10.9.1 // indirect
+	github.com/couchbase/gocbcore/v10 v10.9.3 // indirect
 	github.com/couchbase/gocbcoreps v0.1.5-0.20260107140814-1c3a03f888f8 // indirect
 	github.com/couchbase/query v0.0.0-20231201224521-b47444ea33a9 // indirect
 	github.com/couchbase/regulator v0.0.0-00010101000000-000000000000 // indirect
@@ -87,9 +87,9 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
