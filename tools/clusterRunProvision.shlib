@@ -42,6 +42,11 @@ HARD_RESET_MAX_ATTEMPTS=5
 HARD_RESET_BACKOFF_INITIAL_SECS=1
 HARD_RESET_BACKOFF_MULTIPLIER=2
 HARD_RESET_BACKOFF_MAX_SECS=16
+NODE_SETUP_MAX_ATTEMPTS=5
+NODE_SETUP_BACKOFF_INITIAL_SECS=1
+NODE_SETUP_BACKOFF_MULTIPLIER=2
+NODE_SETUP_BACKOFF_MAX_SECS=16
+NODE_WEB_READY_TIMEOUT_SECS=120
 
 # topological globals
 # -----------------
@@ -582,6 +587,20 @@ function hardResetNodes {
 		return 1
 	fi
 
+	# wait for each node's web server to be responsive before setup proceeds
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
+			initPort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		else
+			initPort=8091
+		fi
+		waitForNodeWebServer "$initPort"
+		if (($? != 0)); then
+			echo "ERROR: node $clusterName web server did not come back after hard reset"
+			return 1
+		fi
+	done
+
 	# give it 5 seconds before other "setupTopologies" may be called
 	sleep 5
 
@@ -615,6 +634,13 @@ function hardResetNodesSynchronously {
 		if (($? != 0)); then
 			return 1
 		fi
+
+		# wait for the node's web server to be responsive before setup proceeds
+		waitForNodeWebServer "$initPort"
+		if (($? != 0)); then
+			echo "ERROR: node $clusterName web server did not come back after hard reset"
+			return 1
+		fi
 	done
 
 	echo "sleeping 10 seconds before other 'setupTopologies' may be called"
@@ -622,6 +648,102 @@ function hardResetNodesSynchronously {
 
 	CLUSTER_SETUP_DONE_MAP=()
 	declare -gA CLUSTER_SETUP_DONE_MAP
+}
+
+# Polls a node's REST endpoint until the web server responds with any HTTP
+# status code. Used after a hard reset or a rename-triggered ns_server restart,
+# where the web server can be down for a minute or more on a loaded machine.
+function waitForNodeWebServer {
+	local port=$1
+	local timeoutSecs=${2:-$NODE_WEB_READY_TIMEOUT_SECS}
+	local startTime=$(date +%s)
+	local httpCode
+
+	while true; do
+		httpCode=$($CURL -o /dev/null -w "%{http_code}" http://localhost:$port/pools 2>/dev/null)
+		if [[ "$httpCode" =~ ^[0-9]+$ ]] && ((httpCode >= 200 && httpCode < 600)); then
+			return 0
+		fi
+		if (($(date +%s) - startTime > timeoutSecs)); then
+			echo "Timed out after ${timeoutSecs}s waiting for web server on port $port"
+			return 1
+		fi
+		sleep 2
+	done
+}
+
+# POSTs a node-setup REST call, retrying on curl failures and HTTP 5xx. The web
+# server may briefly restart mid-setup (e.g. ns_server restarts itself when a
+# node rename times out internally), so each retry first waits for the web
+# server to come back.
+# Args: clusterName port label, followed by the curl arguments for the POST.
+# Returns: 0 on HTTP 200, 2 on HTTP 4xx (caller decides whether that is fatal),
+# 1 on persistent failure.
+function nodeSetupPostWithRetry {
+	local clusterName=$1
+	local port=$2
+	local label=$3
+	shift 3
+	local attempt=1
+	local backoffSecs=$NODE_SETUP_BACKOFF_INITIAL_SECS
+	local bodyFile httpCode ret responseBody
+
+	while ((attempt <= NODE_SETUP_MAX_ATTEMPTS)); do
+		bodyFile=$(mktemp)
+		httpCode=$($CURL -o "$bodyFile" -w "%{http_code}" "$@" 2>/dev/null)
+		ret=$?
+		responseBody=$(cat "$bodyFile")
+		rm -f "$bodyFile"
+
+		if ((ret == 0)) && [[ "$httpCode" == "200" ]]; then
+			return 0
+		fi
+
+		if ((ret == 0)) && [[ "$httpCode" =~ ^4 ]]; then
+			# Client errors will not resolve by retrying
+			echo "$label for $clusterName on port $port returned HTTP $httpCode. Response body: $responseBody"
+			return 2
+		fi
+
+		echo "$label for $clusterName on port $port failed (attempt $attempt/$NODE_SETUP_MAX_ATTEMPTS, curlRet=$ret, httpCode=$httpCode). Response body: $responseBody"
+		if ((attempt == NODE_SETUP_MAX_ATTEMPTS)); then
+			break
+		fi
+		# The node may be restarting - wait for the web server before retrying
+		waitForNodeWebServer "$port"
+		echo "Retrying $label in ${backoffSecs}s"
+		sleep $backoffSecs
+		backoffSecs=$((backoffSecs * NODE_SETUP_BACKOFF_MULTIPLIER))
+		if ((backoffSecs > NODE_SETUP_BACKOFF_MAX_SECS)); then
+			backoffSecs=$NODE_SETUP_BACKOFF_MAX_SECS
+		fi
+		attempt=$((attempt + 1))
+	done
+
+	echo "ERROR: $label failed for $clusterName on port $port after $NODE_SETUP_MAX_ATTEMPTS attempts"
+	return 1
+}
+
+# Renames a node, retrying on curl failures and HTTP 5xx. A rename right after
+# a hard reset can time out internally (chronicle rename) and return 500 while
+# ns_server restarts, even though the new name may have been persisted. HTTP
+# 4xx is treated as non-fatal to preserve the previous lenient behavior for
+# already-provisioned nodes (rename is disallowed once a node is part of a
+# cluster).
+function renameNodeWithRetry {
+	local clusterName=$1
+	local port=$2
+	local hostName=$3
+	local ret
+
+	nodeSetupPostWithRetry "$clusterName" "$port" "node rename to $hostName" \
+		-X POST http://localhost:$port/node/controller/rename -d hostname="$hostName"
+	ret=$?
+	if ((ret == 2)); then
+		# 4xx - e.g. node is already part of a provisioned cluster; keep going
+		return 0
+	fi
+	return $ret
 }
 
 function setupCluster {
@@ -660,13 +782,28 @@ function setupCluster {
 		fi
 		echo "SETTING up cluster name $clusterName on port $port with hostName $hostName"
 
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
-		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostName" >/dev/null 2>&1
-		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv >/dev/null 2>&1
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
+		nodeSetupPostWithRetry "$clusterName" "$port" "node controller settings" \
+			-u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings
+		if (($? == 1)); then
+			echo "non-0 error when setting node controller settings"
+			return 1
+		fi
+		renameNodeWithRetry "$clusterName" "$port" "$hostName"
+		if (($? != 0)); then
+			echo "non-0 error when renaming node"
+			return 1
+		fi
+		nodeSetupPostWithRetry "$clusterName" "$port" "setup services" \
+			-X POST http://localhost:$port/node/controller/setupServices -d services=kv
+		if (($? == 1)); then
+			echo "non-0 error when setting up services"
+			return 1
+		fi
+		nodeSetupPostWithRetry "$clusterName" "$port" "cluster init (settings/web)" \
+			-u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort
 		if (($? != 0)); then
 			echo "non-0 error when setting up cluster"
-			return $?
+			return 1
 		fi
 
 		# Vagrant, set up alternate address so cbworkloadgen can run from dev machine onto vagrants
@@ -710,22 +847,25 @@ function setupClusterWithN1QL {
 		fi
 		echo "SETTING up cluster name $clusterName on port $port with hostName $hostName"
 
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
-		if (($? != 0)); then
+		nodeSetupPostWithRetry "$clusterName" "$port" "node controller settings" \
+			-u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings
+		if (($? == 1)); then
 			echo "Node $port not found. Skipping cluster_run XDCR init"
 			exit 1
 		fi
-		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostName" >/dev/null 2>&1
+		renameNodeWithRetry "$clusterName" "$port" "$hostName"
 		if (($? != 0)); then
 			echo "non-0 error when renaming node"
 			exit 1
 		fi
-		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv%2Cn1ql >/dev/null 2>&1
-		if (($? != 0)); then
+		nodeSetupPostWithRetry "$clusterName" "$port" "setup services" \
+			-X POST http://localhost:$port/node/controller/setupServices -d services=kv%2Cn1ql
+		if (($? == 1)); then
 			echo "non-0 error when setting up services"
 			exit 1
 		fi
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
+		nodeSetupPostWithRetry "$clusterName" "$port" "cluster init (settings/web)" \
+			-u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort
 		if (($? != 0)); then
 			echo "non-0 error when setting up cluster"
 			exit 1
