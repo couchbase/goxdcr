@@ -102,6 +102,11 @@ function runOneReplicationCycleAndPause {
 
 	setCustomManifestRefreshInterval "C1"
 
+	# Under heavy collection load, pause/resume can make broken-map updates take >5s and trip
+	# the benign "Executing Action timed out" watchdog that we assert on below. Give the node
+	# more breathing room (kept well within the [1,60]s allowed range).
+	setBrokenMapExecTimeout "C1" 30
+
 	# Previous test may have messed with the CAs
 	setupCertsForTesting
 	cleanupClientCertMaps
@@ -274,6 +279,7 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	resetBrokenMapExecTimeout "C1"
 	resetCustomManifestRefreshInterval "C1"
 
 	echo "Cleaning up topology..."

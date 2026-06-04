@@ -71,6 +71,10 @@ function runTestCase {
 		exit $?
 	fi
 
+	# Under heavy collection load, broken-map updates can take >5s and trip the benign
+	# "Executing Action timed out" watchdog we assert on below. Give the node breathing room.
+	setBrokenMapExecTimeout "C1" 30
+
 	# Get current instance
 	local -i currentBackfillInstanceCnt
 	local -i currentVBTasksDoneInstanceCnt
@@ -112,4 +116,5 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	resetBrokenMapExecTimeout "C1"
 }

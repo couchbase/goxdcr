@@ -871,6 +871,76 @@ function resetCustomManifestRefreshInterval {
 	echo "XDCR restarted successfully after resetting ManifestRefreshTgtInterval"
 }
 
+# The broken-map load/export paths are guarded by a watchdog (base.ExecWithTimeout) that
+# logs TIMEDOUT_TYPE1_MSG ("Executing Action timed out") and returns while the action keeps
+# running in the background. Default is 5s. On a heavily loaded host (e.g. pause/resume while
+# draining a large backlog), metakv/memcached/ns_server I/O can take 10-17s, tripping the
+# watchdog and incrementing a count that brokenMap tests assert against. Raising the timeout
+# gives the node breathing room without weakening the assertion. Any internal-settings change
+# restarts goxdcr, so this waits for the reboot like setCustomManifestRefreshInterval does.
+# Range allowed by goxdcr is [1, 60] seconds.
+function setBrokenMapExecTimeout {
+	local cluster="$1"
+	local timeoutSec="${2:-30}"
+
+	local rawExport
+	rawExport=$(getSpecificInternalSettings "$cluster" "ReplStatusExportBrokenMapTimeoutSec")
+	[[ -z "$rawExport" || "$rawExport" == "null" ]] && rawExport=5
+	ORIG_EXPORT_BROKENMAP_TIMEOUT=$rawExport
+
+	local rawLoad
+	rawLoad=$(getSpecificInternalSettings "$cluster" "ReplStatusLoadBrokenMapTimeoutSec")
+	[[ -z "$rawLoad" || "$rawLoad" == "null" ]] && rawLoad=5
+	ORIG_LOAD_BROKENMAP_TIMEOUT=$rawLoad
+
+	if (($ORIG_EXPORT_BROKENMAP_TIMEOUT == $timeoutSec)) && (($ORIG_LOAD_BROKENMAP_TIMEOUT == $timeoutSec)); then
+		echo "Broken-map exec timeouts already $timeoutSec, skipping set"
+		return 0
+	fi
+
+	local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
+
+	echo "Temporarily updating broken-map exec timeouts (export $ORIG_EXPORT_BROKENMAP_TIMEOUT, load $ORIG_LOAD_BROKENMAP_TIMEOUT) to $timeoutSec seconds"
+	# Both keys in one POST -> single metakv write -> single goxdcr restart
+	setInternalSettings "$cluster" "ReplStatusExportBrokenMapTimeoutSec=$timeoutSec" "ReplStatusLoadBrokenMapTimeoutSec=$timeoutSec"
+
+	echo "Waiting upto 1 minute for XDCR to reboot..."
+	waitForInternalLogInstance "$cluster" "$PROCESS_RESTART_GOMAXPROCS" $(($currentRestartCt + 1)) 1
+	if ((!$? == 0)); then
+		echo "Error - Timed out waiting for goxdcr to restart after setting broken-map exec timeouts"
+		return 1
+	fi
+	echo "XDCR restarted successfully after setting broken-map exec timeouts"
+}
+
+function resetBrokenMapExecTimeout {
+	local cluster="$1"
+	# If originals were never captured, default to goxdcr's built-in default of 5
+	[[ -z "${ORIG_EXPORT_BROKENMAP_TIMEOUT:-}" ]] && ORIG_EXPORT_BROKENMAP_TIMEOUT=5
+	[[ -z "${ORIG_LOAD_BROKENMAP_TIMEOUT:-}" ]] && ORIG_LOAD_BROKENMAP_TIMEOUT=5
+
+	local currentExport=$(getSpecificInternalSettings "$cluster" "ReplStatusExportBrokenMapTimeoutSec")
+	local currentLoad=$(getSpecificInternalSettings "$cluster" "ReplStatusLoadBrokenMapTimeoutSec")
+	if [[ "$currentExport" == "$ORIG_EXPORT_BROKENMAP_TIMEOUT" && "$currentLoad" == "$ORIG_LOAD_BROKENMAP_TIMEOUT" ]]; then
+		echo "Broken-map exec timeouts already at originals, skipping reset"
+		return 0
+	fi
+
+	echo "Cleaning up broken-map exec timeouts back to export $ORIG_EXPORT_BROKENMAP_TIMEOUT, load $ORIG_LOAD_BROKENMAP_TIMEOUT"
+	local currentRestartCt=$(getInternalNodeXdcrLog "$cluster" | grep -c "$PROCESS_RESTART_GOMAXPROCS")
+
+	setInternalSettings "$cluster" "ReplStatusExportBrokenMapTimeoutSec=$ORIG_EXPORT_BROKENMAP_TIMEOUT" "ReplStatusLoadBrokenMapTimeoutSec=$ORIG_LOAD_BROKENMAP_TIMEOUT"
+
+	# When re-setting internal settings, XDCR process will restart. Tests often delete
+	# replications right after, so wait (up to 5 minutes) for goxdcr to come back.
+	waitForInternalLogInstance "$cluster" "$PROCESS_RESTART_GOMAXPROCS" $(($currentRestartCt + 1)) 5
+	if ((!$? == 0)); then
+		echo "Error - Timed out waiting for goxdcr to restart after resetting broken-map exec timeouts"
+		return 1
+	fi
+	echo "XDCR restarted successfully after resetting broken-map exec timeouts"
+}
+
 function getInternalNsServerLogDir {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}

@@ -90,6 +90,11 @@ function runTestCase {
 	# Before doing provisioning, get old internal settings
 	setCustomManifestRefreshInterval "C1"
 
+	# Under heavy collection load, pause/resume can make broken-map updates take >5s and trip
+	# the benign "Executing Action timed out" watchdog that we assert on below. Give the node
+	# more breathing room (kept well within the [1,60]s allowed range).
+	setBrokenMapExecTimeout "C1" 30
+
 	# Get current instance
 	local -i currentBackfillInstanceCnt
 	local -i currentVBTasksDoneInstanceCnt
@@ -227,6 +232,7 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	resetBrokenMapExecTimeout "C1"
 	resetCustomManifestRefreshInterval "C1"
 
 	# Reset the nodes after test to reload non-10k collections

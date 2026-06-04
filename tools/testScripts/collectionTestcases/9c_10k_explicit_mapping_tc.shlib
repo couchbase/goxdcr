@@ -78,6 +78,10 @@ function runTestCase {
 		exit $?
 	fi
 
+	# Under heavy collection load, broken-map updates can take >5s and trip the benign
+	# "Executing Action timed out" watchdog we assert on below. Give the node breathing room.
+	setBrokenMapExecTimeout "C1" 30
+
 	# Now while it's up and running, restore profile back in case the script stops running at any point
 	# Generate collection mapping rules dynamically
 	local colMappingRules='{'
@@ -144,4 +148,5 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+	resetBrokenMapExecTimeout "C1"
 }
