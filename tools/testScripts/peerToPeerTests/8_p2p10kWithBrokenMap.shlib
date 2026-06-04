@@ -190,6 +190,9 @@ function runReplicationResume {
 	logsC1P=$(getInternalNodeXdcrLog "C1P")
 	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
 	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
+	# C1P's goxdcr.log is not cleared between cases, so it may still hold "ts.Seqno=0" lines
+	# from prior runs. Capture a baseline so we only count VBs that resume from 0 during THIS resume.
+	local curResumeFrom0CntC1P=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 60 seconds for resume to finish"
@@ -226,8 +229,8 @@ function runReplicationResume {
 	# pulled by C1P, but no ckpt pulled
 	# That's ok... so skip checking those
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
-	if (($resumeFrom0Cnt > 10)); then
-		echo "C1P has at least 10 VBs ($resumeFrom0Cnt) that resumed from seqno 0"
+	if (($(($resumeFrom0Cnt - $curResumeFrom0CntC1P)) > 10)); then
+		echo "C1P has at least 10 VBs (delta=$(($resumeFrom0Cnt - $curResumeFrom0CntC1P)), baseline=$curResumeFrom0CntC1P) that resumed from seqno 0"
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi
@@ -249,10 +252,9 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	# since this test requires testing for specific log counts, clear first
-	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-		clearInternalNodeXdcrLog "$clusterName"
-	done
+	# Note: goxdcr.log is intentionally NOT cleared here (mirrors 8a). The resume assertions are
+	# baseline-relative (capture a "before" count, then check the delta), so stale lines from prior
+	# cases cannot pollute them; the trailing error-message checks expect 0 across the whole suite.
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
