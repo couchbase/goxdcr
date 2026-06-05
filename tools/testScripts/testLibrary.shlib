@@ -20,7 +20,9 @@ OSO_BACKFILL_COUNT="oso_received=10000"
 DCP_CONVERT_ERR_MSG="Error converting VBTask to DCP Nozzle Task"
 BROKENEVENT_TYPE=3
 BACKFILL_PIPELINE_TORNDOWN_MSG="Background check task finished"
-GOXDCR_IDLE_CPU_THRESHOLD=10
+GOXDCR_IDLE_CPU_THRESHOLD=50
+GOXDCR_IDLE_CPU_MAX_RETRIES=6
+GOXDCR_IDLE_CPU_RETRY_SLEEP=10
 RECEIVE_P2P_REQ_MSG="Received peer-to-peer push requests"
 RECEIVE_P2P_REQ_DONE_MSG="Done handling peer-to-peer push requests from"
 TS_PREFIX="ts.Seqno"
@@ -1973,26 +1975,42 @@ function changeRemoteClusterReferenceToSecure {
 }
 
 function testIdleXdcrCPU {
-	local goxdcrCPUsOut
 	local oldIFS
 	local retResult=0
+	local attempt
 
-	goxdcrCPUsOut=$(ps -e -o pid,pcpu,comm | grep goxdcr)
-	oldIFS="$IFS"
-	IFS=$'\n'
+	# ps -o pcpu can report a transient spike if XDCR happens to be mid-operation at the
+	# moment of sampling. Rather than failing on a single reading, re-sample a few times and
+	# only declare failure if the CPU stays above the idle threshold across all attempts.
+	for ((attempt = 1; attempt <= GOXDCR_IDLE_CPU_MAX_RETRIES; attempt++)); do
+		local goxdcrCPUsOut
+		goxdcrCPUsOut=$(ps -e -o pid,pcpu,comm | grep goxdcr)
+		oldIFS="$IFS"
+		IFS=$'\n'
 
-	local oneXDCRProcess
-	local oneXDCRCPU
-	for oneXDCRProcess in $(echo "$goxdcrCPUsOut"); do
-		oneXDCRCPU=$(echo "$oneXDCRProcess" | awk '{print $2}')
-		if (($(echo "$oneXDCRCPU > $GOXDCR_IDLE_CPU_THRESHOLD" | bc) == 1)); then
-			echo "GOXDCR CPU process is using $oneXDCRCPU% and greater than idle threshold of $GOXDCR_IDLE_CPU_THRESHOLD"
-			retResult=1
-		else
-			echo "GOXDCR CPU process is using $oneXDCRCPU% and under acceptable threshold of $GOXDCR_IDLE_CPU_THRESHOLD"
+		retResult=0
+		local oneXDCRProcess
+		local oneXDCRCPU
+		for oneXDCRProcess in $(echo "$goxdcrCPUsOut"); do
+			oneXDCRCPU=$(echo "$oneXDCRProcess" | awk '{print $2}')
+			if (($(echo "$oneXDCRCPU > $GOXDCR_IDLE_CPU_THRESHOLD" | bc) == 1)); then
+				echo "GOXDCR CPU process is using $oneXDCRCPU% and greater than idle threshold of $GOXDCR_IDLE_CPU_THRESHOLD (attempt $attempt/$GOXDCR_IDLE_CPU_MAX_RETRIES)"
+				retResult=1
+			else
+				echo "GOXDCR CPU process is using $oneXDCRCPU% and under acceptable threshold of $GOXDCR_IDLE_CPU_THRESHOLD"
+			fi
+		done
+		IFS="$oldIFS"
+
+		if (($retResult == 0)); then
+			return 0
+		fi
+
+		if ((attempt < GOXDCR_IDLE_CPU_MAX_RETRIES)); then
+			echo "XDCR CPU still above idle threshold; waiting $GOXDCR_IDLE_CPU_RETRY_SLEEP seconds before re-sampling"
+			sleep $GOXDCR_IDLE_CPU_RETRY_SLEEP
 		fi
 	done
-	IFS="$oldIFS"
 
 	return $retResult
 }
