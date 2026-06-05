@@ -199,6 +199,9 @@ function runReplicationResume {
 	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
 	local curBackfillRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$BACKFILL_CKPT_RETRIEVED")
 	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "backfill" | grep -cv "${TS_PREFIX}=0")
+	# C1P's goxdcr.log is not cleared between cases, so it may still hold "ts.Seqno=0" lines
+	# from prior runs. Capture a baseline so we only count VBs that resume from 0 during THIS resume.
+	local curResumeFrom0CntC1P=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 60 seconds for resume to finish"
@@ -234,8 +237,8 @@ function runReplicationResume {
 	local resumeFrom0Cnt
 	local bpResumeFromNon0Cnt
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
-	if (($resumeFrom0Cnt > 10)); then
-		echo "C1P main pipeline has at least ten VBs that resumed from seqno 0"
+	if (($(($resumeFrom0Cnt - $curResumeFrom0CntC1P)) > 10)); then
+		echo "C1P main pipeline has at least ten VBs (delta=$(($resumeFrom0Cnt - $curResumeFrom0CntC1P)), baseline=$curResumeFrom0CntC1P) that resumed from seqno 0"
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi
