@@ -2497,8 +2497,8 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 		r.humanRecoveryThresholdMtx.Unlock()
 	} else if r.casPoisonErrors(errs) {
 		errMsgForAutoPause = base.FlattenErrorMap(errs)
-	} else if r.communityEditionErrors(errs) {
-		errMsgForAutoPause = fmt.Sprintf("Replication %s cannot continue. %s.", r.pipeline_name, base.ErrCERestrictionsBreached.Error())
+	} else if hasCERestrictionErr, msg := r.communityEditionErrors(errs); hasCERestrictionErr {
+		errMsgForAutoPause = fmt.Sprintf("Replication %s cannot continue. %s.", r.pipeline_name, msg)
 	}
 
 	if len(errMsgForAutoPause) > 0 {
@@ -2620,8 +2620,16 @@ func (r *PipelineUpdater) casPoisonErrors(errMap base.ErrorMap) bool {
 	return base.CheckErrorMapForError(errMap, casPoisonErr, false)
 }
 
-func (r *PipelineUpdater) communityEditionErrors(errMap base.ErrorMap) bool {
-	return base.CheckErrorMapForError(errMap, base.ErrCERestrictionsBreached, false)
+func (r *PipelineUpdater) communityEditionErrors(errMap base.ErrorMap) (bool, string) {
+	for _, v := range errMap {
+		msg := v.Error()
+		if strings.Contains(msg, base.ErrCERestrictionsBreached.Error()) ||
+			strings.Contains(msg, base.CNGReplWithCEClusterUnsupportedErrMsg) {
+			return true, msg
+		}
+	}
+
+	return false, ""
 }
 
 func (r *PipelineUpdater) shouldRetryOnRemoteAuthErrAndRemoteClusterName() (bool, string) {

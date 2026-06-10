@@ -3030,21 +3030,9 @@ func (service *RemoteClusterService) validateRemote(ref *metadata.RemoteClusterR
 }
 
 func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClusterReference, updateRef bool) error {
-	// Only enterprise cluster are allowed to have a CNG reference
-	// Check if `this` node is a part of enterprise cluster
-	isEnterprise, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
-	if err != nil {
-		return err
-	}
-
-	if !isEnterprise {
-		return wrapAsInvalidRemoteClusterError("CNG remote references are only supported in enterprise edition when the entire cluster is running at least 8.1 version of Couchbase Server")
-	}
-	// A CNG reference is created only when encryptionType is Full.
-	// Since this validation is already enforced at the REST layer, no additional check is needed here.
-
-	// validate certificates
-	err = service.validateCertificates(ref)
+	// A CNG-reference can only be created when encryptionType is 'Full' - enforced by validateRemoteClusterParameters() at the REST layer.
+	// Validate certificates
+	err := service.validateCertificates(ref)
 	if err != nil {
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
@@ -3092,6 +3080,31 @@ func (service *RemoteClusterService) validateRemoteCng(ref *metadata.RemoteClust
 		service.logger.Errorf("RemoteRef %v: CngGetClusterInfo on %s failed with err=%s statusCode=%v", ref.Name(), connStr, response.Message(), response.Code())
 		return wrapAsInvalidRemoteClusterError(response.Message())
 	}
+
+	sourceIsEE, err := service.xdcr_topology_svc.IsMyClusterEnterprise()
+	if err != nil {
+		return err
+	}
+	targetIsEE := response.Response().GetEdition() == internal_xdcr_v1.ClusterEdition_CLUSTER_EDITION_ENTERPRISE
+
+	// CNG-references cannot be setup between two CE clusters (irrespective of ns_server's diag/eval backdoor)
+	if !sourceIsEE && !targetIsEE {
+		return wrapAsInvalidRemoteClusterError(base.CNGReplWithCEClusterUnsupportedErrMsg)
+	}
+
+	// CNG-references for a CE -> EE replication can only be setup with ns_server's diag/eval backdoor enabled
+	if !sourceIsEE {
+		disableCERestrictions, err := service.xdcr_topology_svc.DisableCERestrictions()
+		if err != nil {
+			return err
+		}
+		if !disableCERestrictions {
+			return wrapAsInvalidRemoteClusterError(base.CNGReplWithCEClusterUnsupportedErrMsg)
+		}
+	}
+
+	// Note: CNG-references setup on a Source EE cluster (irrespective of the Target's edition)
+	// do not require ns_server's diag/eval backdoor to be enabled
 
 	if updateRef {
 		ref.SetUuid(response.Response().GetClusterUuid())
@@ -3674,8 +3687,6 @@ func formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hos
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 }
-
-var agentCounter uint64
 
 func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent {
 	finCh := make(chan bool, 1)

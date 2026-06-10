@@ -119,6 +119,7 @@ var (
 	ErrorForwardLocalOnlyUnsupported             = errors.New("all cluster nodes do not support the replication setting 'forwardLocalOnly', so it cannot be enabled")
 	ErrorForwardLocalOnlyCNGUnsupported          = errors.New("'forwardLocalOnly' currently does not support being enabled when remote-cluster is of CNG type")
 	StaleManifestCleanupErrMsg                   = "failed to delete %v manifests for %v on metakv's simple-store, replication may resume from a dirty state: %v"
+	CNGReplWithCEClusterUnsupportedErrMsg        = "CNG replications are not supported with Community Edition clusters"
 )
 
 // Various non-error internal msgs

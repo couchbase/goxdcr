@@ -67,8 +67,8 @@ type XDCRTopologySvc struct {
 	clusterCompatRLO *RateLimitOperatorCache
 	terseInfoRLO     *RateLimitOperatorCache
 
-	// disableCERestrictions indicates whether goxdcr need to honour ns_server's
-	// diag/eval backdoor and then allow CE -> CE replications.
+	// disableCERestrictions indicates whether goxdcr needs to honour
+	// ns_server's diag/eval backdoor and allow restricted CE activity
 	disableCERestrictions bool
 }
 
@@ -814,8 +814,10 @@ func (top_svc *XDCRTopologySvc) MyBuildVersion() (string, error) {
 	return fmt.Sprintf("%s-%s", implVersionParts[0], implVersionParts[1]), nil
 }
 
-// DisableCERestrictions returns whether goxdcr need to honour ns_server's diag/eval backdoor
-// and then allow CE -> CE replications.
+// DisableCERestrictions returns whether goxdcr needs to honour ns_server's
+// diag/eval backdoor and then allow restricted CE activity such as:
+// 1) CE -> CE replications (without Encryption)
+// 2) CE -> EE CNG-replications
 func (top_svc *XDCRTopologySvc) DisableCERestrictions() (bool, error) {
 	return top_svc.disableCERestrictions, nil
 }
