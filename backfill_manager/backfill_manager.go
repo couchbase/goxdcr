@@ -1640,6 +1640,7 @@ func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, o
 	if handler == nil || len(b.errorRetryQueue) > 0 {
 		isKVNode, isKVNodeErr := b.xdcrTopologySvc.IsKVNode()
 		if isKVNodeErr == nil && !isKVNode {
+			b.errorRetryQMtx.RUnlock()
 			b.logger.Infof("Ignoring raiseBackfillReq of reason=%v request due to absence of data-service for %v", reason, replId)
 			return nil
 		}
@@ -1821,6 +1822,7 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	b.cacheMtx.RLock()
 	currentCachedManifest, ok := b.cacheSpecSourceMap[specId]
 	if !ok {
+		b.cacheMtx.RUnlock()
 		// should not be the case
 		b.logger.Errorf("Unable to find cached manifest for %v", specId)
 		return nil, base.ErrorNotFound
@@ -1828,6 +1830,7 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	clonedSourceManifest := currentCachedManifest.Clone()
 	currentCachedManifest, ok = b.cacheSpecTargetMap[specId]
 	if !ok {
+		b.cacheMtx.RUnlock()
 		// should not be the case
 		b.logger.Errorf("Unable to find cached target manifest for %v", specId)
 		return nil, base.ErrorNotFound
