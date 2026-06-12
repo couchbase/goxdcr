@@ -11,16 +11,17 @@ package peerToPeer
 import (
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
 )
 
 type PeriodicPushHandler struct {
@@ -226,6 +227,7 @@ func (p *PeriodicPushHandler) storePushReqInfoByType(payload *ReplicationPayload
 	// If a peer node sends a request but this node does not have an active pipeline, then it's a race condition
 	// and should be treated as such
 
+	payload.PushSender = sender
 	fullTopic := common.ComposeFullTopic(payload.ReplicationSpecId, pipelineType)
 	return p.requestMerger(fullTopic, sender, payload)
 }
