@@ -213,6 +213,13 @@ func ParseRules(j base.ConflictLoggingMappingInput) (rules *Rules, err error) {
 
 	loggingRulesObj, ok := j[base.CLogLoggingRulesKey]
 	if !ok || loggingRulesObj == nil {
+		// Logging rules are optional. Validate rest of the rules and return.
+		err = rules.Validate()
+		if err != nil {
+			rules = nil
+			return
+		}
+
 		return
 	}
 

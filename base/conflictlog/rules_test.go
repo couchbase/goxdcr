@@ -263,6 +263,44 @@ func TestRules_Parse(t *testing.T) {
 				}`,
 			shouldFail: true,
 		},
+		{
+			name: "[negative] target collection is system collection, no logging rules",
+			jsonStr: `{
+					"bucket":"B1",
+					"collection": "_system._query"
+				}`,
+			shouldFail: true,
+		},
+		{
+			name: "[negative] target collection is system collection, logging rule is present",
+			jsonStr: `{
+					"bucket":"B1",
+					"collection": "_system._query"
+				}`,
+			shouldFail: true,
+		},
+		{
+			name: "[negative] logging rule source contains a system collection",
+			jsonStr: `{
+					"bucket":"B1",
+					"collection": "S1.col1",
+					"loggingRules": {
+						"_system": "S1.col1"
+					}
+				}`,
+			shouldFail: true,
+		},
+		{
+			name: "[negative] logging rule target contains a system collection",
+			jsonStr: `{
+					"bucket":"B1",
+					"collection": "S1.col1",
+					"loggingRules": {
+						"S2": "_system._query"
+					}
+				}`,
+			shouldFail: true,
+		},
 	}
 
 	for _, tt := range testData {
