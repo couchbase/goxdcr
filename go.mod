@@ -1,6 +1,6 @@
 module github.com/couchbase/goxdcr/v8
 
-go 1.26.0
+go 1.26.2
 
 replace github.com/couchbase/eventing => ../eventing
 
@@ -34,14 +34,14 @@ require (
 	github.com/couchbase/cbauth v0.1.18
 	github.com/couchbase/eventing-ee v0.0.0-00010101000000-000000000000
 	github.com/couchbase/go-couchbase v0.1.1
-	github.com/couchbase/gocb/v2 v2.12.3 // TODO: MB-70129
+	github.com/couchbase/gocb/v2 v2.12.3
 	github.com/couchbase/gocbcore/v9 v9.1.11
+	github.com/couchbase/gocoverage v0.0.0
 	github.com/couchbase/gomemcached v0.3.4
 	github.com/couchbase/goprotostellar v1.0.6-0.20260407143512-d7af25156dcc
 	github.com/couchbase/goutils v0.3.0
 	github.com/couchbase/tools-common/http v1.0.7
 	github.com/couchbaselabs/gojsonsm v1.0.1
-	github.com/couchbase/gocoverage v0.0.0
 	github.com/glenn-brown/golang-pkg-pcre v0.0.0-20120522223659-48bb82a8b8ce
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
