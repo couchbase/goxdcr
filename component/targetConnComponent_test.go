@@ -83,8 +83,8 @@ func setupBasicRemoteMemcachedComponent(maxConns int) (*RemoteMemcachedComponent
 
 	// Set up basic getters
 	testRef := createTestRemoteClusterRef()
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return testRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return testRef, nil
 	})
 
 	kvVbMap := createTestKvVbMap()
@@ -287,8 +287,8 @@ func TestRemoteMemcachedComponent_InitConnections_Success_SSL(t *testing.T) {
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	mockClient := createMockClient()
@@ -329,6 +329,27 @@ func TestRemoteMemcachedComponent_InitConnections_KvVbMapError(t *testing.T) {
 
 	assert.Error(err)
 	assert.Contains(err.Error(), "failed to get topology")
+}
+
+func TestRemoteMemcachedComponent_InitConnections_RefGetterError(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_InitConnections_RefGetterError =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_InitConnections_RefGetterError =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	// The remote cluster reference is gone; the init goroutine should surface the error
+	// rather than dereferencing a nil ref.
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return nil, errors.New("unknown remote cluster")
+	})
+
+	assert.NotPanics(func() {
+		err := component.InitConnections()
+		assert.Error(err)
+		assert.Contains(err.Error(), "unknown remote cluster")
+	})
 }
 
 func TestRemoteMemcachedComponent_InitConnections_ClientCreationPartialFailure(t *testing.T) {
@@ -930,8 +951,8 @@ func TestRemoteMemcachedComponent_InitSSLConStrMap_Success(t *testing.T) {
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock SSL port map
@@ -964,8 +985,8 @@ func TestRemoteMemcachedComponent_InitSSLConStrMap_PortMapError(t *testing.T) {
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock error
@@ -975,6 +996,25 @@ func TestRemoteMemcachedComponent_InitSSLConStrMap_PortMapError(t *testing.T) {
 
 	assert.Error(err)
 	assert.Contains(err.Error(), "port map error")
+}
+
+func TestRemoteMemcachedComponent_InitSSLConStrMap_RefGetterError(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_InitSSLConStrMap_RefGetterError =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_InitSSLConStrMap_RefGetterError =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return nil, errors.New("unknown remote cluster")
+	})
+
+	assert.NotPanics(func() {
+		err := component.InitSSLConStrMap()
+		assert.Error(err)
+		assert.Contains(err.Error(), "unknown remote cluster")
+	})
 }
 
 func TestRemoteMemcachedComponent_InitSSLConStrMap_MissingPort(t *testing.T) {
@@ -989,8 +1029,8 @@ func TestRemoteMemcachedComponent_InitSSLConStrMap_MissingPort(t *testing.T) {
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock incomplete port map (missing one server)
@@ -1036,8 +1076,8 @@ func TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL(t *testing.T) {
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Set SSL connection string map
@@ -1052,6 +1092,30 @@ func TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL(t *testing.T) {
 
 	assert.NoError(err)
 	assert.NotNil(client)
+}
+
+// Regression test for the nil-ref panic: when the remote cluster reference is no
+// longer available (e.g. it was deleted), RefGetter returns an error. GetNewMemcachedClient
+// must surface that as an error instead of dereferencing a nil ref and crashing the process.
+func TestRemoteMemcachedComponent_GetNewMemcachedClient_RefGetterError(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_GetNewMemcachedClient_RefGetterError =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_GetNewMemcachedClient_RefGetterError =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+	defer close(finCh)
+
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return nil, errors.New("unknown remote cluster")
+	})
+
+	// Must not panic; must return the error.
+	assert.NotPanics(func() {
+		client, err := component.GetNewMemcachedClient(testServerAddr)
+		assert.Error(err)
+		assert.Nil(client)
+		assert.Contains(err.Error(), "unknown remote cluster")
+	})
 }
 
 // Race condition tests
@@ -1494,8 +1558,8 @@ func TestRemoteMemcachedComponent_MonitorTopology_AddsNewServersWithSSL(t *testi
 	// Create SSL-enabled ref
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock SSL port map for all 3 servers
@@ -1557,6 +1621,56 @@ func TestRemoteMemcachedComponent_MonitorTopology_AddsNewServersWithSSL(t *testi
 	utils.AssertCalled(t, "GetMemcachedSSLPortMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
+// TestRemoteMemcachedComponent_MonitorTopology_RefGetterError verifies that when the remote cluster
+// reference is unavailable (RefGetter errors) during a topology change, MonitorTopology skips that
+// cycle without panicking or applying the topology change, and still exits cleanly when finCh closes.
+func TestRemoteMemcachedComponent_MonitorTopology_RefGetterError(t *testing.T) {
+	fmt.Println("============== Test case start: TestRemoteMemcachedComponent_MonitorTopology_RefGetterError =================")
+	defer fmt.Println("============== Test case end: TestRemoteMemcachedComponent_MonitorTopology_RefGetterError =================")
+	assert := assert.New(t)
+
+	component, _, finCh := setupBasicRemoteMemcachedComponent(testMaxConnectionsPerServer)
+
+	// The remote cluster reference is gone.
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return nil, errors.New("unknown remote cluster")
+	})
+
+	// Start with only server1 and server2 known.
+	component.knownServers[testServerAddr] = true
+	component.knownServers[testServerAddr2] = true
+
+	// Topology reports a new server3, so MonitorTopology reaches the RefGetter call.
+	component.SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		return createTestKvVbMapThreeServers(), nil
+	})
+
+	originalTopologyChangeCheckInterval := base.TopologyChangeCheckInterval
+	base.TopologyChangeCheckInterval = 100 * time.Millisecond
+
+	monitorDone := make(chan struct{})
+	assert.NotPanics(func() {
+		go func() {
+			component.MonitorTopology()
+			close(monitorDone)
+		}()
+
+		// Allow several topology checks to run while the ref is unavailable.
+		time.Sleep(300 * time.Millisecond)
+
+		// finCh closure must terminate the goroutine even though every cycle hit the ref error.
+		close(finCh)
+		<-monitorDone
+	})
+	base.TopologyChangeCheckInterval = originalTopologyChangeCheckInterval
+
+	// The topology change was skipped on the ref error, so server3 was never added.
+	component.poolConfigMtx.RLock()
+	_, server3Known := component.knownServers[testServerAddr3]
+	component.poolConfigMtx.RUnlock()
+	assert.False(server3Known, "server3 should not be added while the remote cluster reference is unavailable")
+}
+
 // TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds verifies that when
 // InitSSLConStrMap fails the exponential retry on the first MonitorTopology cycle, the new servers
 // are NOT added to knownServers. On the next cycle, the SSL refresh succeeds and the servers are added.
@@ -1570,8 +1684,8 @@ func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds(t 
 	// Create SSL-enabled ref
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock SSL port map for all 3 servers (needed when InitSSLConStrMap actually executes)
@@ -1655,8 +1769,8 @@ func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshPersistentFailure(t 
 	// Create SSL-enabled ref
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Track how many times ExponentialBackoffExecutor is called
@@ -1737,8 +1851,8 @@ func TestRemoteMemcachedComponent_GetNewMemcachedClient_SSL_MissingSslConStr(t *
 	// Create SSL-enabled ref
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Populate SslConStrMap with only server1, missing server2
@@ -1770,8 +1884,8 @@ func TestRemoteMemcachedComponent_MonitorTopology_SSLRefreshFailsThenSucceeds_Wi
 	// Create SSL-enabled ref
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Mock SSL port map for all 3 servers
@@ -1863,8 +1977,8 @@ func TestRemoteMemcachedComponent_InitSSLConStrMap_AlternateAddressError(t *test
 	sslRef, _ := metadata.NewRemoteClusterReference(testClusterUuid, "testCluster", "localhost:18091", "admin", "password", "", true, "", nil, nil, nil, nil)
 	sslRef.SetEncryptionType(metadata.EncryptionType_Full)
 
-	component.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return sslRef
+	component.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return sslRef, nil
 	})
 
 	// Set alternate address checker to return error

@@ -81,8 +81,8 @@ func setupTestRemoteMemcachedComponent(provider *ClusterBucketStatsProvider, uti
 	}
 	// Set RefGetter to return a test ref (needed for InitConnections)
 	testRef := createTestRemoteClusterRef()
-	provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
-		return testRef
+	provider.remoteMemcachedComponent.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+		return testRef, nil
 	})
 
 	mockClient := &clientMocks.ClientIface{}

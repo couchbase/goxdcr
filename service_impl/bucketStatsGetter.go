@@ -119,9 +119,8 @@ func (provider *ClusterBucketStatsProvider) Init() error {
 	userAgentStr := base.ComposeHELOMsgKey(fmt.Sprintf("BucketStatsProvider %s", provider.bucketName))
 	if provider.remoteMemcachedComponent == nil {
 		provider.remoteMemcachedComponent = Component.NewRemoteMemcachedComponent(provider.logger, provider.finCh, provider.utils, provider.bucketName, userAgentStr, provider.GetRemoteMemcachedTunables())
-		provider.remoteMemcachedComponent.SetRefGetter(func() *metadata.RemoteClusterReference {
-			ref, _ := provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
-			return ref
+		provider.remoteMemcachedComponent.SetRefGetter(func() (*metadata.RemoteClusterReference, error) {
+			return provider.remoteClusterSvc.RemoteClusterByUuid(provider.clusterUuid, false)
 		}).SetAlternateAddressChecker(func(ref *metadata.RemoteClusterReference) (bool, error) {
 			return provider.remoteClusterSvc.ShouldUseAlternateAddress(ref)
 		}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {

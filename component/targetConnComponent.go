@@ -81,7 +81,7 @@ type RemoteMemcachedComponent struct {
 
 	TargetBucketname string
 
-	RefGetter func() *metadata.RemoteClusterReference
+	RefGetter func() (*metadata.RemoteClusterReference, error)
 
 	Utils utilities.UtilsIface
 
@@ -208,7 +208,7 @@ func (r *RemoteMemcachedComponent) SetTargetKvVbMapGetter(getter func() (base.Kv
 	return r
 }
 
-func (r *RemoteMemcachedComponent) SetRefGetter(getter func() *metadata.RemoteClusterReference) *RemoteMemcachedComponent {
+func (r *RemoteMemcachedComponent) SetRefGetter(getter func() (*metadata.RemoteClusterReference, error)) *RemoteMemcachedComponent {
 	r.RefGetter = getter
 	return r
 }
@@ -228,11 +228,6 @@ func (r *RemoteMemcachedComponent) SetAlternateAddressChecker(checker func(ref *
 //   - If a previous call is still in progress, the caller blocks until it completes.
 //   - If a previous call failed, a new initialization attempt is started.
 func (r *RemoteMemcachedComponent) InitConnections() error {
-	// CNG TODO: remove this RemoteMemcachedComponent
-	if r.RefGetter().IsCNG() {
-		return nil
-	}
-
 	r.initConnMu.Lock()
 
 	// Already succeeded — no need to re-run.
@@ -280,7 +275,14 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 			close(resultCh)
 		}()
 
-		if r.RefGetter().IsFullEncryption() {
+		ref, err := r.RefGetter()
+		if err != nil {
+			r.LoggerImpl.Errorf("failed to get remote cluster reference, err=%v", err)
+			resultErr = err
+			return
+		}
+
+		if ref.IsFullEncryption() {
 			err := r.InitSSLConStrMap()
 			if err != nil {
 				r.LoggerImpl.Errorf("failed to initialize ssl connection string map, err=%v", err)
@@ -330,7 +332,10 @@ func (r *RemoteMemcachedComponent) InitConnections() error {
 }
 
 func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
-	ref := r.RefGetter()
+	ref, err := r.RefGetter()
+	if err != nil {
+		return fmt.Errorf("InitSSLConStrMap: failed to get remote cluster reference for bucket %v: %w", r.TargetBucketname, err)
+	}
 	connStr, err := ref.MyConnectionStr()
 	if err != nil {
 		return err
@@ -376,7 +381,10 @@ func (r *RemoteMemcachedComponent) InitSSLConStrMap() error {
 }
 
 func (r *RemoteMemcachedComponent) GetNewMemcachedClient(server_addr string) (mcc.ClientIface, error) {
-	ref := r.RefGetter()
+	ref, err := r.RefGetter()
+	if err != nil {
+		return nil, fmt.Errorf("GetNewMemcachedClient: failed to get remote cluster reference for bucket %v: %w", r.TargetBucketname, err)
+	}
 	username, password, _, certificate, san_in_certificate, client_certificate, client_key, err := ref.MyCredentials()
 	if err != nil {
 		return nil, err
@@ -609,7 +617,16 @@ func (r *RemoteMemcachedComponent) MonitorTopology() {
 			}
 
 			// For new servers under full encryption, refresh the SSL connection string
-			if len(serversToAdd) > 0 && r.RefGetter().IsFullEncryption() {
+			ref, err := r.RefGetter()
+			if err != nil {
+				// The ref may be transiently missing (e.g. remote cluster agent is yet to init).
+				// Skip this tick and retry on the next one rather than terminating the monitor.
+				// If the ref is gone for good, the provider will be Closed, which closes FinishCh
+				// and lets this goroutine exit on the next select iteration - so no leak.
+				r.LoggerImpl.Warnf("failed to get remote cluster reference while diffing topology: %v", err)
+				continue
+			}
+			if len(serversToAdd) > 0 && ref.IsFullEncryption() {
 				if err := r.Utils.ExponentialBackoffExecutor("GetNewMemcachedClient: RefreshSslConStrMap", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
 					base.RemoteMcRetryFactor, r.InitSSLConStrMap); err != nil {
 					// This is a critical failure since without the SSL connection string map, we won't be able to create connections to the new servers at all.
@@ -829,6 +846,10 @@ func (r *RemoteMemcachedComponent) gcIdleConnectionsOnce() {
 	}
 
 	if len(clientsToClose) > 0 {
-		r.LoggerImpl.Infof("idle connections GC: closed %d idle connection(s) for bucket %v on target cluster %s", len(clientsToClose), r.TargetBucketname, r.RefGetter().Name())
+		clusterName := "unknown"
+		if ref, err := r.RefGetter(); err == nil {
+			clusterName = ref.Name()
+		}
+		r.LoggerImpl.Infof("idle connections GC: closed %d idle connection(s) for bucket %v on target cluster %s", len(clientsToClose), r.TargetBucketname, clusterName)
 	}
 }
