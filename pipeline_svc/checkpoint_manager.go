@@ -194,7 +194,8 @@ type CheckpointManager struct {
 	targetKvVbMap base.KvVBMapType
 
 	// lastBucketStats is the last bucket stats retrieved from the target
-	lastBucketStats *base.BucketVBStats
+	lastBucketStats    *base.BucketVBStats
+	lastBucketStatsMtx sync.Mutex
 }
 
 type checkpointSyncHelper struct {
@@ -845,11 +846,13 @@ func (ckmgr *CheckpointManager) getHighSeqNosFromTarget() (*base.BucketVBStats, 
 	if len(errMap) > 0 {
 		ckmgr.logger.Warnf("failed to get high seqno and vbuuid for some vbuckets. errMap=%v", errMap)
 	}
+	ckmgr.lastBucketStatsMtx.Lock()
 	diff := bucketStats.Diff(ckmgr.lastBucketStats)
 	if len(diff) > 0 {
 		ckmgr.logger.Infof("getHighSeqNosFromTarget: statsDiffMap=%v", diff)
 	}
 	ckmgr.lastBucketStats = bucketStats
+	ckmgr.lastBucketStatsMtx.Unlock()
 
 	return bucketStats, nil
 }

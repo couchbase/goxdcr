@@ -1711,16 +1711,22 @@ func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
 	_, _, err := cacheCtxErr.preReplicate(tgtTs, nil)
 	assert.NotNil(err)
 	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
+	cacheCtxErr.mtx.RLock()
 	assert.Len(cacheCtxErr.lastQueriedTimers, 1)
+	cacheCtxErr.mtx.RUnlock()
 	// Immediately do another pull, call should not increment, same error
 	_, _, err = cacheCtxErr.preReplicate(tgtTs, nil)
 	assert.NotNil(err)
 	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
+	cacheCtxErr.mtx.RLock()
 	assert.Len(cacheCtxErr.lastQueriedTimers, 1)
+	cacheCtxErr.mtx.RUnlock()
 
 	// error should expire after 1 second
 	time.Sleep(1 * time.Second)
+	cacheCtxErr.mtx.RLock()
 	assert.Len(cacheCtxErr.lastQueriedTimers, 0)
+	cacheCtxErr.mtx.RUnlock()
 
 	// Create a cache context with a mock preReplicate function that returns success
 	cacheCtxGood := &globalCkptPrereplicateCacheCtx{
