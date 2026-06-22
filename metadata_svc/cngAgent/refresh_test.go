@@ -651,13 +651,13 @@ func TestRemoteCngAgent_AbortAnyOngoingRefresh(t *testing.T) {
 	needToReEnable := agent.AbortAnyOngoingRefresh()
 	assert.True(needToReEnable)
 
-	// Refresh should be canceled
+	// Refresh should be canceled — wait for goroutine to write refreshErr before reading
+	wg.Wait()
 	assert.Error(refreshErr)
 	assert.Contains(refreshErr.Error(), "context canceled")
 
-	// Re-enable and wait for completion
+	// Re-enable
 	agent.ReenableRefresh()
-	wg.Wait()
 
 	utilsMock.AssertExpectations(t)
 }

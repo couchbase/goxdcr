@@ -617,8 +617,10 @@ func TestSpecMetadataCache(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		assert.NotNil(pipelineMgr.GetOrCreateReplicationStatus(testTopic, nil))
 		assert.Nil(pipelineMgr.Update(testTopic, nil))
-		//Change the spec.InternalId to force the removal to clean up the ReplicationStatus
-		//objecat from the cache
+		// Use a new spec with a modified InternalId to force the removal to clean up
+		// the ReplicationStatus object from the cache. Do not mutate the original spec
+		// object since the pipeline goroutine may still be reading it.
+		spec = spec.Clone()
 		spec.InternalId = internalId + "1"
 		fmt.Println("	Stopping replication testTopic:", i)
 		waitGroup.Add(1)

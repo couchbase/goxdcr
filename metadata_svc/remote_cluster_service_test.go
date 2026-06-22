@@ -2795,6 +2795,9 @@ func TestStalledAddClusterRefFromCallback(t *testing.T) {
 	}()
 
 	wg.Wait()
+	// Stop the agent so its runPeriodicRefresh goroutine exits before the next test
+	// modifies the global base.RefreshRemoteClusterRefInterval.
+	agent.Stop()
 }
 
 // When an SRV entry is used and none of the A records are accessible

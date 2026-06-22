@@ -44,7 +44,6 @@ func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
 
 	ckptCache := NewCheckpointsServiceCache(nil, "")
 	ckptCache.cacheEnabled = true
-	go ckptCache.Run()
 
 	// spec
 	spec, _ := metadata.NewReplicationSpecification("sourceBucket", "sourceBucketUuid",

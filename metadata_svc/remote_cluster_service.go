@@ -4304,7 +4304,9 @@ func (service *RemoteClusterService) updateUtilities(utilsIn utilities.UtilsIfac
 	for _, agent := range service.agentMap {
 		switch a := agent.(type) {
 		case *RemoteClusterAgent:
+			a.refMtx.Lock()
 			a.utils = utilsIn
+			a.refMtx.Unlock()
 		default:
 			service.logger.Fatalf("unexpected agent type encountered type=%T agentID=%v", a, a.Id())
 		}
