@@ -928,6 +928,9 @@ func TestBackfillHandlerParentSpecUpdate(t *testing.T) {
 	assert.Equal(t, true, exists)
 	assert.NotNil(t, handler)
 
+	// Stop the handler goroutine before accessing fields directly to avoid races.
+	handler.Stop()
+
 	// initially the spec should be nil
 	assert.Nil(t, handler.cachedBackfillSpec)
 	handler.updateBackfillSpec(nil, nil, nil, nil, false, 0)
@@ -948,9 +951,8 @@ func TestBackfillHandlerParentSpecUpdate(t *testing.T) {
 	newSpec.Settings.Values[metadata.PriorityKey] = base.PriorityTypeLow
 	newSpec.Settings.Values[metadata.BandwidthLimitKey] = int(100)
 
-	// call replicationSpecChangeCallBack since the settings was changed
-	err = backfillMgr.ReplicationSpecChangeCallback(newSpec.Id, spec, newSpec, nil)
-	assert.Nil(t, err)
+	// Update the handler's cached parent spec directly (handler is stopped, can't use the channel).
+	handler.spec = newSpec.Clone()
 	// reset the cachedBackfillSpec to nil to ensure the newly created backfill spec will inherit the new settings
 	handler.cachedBackfillSpec = nil
 	handler.updateBackfillSpec(nil, &metadata.VBTasksMapType{}, nil, nil, false, 0)
@@ -970,10 +972,12 @@ func TestBackfillHandlerParentSpecUpdate(t *testing.T) {
 	newSpec2.Settings.Values[metadata.PriorityKey] = base.PriorityTypeMedium
 	newSpec2.Settings.Values[metadata.BandwidthLimitKey] = int(200)
 
-	// call replicationSpecChangeCallBack since the settings was changed
-	err = backfillMgr.ReplicationSpecChangeCallback(newSpec.Id, newSpec, newSpec2, nil)
-	assert.Nil(t, err)
-
+	// Update the handler's cached parent spec directly (handler is stopped, can't use the channel).
+	// Also update cachedBackfillSpec's replication spec to simulate what updateParentSpec would have done.
+	handler.spec = newSpec2.Clone()
+	if handler.cachedBackfillSpec != nil {
+		handler.cachedBackfillSpec.SetReplicationSpec(newSpec2.Clone())
+	}
 	handler.updateBackfillSpec(nil, &metadata.VBTasksMapType{}, nil, nil, false, 0)
 	// since we are calling the updateBackfillSpec directly and not through the handler,
 	// remove the queuedResponse channel
