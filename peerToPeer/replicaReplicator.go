@@ -438,6 +438,7 @@ type ReplicatorAgentImpl struct {
 	backfillReplSvc     service_def.BackfillReplSvc
 	colManifestSvc      service_def.CollectionsManifestSvc
 	replSpecSvc         service_def.ReplicationSpecSvc
+	replSpecSvcMtx      sync.RWMutex
 	bucketTopologySvc   service_def.BucketTopologySvc
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 
@@ -529,7 +530,10 @@ func (a *ReplicatorAgentImpl) SetUpdatedSpecAsync(spec *metadata.ReplicationSpec
 }
 
 func (a *ReplicatorAgentImpl) GetReplicationInterval() (time.Duration, error) {
-	spec, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
+	a.replSpecSvcMtx.RLock()
+	svc := a.replSpecSvc
+	a.replSpecSvcMtx.RUnlock()
+	spec, err := svc.ReplicationSpecReadOnly(a.specId)
 	if err != nil {
 		return 0, err
 	}
@@ -537,12 +541,21 @@ func (a *ReplicatorAgentImpl) GetReplicationInterval() (time.Duration, error) {
 }
 
 func (a *ReplicatorAgentImpl) ReplicationIsPaused() bool {
-	spec, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
+	a.replSpecSvcMtx.RLock()
+	svc := a.replSpecSvc
+	a.replSpecSvcMtx.RUnlock()
+	spec, err := svc.ReplicationSpecReadOnly(a.specId)
 	if err != nil {
 		a.logger.Warnf("Unable to get repl %v - %v so assuming replication is paused", err)
 		return true
 	}
 	return !spec.Settings.Active
+}
+
+func (a *ReplicatorAgentImpl) setReplSpecSvc(svc service_def.ReplicationSpecSvc) {
+	a.replSpecSvcMtx.Lock()
+	a.replSpecSvc = svc
+	a.replSpecSvcMtx.Unlock()
 }
 
 func (a *ReplicatorAgentImpl) run() {

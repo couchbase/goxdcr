@@ -569,6 +569,7 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNod
 		retErrMap[serverName] = &errWrapper{err: nil}
 	}
 
+	localFinCh := s.finCh
 	for serverName, ch := range s.respMap {
 		serverNameCpy := serverName
 		chCpy := ch
@@ -593,7 +594,7 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNod
 				}
 			case <-timeoutTimer.C:
 				retErrMap[serverNameCpy].err = fmt.Errorf("%v - did not hear back from node after %v. Could be due to peer node being busy to respond in time or this XDCR being too busy to handle incoming requests", base.ErrorExecutionTimedOut, s.timeout)
-			case <-s.finCh:
+			case <-localFinCh:
 				retErrMap[serverNameCpy].err = base.ErrorOpInterrupted
 				return
 			}

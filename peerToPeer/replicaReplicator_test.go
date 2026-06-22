@@ -156,7 +156,7 @@ func TestReplicatorChangeSpecDuringInitWait(t *testing.T) {
 	replicator.replicationSpecSvc = replSvc2
 	replicator.agentMapMtx.Lock()
 	for _, agent := range replicator.agentMap {
-		agent.replSpecSvc = replSvc2
+		agent.setReplSpecSvc(replSvc2)
 		// The replicator is still sleeping, so agent not running yet
 		assert.False(agent.IsRunning())
 	}

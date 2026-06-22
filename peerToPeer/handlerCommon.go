@@ -92,7 +92,9 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 					undoReservation()
 					return getErr
 				}
+				opts.respMapMtx.Lock()
 				opts.finCh = finCh
+				opts.respMapMtx.Unlock()
 			}
 		}
 	}
