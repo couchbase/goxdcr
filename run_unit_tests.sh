@@ -122,9 +122,9 @@ for directory in ${DIRS_WITH_UT[@]}; do
 	cd ${ROOT_DIR}/${directory}
 	fileFriendlyFileName=$(echo "${directory}" | sed 's/\//_/g')
 	if [[ -z "$runAllTests" ]]; then
-		go test -tags=dev -timeout 100s -short >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
+		go test -race -tags=dev -timeout 100s -short >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	else
-		go test -tags=dev -timeout 100s >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
+		go test -race -tags=dev -timeout 100s >$testOutputDir/${fileFriendlyFileName}.out 2>&1 &
 	fi
 	lastPid="$!"
 	echo "INFO: Test $directory with background PID $lastPid"
