@@ -43,7 +43,9 @@ func TestPipelineOpSerializerDelete(t *testing.T) {
 	time.Sleep(serializerSleepTime)
 	serializer.Delete("TestTopic")
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerDelete =================")
 }
@@ -57,7 +59,9 @@ func TestPipelineOpSerializerUpdate(t *testing.T) {
 	time.Sleep(serializerSleepTime)
 	serializer.Update("TestTopic", nil)
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerUpdate =================")
 }
@@ -72,7 +76,9 @@ func TestPipelineOpSerializerDeleteTwice(t *testing.T) {
 	go serializer.Delete("TestTopic")
 	go serializer.Delete("TestTopic")
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerDeleteTwice =================")
 }
@@ -87,7 +93,9 @@ func TestPipelineOpSerializerUpdateTwice(t *testing.T) {
 	go serializer.Update("TestTopic", nil)
 	go serializer.Update("TestTopic", nil)
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerUpdateTwice =================")
 }
@@ -110,7 +118,9 @@ func TestPipelineOpSerializerGetTwice(t *testing.T) {
 	assert.Equal(repStatus, repStatusPtr)
 
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerGetTwice =================")
 }
@@ -127,7 +137,9 @@ func TestPipelineOpSerializerMix(t *testing.T) {
 	go serializer.Delete("TestTopic")
 	go serializer.Delete("TestTopic")
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	serializer.Stop()
 	fmt.Println("============== Test case start: TestPipelineOpSerializerMix =================")
 }
@@ -152,6 +164,8 @@ func TestPipelineOpSerializerReinit(t *testing.T) {
 
 	assert.Nil(serializer.ReInit("TestTopic"))
 	time.Sleep(serializerSleepTime)
+	serializer.mapMtx.RLock()
 	assert.Equal(0, len(serializer.jobTopicMap))
+	serializer.mapMtx.RUnlock()
 	fmt.Println("============== Test case end: TestPipelineOpSerializerReinit =================")
 }

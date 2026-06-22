@@ -918,39 +918,39 @@ func TestPipelineMgrCallbacks(t *testing.T) {
 	setupLaunchUpdater(testRepairer, true)
 	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
 
-	var callbackCount int
-	var errCount int
+	var callbackCount atomic.Int32
+	var errCount atomic.Int32
 	callback := func() error {
-		callbackCount++
+		callbackCount.Add(1)
 		return nil
 	}
 	errFunc := func(err error, cbCalled bool) {
-		errCount++
+		errCount.Add(1)
 	}
 	pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
 	time.Sleep(250 * time.Millisecond)
 
-	assert.Equal(1, callbackCount)
-	assert.Equal(0, errCount)
+	assert.Equal(int32(1), callbackCount.Load())
+	assert.Equal(int32(0), errCount.Load())
 	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
 
 	// Test concurrent run - only callback once
 	go pipelineMgr.Update("testTopic", nil)
 	go pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
 	time.Sleep(250 * time.Millisecond)
-	assert.Equal(2, callbackCount)
-	assert.Equal(0, errCount)
+	assert.Equal(int32(2), callbackCount.Load())
+	assert.Equal(int32(0), errCount.Load())
 	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
 
 	// Test failure call
 	callback = func() error {
-		callbackCount++
+		callbackCount.Add(1)
 		return fmt.Errorf("Dummy")
 	}
 	pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
 	time.Sleep(250 * time.Millisecond)
-	assert.Equal(3, callbackCount)
-	assert.Equal(1, errCount)
+	assert.Equal(int32(3), callbackCount.Load())
+	assert.Equal(int32(1), errCount.Load())
 	assert.Equal(uint64(4), atomic.LoadUint64(&testRepairer.runCounter))
 }
 
