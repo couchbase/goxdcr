@@ -2,6 +2,7 @@ package iopool
 
 import (
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,20 +12,20 @@ import (
 )
 
 type testConn struct {
-	count *int
+	count *atomic.Int32
 }
 
 func (conn *testConn) Close() error {
-	(*conn.count)++
+	conn.count.Add(1)
 	return nil
 }
 
 func TestPool_EmptyPool(t *testing.T) {
 	logger := log.NewLogger("testlogger", log.DefaultLoggerContext)
 
-	buckets := map[string]*int{
-		"B1": new(int),
-		"B2": new(int),
+	buckets := map[string]*atomic.Int32{
+		"B1": &atomic.Int32{},
+		"B2": &atomic.Int32{},
 	}
 
 	newConnFn := func(bucketName string, params interface{}) (io.Closer, error) {
@@ -47,9 +48,9 @@ func TestPool_EmptyPool(t *testing.T) {
 func TestPool_GC(t *testing.T) {
 	logger := log.NewLogger("testlogger", log.DefaultLoggerContext)
 
-	buckets := map[string]*int{
-		"B1": new(int),
-		"B2": new(int),
+	buckets := map[string]*atomic.Int32{
+		"B1": &atomic.Int32{},
+		"B2": &atomic.Int32{},
 	}
 
 	newConnFn := func(bucketName string, params interface{}) (io.Closer, error) {
@@ -80,5 +81,5 @@ func TestPool_GC(t *testing.T) {
 	}
 
 	time.Sleep(8 * time.Second)
-	require.Equal(t, connCount, *(buckets[bucket]))
+	require.Equal(t, int32(connCount), buckets[bucket].Load())
 }
