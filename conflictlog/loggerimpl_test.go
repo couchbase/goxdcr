@@ -292,14 +292,19 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	}
 
 	finCh := make(chan bool)
+	var workerWg sync.WaitGroup
+	workerWg.Add(1)
+	// Capture the current channel to avoid racing against UpdateQueueCapcity's channel swap.
+	localCh := l.logReqCh
 
 	// pseudo worker to test that conflicts are not lost
 	go func() {
+		defer workerWg.Done()
 		for {
 			select {
 			case <-finCh:
 				return
-			case req := <-l.logReqCh:
+			case req := <-localCh:
 				if req.conflictRec == nil {
 					continue
 				}
@@ -323,6 +328,7 @@ func TestLoggerImpl_UpdateCapacity(t *testing.T) {
 	close(finCh)
 	testCapacity(l, numItems+1)
 	l.lock.Unlock()
+	workerWg.Wait()
 	assert.Equal(t, len(l.logReqCh)+readCount, numItems)
 
 	// have actual workers and check if the queue is read from
@@ -490,7 +496,10 @@ func TestLoggerImpl_HibernateIfNeeded(t *testing.T) {
 			// Check hibernation state
 			if tt.shouldHibernate {
 				assert.True(t, l.hibernated.Load(), "logger should be hibernated")
-				assert.Equal(t, uint64(tt.maxErrorCount), l.errorCnt)
+				l.hibernationLock.Lock()
+				errorCnt := l.errorCnt
+				l.hibernationLock.Unlock()
+				assert.Equal(t, uint64(tt.maxErrorCount), errorCnt)
 
 				// Test that log() method returns ErrLoggerHibernated
 				testRecord := &ConflictRecord{}
