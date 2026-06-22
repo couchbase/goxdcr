@@ -489,7 +489,6 @@ func generateTestDataForSnappyDecode(numDocs int) []*base.WrappedMCRequest {
 			SlicesToBeReleasedMtx:      sync.Mutex{},
 			SiblingReqs:                nil,
 			SiblingReqsMtx:             sync.RWMutex{},
-			RetryCRCount:               0,
 		}
 		generatedWrappedMCR = append(generatedWrappedMCR, newWrappedMCR)
 	}
@@ -1200,12 +1199,12 @@ func Test_retryAfterCasLockingFailureWithXmemRetry(t *testing.T) {
 
 	xmem.receive_token_ch <- 1
 	time.Sleep(2 * time.Second)
-	assert.Equal(t, req.RetryCRCount, 1)
+	assert.Equal(t, int32(1), req.RetryCRCount.Load())
 
 	// say the xmem buffer repair retry mechanism fired the request calls and the response comes now
 	xmem.receive_token_ch <- 1
 	time.Sleep(2 * time.Second)
-	assert.Equal(t, req.RetryCRCount, 1) // retryCnt should remain 1
+	assert.Equal(t, int32(1), req.RetryCRCount.Load()) // retryCnt should remain 1
 	finCh <- true
 }
 

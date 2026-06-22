@@ -860,7 +860,7 @@ type WrappedMCRequest struct {
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
 	SiblingReqs    []*WrappedMCRequest
 	SiblingReqsMtx sync.RWMutex
-	RetryCRCount   int
+	RetryCRCount   atomic.Int32
 	Cloned         bool
 	ClonedSyncCh   chan bool
 

@@ -140,8 +140,9 @@ func testMcRequest(req *base.WrappedMCRequest, lookup *base.WrappedMCResponse) {
 		}
 	}
 
-	if t.retryCnt != req.RetryCRCount && !(t.targetCasChanger.enabled && t.retryCnt+1 == req.RetryCRCount) {
-		panic(fmt.Sprintf("RetryCnt mismatch - %v != %v, caschanged=%v", t.retryCnt, req.RetryCRCount, t.targetCasChanger.enabled))
+	retryCRCount := req.RetryCRCount.Load()
+	if int(retryCRCount) != t.retryCnt && !(t.targetCasChanger.enabled && int(retryCRCount) == t.retryCnt+1) {
+		panic(fmt.Sprintf("RetryCnt mismatch - %v != %v, caschanged=%v", t.retryCnt, retryCRCount, t.targetCasChanger.enabled))
 	}
 
 	if lookup != nil {

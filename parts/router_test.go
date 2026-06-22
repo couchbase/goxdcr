@@ -21,6 +21,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1097,11 +1098,15 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter(uint16(base.NumberOfVbs))
 	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc, 1)
 
-	var connectivityReturnHealthy = true
+	var connectivityMtx sync.RWMutex
+	connectivityReturnHealthy := true
 	var connectivityGetCnt uint32
 	connectivityGetter := func() (metadata.ConnectivityStatus, error) {
 		atomic.AddUint32(&connectivityGetCnt, 1)
-		if connectivityReturnHealthy {
+		connectivityMtx.RLock()
+		healthy := connectivityReturnHealthy
+		connectivityMtx.RUnlock()
+		if healthy {
 			return metadata.ConnValid, nil
 		} else {
 			return metadata.ConnDegraded, nil
@@ -1140,11 +1145,24 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	}
 	assert.Nil(err)
 
-	// routing updater receiver
+	// routing updater receiver — protected by mutex because a timer goroutine writes lastCalledBackfillMap
+	var backfillMapMtx sync.RWMutex
 	var lastCalledBackfillMap metadata.CollectionNamespaceMapping
-	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+	newRoutingUpdater2 := func(info CollectionsRoutingInfo) error {
+		backfillMapMtx.Lock()
 		lastCalledBackfillMap = info.BackfillMap
+		backfillMapMtx.Unlock()
 		return nil
+	}
+	getLastCalledBackfillMap := func() metadata.CollectionNamespaceMapping {
+		backfillMapMtx.RLock()
+		defer backfillMapMtx.RUnlock()
+		return lastCalledBackfillMap
+	}
+	setLastCalledBackfillMap := func(m metadata.CollectionNamespaceMapping) {
+		backfillMapMtx.Lock()
+		lastCalledBackfillMap = m
+		backfillMapMtx.Unlock()
 	}
 
 	var ignoreCnt int
@@ -1152,50 +1170,63 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 		ignoreCnt++
 	}
 
-	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.routingUpdater = newRoutingUpdater2
 	collectionsRouter.ignoreDataFunc = ignoreFunc
 	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
-	assert.Nil(lastCalledBackfillMap)
+	assert.Nil(getLastCalledBackfillMap())
 
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
 	assert.Equal(1, ignoreCnt)
 	// Note that brokenMapDblChkTicker and brokenMapDblChkKicker will be not nil only when xmem raises collection error
+	collectionsRouter.brokenDenyMtx.RLock()
 	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
 	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
-	assert.Nil(lastCalledBackfillMap)
 	assert.Equal(1, len(collectionsRouter.brokenMapping))
+	collectionsRouter.brokenDenyMtx.RUnlock()
+	assert.Nil(getLastCalledBackfillMap())
 
 	time.Sleep(1 * time.Second)
 	assert.Equal(1, ignoreCnt)
+	collectionsRouter.brokenDenyMtx.RLock()
 	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
-	assert.NotNil(lastCalledBackfillMap)
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
 	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
+	collectionsRouter.brokenDenyMtx.RUnlock()
+	assert.NotNil(getLastCalledBackfillMap())
 	assert.Equal(1, int(atomic.LoadUint32(&connectivityGetCnt)))
 
 	// Now, let's pretend the cluster is unhealthy and the same ignore request should not be serviced
+	connectivityMtx.Lock()
 	connectivityReturnHealthy = false
-	lastCalledBackfillMap = nil
+	connectivityMtx.Unlock()
+	setLastCalledBackfillMap(nil)
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
 	assert.Equal(2, ignoreCnt)
 	time.Sleep(2 * time.Second)
 	assert.Eventuallyf(func() bool {
+		collectionsRouter.brokenDenyMtx.RLock()
+		defer collectionsRouter.brokenDenyMtx.RUnlock()
 		return collectionsRouter.brokenMapDblChkTicker != nil
 	}, 5*time.Second, 200*time.Millisecond, "Expected brokenMapDblChkTicker to be non-nil")
-	//assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
-	assert.Nil(lastCalledBackfillMap)
+	assert.Nil(getLastCalledBackfillMap())
+	collectionsRouter.brokenDenyMtx.RLock()
 	assert.NotEqual(0, len(collectionsRouter.brokenMapping))
 	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
+	collectionsRouter.brokenDenyMtx.RUnlock()
 	assert.NotEqual(1, int(atomic.LoadUint32(&connectivityGetCnt)))
 
 	// Now let's say cluster is healthy again
+	connectivityMtx.Lock()
 	connectivityReturnHealthy = true
-	lastCalledBackfillMap = nil
+	connectivityMtx.Unlock()
+	setLastCalledBackfillMap(nil)
 	time.Sleep(1 * time.Second)
 	assert.Eventuallyf(func() bool {
+		collectionsRouter.brokenDenyMtx.RLock()
+		defer collectionsRouter.brokenDenyMtx.RUnlock()
 		return collectionsRouter.brokenMapDblChkTicker == nil
 	}, 5*time.Second, 200*time.Millisecond, "Expected brokenMapDblChkTicker to be nil")
-	assert.NotNil(lastCalledBackfillMap)
+	assert.NotNil(getLastCalledBackfillMap())
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
 	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
 }

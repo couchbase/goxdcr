@@ -1221,7 +1221,7 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 }
 
 func (xmem *XmemNozzle) checkAndUpdateReceivedStats(request *base.WrappedMCRequest) {
-	if request.RetryCRCount > 0 {
+	if request.RetryCRCount.Load() > 0 {
 		return
 	}
 	atomic.AddUint64(&xmem.counter_received, 1)
@@ -3281,7 +3281,7 @@ func (xmem *XmemNozzle) sendOrNotBasedOnHLV(req *base.WrappedMCRequest) (bool, O
 		return true, reasonIfSkipping, nil
 	}
 
-	if req.RetryCRCount > 0 {
+	if req.RetryCRCount.Load() > 0 {
 		return true, reasonIfSkipping, nil
 	}
 
@@ -4129,7 +4129,7 @@ func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) 
 	req.Req.Opaque = 0
 	req.ResetCLogOptions()
 	// Don't free the slices from datapool since that's the mutation body.
-	req.RetryCRCount++
+	req.RetryCRCount.Add(1)
 	err := xmem.accumuBatch(req)
 	if err != nil {
 		xmem.Logger().Errorf("%v Retry conflict resolution for %v%s%v failed accumuBatch call with error %v", xmem.Id(), base.UdTagBegin, bytes.Trim(req.Req.Key, "\x00"), base.UdTagEnd, err)
