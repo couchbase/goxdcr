@@ -34,6 +34,18 @@ function runPVTests {
 	fi
 	reset
 }
+
+function runMobileClockSkewTest {
+	echo "Running mobile clock skew test"
+	testName="TestMobilePushReplicationWithClockSkew"
+	go test -timeout 140s -run $testName github.com/couchbase/goxdcr/parts
+	if (($? != 0)); then
+		echo "failed mobile clock skew pruning test"
+		exit 1
+	fi
+	reset
+}
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running mobile coexistence subdoc test case + other go tests"
@@ -51,6 +63,9 @@ function runTestCase {
 	# source and target docs are both tombstones
 	runSubdocTest 4
 	runPVTests
+
+	runMobileClockSkewTest
+
 	echo "============================================================================"
 	echo "Mobile coexistence subdoc test + other go tests case passed"
 	echo "============================================================================"

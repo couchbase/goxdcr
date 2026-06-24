@@ -2125,8 +2125,8 @@ func TestPVPruning(t *testing.T) {
 		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
 		afterPruningList = pvBytesToArray(a, afterPruningBytes)
 		a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("%vd: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
-		hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
-		_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+		hlvBytes, _ := getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(hlvBytes)
 		a.Nil(err)
 		deleteNSmallestEntriesInPV(1, beforePruningMap)
 		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%vd: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
@@ -2137,8 +2137,8 @@ func TestPVPruning(t *testing.T) {
 		_, _, _, _, afterPruningBytes, _ = getVVXattr(tgtBucket, docKey, colName, scopeName, a)
 		afterPruningList = pvBytesToArray(a, afterPruningBytes)
 		a.Equal(len(beforePruningMap)-5, len(afterPruningList), fmt.Sprintf("%ve: pv before: %v, pv after: %v", testNum, beforePruningMap, afterPruningList))
-		hlvBytes, cas = getHLV(a, tgtBucket, scopeName, colName, docKey)
-		_, _, _, afterPruningMap, _, err = crMeta.ParseHlvFields(cas, hlvBytes)
+		hlvBytes, _ = getHLV(a, tgtBucket, scopeName, colName, docKey)
+		_, _, _, afterPruningMap, _, err = crMeta.ParseHlvFields(hlvBytes)
 		a.Nil(err)
 		deleteNSmallestEntriesInPV(5, beforePruningMap)
 		a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("%ve: pvMap before: %v, pvMap after: %v", testNum, beforePruningMap, afterPruningMap))
@@ -2154,8 +2154,8 @@ func TestPVPruning(t *testing.T) {
 	_, _, _, _, afterPruningBytes, _ := getVVXattr(tgtBucket, docKey, colName, scopeName, a)
 	afterPruningList := pvBytesToArray(a, afterPruningBytes)
 	a.Equal(len(beforePruningMap)-1, len(afterPruningList), fmt.Sprintf("3a: pv before: %v, pv after: %v", beforePruningMap, afterPruningList))
-	hlvBytes, cas := getHLV(a, tgtBucket, scopeName, colName, docKey)
-	_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(cas, hlvBytes)
+	hlvBytes, _ := getHLV(a, tgtBucket, scopeName, colName, docKey)
+	_, _, _, afterPruningMap, _, err := crMeta.ParseHlvFields(hlvBytes)
 	a.Nil(err)
 	deleteNSmallestEntriesInPV(1, beforePruningMap)
 	a.Equal(beforePruningMap, afterPruningMap, fmt.Sprintf("3a: pvMap before: %v, pvMap after: %v", beforePruningMap, afterPruningMap))
@@ -2178,6 +2178,62 @@ func TestPVPruning(t *testing.T) {
 	changeClusterRunReplicationSettings(srcNode, replID, "mobile", "Off")
 	time.Sleep(2 * time.Second)
 	testWithMobileOff(5)
+
+	verifyStatsForDone(a, srcNode, tgtNode)
+}
+
+// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
+// go test -timeout 150s -run ^TestMobilePushReplicationWithClockSkew$ github.com/couchbase/goxdcr/v8/parts
+func TestMobilePushReplicationWithClockSkew(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestMobilePushReplicationWithClockSkew")
+	}
+
+	// This test simulates mobile push replication such that the CV ver generated
+	// by mobile cluster will be ahead of server HLC clock which generates CAS
+	// and cvCAS (via CAS macro expansion).
+	fmt.Println("============== Test case start: TestMobilePushReplicationWithClockSkew =================")
+	defer fmt.Println("============== Test case end: TestMobilePushReplicationWithClockSkew =================")
+	a := assert.New(t)
+
+	// test common parameters
+	bucketName := "B1" // both on source and target
+	scopeName := "_default"
+	colName := "_default"
+	docKey := "mobilePushReplSkewDoc"
+	docVal := "{\"foo\" : \"bar\"}"
+	srcNode := 9000 // cluster_run source node port
+	tgtNode := 9001 // cluster_run target node port
+	// printCmd = true // uncomment this line for printing cluster_run curl command while debugging
+
+	srcBucket, _, srcAgent, _, _, closeFunc1, closeFunc2, closeFunc3, closeFunc4 := setupForPVPruningTest(a, bucketName, srcNode, tgtNode)
+	defer closeFunc1(nil)
+	defer closeFunc2(nil)
+	defer closeFunc3()
+	defer closeFunc4()
+
+	writeDoc(srcAgent, docKey, docVal, colName, scopeName, 0, base.JSONDataType, 0)
+	time.Sleep(2 * time.Second)
+
+	mutateInSpec := []gocb.MutateInSpec{}
+	// make ver higher than what cas is going to be - to simulate clock skew.
+	// Technically current CV should go to PV and src should change to mobile actor ID - but
+	// this test just concerns about ver, cas and cvCas.
+	oneHour := uint64(3600000000000)
+	newVer := base.Uint64ToHexLittleEndian(uint64(time.Now().UnixNano()) + oneHour)
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_VER_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// cvCas should macro expand to cas.
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	_, err = srcBucket.Scope(scopeName).Collection(colName).MutateIn(docKey, mutateInSpec, &gocb.MutateInOptions{
+		Internal: struct {
+			DocFlags gocb.SubdocDocFlag
+			User     []byte
+		}{
+			DocFlags: gocb.SubdocDocFlagAccessDeleted,
+		},
+	})
+	a.Nil(err)
+	time.Sleep(5 * time.Second)
 
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
