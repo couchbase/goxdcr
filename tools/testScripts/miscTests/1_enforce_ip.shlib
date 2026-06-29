@@ -362,6 +362,37 @@ function waitForReplicationInfosNotContaining {
 	return 1
 }
 
+# Polls getRemoteClusters until searchStr is ABSENT or maxWaitSec elapses.
+# The /pools/default/remoteClusters REST output reflects the agent's CACHED
+# connectivity status, which is only updated by the periodic refresh
+# (RefreshRemoteClusterRefInterval, ~15s). When the *target* cluster's IP family
+# changes, the source goxdcr does NOT restart, so its cached status stays stale
+# (e.g. RC_OK) until the next refresh tick detects the connection failure and
+# rolls the overall status to RC_DEGRADED/RC_ERROR. Poll across at least two
+# refresh cycles before asserting on connectivityStatus.
+function waitForRemoteClustersNotContaining {
+	local clusterName=$1
+	local searchStr="$2"
+	local maxWaitSec=${3:-40}
+	local intervalSec=5
+	local elapsed=0
+	local result
+
+	while ((elapsed < maxWaitSec)); do
+		result=$(getRemoteClusters "$clusterName")
+		local count
+		count=$(echo "$result" | grep -c "$searchStr")
+		if ((count == 0)); then
+			echo "$result"
+			return 0
+		fi
+		sleep $intervalSec
+		elapsed=$((elapsed + intervalSec))
+	done
+	echo "$result"
+	return 1
+}
+
 function testChangeRemoteC1FQDN {
 	echo "==============================================================="
 	echo "====== Change Remote Cluster Reference Test C1 with FQDN ======"
@@ -502,8 +533,11 @@ function testChangeRemoteC2FQDN {
 	echo
 	echo "===== Test 4: C1 ipv4 (only=false), C2:ipv6 only: existing remote with ipv4 address will not be able to connect."
 	setIpFamily "C2" "ipv6" "true"
-	result=$(getRemoteClusters "C1")
-	checkForCrash "$result" "getRemoteClusters C1"
+	# Changing the TARGET (C2) IP family does not restart C1's goxdcr, so C1's
+	# remote cluster agent keeps a cached RC_OK status until its periodic refresh
+	# (~15s) attempts the connection, fails, and rolls the status to
+	# RC_ERROR/RC_DEGRADED. Poll until RC_OK is gone rather than reading the stale
+	# cache immediately (otherwise this races the refresh and flakes).
 	# This test does something interesting where C2 has the hostname set up to be an FQDN
 	# while the source remote cluster ref is created with "do not replace" turned on
 	# 2026-03-05T15:56:36.305-08:00 INFO GOXDCR.RemClusterSvc: remoteCluster/9lQxsIflsArllryza82uPzpbgnKykHybJ__FS3JQSf4= useExternal: false cachedRefNodesList in refresh: [[node9001.localhost:9001 ]]
@@ -511,6 +545,8 @@ function testChangeRemoteC2FQDN {
 	#
 	# node Status is map[127.0.0.1:9001:RC_ERROR node9001.localhost:9001:RC_OK]. ConnErrCount is 1 totalCount is 2
 	# Because of this, as long as RC_OK doesn't show up, we're ok
+	result=$(waitForRemoteClustersNotContaining "C1" "RC_OK" 40)
+	checkForCrash "$result" "getRemoteClusters C1"
 	count=$(echo $result | grep -c "RC_OK")
 	if (($count > 0)); then
 		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR or RC_DEGRADED but it returned $result"
