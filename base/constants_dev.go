@@ -28,3 +28,9 @@ const DevBackfillUnrecoverableErrorInj = "xdcrDevBackfillUnrecoverableErrorInj"
 const DevBackfillMgrVbsTasksDoneNotifierDelay = "xdcrDevBackfillMgrVbsTasksDoneNotifierDelay"
 const DevXmemNozzleNetworkIOFaultProbability = "xdcrDevXmemNozzleNetworkIOFaultProbability"
 const DevXmemColErrorPercent = "xdcrDevXmemColErrorPercent"
+
+// DevRemoveSrcFailoverLogVBsOnce takes a CSV list of source VB numbers (e.g. "0,5,17").
+// The first time CheckpointManager.getOneTimeSrcFailoverLog() on a node returns a failover
+// log map that contains any of these VBs, those VBs are removed from the result once,
+// simulating an incomplete source failover log fetch on a freshly rebalanced-in node.
+const DevRemoveSrcFailoverLogVBsOnce = "removeSrcFailoverLogVBsOnce"

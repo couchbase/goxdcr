@@ -9,8 +9,10 @@
 package pipeline_svc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -136,6 +138,107 @@ func TestCombineFailoverlogs(t *testing.T) {
 	assert.Len(hashFilteredResult[0].Checkpoint_records, 1)
 	assert.Len(hashFilteredResult[1].Checkpoint_records, 1)
 	assert.Len(hashFilteredResult[2].Checkpoint_records, 0)
+}
+
+// TestSourceFailoverPartialDropsCasPoison reproduces, in isolation, the P2P test-6
+// failure (MB-68292): cas_poison Before(100) > After(93).
+//
+// RCA chain proven here: a freshly rebalanced-in node pulls peer checkpoints for
+// all of its VBs, but getOneTimeSrcFailoverLog -> UprGetFailoverLog (no retry,
+// checkpoint_manager.go ~3902 "TODO - maybe need retry mechanism") can return a
+// failover-log map covering only a subset of those VBs. filterInvalidCkptsBasedOnSourceFailover
+// then hits `if !found || failoverLog == nil { continue }` (checkpoint_manager.go ~3747)
+// for every VB missing from the map and SILENTLY skips it -- the checkpoint is never
+// added to the result and is NOT recorded in ignoredRecords, so no "removed records"
+// line is logged. The pulled checkpoints for those VBs -- and their CasPoisonCnt --
+// are lost. This mirrors the real run: 170 VB checkpoints received, 0 "removed records"
+// logged, only 56 "Found".
+func TestSourceFailoverPartialDropsCasPoison(t *testing.T) {
+	fmt.Println("============== Test case start: TestSourceFailoverPartialDropsCasPoison =================")
+	defer fmt.Println("============== Test case end: TestSourceFailoverPartialDropsCasPoison =================")
+	assert := assert.New(t)
+
+	const totalVBs = 10   // VBs the node owns and pulled checkpoints for
+	const presentVBs = 6  // VBs the partial source failover-log fetch covered
+	var vbUuid uint64 = 1
+	var seqno uint64 = 5
+
+	// Each owned VB has a single, perfectly valid checkpoint record carrying one
+	// cas-poisoned document count.
+	buildNodeMap := func() nodeVbCkptMap {
+		m := make(nodeVbCkptMap)
+		m["peerNode"] = make(map[uint16]*metadata.CheckpointsDoc)
+		for vb := uint16(0); vb < totalVBs; vb++ {
+			rec := &metadata.CheckpointRecord{
+				SourceVBTimestamp: metadata.SourceVBTimestamp{
+					Failover_uuid: vbUuid,
+					Seqno:         seqno,
+				},
+				SourceVBCounters: metadata.SourceVBCounters{
+					CasPoisonCnt: 1,
+				},
+			}
+			m["peerNode"][vb] = &metadata.CheckpointsDoc{
+				Checkpoint_records: []*metadata.CheckpointRecord{rec},
+			}
+		}
+		return m
+	}
+
+	failoverEntry := &mcc.FailoverLog{[2]uint64{vbUuid, seqno}}
+
+	sumCasPoison := func(result metadata.VBsCkptsDocMap) uint64 {
+		var total uint64
+		for _, doc := range result {
+			for _, rec := range doc.Checkpoint_records {
+				if rec != nil {
+					total += rec.CasPoisonCnt
+				}
+			}
+		}
+		return total
+	}
+
+	// --- Control: complete source failover log (all VBs present) ---
+	// The filter is innocent when the failover log is complete: everything survives.
+	completeLog := make(map[uint16]*mcc.FailoverLog)
+	for vb := uint16(0); vb < totalVBs; vb++ {
+		completeLog[vb] = failoverEntry
+	}
+	controlResults := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{buildNodeMap(), nil}, completeLog, log.NewLogger("", nil))
+	control := controlResults[int(common.MainPipeline)]
+	assert.Len(control, totalVBs, "complete failover log should retain all VBs")
+	assert.Equal(uint64(totalVBs), sumCasPoison(control), "complete failover log should retain all cas_poison counts")
+
+	// --- Bug: partial source failover log (only presentVBs of totalVBs) ---
+	// Capture all log output to prove the drop is silent.
+	var logBuf bytes.Buffer
+	writers := make(map[log.LogLevel]io.Writer)
+	for _, lvl := range []log.LogLevel{log.LogLevelFatal, log.LogLevelError, log.LogLevelWarn, log.LogLevelInfo, log.LogLevelDebug, log.LogLevelTrace} {
+		writers[lvl] = &logBuf
+	}
+	capturingLogger := log.NewLogger("test", &log.LoggerContext{Log_writers: writers, Log_level: log.LogLevelTrace})
+
+	partialLog := make(map[uint16]*mcc.FailoverLog)
+	for vb := uint16(0); vb < presentVBs; vb++ {
+		partialLog[vb] = failoverEntry
+	}
+	bugResults := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{buildNodeMap(), nil}, partialLog, capturingLogger)
+	bug := bugResults[int(common.MainPipeline)]
+
+	// The (totalVBs-presentVBs) VBs whose failover log was missing vanish entirely,
+	// even though their checkpoint records are valid (UUID matches). Their cas_poison
+	// counts are lost -- exactly the Before(100) > After(93) shortfall.
+	assert.Len(bug, presentVBs, "partial failover log silently drops checkpoints for the absent VBs")
+	assert.Equal(uint64(presentVBs), sumCasPoison(bug), "cas_poison count is lost for VBs absent from the failover log")
+
+	// Prove the loss is invisible: the !found branch does not call recordIgnoredCkpt,
+	// so no "removed records" line is emitted (matches "0 removed records" in the field logs).
+	assert.NotContains(logBuf.String(), "removed records",
+		"dropped checkpoints are skipped silently -- no removed-records log is emitted")
+
+	fmt.Printf("Pulled %d VB checkpoints; source failover log covered %d; survived merge=%d; cas_poison %d -> %d (lost %d)\n",
+		totalVBs, presentVBs, len(bug), totalVBs, sumCasPoison(bug), totalVBs-int(sumCasPoison(bug)))
 }
 
 func TestCombineFailoverlogsWithData(t *testing.T) {

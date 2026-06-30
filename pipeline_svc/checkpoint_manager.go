@@ -55,6 +55,11 @@ type CheckpointMgrSvc interface {
 
 type CheckpointManagerInjector interface {
 	InjectGcWaitSec(ckmgr *CheckpointManager, settings metadata.ReplicationSettingsMap)
+	InjectRemoveSrcFailoverLogVbsOnce(ckmgr *CheckpointManager, settings metadata.ReplicationSettingsMap)
+	// MaybeRemoveSrcFailoverLogVbs performs the (dev-only) removal of injected VBs from a source
+	// failover log map. The production implementation is a no-op, so the destructive mutation is
+	// not compiled into production builds.
+	MaybeRemoveSrcFailoverLogVbs(ckmgr *CheckpointManager, failoverLogMap map[uint16]*mcc.FailoverLog)
 }
 
 type CheckpointManager struct {
@@ -743,6 +748,7 @@ func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSe
 	}
 
 	ckmgr.CheckpointManagerInjector.InjectGcWaitSec(ckmgr, settings)
+	ckmgr.CheckpointManagerInjector.InjectRemoveSrcFailoverLogVbsOnce(ckmgr, settings)
 
 	if _, exists := settings[parts.ForceCollectionDisableKey]; exists {
 		atomic.StoreUint32(&ckmgr.collectionEnabledVar, 0)
@@ -1886,6 +1892,7 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSett
 	}
 
 	ckmgr.CheckpointManagerInjector.InjectGcWaitSec(ckmgr, settings)
+	ckmgr.CheckpointManagerInjector.InjectRemoveSrcFailoverLogVbsOnce(ckmgr, settings)
 
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
@@ -3896,7 +3903,19 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 		return nil, err
 	}
 	defer feed.Close()
-	return client.UprGetFailoverLog(vbsList)
+	failoverLogMap, err := client.UprGetFailoverLog(vbsList)
+	if err == nil {
+		ckmgr.CheckpointManagerInjector.MaybeRemoveSrcFailoverLogVbs(ckmgr, failoverLogMap)
+	}
+	return failoverLogMap, err
+}
+
+// ApplyMergeTimeInjections applies dev injections that must take effect during the pull-model
+// VBMaster checkpoint merge. That merge (runP2PProtocol -> MergePeerNodesCkptInfo) runs before
+// the checkpoint manager's Start()/initializeConfig(), so injections set only at Start would be
+// too late. No-op in production builds (the injector is a no-op there).
+func (ckmgr *CheckpointManager) ApplyMergeTimeInjections(settings metadata.ReplicationSettingsMap) {
+	ckmgr.CheckpointManagerInjector.InjectRemoveSrcFailoverLogVbsOnce(ckmgr, settings)
 }
 
 // TODO - maybe need retry mechanism

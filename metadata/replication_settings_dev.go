@@ -32,6 +32,7 @@ const (
 	DevBackfillMgrVbsTasksDoneNotifierDelay   = base.DevBackfillMgrVbsTasksDoneNotifierDelay
 	DevXmemNozzleNetworkIOFaultProbability    = base.DevXmemNozzleNetworkIOFaultProbability
 	DevXmemColErrorPercent                    = base.DevXmemColErrorPercent
+	DevRemoveSrcFailoverLogVBsOnce            = base.DevRemoveSrcFailoverLogVBsOnce
 )
 
 var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
@@ -51,6 +52,7 @@ var XDCRDevBackfillUnrecoverableErrorInjConfig = &SettingsConfig{false, nil}
 var XDCRDevBackfillMgrVbsTasksDoneNotifierDelayConfig = &SettingsConfig{false, nil}
 var XDCRDevXmemNozzleNetworkIOFaultProbabilityConfig = &SettingsConfig{0 /*percent*/, &Range{0, 100}}
 var XDCRDevXmemColErrorPercentConfig = &SettingsConfig{0 /*percent*/, &Range{0, 100}}
+var XDCRDevRemoveSrcFailoverLogVBsOnceConfig = &SettingsConfig{"" /*CSV of vbnos, empty=off*/, nil}
 
 // This file contains development-only settings that will only be included
 // when the code is compiled with the "dev" build tag
@@ -116,6 +118,11 @@ func init() {
 		// DevXmemColErrorPercent is used to inject UNKNOWN_COLLECTION responses in xmem nozzle for testing purposes.
 		// Overrides a percentage of SUCCESS responses to UNKNOWN_COLLECTION to simulate the manifest-vs-KV race.
 		DevXmemColErrorPercent: XDCRDevXmemColErrorPercentConfig,
+
+		// DevRemoveSrcFailoverLogVBsOnce takes a CSV list of source VB numbers and removes them
+		// from CheckpointManager.getOneTimeSrcFailoverLog()'s result once, to simulate an
+		// incomplete source failover log fetch on a freshly rebalanced-in node.
+		DevRemoveSrcFailoverLogVBsOnce: XDCRDevRemoveSrcFailoverLogVBsOnceConfig,
 	}
 
 	// Merge the dev settings into the main configuration map

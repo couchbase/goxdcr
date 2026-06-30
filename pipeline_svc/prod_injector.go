@@ -12,7 +12,10 @@ licenses/APL2.txt.
 
 package pipeline_svc
 
-import "github.com/couchbase/goxdcr/v8/metadata"
+import (
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/v8/metadata"
+)
 
 type CheckpointManagerProdInjector struct {
 }
@@ -22,5 +25,13 @@ func NewCheckpointManagerInjector() *CheckpointManagerProdInjector {
 }
 
 func (c *CheckpointManagerProdInjector) InjectGcWaitSec(ckmgr *CheckpointManager, settings metadata.ReplicationSettingsMap) {
+	// no op
+}
+
+func (c *CheckpointManagerProdInjector) InjectRemoveSrcFailoverLogVbsOnce(ckmgr *CheckpointManager, settings metadata.ReplicationSettingsMap) {
+	// no op
+}
+
+func (c *CheckpointManagerProdInjector) MaybeRemoveSrcFailoverLogVbs(ckmgr *CheckpointManager, failoverLogMap map[uint16]*mcc.FailoverLog) {
 	// no op
 }

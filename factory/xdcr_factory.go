@@ -2053,7 +2053,17 @@ func (xdcrf *XDCRFactory) MergePeerNodesCkptsResponse(pipeline common.Pipeline, 
 	if ckptMgr == nil {
 		return errors.New(fmt.Sprintf("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic()))
 	}
-	err := ckptMgr.(*pipeline_svc.CheckpointManager).MergePeerNodesCkptInfo(resp)
+	ckptMgrObj := ckptMgr.(*pipeline_svc.CheckpointManager)
+	// This pull-model merge runs before the checkpoint manager's Start()/initializeConfig(), so any
+	// dev injection that must affect the merge (e.g. removeSrcFailoverLogVBsOnce) has to be applied
+	// here. Construct the checkpoint manager settings (which routes dev settings through
+	// InjectCheckpointMgr) and apply the merge-time injections. No-op in production builds.
+	ckptSettings, settingsErr := xdcrf.constructSettingsForCheckpointManager(pipeline, pipeline.Settings())
+	if settingsErr != nil {
+		return settingsErr
+	}
+	ckptMgrObj.ApplyMergeTimeInjections(ckptSettings)
+	err := ckptMgrObj.MergePeerNodesCkptInfo(resp)
 	if err != nil {
 		return err
 	}

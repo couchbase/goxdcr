@@ -37,6 +37,7 @@ func init() {
 		base.DevBackfillMgrVbsTasksDoneNotifierDelay:   metadata.DevBackfillMgrVbsTasksDoneNotifierDelay,
 		base.DevXmemNozzleNetworkIOFaultProbability:    metadata.DevXmemNozzleNetworkIOFaultProbability,
 		base.DevXmemColErrorPercent:                     metadata.DevXmemColErrorPercent,
+		base.DevRemoveSrcFailoverLogVBsOnce:            metadata.DevRemoveSrcFailoverLogVBsOnce,
 	}
 
 	// Merge the dev settings into the main configuration map
@@ -62,6 +63,7 @@ func init() {
 		metadata.DevBackfillMgrVbsTasksDoneNotifierDelay:   base.DevBackfillMgrVbsTasksDoneNotifierDelay,
 		metadata.DevXmemNozzleNetworkIOFaultProbability:    base.DevXmemNozzleNetworkIOFaultProbability,
 		metadata.DevXmemColErrorPercent:                     base.DevXmemColErrorPercent,
+		metadata.DevRemoveSrcFailoverLogVBsOnce:            base.DevRemoveSrcFailoverLogVBsOnce,
 	}
 
 	for k, v := range devSettingsKeyToKeyMap {

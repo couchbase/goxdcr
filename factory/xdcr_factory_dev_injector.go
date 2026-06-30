@@ -71,6 +71,7 @@ func (i *XDCRFactoryDevInjector) InjectXmemNozzleUpdate(in metadata.ReplicationS
 
 func (i *XDCRFactoryDevInjector) InjectCheckpointMgr(settings, outSettigs metadata.ReplicationSettingsMap) {
 	outSettigs[metadata.DevCkptMgrForceGCWaitSec] = metadata.GetSettingFromSettingsMap(settings, metadata.DevCkptMgrForceGCWaitSec, metadata.XDCRDevCkptGcWaitConfig.Default())
+	outSettigs[metadata.DevRemoveSrcFailoverLogVBsOnce] = metadata.GetSettingFromSettingsMap(settings, metadata.DevRemoveSrcFailoverLogVBsOnce, metadata.XDCRDevRemoveSrcFailoverLogVBsOnceConfig.Default())
 }
 
 func (i *XDCRFactoryDevInjector) InjectRouter(in, out metadata.ReplicationSettingsMap) {

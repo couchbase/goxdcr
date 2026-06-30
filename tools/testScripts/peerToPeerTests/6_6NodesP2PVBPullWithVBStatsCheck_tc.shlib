@@ -416,6 +416,15 @@ function waitForAllPipelinesInitialized {
 	echo "WARNING: Stats did not stabilize after $maxRetries attempts (last total=$prevTotal)"
 }
 
+# Computes the Couchbase vBucket id for a document key, matching base/vb.go:
+#   vbid = ((^crc32_ieee(key)) >> 16) % numVbuckets
+# zlib.crc32 already returns the finalized (complemented) CRC32-IEEE, so we just shift+mod.
+function getVbucketIdForKey {
+	local key="$1"
+	local numVbs="${2:-1024}"
+	python3 -c "import zlib,sys; print((zlib.crc32(sys.argv[1].encode()) >> 16) % int(sys.argv[2]))" "$key" "$numVbs"
+}
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Verifying vb specific stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
@@ -451,6 +460,27 @@ function runTestCase {
 
 	echo "Sleeping $sleepSecs seconds before gathering stats"
 	sleep $sleepSecs
+
+	# DEV INJECTION (MB-68292 RCA reproduction):
+	# Drop the source failover-log entries for the VBs that hold cas-poisoned docs, ONCE, so that
+	# at resume the freshly rebalanced-in node that owns those VBs sees an "incomplete" source
+	# failover log. filterInvalidCkptsBasedOnSourceFailover then silently skips those VBs' pulled
+	# checkpoints (and their CasPoisonCnt), reproducing cas_poison Before > After deterministically.
+	# casPoisonDoc_0..4 are guaranteed cas-poisoned (CAS drift was injected on those exact keys).
+	local casVbCsv=""
+	local i
+	for ((i = 0; i < 5; i = i + 1)); do
+		local vb
+		vb=$(getVbucketIdForKey "casPoisonDoc_$i" 1024)
+		if [[ -z "$casVbCsv" ]]; then
+			casVbCsv="$vb"
+		else
+			casVbCsv="$casVbCsv,$vb"
+		fi
+	done
+	echo "DEV INJECTION: setting removeSrcFailoverLogVBsOnce=$casVbCsv (source VBs of casPoisonDoc_0..4) before resume"
+	setReplicationSettings "C1" "B1" "C2" "B1" "removeSrcFailoverLogVBsOnce=$casVbCsv"
+	sleep 2
 
 	resumeReplications
 

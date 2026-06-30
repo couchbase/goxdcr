@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	mcc "github.com/couchbase/gomemcached/client"
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
 	mock "github.com/stretchr/testify/mock"
 
@@ -52,6 +53,74 @@ func (_c *CheckpointManagerInjector_InjectGcWaitSec_Call) Return() *CheckpointMa
 }
 
 func (_c *CheckpointManagerInjector_InjectGcWaitSec_Call) RunAndReturn(run func(*pipeline_svc.CheckpointManager, metadata.ReplicationSettingsMap)) *CheckpointManagerInjector_InjectGcWaitSec_Call {
+	_c.Run(run)
+	return _c
+}
+
+// InjectRemoveSrcFailoverLogVbsOnce provides a mock function with given fields: ckmgr, settings
+func (_m *CheckpointManagerInjector) InjectRemoveSrcFailoverLogVbsOnce(ckmgr *pipeline_svc.CheckpointManager, settings metadata.ReplicationSettingsMap) {
+	_m.Called(ckmgr, settings)
+}
+
+// CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InjectRemoveSrcFailoverLogVbsOnce'
+type CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call struct {
+	*mock.Call
+}
+
+// InjectRemoveSrcFailoverLogVbsOnce is a helper method to define mock.On call
+//   - ckmgr *pipeline_svc.CheckpointManager
+//   - settings metadata.ReplicationSettingsMap
+func (_e *CheckpointManagerInjector_Expecter) InjectRemoveSrcFailoverLogVbsOnce(ckmgr interface{}, settings interface{}) *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call {
+	return &CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call{Call: _e.mock.On("InjectRemoveSrcFailoverLogVbsOnce", ckmgr, settings)}
+}
+
+func (_c *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call) Run(run func(ckmgr *pipeline_svc.CheckpointManager, settings metadata.ReplicationSettingsMap)) *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*pipeline_svc.CheckpointManager), args[1].(metadata.ReplicationSettingsMap))
+	})
+	return _c
+}
+
+func (_c *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call) Return() *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call) RunAndReturn(run func(*pipeline_svc.CheckpointManager, metadata.ReplicationSettingsMap)) *CheckpointManagerInjector_InjectRemoveSrcFailoverLogVbsOnce_Call {
+	_c.Run(run)
+	return _c
+}
+
+// MaybeRemoveSrcFailoverLogVbs provides a mock function with given fields: ckmgr, failoverLogMap
+func (_m *CheckpointManagerInjector) MaybeRemoveSrcFailoverLogVbs(ckmgr *pipeline_svc.CheckpointManager, failoverLogMap map[uint16]*mcc.FailoverLog) {
+	_m.Called(ckmgr, failoverLogMap)
+}
+
+// CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MaybeRemoveSrcFailoverLogVbs'
+type CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call struct {
+	*mock.Call
+}
+
+// MaybeRemoveSrcFailoverLogVbs is a helper method to define mock.On call
+//   - ckmgr *pipeline_svc.CheckpointManager
+//   - failoverLogMap map[uint16]*mcc.FailoverLog
+func (_e *CheckpointManagerInjector_Expecter) MaybeRemoveSrcFailoverLogVbs(ckmgr interface{}, failoverLogMap interface{}) *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call {
+	return &CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call{Call: _e.mock.On("MaybeRemoveSrcFailoverLogVbs", ckmgr, failoverLogMap)}
+}
+
+func (_c *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call) Run(run func(ckmgr *pipeline_svc.CheckpointManager, failoverLogMap map[uint16]*mcc.FailoverLog)) *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*pipeline_svc.CheckpointManager), args[1].(map[uint16]*mcc.FailoverLog))
+	})
+	return _c
+}
+
+func (_c *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call) Return() *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call) RunAndReturn(run func(*pipeline_svc.CheckpointManager, map[uint16]*mcc.FailoverLog)) *CheckpointManagerInjector_MaybeRemoveSrcFailoverLogVbs_Call {
 	_c.Run(run)
 	return _c
 }
