@@ -1315,7 +1315,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	buildVersion string, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
 	disableBucketConfigManager bool,
 	timeoutWaitForOngoingCkptOps time.Duration, maxKeepAliveTokensForCkptMgr int, disableMutateWithMeta bool,
-	bucketWatcherWarmupTimeout time.Duration) {
+	bucketWatcherWarmupTimeout time.Duration, srcFailoverLogInitWait time.Duration,
+	srcFailoverLogMaxRetry int, srcFailoverLogBackoffFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1524,6 +1525,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DisableMutateWithMeta = disableMutateWithMeta
 
 	BucketWatcherWarmupTimeout = bucketWatcherWarmupTimeout
+
+	SrcFailoverLogInitWait = srcFailoverLogInitWait
+	SrcFailoverLogMaxRetry = srcFailoverLogMaxRetry
+	SrcFailoverLogBackoffFactor = srcFailoverLogBackoffFactor
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -2189,3 +2194,8 @@ const CngGuardrailKey = "cngGuardrail"
 const ExcludeEventRegexKey string = "excludeUIErrRegex"
 
 var MaxKeepAliveTokensForCkptMgr = 100
+
+// SrcFailoverLog
+var SrcFailoverLogInitWait = 500 * time.Millisecond
+var SrcFailoverLogMaxRetry = 5
+var SrcFailoverLogBackoffFactor = 2
