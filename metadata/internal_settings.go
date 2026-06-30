@@ -293,6 +293,12 @@ const (
 	PipelineReinitStreamDelaySecKey = "PipelineReinitStreamDelaySec"
 
 	MaxKeepAliveTokensForCkptMgrKey = "MaxKeepAliveTokensForCkptMgr"
+
+	// SrcFailoverLog* control the retry of the one-time source failover log fetch performed during
+	// the P2P checkpoint pull/merge on a freshly rebalanced-in node.
+	SrcFailoverLogInitWaitMilliSecKey = "SrcFailoverLogInitWaitMilliSec"
+	SrcFailoverLogMaxRetryKey         = "SrcFailoverLogMaxRetry"
+	SrcFailoverLogBackoffFactorKey    = "SrcFailoverLogBackoffFactor"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -425,6 +431,9 @@ var CasPoisoningPreCheckEnabledConfig = &SettingsConfig{base.CasPoisoningPreChec
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
 var PipelineReinitStreamDelaySecConfig = &SettingsConfig{int(base.PipelineReinitStreamDelaySec / time.Second), &Range{0, 300}}
 var MaxKeepAliveTokensForCkptMgrConfig = &SettingsConfig{base.MaxKeepAliveTokensForCkptMgr, &Range{50, 1000}}
+var SrcFailoverLogInitWaitMilliSecConfig = &SettingsConfig{int(base.SrcFailoverLogInitWait / time.Millisecond), &Range{1, math.MaxInt}}
+var SrcFailoverLogMaxRetryConfig = &SettingsConfig{base.SrcFailoverLogMaxRetry, &Range{0, 100}}
+var SrcFailoverLogBackoffFactorConfig = &SettingsConfig{base.SrcFailoverLogBackoffFactor, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -557,6 +566,9 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
 	PipelineReinitStreamDelaySecKey:               PipelineReinitStreamDelaySecConfig,
 	MaxKeepAliveTokensForCkptMgrKey:               MaxKeepAliveTokensForCkptMgrConfig,
+	SrcFailoverLogInitWaitMilliSecKey:             SrcFailoverLogInitWaitMilliSecConfig,
+	SrcFailoverLogMaxRetryKey:                     SrcFailoverLogMaxRetryConfig,
+	SrcFailoverLogBackoffFactorKey:                SrcFailoverLogBackoffFactorConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -2834,10 +2834,34 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	var srcFailoverLogs map[uint16]*mcc.FailoverLog
 	var tgtFailoverLogs map[uint16]*mcc.FailoverLog
 	if needToGetFailoverLogs {
-		srcFailoverLogs, err = ckmgr.getOneTimeSrcFailoverLog()
+		// getOneTimeSrcFailoverLog can legitimately return an incomplete failover log (fewer
+		// entries than requested VBs) on a freshly rebalanced-in node whose vBuckets are still
+		// settling; it signals that with oneTimeSrcFailoverLogVBsNotMatch and returns the partial
+		// map. We retry to give KV time to become ready. The backoff executor wraps the op's error
+		// on exhaustion, so the sentinel identity does not survive its return value - capture
+		// whether the last attempt was a VB mismatch (vs a real fetch failure) in the closure.
+		var lastAttemptWasVBsMismatch bool
+		getOp := func(interface{}) (interface{}, error) {
+			var getErr error
+			srcFailoverLogs, getErr = ckmgr.getOneTimeSrcFailoverLog()
+			lastAttemptWasVBsMismatch = getErr == oneTimeSrcFailoverLogVBsNotMatch
+			return nil, getErr
+		}
+		_, err = ckmgr.utils.ExponentialBackoffExecutorWithFinishSignal("srcFailoverLog", base.SrcFailoverLogInitWait,
+			base.SrcFailoverLogMaxRetry, base.SrcFailoverLogBackoffFactor, getOp, nil, ckmgr.finish_ch)
 		if err != nil {
-			ckmgr.logger.Errorf("unable to get failoverlog from source %v", err)
-			return err
+			if lastAttemptWasVBsMismatch {
+				// Still incomplete after all retries. Proceed with the partial failover log rather
+				// than aborting the entire merge: checkpoints for the VBs missing from it will be
+				// filtered out (and logged) by filterInvalidCkptsBasedOnSourceFailover, instead of
+				// dropping the merge for every VB this node pulled.
+				ckmgr.logger.Warnf("Source failover log still incomplete after retries; proceeding with the partial map. Checkpoints for VBs absent from it may be dropped during the merge.")
+				err = nil
+			} else {
+				// Genuine fetch failure (no usable map) or finish-signal abort: do not merge.
+				ckmgr.logger.Errorf("unable to get failoverlog from source %v", err)
+				return err
+			}
 		}
 	}
 
@@ -3279,6 +3303,8 @@ func findVbsThatNeedTargetFailoverLogs(filteredMaps []metadata.VBsCkptsDocMap) [
 	return retVBList
 }
 
+var oneTimeSrcFailoverLogVBsNotMatch error = fmt.Errorf("oneTimeSrcFailoverLogVBsNotMatch")
+
 func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.FailoverLog, error) {
 	memcachedAddr, err := ckmgr.xdcr_topology_svc.MyMemcachedAddr()
 	if err != nil {
@@ -3294,7 +3320,6 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 		vbsList = append(vbsList, oneList...)
 	}
 
-	//GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	client, err := ckmgr.utils.GetMemcachedConnection(memcachedAddr, spec.SourceBucketName, ckmgr.UserAgent, 0, ckmgr.logger)
 	if err != nil {
 		return nil, err
@@ -3308,7 +3333,19 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 		return nil, err
 	}
 	defer feed.Close()
-	return client.UprGetFailoverLog(vbsList)
+	failoverLogMap, err := client.UprGetFailoverLog(vbsList)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compare failover log entries with number of VBs this source node owns
+	if len(failoverLogMap) != len(vbsList) {
+		ckmgr.logger.Warnf("getOneTimeSrcFailoverLog: failover log entries (%v) is not equal to the VBs (%v) this source node owns. "+
+			"This may indicate KV rebalance is not fully ready yet", len(failoverLogMap), len(vbsList))
+		// Return the actual map just in case we need to use it
+		err = oneTimeSrcFailoverLogVBsNotMatch
+	}
+	return failoverLogMap, err
 }
 
 // TODO - maybe need retry mechanism

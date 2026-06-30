@@ -361,6 +361,9 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
 		time.Duration(internal_settings.Values[metadata.PipelineReinitStreamDelaySecKey].(int))*time.Second,
 		internal_settings.Values[metadata.MaxKeepAliveTokensForCkptMgrKey].(int),
+		time.Duration(internal_settings.Values[metadata.SrcFailoverLogInitWaitMilliSecKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.SrcFailoverLogMaxRetryKey].(int),
+		internal_settings.Values[metadata.SrcFailoverLogBackoffFactorKey].(int),
 	)
 }
 

@@ -1222,7 +1222,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	datapoolLogFrequency int, capellaHostNameSuffix string,
 	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int,
 	tempMCErrorDisplayDelayFactor int, pipelineReinitStreamDelaySec time.Duration,
-	maxKeepAliveTokensForCkptMgr int) {
+	maxKeepAliveTokensForCkptMgr int,
+	srcFailoverLogInitWait time.Duration, srcFailoverLogMaxRetry int, srcFailoverLogBackoffFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1384,6 +1385,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
 	PipelineReinitStreamDelaySec = pipelineReinitStreamDelaySec
 	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
+
+	SrcFailoverLogInitWait = srcFailoverLogInitWait
+	SrcFailoverLogMaxRetry = srcFailoverLogMaxRetry
+	SrcFailoverLogBackoffFactor = srcFailoverLogBackoffFactor
 }
 
 // XDCR Dev hidden replication settings
@@ -1776,3 +1781,8 @@ var MaxKeepAliveTokensForCkptMgr = 100
 
 // ExcludeEventRegexKey is a regex pattern to exclude errors from UI error events section
 const ExcludeEventRegexKey string = "excludeUIErrRegex"
+
+// SrcFailoverLog
+var SrcFailoverLogInitWait = 500 * time.Millisecond
+var SrcFailoverLogMaxRetry = 5
+var SrcFailoverLogBackoffFactor = 2
