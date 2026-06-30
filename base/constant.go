@@ -1284,7 +1284,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
 	tempMCErrorDisplayDelayFactor int,
 	maxCheckpointRecordsToKeepVariableVB int, maxCheckpointRecordsToReadVariableVB int,
-	buildVersion string, maxKeepAliveTokensForCkptMgr int, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int) {
+	buildVersion string, maxKeepAliveTokensForCkptMgr int, cLogMonitorCycleInterval time.Duration, cLogMonitorCleanupFreq int,
+	srcFailoverLogInitWait time.Duration, srcFailoverLogMaxRetry int, srcFailoverLogBackoffFactor int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1477,6 +1478,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	MaxCheckpointRecordsToReadVariableVB = maxCheckpointRecordsToReadVariableVB
 
 	MaxKeepAliveTokensForCkptMgr = maxKeepAliveTokensForCkptMgr
+
+	SrcFailoverLogInitWait = srcFailoverLogInitWait
+	SrcFailoverLogMaxRetry = srcFailoverLogMaxRetry
+	SrcFailoverLogBackoffFactor = srcFailoverLogBackoffFactor
 }
 
 // XDCR Dev hidden replication settings
@@ -2054,3 +2059,8 @@ var (
 	// for cleaning conflict monitor stats. It is an internal setting.
 	CLogMonitorCleanupFreq uint64 = 300
 )
+
+// SrcFailoverLog
+var SrcFailoverLogInitWait = 500 * time.Millisecond
+var SrcFailoverLogMaxRetry = 5
+var SrcFailoverLogBackoffFactor = 2

@@ -382,6 +382,9 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		buildVersion, internal_settings.Values[metadata.MaxKeepAliveTokensForCkptMgrKey].(int),
 		time.Duration(internal_settings.Values[metadata.CLogMonitorCycleIntervalKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.CLogMonitorCleanupFreqKey].(int),
+		time.Duration(internal_settings.Values[metadata.SrcFailoverLogInitWaitMilliSecKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.SrcFailoverLogMaxRetryKey].(int),
+		internal_settings.Values[metadata.SrcFailoverLogBackoffFactorKey].(int),
 	)
 }
 

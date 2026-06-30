@@ -312,6 +312,12 @@ const (
 	MaxCheckpointRecordsToReadVariableVBKey = "MaxCheckpointRecordsToReadVariableVB"
 
 	MaxKeepAliveTokensForCkptMgrKey = "MaxKeepAliveTokensForCkptMgr"
+
+	// SrcFailoverLog* control the retry of the one-time source failover log fetch performed during
+	// the P2P checkpoint pull/merge on a freshly rebalanced-in node.
+	SrcFailoverLogInitWaitMilliSecKey = "SrcFailoverLogInitWaitMilliSec"
+	SrcFailoverLogMaxRetryKey         = "SrcFailoverLogMaxRetry"
+	SrcFailoverLogBackoffFactorKey    = "SrcFailoverLogBackoffFactor"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -457,6 +463,9 @@ var MaxCheckpointRecordsToReadVariableVBConfig = &SettingsConfig{12, &Range{1, 1
 var MaxKeepAliveTokensForCkptMgrConfig = &SettingsConfig{base.MaxKeepAliveTokensForCkptMgr, &Range{50, 1000}}
 var CLogMonitorCycleIntervalConfig = &SettingsConfig{int(base.CLogMonitorCycleInterval / time.Millisecond), &Range{100, math.MaxInt}}
 var CLogMonitorCleanupFreqConfig = &SettingsConfig{int(base.CLogMonitorCleanupFreq), &Range{1, math.MaxInt}}
+var SrcFailoverLogInitWaitMilliSecConfig = &SettingsConfig{int(base.SrcFailoverLogInitWait / time.Millisecond), &Range{1, math.MaxInt}}
+var SrcFailoverLogMaxRetryConfig = &SettingsConfig{base.SrcFailoverLogMaxRetry, &Range{0, 100}}
+var SrcFailoverLogBackoffFactorConfig = &SettingsConfig{base.SrcFailoverLogBackoffFactor, &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -602,6 +611,9 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	MaxKeepAliveTokensForCkptMgrKey:               MaxKeepAliveTokensForCkptMgrConfig,
 	CLogMonitorCycleIntervalKey:                   CLogMonitorCycleIntervalConfig,
 	CLogMonitorCleanupFreqKey:                     CLogMonitorCleanupFreqConfig,
+	SrcFailoverLogInitWaitMilliSecKey:             SrcFailoverLogInitWaitMilliSecConfig,
+	SrcFailoverLogMaxRetryKey:                     SrcFailoverLogMaxRetryConfig,
+	SrcFailoverLogBackoffFactorKey:                SrcFailoverLogBackoffFactorConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
