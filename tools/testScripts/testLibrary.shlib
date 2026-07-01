@@ -1457,6 +1457,11 @@ function xdcrDifferParseOpts {
 		echo "-m body"
 	elif [[ "$optsIn" == "retry" ]]; then
 		echo "-e 2"
+	elif [[ "$optsIn" =~ ^gomaxprocs= ]]; then
+		# Limit the Go runtime to N logical cores (sets GOMAXPROCS).
+		# Use the combined -gN form (no space): runXdcrDiffer passes this flag as a
+		# single quoted argument, and a space would end up inside getopts' OPTARG.
+		echo "-g${optsIn#*=}"
 	elif [[ "$optsIn" =~ ^-o ]]; then
 		# Out directory, just let it fly
 		echo "$optsIn"
@@ -1776,6 +1781,20 @@ function checkDifferLogItemCount {
 	found=$(grep -c "$expected" $logFile)
 	if (($found == 0)); then
 		echo "Did not find the line: \"$expected\" from the file $logFile"
+		exit 1
+	fi
+	echo "Found the line: $expected"
+}
+
+# Verifies that the differ log contains a line matching the given (grep) pattern.
+function checkDifferLogContains {
+	local expected=$1
+	local logFile="${xdcrDifferDir}/outputs/xdcrDiffer.log"
+
+	found=$(grep -c "$expected" $logFile)
+	if (($found == 0)); then
+		echo "Did not find the line: \"$expected\" from the file $logFile"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 	echo "Found the line: $expected"
