@@ -141,6 +141,7 @@ function runTestCase {
 	VBToRollback=$(getNon0StartingBackfillVB "C1" "C2" "B0" "B1")
 	if ((!$? == 0)); then
 		echo "Unable to get non0-starting VB for backfill pipeline"
+		dumpDebugInfoBeforeExit "C1" "B0" "C2" "B1"
 		exit 1
 	fi
 

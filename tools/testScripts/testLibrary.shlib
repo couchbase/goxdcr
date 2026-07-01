@@ -2637,6 +2637,8 @@ function getNon0StartingBackfillVB {
 	result=$?
 	if (($result == 0)); then
 		echo "$firstNon0VB"
+	else
+		echo "getNon0StartingBackfillVB: no non-zero starting VB found for backfill pipeline ${remClusterUUID}/${srcBucketName}/${tgtBucketName} on node ${logNodeName} (see preceding stderr for the specific reason)" >&2
 	fi
 	return $result
 }

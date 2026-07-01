@@ -3686,11 +3686,23 @@ function getSetVBTimestampMsgsFromLogs {
 		return 1
 	fi
 
+	local msgs
+	local pattern
 	if [[ -z "${backfillPipeline:-}" ]]; then
-		getInternalNodeXdcrLog "$logNodeName" | grep "${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep -v "backfill" | grep "Set VBTimestamp"
+		pattern="${clusterUuid}/${srcBucketName}/${tgtBucketName} (main pipeline)"
+		msgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep -v "backfill" | grep "Set VBTimestamp")
 	else
-		getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+		pattern="backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName} (backfill pipeline)"
+		msgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp")
 	fi
+
+	if [[ -z "$msgs" ]]; then
+		# Diagnostics to stderr - stdout of this function is consumed by callers via a pipe
+		echo "getSetVBTimestampMsgsFromLogs: no 'Set VBTimestamp' lines found in ${logNodeName} log for ${pattern}" >&2
+		return 1
+	fi
+
+	echo "$msgs"
 }
 
 # Usage: Grep "Set VBTimestamp" from the logs and then pass to this function via pipe
@@ -3734,13 +3746,16 @@ function getFirstNon0VB {
 	local -A VbSeqnoMap
 	local input
 	local OLDIFS="$IFS"
+	local linesScanned=0
 	input=$(cat)
 	IFS=$'\n'
 	for oneLine in $(echo "$input"); do
+		linesScanned=$(($linesScanned + 1))
 		local vb=$(echo "$oneLine" | awk '{print $7}' | sed 's/,//g' | sed 's/vb=//g')
 		local startingSeqno=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
 		if [[ -z "$vb" ]] || [[ -z "$startingSeqno" ]]; then
-			echo "Unable to parse"
+			# Diagnostics must go to stderr - stdout of this function is captured by callers
+			echo "getFirstNon0VB: unable to parse vb/seqno from line: $oneLine" >&2
 			IFS="$OLDIFS"
 			return 1
 		fi
@@ -3755,7 +3770,13 @@ function getFirstNon0VB {
 		return 0
 	done
 	IFS="$OLDIFS"
-	echo "Did not find one"
+	# Diagnostics must go to stderr - stdout of this function is captured by callers.
+	# Distinguish "no backfill Set VBTimestamp lines at all" from "all VBs started at seqno 0".
+	if (($linesScanned == 0)); then
+		echo "getFirstNon0VB: no 'Set VBTimestamp' lines were supplied (backfill pipeline produced none)" >&2
+	else
+		echo "getFirstNon0VB: scanned $linesScanned 'Set VBTimestamp' line(s) but all started at seqno 0" >&2
+	fi
 	return 1
 }
 
