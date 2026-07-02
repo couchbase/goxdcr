@@ -5,10 +5,8 @@ package mocks
 import (
 	base "github.com/couchbase/goxdcr/v8/base"
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
-
-	mock "github.com/stretchr/testify/mock"
-
 	pipeline "github.com/couchbase/goxdcr/v8/pipeline"
+	mock "github.com/stretchr/testify/mock"
 
 	service_def "github.com/couchbase/goxdcr/v8/service_def"
 )

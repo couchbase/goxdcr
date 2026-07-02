@@ -5,7 +5,6 @@ package mocks
 import (
 	base "github.com/couchbase/goxdcr/v8/base"
 	hlv "github.com/couchbase/goxdcr/v8/hlv"
-
 	mock "github.com/stretchr/testify/mock"
 )
 

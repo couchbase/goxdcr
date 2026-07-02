@@ -6,7 +6,6 @@ import (
 	base "github.com/couchbase/goxdcr/v8/base"
 
 	memcached "github.com/couchbase/gomemcached/client"
-
 	mock "github.com/stretchr/testify/mock"
 )
 

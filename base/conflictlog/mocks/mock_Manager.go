@@ -4,12 +4,9 @@ package mocks
 
 import (
 	conflictlog "github.com/couchbase/goxdcr/v8/base/conflictlog"
-	common "github.com/couchbase/goxdcr/v8/common"
-
 	iopool "github.com/couchbase/goxdcr/v8/base/iopool"
-
+	common "github.com/couchbase/goxdcr/v8/common"
 	log "github.com/couchbase/goxdcr/v8/log"
-
 	mock "github.com/stretchr/testify/mock"
 )
 

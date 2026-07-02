@@ -5,7 +5,6 @@ package mocks
 import (
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
 	metadata_svc "github.com/couchbase/goxdcr/v8/metadata_svc"
-
 	mock "github.com/stretchr/testify/mock"
 )
 
