@@ -102,8 +102,6 @@ func setupTestRefreshSnapShot(agent *RemoteCngAgent, ref *metadata.RemoteCluster
 	return newRefreshSnapShot(ref, capability, agent.services, agent.logger)
 }
 
-
-
 // ============= Test Cases for refreshState =============
 
 func TestRefreshState_BeginOp_Success(t *testing.T) {
@@ -800,6 +798,74 @@ func TestRefreshWithUserInitiatedSetOperation(t *testing.T) {
 	// Set operation should succeed, refresh should be canceled
 	assert.NoError(setErr)
 	assert.Contains(refreshErr.Error(), "context canceled")
+
+	utilsMock.AssertExpectations(t)
+	metakvMock.AssertExpectations(t)
+}
+
+func TestUpdateReference_ConcurrentWithPersistingRefresh_NoDeadlock(t *testing.T) {
+	assert := assert.New(t)
+
+	agent, utilsMock, metakvMock, uiLogMock := createTestRemoteCngAgent()
+	ref := createTestRemoteClusterReferenceWithStagedCreds()
+
+	agent.refCache.update(ref)
+	agent.setInitDone()
+
+	// Refresh: primary auth fails, staged auth succeeds -> promote staged creds -> persistence required.
+	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(createTestClusterInfoErrorResponse(codes.Unauthenticated, fmt.Errorf("primary auth failed"))).Once()
+	utilsMock.On("CngGetClusterInfo", mock.AnythingOfType("*internal_xdcr_v1.xdcrServiceClient"), mock.AnythingOfType("*base.GrpcRequest[*github.com/couchbase/goprotostellar/genproto/internal_xdcr_v1.GetClusterInfoRequest]")).Return(createTestClusterInfoResponse(testUuid)).Once()
+
+	// Park the refresh inside its metakv persist (past the context-cancellation checks, and just
+	// before it needs the refCache WRITE lock). This is the precise window the deadlock needs.
+	inPersist := make(chan struct{})
+	releasePersist := make(chan struct{})
+	metakvMock.On("SetSensitive", ref.Id(), mock.Anything, ref.Revision()).Return(nil).Run(func(args mock.Arguments) {
+		close(inPersist)
+		<-releasePersist
+	})
+	promotedRef := ref.Clone()
+	promotedRef.PromoteStageCredsToPrimary()
+	refBytes, _ := promotedRef.Marshal()
+	metakvMock.On("Get", ref.Id()).Return(refBytes, interface{}(nil), nil)
+	uiLogMock.On("Write", mock.Anything).Return(nil).Maybe()
+
+	// 1. Start the refresh.
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- agent.Refresh() }()
+
+	// 2. Wait until the refresh is parked inside persist (holding no refCache lock yet, but about to
+	//    need the WRITE lock once released).
+	select {
+	case <-inPersist:
+	case <-time.After(testTimeout):
+		t.Fatal("refresh did not reach the persist path")
+	}
+
+	// 3. Concurrently drive a metakv reference-update callback (the target credential change).
+	updateDone := make(chan error, 1)
+	newRef := createTestRemoteClusterReferenceWithCreds()
+	newRef.SetName("updated-by-callback")
+	go func() { updateDone <- agent.updateReference(newRef, false /*updateMetaKv*/) }()
+
+	// Give updateReference time to reach the abort (in the buggy version it now holds refCache.RLock).
+	time.Sleep(20 * time.Millisecond)
+
+	// 4. Release the refresh; it now needs the refCache WRITE lock to finish its deferred cache update.
+	close(releasePersist)
+
+	// 5. Both must complete. If the lock ordering is wrong, neither ever will.
+	select {
+	case <-refreshDone:
+	case <-time.After(testTimeout):
+		t.Fatal("DEADLOCK (MB-72677): refresh could not acquire refCache write lock; updateReference is holding the read lock while waiting for the refresh to abort")
+	}
+	select {
+	case err := <-updateDone:
+		assert.NoError(err)
+	case <-time.After(testTimeout):
+		t.Fatal("DEADLOCK (MB-72677): updateReference did not complete")
+	}
 
 	utilsMock.AssertExpectations(t)
 	metakvMock.AssertExpectations(t)

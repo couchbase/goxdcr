@@ -364,9 +364,10 @@ func (agent *RemoteCngAgent) readAfterWrite(key string, incomingRef *metadata.Re
 // If updateMetaKv is true, it writes the new reference to metakv and updates the local cache, triggers callbacks on success.
 // If updateMetaKv is false, it just updates the local cache and triggers callbacks.
 func (agent *RemoteCngAgent) updateReference(newRef *metadata.RemoteClusterReference, updateMetaKv bool) error {
+	userInitiated := updateMetaKv
+
 	agent.refCache.mutex.RLock()
 	refPresent := !agent.refCache.reference.IsEmpty()
-	userInitiated := updateMetaKv
 
 	// If there are no changes, return
 	if refPresent && agent.refCache.reference.IsSame(newRef) {
@@ -378,6 +379,7 @@ func (agent *RemoteCngAgent) updateReference(newRef *metadata.RemoteClusterRefer
 		agent.refCache.mutex.RUnlock()
 		return metadata_svc.DeleteAlreadyIssued
 	}
+	agent.refCache.mutex.RUnlock()
 
 	// updateReference can be called in the following scenarios:
 	// 1. User-initiated add/update via REST API  (updateMetaKv=true)
@@ -399,6 +401,8 @@ func (agent *RemoteCngAgent) updateReference(newRef *metadata.RemoteClusterRefer
 	//   - System-initiated update:
 	//      The "newRef" represents modifications made on the clone of an existing reference,
 	//      so it already carries the correct RefID and revision. No special handling is required.
+	agent.refCache.mutex.RLock()
+	refPresent = !agent.refCache.reference.IsEmpty()
 	if refPresent && userInitiated {
 		newRef.SetId(agent.refCache.reference.Id())
 		newRef.SetRevision(agent.refCache.reference.Revision())
