@@ -142,6 +142,13 @@ type CollectionsWatcher struct {
 	closeOnce sync.Once
 }
 
+// String implements fmt.Stringer to prevent fmt.Sprintf from recursively reflecting over
+// internal sync primitives (e.g. waitGrp, cache.mutex) which would race with concurrent
+// WaitGroup/mutex operations when testify prints arguments during mock matching.
+func (cw *CollectionsWatcher) String() string {
+	return "CollectionsWatcher{bucket: " + cw.bucketName + "}"
+}
+
 // NewCollectionsWatcher creates a new CollectionsWatcher
 func NewCollectionsWatcher(bucketName string, getGrpcOpts func() *base.GrpcOptions, utils utils.CngUtils, waitTime time.Duration, backoffFactor int, maxWaitTime time.Duration, retry bool, logger *log.CommonLogger) GrpcStreamManager[*metadata.CollectionsManifest] {
 	return &CollectionsWatcher{

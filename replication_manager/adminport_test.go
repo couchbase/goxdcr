@@ -15,8 +15,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/v8/base"
@@ -73,8 +73,11 @@ func setupTestAdminport() (*Adminport, *mocks.RemoteClusterSvc, *mocks.Replicati
 	return adminport, remoteClusterSvc, replSpecSvc
 }
 
-// mockReplicationManager sets up the global replication_mgr for testing
-func mockReplicationManager(remoteClusterSvc service_def.RemoteClusterSvc, replSpecSvc service_def.ReplicationSpecSvc) func() {
+// mockReplicationManager sets up the global replication_mgr for testing.
+// It returns a cleanup function and a WaitGroup. For test cases that trigger
+// background goroutines (audit/eventlog writes), call wg.Add(n) before
+// invoking the handler so the cleanup can synchronize via wg.Wait().
+func mockReplicationManager(remoteClusterSvc service_def.RemoteClusterSvc, replSpecSvc service_def.ReplicationSpecSvc) (func(), *sync.WaitGroup) {
 	// Save the original services
 	originalRemoteClusterSvc := replication_mgr.remote_cluster_svc
 	originalReplSpecSvc := replication_mgr.repl_spec_svc
@@ -82,18 +85,29 @@ func mockReplicationManager(remoteClusterSvc service_def.RemoteClusterSvc, replS
 	originalAuditSvc := replication_mgr.audit_svc
 	originalXdcrTopologySvc := replication_mgr.xdcr_topology_svc
 
-	// Create mock services for audit and eventlog
+	var wg sync.WaitGroup
+
+	// Create mock services for audit and eventlog. Each mock's Run callback
+	// calls wg.Done() so the cleanup can synchronize with background goroutines.
 	eventlogSvc := &mocks.EventLogSvc{}
-	eventlogSvc.On("WriteEvent", service_def.DeleteRemoteClusterRefSystemEventId, mock.Anything).Return(nil)
-	eventlogSvc.On("WriteEvent", service_def.DeleteReplicationSystemEventId, mock.Anything).Return(nil)
-	eventlogSvc.On("WriteEvent", service_def.UpdateRemoteClusterRefSystemEventId, mock.Anything).Return(nil)
-	eventlogSvc.On("WriteEvent", service_def.UpdateReplicationSettingSystemEventId, mock.Anything).Return(nil)
+	eventlogSvc.On("WriteEvent", service_def.DeleteRemoteClusterRefSystemEventId, mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	eventlogSvc.On("WriteEvent", service_def.DeleteReplicationSystemEventId, mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	eventlogSvc.On("WriteEvent", service_def.UpdateRemoteClusterRefSystemEventId, mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	eventlogSvc.On("WriteEvent", service_def.UpdateReplicationSettingSystemEventId, mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
 
 	auditSvc := &mocks.AuditSvc{}
-	auditSvc.On("Write", uint32(service_def.DeleteRemoteClusterRefEventId), mock.Anything).Return(nil)
-	auditSvc.On("Write", uint32(service_def.CancelReplicationEventId), mock.Anything).Return(nil)
-	auditSvc.On("Write", uint32(service_def.UpdateRemoteClusterRefEventId), mock.Anything).Return(nil)
-	auditSvc.On("Write", uint32(service_def.UpdateReplicationSettingsEventId), mock.Anything).Return(nil)
+	auditSvc.On("Write", uint32(service_def.DeleteRemoteClusterRefEventId), mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	auditSvc.On("Write", uint32(service_def.CancelReplicationEventId), mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	auditSvc.On("Write", uint32(service_def.UpdateRemoteClusterRefEventId), mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
+	auditSvc.On("Write", uint32(service_def.UpdateReplicationSettingsEventId), mock.Anything).
+		Run(func(args mock.Arguments) { wg.Done() }).Return(nil)
 
 	// Create mock for XDCRCompTopologySvc
 	xdcrTopologySvc := &mocks.XDCRCompTopologySvc{}
@@ -108,14 +122,16 @@ func mockReplicationManager(remoteClusterSvc service_def.RemoteClusterSvc, replS
 	replication_mgr.audit_svc = auditSvc
 	replication_mgr.xdcr_topology_svc = xdcrTopologySvc
 
-	// Return a cleanup function that restores the original services
+	// Return a cleanup function that waits for background goroutines to complete
+	// before restoring the original services, preventing data races.
 	return func() {
+		wg.Wait()
 		replication_mgr.remote_cluster_svc = originalRemoteClusterSvc
 		replication_mgr.repl_spec_svc = originalReplSpecSvc
 		replication_mgr.eventlog_svc = originalEventlogSvc
 		replication_mgr.audit_svc = originalAuditSvc
 		replication_mgr.xdcr_topology_svc = originalXdcrTopologySvc
-	}
+	}, &wg
 }
 
 func TestDoDeleteRemoteClusterRequest(t *testing.T) {
@@ -127,6 +143,7 @@ func TestDoDeleteRemoteClusterRequest(t *testing.T) {
 		expectedBodyContains []string
 		expectedBodyExcludes []string
 		description          string
+		goroutinesExpected   int
 	}{
 		{
 			name:        "NotFound_UnknownCluster",
@@ -154,6 +171,7 @@ func TestDoDeleteRemoteClusterRequest(t *testing.T) {
 			},
 			expectedStatusCode: http.StatusOK,
 			description:        "Should return 200 when cluster is successfully deleted",
+			goroutinesExpected: 2,
 		},
 		{
 			name:        "BadRequest_ClusterReferencedByReplications",
@@ -198,11 +216,14 @@ func TestDoDeleteRemoteClusterRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, wg := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks based on test case
 			tt.setupMocks(remoteClusterSvc, replSpecSvc, tt.clusterName)
+
+			// Register expected background goroutines before calling the handler.
+			wg.Add(tt.goroutinesExpected)
 
 			// Create HTTP request
 			requestPath := fmt.Sprintf("/pools/default/remoteClusters/%s", tt.clusterName)
@@ -230,9 +251,6 @@ func TestDoDeleteRemoteClusterRequest(t *testing.T) {
 			// Verify mock expectations
 			remoteClusterSvc.AssertExpectations(t)
 			replSpecSvc.AssertExpectations(t)
-
-			// Give goroutines time to complete (for audit/eventlog writes)
-			time.Sleep(10 * time.Millisecond)
 		})
 	}
 }
@@ -260,6 +278,7 @@ func TestDoDeleteReplicationRequest(t *testing.T) {
 		expectedStatusCode   int
 		expectedBodyContains []string
 		description          string
+		goroutinesExpected   int
 	}{
 		{
 			name:          "NotFound_ReplicationDoesNotExist",
@@ -286,6 +305,7 @@ func TestDoDeleteReplicationRequest(t *testing.T) {
 			},
 			expectedStatusCode: http.StatusOK,
 			description:        "Should return 200 when replication is successfully deleted",
+			goroutinesExpected: 2,
 		},
 		{
 			name:          "BadRequest_OtherDeletionError",
@@ -314,11 +334,14 @@ func TestDoDeleteReplicationRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, wg := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks
 			tt.setupMocks(remoteClusterSvc, replSpecSvc, tt.replicationId)
+
+			// Register expected background goroutines before calling the handler.
+			wg.Add(tt.goroutinesExpected)
 
 			// Create HTTP request
 			requestPath := fmt.Sprintf("/settings/replications/%s", tt.replicationId)
@@ -340,9 +363,6 @@ func TestDoDeleteReplicationRequest(t *testing.T) {
 
 			// Verify mock expectations
 			replSpecSvc.AssertExpectations(t)
-
-			// Give goroutines time to complete
-			time.Sleep(10 * time.Millisecond)
 		})
 	}
 }
@@ -407,7 +427,7 @@ func TestDoViewReplicationSettingsRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, _ := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks
@@ -433,9 +453,6 @@ func TestDoViewReplicationSettingsRequest(t *testing.T) {
 
 			// Verify mock expectations
 			replSpecSvc.AssertExpectations(t)
-
-			// Give goroutines time to complete
-			time.Sleep(10 * time.Millisecond)
 		})
 	}
 }
@@ -507,7 +524,7 @@ func TestDoGetRemoteClustersRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, _ := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks
@@ -553,6 +570,7 @@ func TestDoChangeRemoteClusterRequest(t *testing.T) {
 		expectedStatusCode   int
 		expectedBodyContains []string
 		description          string
+		goroutinesExpected   int
 	}{
 		{
 			name:        "NotFound_UnknownCluster",
@@ -577,6 +595,7 @@ func TestDoChangeRemoteClusterRequest(t *testing.T) {
 			},
 			expectedStatusCode: http.StatusOK,
 			description:        "Should return 200 when cluster is successfully updated",
+			goroutinesExpected: 2,
 		},
 		{
 			name:        "BadRequest_InvalidConfiguration",
@@ -606,11 +625,14 @@ func TestDoChangeRemoteClusterRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, wg := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks
 			tt.setupMocks(remoteClusterSvc, replSpecSvc, tt.clusterName)
+
+			// Register expected background goroutines before calling the handler.
+			wg.Add(tt.goroutinesExpected)
 
 			// Create HTTP request with form data
 			requestPath := fmt.Sprintf("/pools/default/remoteClusters/%s", tt.clusterName)
@@ -633,9 +655,6 @@ func TestDoChangeRemoteClusterRequest(t *testing.T) {
 
 			// Verify mock expectations
 			remoteClusterSvc.AssertExpectations(t)
-
-			// Give goroutines time to complete
-			time.Sleep(10 * time.Millisecond)
 		})
 	}
 }
@@ -720,7 +739,7 @@ func TestDoChangeReplicationSettingsRequest(t *testing.T) {
 
 			// Setup
 			adminport, remoteClusterSvc, replSpecSvc := setupTestAdminport()
-			cleanup := mockReplicationManager(remoteClusterSvc, replSpecSvc)
+			cleanup, _ := mockReplicationManager(remoteClusterSvc, replSpecSvc)
 			defer cleanup()
 
 			// Setup mocks
@@ -747,9 +766,6 @@ func TestDoChangeReplicationSettingsRequest(t *testing.T) {
 
 			// Verify mock expectations
 			replSpecSvc.AssertExpectations(t)
-
-			// Give goroutines time to complete
-			time.Sleep(10 * time.Millisecond)
 		})
 	}
 }

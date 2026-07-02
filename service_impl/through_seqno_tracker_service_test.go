@@ -2171,8 +2171,9 @@ func TestOSOModeWithCLogger(t *testing.T) {
 	// verify that whole of unsure buffer was processed
 	assert.Equal(int(session.cLogRequestedCnt), oldCLogReqCnt+len(session.unsureBufferedCLogSeqnos.seqno_list_1))
 	assert.Equal(int(session.cLogRespondedCnt), oldCLogResCnt+len(session.unsureBufferedCLogSeqnos.seqno_list_2))
-	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_1), 0)
-	assert.Equal(len(svc.cLogTrackerVbMap[vbno].seqno_list_2), 0)
+	cLogL1, cLogL2 := svc.cLogTrackerVbMap[vbno].getLengthOfSeparateLists()
+	assert.Equal(cLogL1, 0)
+	assert.Equal(cLogL2, 0)
 
 	// seqno 11 sent. With this throughSeqno will move to 11.
 	// this session should close.

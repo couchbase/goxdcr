@@ -535,15 +535,16 @@ func TestCollectionsWatcher_GetResult_OnRetryWait(t *testing.T) {
 	// Wait for the stream to be retried before getting the result
 	time.Sleep(3 * time.Second)
 
-	// assert the stream has been retried
+	// stop the watcher before asserting to establish synchronization with the goroutines
+	watcher.Stop()
+
+	// assert the stream has been retried (safe after Stop() syncs all goroutines)
 	assert.Greater(failureCount, 1)
 
-	// assert the result is the message we initialized the cache with
+	// assert the result is the message we initialized the cache with (initDone is already closed)
 	result, _ := watcher.GetResult(nonBlockingCtx())
 	assert.Equal(uint64(999), result.Uid())
 
-	// stop the watcher
-	watcher.Stop()
 	mockUtils.AssertExpectations(t)
 }
 
@@ -631,10 +632,11 @@ func TestCollectionsWatcher_Retry_False_NoRetryOnError(t *testing.T) {
 	// Wait longer than retry time to ensure no retry happens
 	time.Sleep(200 * time.Millisecond)
 
+	// Stop before asserting to synchronize with the goroutines
+	watcher.Stop()
+
 	// Should have been called only once (no retry due to oneTime=true)
 	assert.Equal(1, callCount, "oneTime watcher should not retry after error")
-
-	watcher.Stop()
 	mockUtils.AssertExpectations(t)
 }
 
